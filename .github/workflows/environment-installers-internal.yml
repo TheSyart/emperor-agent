@@ -19,8 +19,8 @@ jobs:
           - runner: macos-15-intel
             arch: x64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -44,84 +44,8 @@ jobs:
           ${{ matrix.arch }}
           receipts/macos-${{ matrix.arch }}.json
       - name: Upload adapter receipt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-adapter-receipt-${{ matrix.arch }}
           path: receipts/macos-${{ matrix.arch }}.json
-          if-no-files-found: error
-
-  windows-adapter:
-    name: Windows adapter (x64)
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify Windows adapter
-        run: >-
-          npm test --workspace @emperor/core --
-          src/environment/windows-adapter.test.ts
-          src/environment/zip.test.ts
-          src/environment/download.test.ts
-          src/environment/process-runner.test.ts
-      - name: Core typecheck
-        run: npm run typecheck --workspace @emperor/core
-      - name: Core lint
-        run: npm run lint --workspace @emperor/core
-      - name: Write adapter receipt
-        run: >-
-          node scripts/write-environment-adapter-receipt.mjs
-          windows
-          x64
-          receipts/windows-x64.json
-      - name: Upload adapter receipt
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-adapter-receipt-x64
-          path: receipts/windows-x64.json
-          if-no-files-found: error
-
-  linux-adapter:
-    name: Ubuntu adapter (${{ matrix.version }})
-    runs-on: ubuntu-${{ matrix.version }}
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ['22.04', '24.04']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify Ubuntu adapter
-        run: >-
-          npm test --workspace @emperor/core --
-          src/environment/linux-adapter.test.ts
-          src/environment/tar.test.ts
-          src/environment/download.test.ts
-          src/environment/process-runner.test.ts
-      - name: Core typecheck
-        run: npm run typecheck --workspace @emperor/core
-      - name: Core lint
-        run: npm run lint --workspace @emperor/core
-      - name: Write adapter receipt
-        run: >-
-          node scripts/write-environment-adapter-receipt.mjs
-          linux
-          x64
-          receipts/ubuntu-${{ matrix.version }}-x64.json
-      - name: Upload adapter receipt
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu-adapter-receipt-${{ matrix.version }}-x64
-          path: receipts/ubuntu-${{ matrix.version }}-x64.json
           if-no-files-found: error

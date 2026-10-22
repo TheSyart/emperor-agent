@@ -118,7 +118,7 @@ export function requestMarkerOf(
     info?.status ?? (record.cell.isError === true ? 'error' : undefined)
   return {
     number,
-    label: `Request #${number}${compaction ? ' · Compaction' : ''}`,
+    label: `请求 #${number}${compaction ? ' · 压缩' : ''}`,
     ...(status === undefined ? {} : { status }),
     runIndex: context.runIndexes.get(record.cell.index) ?? 0,
     turn: record.turn,

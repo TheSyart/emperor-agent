@@ -21,7 +21,9 @@ import {
 const HOOKS = {
   hooks: {
     PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'check.sh' }] }],
-    PostToolUse: [{ matcher: 'WebFetch', hooks: [{ command: 'fetch.sh' }] }],
+    PostToolUse: [
+      { matcher: 'NotebookEdit', hooks: [{ command: 'notebook.sh' }] },
+    ],
   },
 }
 
@@ -107,7 +109,7 @@ describe('plugin member states', () => {
         'hook',
         'PostToolUse#1',
         'unsupported',
-        'Emperor 没有与「WebFetch」对应的工具',
+        'Emperor 没有与「NotebookEdit」对应的工具',
       ],
     ])
   })
@@ -262,6 +264,7 @@ describe('plugin member states', () => {
     expect(pluginPermissions(kit())).toEqual({
       runsCommands: true,
       network: true,
+      env: [],
     })
     const quiet = resolvePluginPackage(
       writePackage(
@@ -275,10 +278,63 @@ describe('plugin member states', () => {
     expect(pluginPermissions(quiet)).toEqual({
       runsCommands: false,
       network: false,
+      env: [],
     })
     expect(pluginPermissions(null)).toEqual({
       runsCommands: false,
       network: false,
+      env: [],
     })
+  })
+
+  it('names the variables its manifest lets its hooks read (SEC-07)', () => {
+    const declared = resolvePluginPackage(
+      writePackage(
+        tempDirectory(),
+        portablePackage(
+          'env-kit',
+          { 'hooks/hooks.json': HOOKS },
+          { env: ['ACME_TOKEN'] },
+        ),
+      ),
+      { strict: true },
+    )
+    expect(pluginPermissions(declared)).toEqual({
+      runsCommands: true,
+      network: false,
+      env: ['ACME_TOKEN'],
+    })
+  })
+
+  it('shows a failed hook with its reason and the variables it may need (SEC-07)', () => {
+    const runtime: PluginRuntimeView = {
+      ...NO_PLUGIN_RUNTIME,
+      hookFailure: (pluginId, hookId) =>
+        pluginId === 'state-kit' && hookId === 'PreToolUse#1'
+          ? {
+              reason: '最近一次运行失败（退出码 1）：ACME_TOKEN is not set',
+              variables: [{ name: 'ACME_TOKEN', state: 'undeclared' }],
+            }
+          : null,
+    }
+    const hooks = views(kit(), { kind: 'active' }, runtime).filter(
+      (view) => view.kind === 'hook',
+    )
+    expect(hooks).toEqual([
+      expect.objectContaining({
+        id: 'PreToolUse#1',
+        state: 'failed',
+        reason: '最近一次运行失败（退出码 1）：ACME_TOKEN is not set',
+        variables: [{ name: 'ACME_TOKEN', state: 'undeclared' }],
+      }),
+      expect.objectContaining({ id: 'PostToolUse#1', state: 'unsupported' }),
+    ])
+    expect(hooks[1]).not.toHaveProperty('variables')
+    // A stopped package shows no stale failure.
+    expect(
+      views(kit(), { kind: 'disabled' }, runtime).find(
+        (view) => view.id === 'PreToolUse#1',
+      ),
+    ).toMatchObject({ state: 'disabled', reason: '插件已停用' })
   })
 })

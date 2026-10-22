@@ -63,7 +63,8 @@ export class BlockAssembler {
       case 'tool-call-delta': {
         const partial = this.ensure(chunk.index, 'tool-call')
         if (partial.block) return
-        partial.toolCallId = chunk.id
+        // Identity is set once: an empty id/name on a later delta never clears it.
+        if (chunk.id) partial.toolCallId = chunk.id
         if (chunk.name) partial.toolCallName = chunk.name
         partial.toolCallArguments += chunk.argumentsDelta
         return

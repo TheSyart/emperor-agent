@@ -7,9 +7,16 @@
  */
 
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import { InvalidSessionError } from '../harness/host/scope'
 import { fallbackSessionTitle, sanitizeSessionTitle } from '../sessions/title'
 import type { SessionEntry } from '../sessions/store'
-import type { HarnessHost } from '../harness/host/host'
+import type {
+  HarnessHost,
+  QueueActionRefusal,
+  SubmitResult,
+  TurnResult,
+} from '../harness/host/host'
+import type { HoldReason } from '../harness/agent/inbox'
 import { isSkillName } from '../skills/name'
 import {
   hasSkillGesture,
@@ -35,6 +42,8 @@ export interface MainlineSubmitInput {
   clientDraftId?: string | null
   draftSession?: DraftSessionInput | null
   delivery?: 'queue' | 'interject' | null
+  /** In-process adapters: discard the message if no turn takes it (see `SubmitInput.unconsumed`). */
+  unconsumed?: 'keep' | 'withdraw' | null
   /** In-process adapters: receive this session's UI events while the submit runs. */
   emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
 }
@@ -46,6 +55,9 @@ export interface DraftSessionInput {
     project_path?: string | null
     project_name?: string | null
   } | null
+  /** The draft's own plan mode and permission preset (FIX-13). */
+  plan?: boolean | null
+  preset?: string | null
 }
 
 export interface MainlineSubmitResult {
@@ -53,7 +65,10 @@ export interface MainlineSubmitResult {
   messageId: string
   content: string
   activeSessionId: string | null
-  delivery: 'completed' | 'interjected'
+  /** See `SubmitResult.delivery`: never `completed` for a message no turn took. */
+  delivery: SubmitResult['delivery']
+  /** How the message's turn ended; null for an interjection. */
+  result: TurnResult | null
 }
 
 export interface MaterializedSession {
@@ -62,16 +77,7 @@ export interface MaterializedSession {
   clientDraftId: string | null
 }
 
-export class InvalidSessionError extends Error {
-  readonly code = 'invalid_session'
-  readonly sessionId: string | null
-
-  constructor(message: string, sessionId: string | null) {
-    super(message)
-    this.name = 'InvalidSessionError'
-    this.sessionId = sessionId
-  }
-}
+export { InvalidSessionError }
 
 export interface QueuedPromptRecord {
   id: string
@@ -89,13 +95,21 @@ export interface QueuedPromptRecord {
   references?: MessageReference[]
   createdOrder: number
   supportsInterjection: boolean
-  state: 'queued'
-  reason: null
+  /** `failed-previous`: waits for the user to send or discard it (「待发送」). */
+  state: 'queued' | 'failed-previous'
+  /** Why a `failed-previous` prompt waits; null while it is simply queued. */
+  reason: HoldReason | null
   createdAt: string
   updatedAt: string
 }
 
+/** Drafts remembered for idempotent promotion; older ones are forgotten. */
+const REMEMBERED_DRAFTS = 256
+
 export class ChatService {
+  /** Client draft id → the session created for it (FIX-13 D2). */
+  private readonly draftSessions = new Map<string, string>()
+
   constructor(private readonly host: HarnessHost) {}
 
   async submit(input: MainlineSubmitInput): Promise<MainlineSubmitResult> {
@@ -151,6 +165,7 @@ export class ChatService {
         uiHidden: input.uiHidden ?? false,
         delivery: input.delivery ?? 'queue',
         signal: input.signal ?? null,
+        unconsumed: input.unconsumed ?? null,
       })
       replyResolve(result.content)
       return {
@@ -159,6 +174,7 @@ export class ChatService {
         content: result.content,
         activeSessionId: sessionId,
         delivery: result.delivery,
+        result: result.result,
       }
     } finally {
       untap?.()
@@ -197,7 +213,21 @@ export class ChatService {
         )
       return { session, promoted: false, clientDraftId: null }
     }
+    const clientDraftId =
+      String(input.clientDraftId ?? sessionId).trim() || sessionId
+    // A second submit of the same draft (sent before the renderer heard of
+    // its session) goes to the session the first one created (FIX-13 D2).
+    const known = this.draftSessions.get(clientDraftId)
+    const existing =
+      known === undefined ? null : this.host.kept.sessionStore.get(known)
+    if (
+      existing &&
+      !existing.archived_at &&
+      !existing.transitioned_to_session_id
+    )
+      return { session: existing, promoted: false, clientDraftId }
     const draft = input.draftSession ?? {}
+    this.checkDraftSettings(draft)
     const project = draft.project ?? {}
     const session = this.host.kept.sessionStore.create('新会话', {
       mode: draft.mode === 'build' ? 'build' : 'chat',
@@ -208,8 +238,13 @@ export class ChatService {
         project_name: project.project_name ?? null,
       },
     })
-    const clientDraftId =
-      String(input.clientDraftId ?? sessionId).trim() || sessionId
+    this.draftSessions.delete(clientDraftId)
+    this.draftSessions.set(clientDraftId, session.id)
+    if (this.draftSessions.size > REMEMBERED_DRAFTS)
+      this.draftSessions.delete(this.draftSessions.keys().next().value!)
+    // Set before anyone hears of the session, so its first step already
+    // runs with them (FIX-13).
+    this.applyDraftSettings(session.id, draft)
     this.host.emitHost({
       event: 'session_created',
       session_id: session.id,
@@ -219,11 +254,32 @@ export class ChatService {
     return { session, promoted: true, clientDraftId }
   }
 
+  /** Refuse an unknown preset before a session is created for it. */
+  checkDraftSettings(draft: Pick<DraftSessionInput, 'preset'>): void {
+    if (draft.preset) this.host.presets.spec(draft.preset)
+  }
+
+  /**
+   * A draft's own settings on the session just created for it (FIX-13): the
+   * preset as a creation-time fact, then plan mode, which a session without
+   * an open turn takes at once.
+   */
+  applyDraftSettings(
+    sessionId: string,
+    draft: Pick<DraftSessionInput, 'plan' | 'preset'>,
+  ): void {
+    if (draft.preset) this.host.pinPermissionPreset(sessionId, draft.preset)
+    if (draft.plan === true) this.host.setPlanMode(sessionId, true)
+  }
+
   /** Queued user prompts in the renderer's queue-record shape. */
   listQueuedPrompts(input: { sessionId: string }): QueuedPromptRecord[] {
     const sessionId = String(input.sessionId ?? '').trim()
     if (!sessionId || !this.host.kept.sessionStore.get(sessionId))
-      throw new Error(`unknown session: ${sessionId || '<empty>'}`)
+      throw new InvalidSessionError(
+        `unknown session: ${sessionId || '<empty>'}`,
+        sessionId || null,
+      )
     const queued = this.host.queuedPrompts(sessionId)
     if (queued.length === 0) return []
     const metas = new Map<string, Record<string, unknown>>()
@@ -265,25 +321,25 @@ export class ChatService {
           : {}),
         createdOrder: index,
         supportsInterjection: prompt.target === 'next-turn',
-        state: 'queued',
-        reason: null,
+        state: prompt.state,
+        reason: prompt.reason ?? null,
         createdAt: now,
         updatedAt: now,
       }
     })
   }
 
+  /** `cancel` (丢弃), `interject` (插入当前执行) or `send` (发送 a held prompt). */
   manageQueuedPrompt(input: {
     sessionId: string
     promptId: string
-    action: 'cancel' | 'interject'
-  }): { ok: boolean; reason?: string } {
-    const applied = this.host.manageQueuedPrompt(
+    action: 'cancel' | 'interject' | 'send'
+  }): { ok: boolean; reason?: QueueActionRefusal } {
+    return this.host.manageQueuedPrompt(
       input.sessionId,
       input.promptId,
       input.action,
     )
-    return applied ? { ok: true } : { ok: false, reason: 'prompt_not_queued' }
   }
 
   /** One title per promoted session; failures fall back and never fail submit. */

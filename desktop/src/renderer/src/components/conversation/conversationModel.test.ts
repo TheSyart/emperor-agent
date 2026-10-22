@@ -3,6 +3,7 @@ import type { SessionInfo } from '../../types'
 import {
   conversationCrumbs,
   conversationPhase,
+  sessionRunning,
   isChildLineage,
 } from './conversationModel'
 
@@ -19,6 +20,31 @@ function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
 }
 
 describe('conversation shell model', () => {
+  it.each(['cold', 'opening', 'error'] as const)(
+    'keeps an existing session in conversation layout while history is %s',
+    (historyState) => {
+      expect(
+        conversationPhase({
+          composer: 'blank',
+          child: false,
+          tab: 'chat',
+          historyState,
+        }),
+      ).toBe('active')
+    },
+  )
+
+  it('allows a genuinely empty loaded chat to use the new-chat layout', () => {
+    expect(
+      conversationPhase({
+        composer: 'blank',
+        child: false,
+        tab: 'chat',
+        historyState: 'open',
+      }),
+    ).toBe('hero')
+  })
+
   it('shows the hero only for a blank or engaging top-level chat', () => {
     const base = {
       composer: 'blank' as const,
@@ -78,6 +104,71 @@ describe('conversation shell model', () => {
     ])
     expect(crumbs[0]!.sessionId).toBe('root')
     expect(crumbs[1]!.subagent).toBe(true)
+    expect(crumbs[1]!.nativeSessionId).toBe('kid1')
+    expect(crumbs[2]!.nativeSessionId).toBe('kid2')
     expect(crumbs[2]!.current).toBe(true)
+    expect(crumbs[2]!.source).toBeUndefined()
+  })
+})
+it('keeps retained external task controls reachable even when the visible chat transcript is empty', () => {
+  expect(
+    conversationPhase({
+      composer: 'blank',
+      child: false,
+      tab: 'chat',
+      externalActivity: true,
+    }),
+  ).toBe('active')
+})
+
+it('uses the canonical Emperor fallback when a child creation description is absent', () => {
+  expect(
+    conversationCrumbs({
+      sessionId: 'sub-child',
+      session: undefined,
+      lineage: { chain: [{ sessionId: 'root' }, { sessionId: 'sub-child' }] },
+      titleOf: () => 'generated title',
+    }).at(-1)?.label,
+  ).toBe('本地子智能体')
+})
+
+describe('sessionRunning: one source for the composer and the turn status (FIX-03 7)', () => {
+  it('follows the raw log projection once the window is open', () => {
+    expect(
+      sessionRunning({
+        windowOpen: true,
+        logRunning: true,
+        active: true,
+        runtimeBusy: false,
+      }),
+    ).toBe(true)
+    // A stale runtime busy never keeps the stop button on.
+    expect(
+      sessionRunning({
+        windowOpen: true,
+        logRunning: false,
+        active: true,
+        runtimeBusy: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('uses the runtime busy of the active session until the window opens', () => {
+    expect(
+      sessionRunning({
+        windowOpen: false,
+        logRunning: false,
+        active: true,
+        runtimeBusy: true,
+      }),
+    ).toBe(true)
+    expect(
+      sessionRunning({
+        windowOpen: false,
+        logRunning: false,
+        active: false,
+        runtimeBusy: true,
+      }),
+    ).toBe(false)
   })
 })

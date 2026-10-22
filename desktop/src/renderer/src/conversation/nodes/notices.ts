@@ -1,5 +1,5 @@
-// Retry, fallback, turn-level notices (error, max-tokens, cost cap), hooks
-// and goal mutations.
+// Retry, fallback, turn-level notices (error, max-tokens, task budget, cost
+// cap), hooks and goal mutations.
 import type { ConversationDefinition, ConversationMatch } from '../assembler'
 import { failureMessage, isEvent } from '../events'
 import type {
@@ -9,6 +9,7 @@ import type {
   HookChatData,
   RetryAttemptView,
   RetryChatData,
+  TurnBudgetChatData,
   TurnErrorChatData,
   TurnMaxTokensChatData,
 } from '../types'
@@ -211,7 +212,39 @@ export const turnMaxTokensDefinition: ConversationDefinition<TurnMaxTokensChatDa
           ),
   }
 
-/** The per-turn cost cap stopped the turn. */
+/** The task budget ended the turn: its steps, or the task's cost (KRN-03). */
+export const turnBudgetDefinition: ConversationDefinition<TurnBudgetChatData> =
+  {
+    kind: 'turnBudget',
+    target: 'chat',
+    match: (event) =>
+      isEvent(event, 'turn/end') && event.data.reason.kind === 'budget'
+        ? { id: String(event.seq), role: 'start' }
+        : null,
+    start: (_context, match) => {
+      const event = match.event
+      if (!isEvent(event, 'turn/end') || event.data.reason.kind !== 'budget')
+        throw new Error('turnBudget start requires a budget turn/end')
+      return {
+        turn: event.data.turn,
+        seq: event.seq,
+        time: event.time,
+        reason: event.data.reason,
+      }
+    },
+    update: (context) => context.state,
+    buildViewNode: (context) =>
+      context.state === undefined
+        ? null
+        : chatNode(
+            context,
+            'turnBudget',
+            context.state.seq + CHAT_SYNTHETIC_SEQ_OFFSETS.turnNotice,
+            context.state,
+          ),
+  }
+
+/** The per-turn cost cap stopped the turn (logs written before KRN-03). */
 export const costCapDefinition: ConversationDefinition<CostCapChatData> = {
   kind: 'costCap',
   target: 'chat',

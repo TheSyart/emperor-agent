@@ -15,6 +15,7 @@ import {
   systemBootMarker,
 } from '../util/stable-process-identity'
 import type { ProcessContainmentController } from '../environment/sandbox'
+import { processContainmentPolicy } from '../sandbox/presets'
 
 const owner = {
   kind: 'session' as const,
@@ -25,14 +26,14 @@ const owner = {
 function sandboxExecution(root: string) {
   return {
     kind: 'sandbox' as const,
-    policy: {
-      mode: 'preferred' as const,
-      workspaceRoot: root,
+    policy: processContainmentPolicy({
+      workspace: { root, access: 'write' },
       stateRoot: null,
-      tempRoot: root,
-      readOnlyRoots: [] as string[],
-      network: 'deny' as const,
-    },
+      tempDir: root,
+      network: 'deny',
+      fallback: 'refuse',
+      executables: [process.execPath],
+    }),
   }
 }
 
@@ -50,7 +51,7 @@ describe('OwnedProcessRuntime receipts', () => {
         processTree: true,
         reason: 'ready',
       }),
-      prepare: () => {
+      contain: () => {
         sandboxPrepareCalls += 1
         throw new Error('host execution must bypass sandbox preparation')
       },
@@ -81,7 +82,7 @@ describe('OwnedProcessRuntime receipts', () => {
     expect(result).toMatchObject({
       status: 'completed',
       stdout: 'host-runtime',
-      containment: { decision: 'unsandboxed', backend: 'none' },
+      containment: { decision: 'user-allowed-unsandboxed', backend: 'none' },
     })
     expect(sandboxPrepareCalls).toBe(0)
     expect(runtime.list()[0]).toMatchObject({
@@ -96,9 +97,8 @@ describe('OwnedProcessRuntime receipts', () => {
         },
       },
       containment: {
-        decision: 'unsandboxed',
-        filesystem: 'unrestricted',
-        network: 'unrestricted',
+        decision: 'user-allowed-unsandboxed',
+        reason: 'authorized host execution',
       },
     })
     expect(readFileSync(runtime.receiptsPath, 'utf8')).not.toContain(
@@ -107,6 +107,59 @@ describe('OwnedProcessRuntime receipts', () => {
     expect(readFileSync(runtime.receiptsPath, 'utf8')).not.toContain(
       'f'.repeat(64),
     )
+  })
+
+  it('kills every running process at once when quitting overruns (FIX-07)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-terminate-all-'))
+    const sandbox: ProcessContainmentController = {
+      capability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'ready',
+      }),
+      contain: () => {
+        throw new Error('unused')
+      },
+    }
+    const killed: number[] = []
+    const runtime = new OwnedProcessRuntime(root, {
+      sandbox,
+      killTree: (pid) => {
+        killed.push(pid)
+        process.kill(pid, 'SIGKILL')
+      },
+    })
+    const running = runtime.run({
+      executable: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 30000)'],
+      cwd: root,
+      env: {},
+      owner,
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'run_command',
+          operationFingerprint: 'f'.repeat(64),
+          source: 'user_approved_once',
+          permissionMode: 'smart_auto',
+          rule: 'user.approved_once',
+          authorizationId: 'quit',
+        },
+      },
+    })
+    for (let i = 0; i < 100 && runtime.list()[0]?.status !== 'running'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    const pid = runtime.list()[0]?.pid
+    expect(pid).toBeGreaterThan(0)
+    runtime.terminateAll('app quit timeout')
+    // Synchronous: the kill happened before terminateAll returned.
+    expect(killed).toEqual([pid])
+    await expect(running).resolves.toMatchObject({ status: 'cancelled' })
   })
 
   it('normalizes a legacy receipt without an execution boundary as sandboxed', () => {
@@ -118,6 +171,53 @@ describe('OwnedProcessRuntime receipts', () => {
     expect(runtime.list()[0]).toMatchObject({
       executionBoundary: { kind: 'sandbox', authorization: null },
     })
+  })
+
+  it('reads a pre-SEC-08 containment receipt in the new words', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-owned-legacy-'))
+    const legacy = (containment: Record<string, unknown>) =>
+      ({ ...runningReceipt(), containment }) as unknown as OwnedProcessReceipt
+    const runtime = new OwnedProcessRuntime(root, {
+      initialReceipts: [
+        legacy({
+          decision: 'sandboxed',
+          backend: 'macos-seatbelt',
+          policyHash: 'a',
+        }),
+        {
+          ...legacy({
+            decision: 'unsandboxed',
+            backend: 'none',
+            policyHash: 'b',
+            reason: 'x',
+          }),
+          id: 'process_fixture_2',
+        },
+        {
+          ...legacy({
+            decision: 'denied',
+            backend: 'linux-bwrap',
+            policyHash: 'c',
+          }),
+          id: 'process_fixture_3',
+        },
+      ],
+    })
+    expect(runtime.list().map((receipt) => receipt.containment)).toEqual([
+      {
+        backend: 'seatbelt',
+        decision: 'contained',
+        policyHash: 'a',
+        reason: '',
+      },
+      {
+        backend: 'none',
+        decision: 'user-allowed-unsandboxed',
+        policyHash: 'b',
+        reason: 'x',
+      },
+      { backend: 'none', decision: 'refused', policyHash: 'c', reason: '' },
+    ])
   })
 
   it('persists owner, lease, cwd capability, sandbox and bounded quota without raw command data', async () => {
@@ -447,12 +547,8 @@ function runningReceipt(
       withinWorkspace: true,
     },
     containment: {
-      decision: 'sandboxed',
-      backend: 'linux-bwrap',
-      capabilityStatus: 'available',
-      filesystem: 'workspace-write',
-      network: 'denied',
-      processTree: true,
+      decision: 'contained',
+      backend: 'bwrap',
       policyHash: 'd'.repeat(64),
       reason: '',
     },

@@ -1,6 +1,9 @@
 // Delegated subagents: background spawn + settlement notice to the parent,
 // foreground wait, fork seeding (completed turns only), fixed permission
 // scope, depth limit, send_message, interrupt authority, and report.
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { messageText, userText } from '../../llm/message'
 import type { GenerateOptions } from '../../llm/types'
@@ -8,17 +11,26 @@ import type { SessionEvent } from '../../session-log/types'
 import { Agent } from '../agent/agent'
 import { ApprovalService } from '../approval/service'
 import { SandboxPolicyService } from '../sandbox/policy'
-import { createTestHarness, replyChunks, type TestHarness } from '../testing'
+import {
+  createTestHarness,
+  replyChunks,
+  testRoute,
+  type TestHarness,
+} from '../testing'
 import { SubagentManager } from './manager'
 import { installSubagents } from './tools'
 
-function setup(maxDepth?: number): {
+function setup(
+  maxDepth?: number,
+  logRoot?: string,
+  extra: Partial<ConstructorParameters<typeof SubagentManager>[0]> = {},
+): {
   h: TestHarness
   manager: SubagentManager
   agents: Map<string, Agent>
   root: Agent
 } {
-  const h = createTestHarness()
+  const h = createTestHarness(logRoot === undefined ? {} : { root: logRoot })
   const agents = new Map<string, Agent>()
   const sandbox = new SandboxPolicyService({
     defaultMode: 'workspace-write',
@@ -45,6 +57,7 @@ function setup(maxDepth?: number): {
     sandbox,
     approval,
     ...(maxDepth === undefined ? {} : { maxDepth }),
+    ...extra,
   })
   installSubagents(manager, h.tools, h.prompt)
   const root = h.agent('root')
@@ -120,7 +133,18 @@ describe('SubagentManager', () => {
     const childRequest = h.adapter.requests.find(
       (r) => r.sessionId === child.id,
     )!
-    expect(textOf(childRequest)).toContain('find x')
+    expect(textOf(childRequest)).toContain('Task: research\n\nfind x')
+    const childContext = [childRequest.system, ...textOf(childRequest)].join(
+      '\n',
+    )
+    expect(childContext).toContain('parent agent in Emperor Agent')
+    expect(childContext).toContain('Verification')
+    expect(childContext).toContain('Open items')
+    expect(
+      [h.adapter.requests[0]!.system, ...textOf(h.adapter.requests[0]!)].join(
+        '\n',
+      ),
+    ).not.toContain('You are a delegated subagent working for a parent')
     expect(childRequest.tools?.map((t) => t.name)).toContain('report')
     expect(h.adapter.requests[0]!.tools?.map((t) => t.name)).not.toContain(
       'report',
@@ -268,6 +292,14 @@ describe('SubagentManager', () => {
     })
     manager.followup(root, childId, 'more work')
     await settleAll(agents)
+    const continued = h.adapter.requests
+      .filter((r) => r.sessionId === childId)
+      .at(-1)!
+    // send_message delivers the parent's words as written (no Task: header).
+    expect(textOf(continued)).toContain('more work')
+    expect(textOf(continued).join('\n')).not.toContain(
+      'Task: worker\n\nmore work',
+    )
     const rootTexts = root.session
       .deriveMessages()
       .map((m) => messageText(m))
@@ -282,5 +314,137 @@ describe('SubagentManager', () => {
     expect(() =>
       manager.interrupt(childId, { kind: 'ancestor', agent: root }),
     ).not.toThrow()
+  })
+
+  it('lets a disposed child write its closing events before its log closes', async () => {
+    const logRoot = mkdtempSync(join(tmpdir(), 'subagent-dispose-'))
+    const { h, agents, root, manager } = setup(undefined, logRoot)
+    const hang = (request: GenerateOptions) =>
+      new Promise<never>((_resolve, reject) => {
+        request.signal?.addEventListener('abort', () =>
+          reject(request.signal?.reason),
+        )
+      })
+    const byOwner =
+      (rootReply: Parameters<typeof replyChunks>[0]) =>
+      (request: GenerateOptions) =>
+        request.sessionId === 'root' ? replyChunks(rootReply) : hang(request)
+    h.adapter.push(
+      byOwner({
+        tools: [
+          {
+            id: 'd1',
+            name: 'subagent',
+            args: { description: 'worker', prompt: 'start' },
+          },
+        ],
+      }),
+      byOwner({ text: 'started' }),
+      byOwner({ text: 'started' }),
+    )
+    root.followup(userText('go'))
+    const until = Date.now() + 3000
+    while (!h.adapter.requests.some((r) => r.sessionId !== 'root')) {
+      if (Date.now() > until) throw new Error('child never asked the model')
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    const child = agents.get(childId)!
+    manager.dispose(childId)
+    await child.whenIdle()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const lines = readFileSync(join(logRoot, childId, 'log.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; data?: unknown })
+    expect(lines.at(-1)).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
+    })
+    await settleAll(agents)
+  })
+})
+
+describe('子智能体 settings in the manager (AGT-10)', () => {
+  const delegate = {
+    tools: [
+      {
+        id: 'd1',
+        name: 'subagent',
+        args: { description: 'worker', prompt: 'start' },
+      },
+    ],
+  }
+
+  it('4 · a chosen model entry runs the child while the parent keeps its own', async () => {
+    let chosen: string | undefined = 'fast-route'
+    const { h, agents, root } = setup(undefined, undefined, {
+      childCallConfig: () =>
+        chosen === undefined
+          ? undefined
+          : () => h.llm.defaultCallConfig(chosen),
+    })
+    h.llm.setRoutes(
+      [testRoute(), testRoute({ id: 'fast-route', modelId: 'fast-model' })],
+      'test-route',
+    )
+    routed(h, {
+      root: [delegate, { text: 'started' }, { text: 'ack' }],
+      child: [{ text: 'child done' }],
+    })
+    root.followup(userText('go'))
+    await settleAll(agents)
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    const childRequest = h.adapter.requests.find(
+      (r) => r.sessionId === childId,
+    )!
+    expect(childRequest.model).toBe('fast-model')
+    expect(
+      h.adapter.requests
+        .filter((r) => r.sessionId === 'root')
+        .map((r) => r.model),
+    ).toEqual(['test-model', 'test-model', 'test-model'])
+
+    // 跟随对话: no choice, the conversation's model.
+    chosen = undefined
+    routed(h, {
+      root: [delegate, { text: 'started again' }, { text: 'ack again' }],
+      child: [{ text: 'second child done' }],
+    })
+    root.followup(userText('again'))
+    await settleAll(agents)
+    const second = root.session.lastOf('subagent/started')!.data.subagentId
+    expect(second).not.toBe(childId)
+    expect(h.adapter.requests.find((r) => r.sessionId === second)!.model).toBe(
+      'test-model',
+    )
+  })
+
+  it('6 · the user writes to a live child: the message starts its next turn as the user', async () => {
+    const { h, agents, root, manager } = setup()
+    routed(h, {
+      root: [delegate, { text: 'started' }, { text: 'ack' }],
+      child: [{ text: 'child done' }],
+    })
+    root.followup(userText('go'))
+    await settleAll(agents)
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    routed(h, {
+      root: [{ text: 'parent saw the settle' }],
+      child: [{ text: 'did the extra step' }],
+    })
+    manager.userFollowup(childId, '顺便把测试也跑一下')
+    await settleAll(agents)
+    const continued = h.adapter.requests
+      .filter((r) => r.sessionId === childId)
+      .at(-1)!
+    expect(textOf(continued)).toContain('顺便把测试也跑一下')
+    const message = agents
+      .get(childId)!
+      .session.deriveMessages()
+      .find((m) => messageText(m) === '顺便把测试也跑一下')!
+    expect(message.role).toBe('user')
+    expect(message.source).toMatchObject({ kind: 'user' })
+    expect(() => manager.userFollowup('sub-missing', 'hi')).toThrow(/not live/)
   })
 })

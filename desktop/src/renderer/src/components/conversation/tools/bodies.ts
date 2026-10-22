@@ -11,6 +11,7 @@ import GrepView from './GrepView.vue'
 import JobView from './JobView.vue'
 import McpView from './McpView.vue'
 import ReadView from './ReadView.vue'
+import ResourceToolView from './ResourceToolView.vue'
 import SchedulerView from './SchedulerView.vue'
 import SkillView from './SkillView.vue'
 import SubagentView from './SubagentView.vue'
@@ -26,6 +27,7 @@ export const TOOL_BODIES: Readonly<Record<ToolBodyKind, Component>> = {
   glob: GlobView,
   grep: GrepView,
   web: WebSearchView,
+  resource: ResourceToolView,
   todo: TodoWriteView,
   ask: AskQuestionView,
   plan: ExitPlanView,

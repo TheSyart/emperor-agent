@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Settings › 诊断 — a conclusion first, details on demand:
- * - a SettingsNotice on top only while a request failed (诊断请求失败,
+ * - a Notice on top only while a request failed (诊断请求失败,
  *   环境检测失败, or a folder that would not open);
  * - the overview card: the state as badges (「n 项异常」「n 项需要关注」, or
  *   「运行正常」) and one conclusion (「其余都正常」), then the rows that need
@@ -14,19 +14,23 @@
  *   Core returned no data for, left out). Rows are DiagnosticItems: the
  *   value as plain text, the why only where something needs attention;
  *   home paths read `~`.
- * Header actions: 刷新 (diagnostics + environment re-detection) and 复制报告
- * (plain-text report of the page).
+ * Header actions: 导出诊断包 (REL-01: DiagnosticsExportDialog lists the
+ * zip's contents before anything is written), 复制报告 (plain-text report
+ * of the page) and 刷新 (diagnostics + environment re-detection). 存储路径
+ * shows the log folder (main.log, core.log, Crashpad) with an open button.
  */
+import EmptyState from '../ui/EmptyState.vue'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import IconButton from '../ui/IconButton.vue'
 import { useCopyFeedback } from '../ui/useCopyFeedback'
-import { DsCopy, DsFolderOpen, DsShieldAlert, DsWarning } from '../icons/ds'
 import {
-  SettingsCard,
-  SettingsNotice,
-  SettingsSection,
-  StatusBadge,
-} from './ui'
+  DsCopy,
+  DsDownload,
+  DsFolderOpen,
+  DsShieldAlert,
+  DsWarning,
+} from '../icons/ds'
+import { SettingsCard, Notice, SettingsSection, Badge } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { core } from '../../api/http'
 import { openPath } from '../../api/backend'
@@ -34,6 +38,7 @@ import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
 import DiagnosticItem from './diagnostics/DiagnosticItem.vue'
 import EnvironmentToolsGroup from './diagnostics/EnvironmentToolsGroup.vue'
+import DiagnosticsExportDialog from './diagnostics/DiagnosticsExportDialog.vue'
 import {
   DIAGNOSTIC_SECTION_TITLES,
   OPENABLE_DIAGNOSTIC_PATHS,
@@ -73,11 +78,23 @@ const environment = ref<EnvironmentStatusPayload | null>(null)
 const environmentLoading = ref(false)
 const environmentError = ref('')
 const openCards = reactive<Partial<Record<CardId, boolean>>>({})
+const exportOpen = ref(false)
 
 const current = computed(
   () => diagnostics.value || ctx.boot.value?.diagnostics || null,
 )
-const sections = computed(() => diagnosticSections(current.value))
+const sections = computed(() =>
+  diagnosticSections(current.value, {
+    app: {
+      service: ctx.runtimeText(),
+      model:
+        ctx.boot.value?.modelConfig?.current?.modelId ||
+        ctx.boot.value?.model ||
+        '',
+      projects: ctx.boot.value?.projects?.length || 0,
+    },
+  }),
+)
 const environmentItems = computed(() =>
   environmentDiagnosticItems(environment.value),
 )
@@ -146,6 +163,16 @@ const { copied, copy } = useCopyFeedback(
 useSettingsHeader({
   actions: () => [
     {
+      id: 'export-bundle',
+      label: '导出诊断包',
+      kind: 'secondary',
+      icon: DsDownload,
+      title: '导出诊断包（zip，导出前列出内容）',
+      onClick: () => {
+        exportOpen.value = true
+      },
+    },
+    {
       id: 'copy-report',
       label: copied.value ? '已复制' : '复制报告',
       kind: 'secondary',
@@ -196,11 +223,17 @@ async function refreshEnvironment() {
   }
 }
 
-async function reveal(target: string) {
-  if (!target) return
+async function reveal(row: DiagnosticRow) {
+  if (!openable(row)) return
   revealError.value = ''
   try {
-    await openPath(target)
+    // Main asks Core where the row's folder is; no path crosses IPC.
+    await openPath({
+      kind: 'diagnostic',
+      rowId: row.id as
+        'global-state-root' | 'active-project-path' | 'logs-path',
+      sessionId: ctx.sessionId?.value || null,
+    })
   } catch (cause) {
     revealError.value = messageOf(cause)
   }
@@ -227,7 +260,7 @@ function messageOf(cause: unknown): string {
 
 <template>
   <SettingsSection>
-    <SettingsNotice
+    <Notice
       v-for="notice in notices"
       :key="notice.id"
       class="diag-notice"
@@ -244,12 +277,12 @@ function messageOf(cause: unknown): string {
       :data-tone="summary.tone"
     >
       <p class="summary">
-        <StatusBadge
+        <Badge
           v-for="badge in summary.badges"
           :key="badge.text"
           :tone="badge.tone"
-          :dot="badge.tone === 'ok'"
-          >{{ badge.text }}</StatusBadge
+          :variant="badge.tone === 'ok' ? 'dot-label' : 'soft'"
+          >{{ badge.text }}</Badge
         >
         <span class="conclusion">{{ summary.conclusion }}</span>
       </p>
@@ -295,11 +328,11 @@ function messageOf(cause: unknown): string {
         :data-diagnostic-card="card.id"
       >
         <template v-if="card.badges.length" #meta>
-          <StatusBadge
+          <Badge
             v-for="badge in card.badges"
             :key="badge.text"
             :tone="badge.tone"
-            >{{ badge.text }}</StatusBadge
+            >{{ badge.text }}</Badge
           >
         </template>
 
@@ -319,17 +352,20 @@ function messageOf(cause: unknown): string {
             <IconButton
               v-if="openable(row)"
               :label="`打开${row.label}`"
-              @click="reveal(row.path || '')"
+              @click="reveal(row)"
             >
               <DsFolderOpen :size="16" />
             </IconButton>
           </DiagnosticItem>
-          <p v-if="!card.rows.length" class="empty">
-            Core 没有返回这一组的数据。
-          </p>
+          <EmptyState
+            v-if="!card.rows.length"
+            variant="inline"
+            title="Core 没有返回这一组的数据。"
+          />
         </div>
       </SettingsCard>
     </div>
+    <DiagnosticsExportDialog v-if="exportOpen" v-model:open="exportOpen" />
   </SettingsSection>
 </template>
 
@@ -353,8 +389,8 @@ function messageOf(cause: unknown): string {
 .conclusion {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .issues {
@@ -412,12 +448,12 @@ function messageOf(cause: unknown): string {
 }
 
 .issue-where {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .issue-what {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
@@ -425,8 +461,8 @@ function messageOf(cause: unknown): string {
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--accent-strong));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-link));
 }
 
 .issue:hover .issue-go {
@@ -444,13 +480,5 @@ function messageOf(cause: unknown): string {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-2) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
 }
 </style>

@@ -45,6 +45,7 @@ import type { AgentPreviewPointer } from '../../shared/ipc-contract'
 import {
   BrowserSessionManager,
   type AgentTab,
+  type BrowserSessionManagerOptions,
   type ElectronFactory,
 } from './browser-session-manager'
 import { IsolatedWorlds } from './cdp/isolated'
@@ -59,6 +60,7 @@ import {
   selectOption,
   strokeFor,
   typeText,
+  withKeyboard,
   type RendererActHooks,
   type RendererPage,
 } from './cdp/renderer-actions'
@@ -120,6 +122,8 @@ export interface EmbeddedBrowserDriverOptions {
   readonly profilesRoot?: string
   /** `~/.emperor/browser/downloads` (download inbox). */
   readonly downloadsRoot?: string
+  /** Imported cookies and backup exclusion of persistent profiles (SEC-10). */
+  readonly profileStorage?: BrowserSessionManagerOptions['profileStorage']
   /** Main-only. The model and Core pass only a handle. */
   readonly credentials?: CredentialVault
   /** Stop renderer preview before a secret is inserted; resume on document navigation. */
@@ -168,6 +172,9 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
       ...(options.profilesRoot === undefined
         ? {}
         : { profilesRoot: options.profilesRoot }),
+      ...(options.profileStorage === undefined
+        ? {}
+        : { profileStorage: options.profileStorage }),
       onPopup: (opener, popup) => {
         this.runtimes.set(popup.targetId, this.newRuntime(popup))
         this.emit({
@@ -514,57 +521,65 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
         'INVALID_REQUEST',
         'credential field type does not match the saved field',
       )
-    await runtime.worlds!.callOnElement(
-      target.frameId,
-      target.backendNodeId,
-      'focusAndSelectAll',
-      [],
+    // Under the input guard (SEC-10): focus and where keys go in one page
+    // call, checked again right before the secret, within the deadline.
+    return await withKeyboard(
+      this.page(runtime, cdp),
       signal,
+      async (keys, inputSignal) => {
+        await keys.focus(target, true)
+        // Recheck after the async focus; a page can navigate between
+        // observation and dispatch. No secret is decrypted before all
+        // checks pass.
+        this.resolve(runtime, request.ref, request.expectedRevision)
+        if (liveOrigin() !== request.origin)
+          throw new UiError(
+            'PERMISSION_DENIED',
+            'credential binding mismatch',
+            { reason: 'credential-binding-mismatch' },
+          )
+        const focusedFrame = await runtime.worlds!.callInFrame<{
+          url: string
+        }>(target.frameId, 'documentState', [], inputSignal)
+        if (new URL(focusedFrame.url).origin !== request.origin)
+          throw new UiError(
+            'PERMISSION_DENIED',
+            'credential frame binding mismatch',
+            { reason: 'credential-binding-mismatch' },
+          )
+        this.resolve(runtime, request.ref, request.expectedRevision)
+        await keys.check()
+        const secret = vault.secret(
+          request.handleId,
+          request.field,
+          request.origin,
+        )
+        // Page script can turn even a password field into visible text.
+        // Mark the document sensitive before dispatch; an uncertain
+        // insertion stays hidden.
+        runtime.credentialVisible = true
+        this.options.credentialVisibility?.(request.targetId, true)
+        hooks.dispatched()
+        try {
+          await cdp.send(
+            'Input.insertText',
+            { text: secret },
+            { signal: inputSignal },
+          )
+        } catch {
+          // CDP errors can contain command params. Never attach their cause.
+          throw new UiError(
+            'DRIVER_UNAVAILABLE',
+            'credential fill failed; check the field before retrying',
+          )
+        }
+        const after = await runtime.worlds!.callOnElement<{
+          hasValue: boolean
+        }>(target.frameId, target.backendNodeId, 'fieldState', [], inputSignal)
+        this.manager.touch(runtime.tab.targetId)
+        return { filled: after.hasValue, bindingMatched: request.origin }
+      },
     )
-    // Recheck after the async focus; a page can navigate between observation
-    // and dispatch. No secret is decrypted before all checks pass.
-    this.resolve(runtime, request.ref, request.expectedRevision)
-    if (liveOrigin() !== request.origin)
-      throw new UiError('PERMISSION_DENIED', 'credential binding mismatch', {
-        reason: 'credential-binding-mismatch',
-      })
-    const focusedFrame = await runtime.worlds!.callInFrame<{ url: string }>(
-      target.frameId,
-      'documentState',
-      [],
-      signal,
-    )
-    if (new URL(focusedFrame.url).origin !== request.origin)
-      throw new UiError(
-        'PERMISSION_DENIED',
-        'credential frame binding mismatch',
-        { reason: 'credential-binding-mismatch' },
-      )
-    this.resolve(runtime, request.ref, request.expectedRevision)
-    const secret = vault.secret(request.handleId, request.field, request.origin)
-    // Page script can turn even a password field into visible text. Mark the
-    // document sensitive before dispatch; an uncertain insertion stays hidden.
-    runtime.credentialVisible = true
-    this.options.credentialVisibility?.(request.targetId, true)
-    hooks.dispatched()
-    try {
-      await cdp.send('Input.insertText', { text: secret }, { signal })
-    } catch {
-      // CDP errors can contain command params. Never attach their cause.
-      throw new UiError(
-        'DRIVER_UNAVAILABLE',
-        'credential fill failed; check the field before retrying',
-      )
-    }
-    const after = await runtime.worlds!.callOnElement<{ hasValue: boolean }>(
-      target.frameId,
-      target.backendNodeId,
-      'fieldState',
-      [],
-      signal,
-    )
-    this.manager.touch(runtime.tab.targetId)
-    return { filled: after.hasValue, bindingMatched: request.origin }
   }
 
   async clearProfile(
@@ -1177,8 +1192,38 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
       cdp,
       worlds: runtime.worlds!,
       mainFrameId: runtime.mainFrameId,
-      crossOriginFrames: runtime.oopifs.size > 0,
+      onInputTimeout: () => this.rebuildCdp(runtime, cdp),
     }
+  }
+
+  /**
+   * Typing ran out of time (SEC-10): drop this tab's CDP session and attach
+   * a new one. Refs go stale (the tab gets a new generation); the frames
+   * the input guard fenced are released through the new session. When the
+   * new session cannot attach now, the next action tries again.
+   */
+  private rebuildCdp(runtime: Runtime, stuck: CdpSession): void {
+    if (runtime.cdp !== stuck) return
+    runtime.cdp = null
+    runtime.detached = true
+    stuck.detach()
+    void this.connect(runtime)
+      .then(async () => {
+        await runtime.worlds?.callInFrame(
+          runtime.mainFrameId ?? '',
+          'releaseInputFence',
+          [],
+          AbortSignal.timeout(2_000),
+        )
+      })
+      .catch(() => {
+        const half = runtime.cdp
+        if (half !== null && half !== stuck) {
+          runtime.cdp = null
+          runtime.detached = true
+          half.detach()
+        }
+      })
   }
 
   private async outcome(

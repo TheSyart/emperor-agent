@@ -6,6 +6,7 @@ import type {
   UiTargetView,
 } from '@emperor/core/runtime-contract'
 import type { AgentPreviewUpdate } from '../../../../../shared/ipc-contract'
+import { imageViewer, closeImageViewer } from '../../ui/imageViewer'
 import ComputerUsePreviewStack from './ComputerUsePreviewStack.vue'
 import {
   previewLayout,
@@ -211,6 +212,7 @@ afterEach(() => {
   document.body.innerHTML = ''
   for (const mock of Object.values(bridge)) mock.mockReset()
   delete (window as unknown as { emperor?: unknown }).emperor
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -532,13 +534,22 @@ describe('ComputerUsePreviewStack', () => {
 
   it('folds into a counted chip in a narrow column and streams only when expanded', async () => {
     columnWidth = 900
+    const rectangles = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('conversation-root'))
+          return { top: 0, bottom: 900 } as DOMRect
+        if (this.classList.contains('cu-preview'))
+          return { top: 704, bottom: 738 } as DOMRect
+        return { top: 0, bottom: 0 } as DOMRect // hidden full stack must not supply reserve
+      })
     setTargets([target(), target({ targetId: 't-2', title: '访达' })])
     const root = await mount()
     const chip = root.querySelector<HTMLButtonElement>('.cu-preview-chip')!
     expect(chip.textContent).toContain('2')
     expect(chip.getAttribute('aria-expanded')).toBe('false')
     expect(bridge.agentPreviewStart).not.toHaveBeenCalled()
-    expect(previewLayout.reservedHeight).toBe(0)
+    expect(previewLayout.reservedHeight).toBe(208)
     chip.click()
     await flush()
     expect(chip.getAttribute('aria-expanded')).toBe('true')
@@ -556,11 +567,65 @@ describe('ComputerUsePreviewStack', () => {
     await flush()
     expect(chip.getAttribute('aria-expanded')).toBe('false')
     expect(bridge.agentPreviewStop).toHaveBeenCalledTimes(2)
+    rectangles.mockRestore()
+  })
+
+  it('UI-S16: sits beside the chat from a 1152px region, a chip below it', async () => {
+    columnWidth = 1151
+    setTargets([target()])
+    let root = await mount()
+    expect(root.querySelector('.cu-preview-chip')).not.toBeNull()
+    app?.unmount()
+    host?.remove()
+    columnWidth = 1152
+    root = await mount()
+    expect(root.querySelector('.cu-preview-chip')).toBeNull()
+    expect(root.querySelector('.cu-preview-stack')).not.toBeNull()
+  })
+
+  it('UI-S16: reserves its span measured from the bottom of its own seat', async () => {
+    const rectangles = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('view-area'))
+          return { top: 0, bottom: 700 } as DOMRect
+        if (this.classList.contains('conversation-root'))
+          return { top: 0, bottom: 900 } as DOMRect
+        if (this.classList.contains('cu-preview'))
+          return { top: 400, bottom: 656 } as DOMRect
+        return { top: 0, bottom: 0 } as DOMRect
+      })
+    setTargets([target()])
+    host = document.createElement('div')
+    host.className = 'conversation-root'
+    Object.defineProperty(host, 'clientWidth', { get: () => columnWidth })
+    const seat = document.createElement('div')
+    seat.className = 'view-area'
+    host.append(seat)
+    document.body.append(host)
+    app = createApp({
+      setup: () => () =>
+        h(ComputerUsePreviewStack, { sessionId: 's1', awaiting: false }),
+    })
+    app.mount(seat)
+    await flush()
+    // 700 − 400 + the 12px gap: the card above stops 12 short of it.
+    expect(previewLayout.reservedHeight).toBe(312)
+    rectangles.mockRestore()
   })
 
   it('brings a target forward and enlarges it on a tool row request', async () => {
     setTargets([
-      target({ targetId: 't-a', title: '访达' }),
+      target({
+        targetId: 't-a',
+        title: '访达',
+        lastScreenshot: {
+          attachmentId: 'att_2026-10_12345678',
+          takenAt: '2026-09-29T10:00:00.000Z',
+          width: 800,
+          height: 600,
+        },
+      }),
       target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
     ])
     const root = await mount()
@@ -569,13 +634,10 @@ describe('ComputerUsePreviewStack', () => {
     expect(card(root)?.querySelector('.cu-card-title')?.textContent).toBe(
       '访达',
     )
-    const dialog = document.body.querySelector('[role="dialog"]')
-    expect(dialog?.getAttribute('aria-label')).toBe('访达')
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }),
-    )
-    await flush()
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(imageViewer.value?.items[0]?.name).toBe('访达')
+    expect(imageViewer.value?.items[0]?.src).toContain('app://attachments/')
+    closeImageViewer()
+    expect(imageViewer.value).toBeNull()
   })
 
   it('draws the Agent’s pointer where its action landed on the live picture, then fades it out', async () => {
@@ -615,7 +677,16 @@ describe('ComputerUsePreviewStack', () => {
 
   it('draws the pointer only on its own target’s live picture', async () => {
     setTargets([
-      target({ targetId: 't-a', title: '访达' }),
+      target({
+        targetId: 't-a',
+        title: '访达',
+        lastScreenshot: {
+          attachmentId: 'att_2026-10_12345678',
+          takenAt: '2026-09-29T10:00:00.000Z',
+          width: 800,
+          height: 600,
+        },
+      }),
       target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
     ])
     const root = await mount()

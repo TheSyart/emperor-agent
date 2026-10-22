@@ -15,7 +15,7 @@
 import { ref, watch } from 'vue'
 import Button from '../../ui/Button.vue'
 import DiffBlock from '../../ui/DiffBlock.vue'
-import { EmptyState, SettingsCard, StatusBadge } from '../ui'
+import { EmptyState, SettingsCard, Badge } from '../ui'
 import { formatBytes, versionDescription } from './memoryModel'
 import type { MemoryVersion, MemoryVersionDetail } from '../../../types'
 
@@ -72,6 +72,7 @@ function unchanged(detail: MemoryVersionDetail) {
       v-if="!versions.length"
       title="还没有版本快照"
       description="保存或恢复记忆文件时会自动留下快照。"
+      framed
     />
     <SettingsCard
       v-for="version in versions"
@@ -84,12 +85,12 @@ function unchanged(detail: MemoryVersionDetail) {
       @update:open="setOpen(version, $event)"
     >
       <template #meta>
-        <StatusBadge mono>{{ formatBytes(version.bytes) }}</StatusBadge>
+        <Badge mono>{{ formatBytes(version.bytes) }}</Badge>
       </template>
       <template #actions>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`恢复 ${version.label || version.relPath}`"
           @click="emit('restore', version.id)"
@@ -149,7 +150,7 @@ function unchanged(detail: MemoryVersionDetail) {
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -157,7 +158,7 @@ function unchanged(detail: MemoryVersionDetail) {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .error {

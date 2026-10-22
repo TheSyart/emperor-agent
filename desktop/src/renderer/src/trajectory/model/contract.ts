@@ -161,7 +161,8 @@ export interface TrajectoryWorkflowFact {
   readonly runId: string
   readonly name: string
   readonly tool?: 'workflow' | 'ralph'
-  readonly status: 'running' | 'completed' | 'cancelled' | 'error'
+  readonly status:
+    'running' | 'completed' | 'cancelled' | 'error' | 'interrupted'
   readonly phases: readonly string[]
   readonly logs: readonly string[]
   readonly error?: string

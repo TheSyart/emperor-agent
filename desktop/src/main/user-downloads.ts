@@ -24,7 +24,6 @@
  * stay where they are.
  */
 
-import { execFile as nodeExecFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import {
   existsSync,
@@ -49,6 +48,9 @@ import {
   uniqueDownloadPath,
   type DownloadItemLike,
 } from './computer-use/download-inbox'
+import { createQuarantine } from './quarantine'
+
+export { createQuarantine } from './quarantine'
 
 /** The largest file your own browsing downloads (2 GiB). */
 export const USER_DOWNLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
@@ -122,6 +124,8 @@ export class UserDownloads {
   /** Save paths running downloads were given, so two never share one. */
   private readonly reserved = new Set<string>()
   private readonly quarantine: (path: string) => Promise<void>
+
+  private newerFile = false
 
   constructor(private readonly options: UserDownloadsOptions) {
     this.quarantine = options.quarantine ?? createQuarantine()
@@ -356,7 +360,8 @@ export class UserDownloads {
 
   private persist(): void {
     const recordPath = this.options.recordPath
-    if (recordPath === undefined) return
+    // A newer Emperor's history file stays as it is (REL-03).
+    if (recordPath === undefined || this.newerFile) return
     const directory = dirname(recordPath)
     const temp = join(
       directory,
@@ -391,6 +396,8 @@ export class UserDownloads {
     } catch {
       return // missing or damaged: start empty
     }
+    if (isRecord(parsed) && Number(parsed.version) > RECORD_VERSION)
+      this.newerFile = true
     if (
       !isRecord(parsed) ||
       parsed.version !== RECORD_VERSION ||
@@ -403,44 +410,6 @@ export class UserDownloads {
         return record === null ? [] : [record]
       })
       .slice(-USER_DOWNLOAD_HISTORY_LIMIT)
-  }
-}
-
-type ExecFileLike = (
-  file: string,
-  args: readonly string[],
-  callback: (error: Error | null) => void,
-) => void
-
-/**
- * macOS: mark a finished download the way browsers do
- * (`com.apple.quarantine`), so Gatekeeper checks it before it first runs.
- * Other systems: nothing.
- */
-export function createQuarantine(
-  options: {
-    platform?: NodeJS.Platform
-    execFile?: ExecFileLike
-    now?: () => number
-  } = {},
-): (path: string) => Promise<void> {
-  const platform = options.platform ?? process.platform
-  const run: ExecFileLike =
-    options.execFile ??
-    ((file, args, callback) => {
-      nodeExecFile(file, [...args], (error) => callback(error))
-    })
-  const now = options.now ?? Date.now
-  return (path) => {
-    if (platform !== 'darwin') return Promise.resolve()
-    const seconds = Math.floor(now() / 1000).toString(16)
-    return new Promise((resolve, reject) => {
-      run(
-        '/usr/bin/xattr',
-        ['-w', 'com.apple.quarantine', `0083;${seconds};Emperor Agent;`, path],
-        (error) => (error ? reject(error) : resolve()),
-      )
-    })
   }
 }
 

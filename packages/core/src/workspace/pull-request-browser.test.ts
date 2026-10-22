@@ -706,3 +706,49 @@ describe('createGhCommandRunner', () => {
     ).resolves.toMatchObject({ exitCode: 4 })
   })
 })
+
+describe('cancellable preview GitHub reads', () => {
+  it('never launches a read when cancellation arrives during runtime resolution', async () => {
+    const controller = new AbortController()
+    const requests: GhCommandRequest[] = []
+    const service = new PullRequestBrowserService({
+      cwd: '/state-root',
+      resolveRuntime: async () => {
+        controller.abort()
+        return RUNTIME
+      },
+      run: async (request) => {
+        requests.push(request)
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(VIEW_RESPONSE),
+          stderr: '',
+        }
+      },
+    })
+    await expect(
+      service.view(
+        { repo: 'acme/widgets', number: 42 },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: 'cancelled' })
+    expect(requests).toHaveLength(0)
+  })
+
+  it('forwards an already cancelled request to the process runner', async () => {
+    const { NodeEnvironmentProcessRunner } =
+      await import('../environment/process-runner')
+    const run = createGhCommandRunner(new NodeEnvironmentProcessRunner())
+    const controller = new AbortController()
+    controller.abort()
+    const result = await run({
+      executable: process.execPath,
+      args: ['-e', "process.stdout.write('launched')"],
+      cwd: process.cwd(),
+      env: {},
+      signal: controller.signal,
+    })
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stdout).toBe('')
+  })
+})

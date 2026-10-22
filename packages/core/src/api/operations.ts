@@ -5,18 +5,47 @@ import {
 } from '../harness/computer-use/external-site-rules'
 import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
+import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
+import { SessionRequiredError, type ViewScope } from '../harness/host/scope'
 import {
   MAX_MESSAGE_REFERENCES,
   referencesFit,
 } from '../harness/host/message-references'
 import { SKILL_NAME, SKILL_NAME_MAX_LENGTH } from '../skills/name'
+import { isDraftSessionId } from '../sessions/constants'
 import {
   environmentIdSchema,
   environmentToolIdSchema,
   sha256Schema,
 } from '../environment/models'
 
+const externalIdSchema = z.string().regex(/^dlg-[a-zA-Z0-9-]+$/)
+const externalRunSchema = z.string().regex(/^dgr-[a-zA-Z0-9-]+$/)
+const externalSession = z.string().trim().min(1).max(256).optional()
+const externalRef = z
+  .object({ id: externalIdSchema, sessionId: externalSession })
+  .strict()
+const externalRunRef = z
+  .object({ runId: externalRunSchema, sessionId: externalSession })
+  .strict()
+const acceptanceCriteriaSchema = z
+  .object({
+    description: z.string().min(1).max(8192),
+    commands: z
+      .array(
+        z
+          .object({
+            executable: z.string().min(1).max(4096),
+            args: z.array(z.string().max(65536)).max(256),
+            timeoutMs: z.number().int().min(1000).max(600000).optional(),
+          })
+          .strict(),
+      )
+      .max(16),
+    requiresReview: z.boolean().optional(),
+  })
+  .strict()
 const dictSchema = z.record(z.string(), z.unknown())
 const idSchema = z.string().trim().min(1)
 const taskIdSchema = idSchema.refine(
@@ -225,6 +254,15 @@ const modelExecutionPolicySchema = z
       .strict(),
   })
   .strict()
+/** Fields a user can lock against metadata refreshes (MOD-03). */
+const modelMetadataFieldSchema = z.enum([
+  'contextWindowTokens',
+  'maxTokens',
+  'pricing',
+  'capabilities',
+  'reasoningEffort',
+  'displayName',
+])
 const modelEntrySaveSchema = z
   .object({
     entryId: idSchema.optional(),
@@ -239,8 +277,20 @@ const modelEntrySaveSchema = z
     contextWindowTokens: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
+    // KRN-07: keep a DeepSeek entry on chat-completions; null clears it.
+    transport: z.enum(['chat-completions']).nullable().optional(),
     credentialsFrom: idSchema.optional(),
+    // MOD-05: the editor's temperature (null removes it) and the fields the
+    // user changed, which metadata refreshes then leave alone.
+    sampling: z
+      .object({ temperature: z.number().min(0).max(2).nullable().optional() })
+      .strict()
+      .optional(),
+    lockFields: z.array(modelMetadataFieldSchema).max(6).optional(),
   })
+  .strict()
+const modelEntryReplaceSchema = z
+  .object({ entryId: idSchema, modelId: z.string().trim().min(1).max(200) })
   .strict()
 const modelEntryIdSchema = z.object({ entryId: idSchema }).strict()
 const modelReasoningEffortSchema = z
@@ -249,15 +299,147 @@ const modelReasoningEffortSchema = z
     reasoningEffort: z.string().trim().min(1).nullable(),
   })
   .strict()
+// A draft connection from the add-model form (MOD-02, UI-29): the typed
+// key wins; entryId / connectionId only lend a saved key to the same
+// provider, protocol and API base.
+const modelConnectionShape = {
+  entryId: idSchema.optional(),
+  connectionId: idSchema.optional(),
+  provider: z.string().trim().min(1).optional(),
+  protocol: modelProtocolSchema.optional(),
+  apiBase: z.string().trim().optional(),
+  apiKey: z.string().nullable().optional(),
+  extraHeaders: z.record(z.string(), z.string()).optional(),
+  workspaceId: z.string().trim().max(63).optional(),
+}
 const modelDiscoverySchema = z
+  .object({ ...modelConnectionShape, refresh: z.boolean().optional() })
+  .strict()
+const modelProbeSchema = z.object(modelConnectionShape).strict()
+// MOD-03: the optional facts an entry carries (validated leniently again
+// when the entry is normalized; unknown keys are refused here).
+const modelEntryFactsShape = {
+  limits: z
+    .object({
+      maxInputTokens: z.number().int().positive().optional(),
+      maxOutputTokens: z.number().int().positive().optional(),
+    })
+    .strict()
+    .optional(),
+  detected: z
+    .object({
+      toolCall: z.boolean().optional(),
+      vision: z.boolean().optional(),
+      reasoning: z.boolean().optional(),
+      reasoningEfforts: z.array(z.string().trim().min(1)).optional(),
+      defaultReasoningEffort: z.string().trim().min(1).optional(),
+      reasoningControl: z
+        .enum(['effort', 'toggle', 'budget', 'always'])
+        .optional(),
+      acceptsTemperature: z.boolean().optional(),
+      modalities: z.array(z.string().trim().min(1)).optional(),
+      kind: z
+        .enum(['chat', 'embedding', 'rerank', 'image', 'audio', 'other'])
+        .optional(),
+    })
+    .strict()
+    .optional(),
+  metadata: z
+    .object({
+      name: z.string().trim().optional(),
+      source: z.enum([
+        'vendor_api',
+        'catalog',
+        'family_rule',
+        'fallback',
+        'manual',
+      ]),
+      catalogKey: z.string().optional(),
+      catalogVersion: z.string().optional(),
+      checkedAt: z.string().optional(),
+      userLocked: z.array(modelMetadataFieldSchema).optional(),
+      pricingSource: z.enum(['catalog', 'vendor_api', 'manual']).optional(),
+      lifecycle: z
+        .object({
+          status: z.enum(['active', 'deprecated', 'retired']).optional(),
+          retiresAt: z.string().optional(),
+          replacement: z.string().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .optional(),
+  sampling: z
+    .object({
+      temperature: z.number().min(0).max(2).nullable().optional(),
+      topP: z.number().min(0).max(1).nullable().optional(),
+    })
+    .strict()
+    .optional(),
+}
+const modelEntriesSaveSchema = z
   .object({
-    entryId: idSchema.optional(),
-    provider: z.string().trim().min(1).optional(),
-    protocol: modelProtocolSchema.optional(),
-    apiBase: z.string().trim().optional(),
-    apiKey: z.string().nullable().optional(),
-    extraHeaders: z.record(z.string(), z.string()).optional(),
+    connection: z
+      .object({
+        provider: z.string().trim().min(1),
+        protocol: modelProtocolSchema,
+        apiBase: z.string().trim().min(1),
+        apiKey: z.string().nullable().optional(),
+      })
+      .strict(),
+    entries: z
+      .array(
+        z
+          .object({
+            entryId: idSchema.optional(),
+            modelId: z.string().trim().min(1),
+            displayName: z.string().trim().optional(),
+            capabilityOverrides: modelCapabilityOverridesSchema.optional(),
+            pricing: modelPricingSchema.nullable().optional(),
+            contextWindowTokens: z.number().int().positive(),
+            maxTokens: z.number().int().positive(),
+            reasoningEffort: z.string().trim().nullable().optional(),
+            ...modelEntryFactsShape,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(200),
+    activateEntryId: idSchema.nullable().optional(),
   })
+  .strict()
+const modelConnectionUpdateSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+    entryId: idSchema.optional(),
+    apiKey: z.string().nullable().optional(),
+    apiBase: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.connectionId || value.entryId), {
+    message: 'connectionId 或 entryId 必须提供一个',
+  })
+const modelMetadataRefreshSchema = z
+  .object({
+    entryIds: z.array(idSchema).min(1).max(200).optional(),
+    connectionId: idSchema.optional(),
+    apply: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.entryIds?.length || value.connectionId), {
+    message: 'entryIds 或 connectionId 必须提供一个',
+  })
+const modelDefaultsSchema = z
+  .object({
+    provider: z.string().trim().min(1),
+    protocol: modelProtocolSchema,
+    apiBase: z.string().trim().optional(),
+    modelId: z.string().trim().min(1),
+  })
+  .strict()
+const modelRejectedKeySchema = z
+  .object({ key: z.string().trim().min(1).max(200) })
   .strict()
 const modelProfilePreviewSchema = z
   .object({
@@ -288,27 +470,11 @@ const manageQueuedPromptSchema = z
   .object({
     sessionId: z.string().trim().min(1),
     promptId: z.string().trim().min(1),
-    action: z.enum(['cancel', 'interject']),
+    action: z.enum(['cancel', 'interject', 'send']),
   })
   .strict()
 
 const commandInvocationSourceSchema = z.enum(['desktop', 'automation', 'acp'])
-const commandListSchema = z
-  .object({
-    sessionId: idSchema,
-    includeUnavailable: z.boolean().optional(),
-    invocationSource: commandInvocationSourceSchema.optional(),
-  })
-  .strict()
-const commandCompleteSchema = z
-  .object({
-    sessionId: idSchema,
-    commandId: idSchema,
-    rawArgs: z.string().max(8_192),
-    cursor: z.number().int().min(0).max(8_192),
-    invocationSource: commandInvocationSourceSchema,
-  })
-  .strict()
 /** Chips in a message's text (E-track contract §2). */
 const messageReferencesSchema = z
   .array(
@@ -362,8 +528,55 @@ const workspaceFileSearchSchema = workspaceFilePageSchema
   .extend({ query: z.string().trim().min(1).max(500) })
   .strict()
 const workspaceFileReadSchema = z
-  .object({ sessionId: idSchema, relativePath: workspaceRelativePathSchema })
+  .object({
+    sessionId: idSchema,
+    relativePath: workspaceRelativePathSchema,
+    turn: z.number().int().nonnegative().optional(),
+  })
   .strict()
+const filePreviewSchema = z.discriminatedUnion('source', [
+  z
+    .object({
+      source: z.literal('project'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('turn'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+      turn: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('reference'),
+      sessionId: idSchema,
+      referenceId: idSchema,
+    })
+    .strict(),
+  z
+    .object({ source: z.literal('attachment'), attachmentId: idSchema })
+    .strict(),
+])
+const fileStatSchema = z.discriminatedUnion('source', [
+  z
+    .object({
+      source: z.literal('project'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('reference'),
+      sessionId: idSchema,
+      referenceId: idSchema,
+    })
+    .strict(),
+])
 const gitStatusSchema = workspaceSessionSchema
 const gitDiffSchema = z
   .object({
@@ -541,11 +754,22 @@ const terminalResizeSchema = terminalIdentitySchema.extend({
 const referenceResolveSchema = z
   .object({
     sessionId: idSchema,
+    delegationId: z
+      .string()
+      .regex(/^dlg-[a-zA-Z0-9-]+$/)
+      .optional(),
     sourceMessageId: idSchema,
     href: z.string().trim().min(1).max(4_096),
     label: z.string().max(500),
   })
   .strict()
+
+/** The three permission presets (`control.setPermissionMode`). */
+const permissionPresetSchema = z.enum([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+])
 
 const draftSessionSchema = z
   .object({
@@ -559,6 +783,9 @@ const draftSessionSchema = z
       .strict()
       .nullable()
       .optional(),
+    // FIX-13: the draft's own plan mode and preset, set before its first turn.
+    plan: z.boolean().optional(),
+    preset: permissionPresetSchema.optional(),
   })
   .strict()
 
@@ -663,6 +890,41 @@ const chatSubmitSchema = z
     { message: 'references do not match the content', path: ['references'] },
   )
 
+/**
+ * `commands.list` / `commands.complete` name a session, or a start-page draft
+ * by its id (`draft:<uuid>`) with the mode and project its session will get,
+ * as `chat.submit` and `goals.start` carry them (FIX-14). The draft context
+ * goes with a draft id only.
+ */
+const commandOwnerFits = (value: {
+  sessionId: string
+  draftSession?: unknown
+}): boolean => value.draftSession == null || isDraftSessionId(value.sessionId)
+const commandOwnerIssue = {
+  message: 'draftSession goes with a draft session id',
+  path: ['draftSession'],
+}
+const commandListSchema = z
+  .object({
+    sessionId: idSchema,
+    draftSession: draftSessionSchema.nullable().optional(),
+    includeUnavailable: z.boolean().optional(),
+    invocationSource: commandInvocationSourceSchema.optional(),
+  })
+  .strict()
+  .refine(commandOwnerFits, commandOwnerIssue)
+const commandCompleteSchema = z
+  .object({
+    sessionId: idSchema,
+    draftSession: draftSessionSchema.nullable().optional(),
+    commandId: idSchema,
+    rawArgs: z.string().max(8_192),
+    cursor: z.number().int().min(0).max(8_192),
+    invocationSource: commandInvocationSourceSchema,
+  })
+  .strict()
+  .refine(commandOwnerFits, commandOwnerIssue)
+
 const hookAuditOptionsSchema = z
   .object({
     cursor: z.union([z.string(), z.number()]).nullable().optional(),
@@ -751,28 +1013,371 @@ const sessionPatchSchema = z.union([
 
 type AnyArgsSchema = z.ZodType<unknown[]>
 
+/**
+ * What travels with a call besides its arguments (KRN-01): the session the
+ * calling UI shows. The desktop passes it with every call; an operation
+ * whose input names no session uses it, and one that needs a session gets
+ * `SESSION_REQUIRED` when there is neither.
+ */
+export interface CoreOperationContext {
+  readonly view?: ViewScope
+}
+
 export interface CoreOperationSpec<Schema extends AnyArgsSchema, Result> {
   readonly args: Schema
   readonly audience: 'main_renderer'
   readonly classification: 'application_operation'
-  readonly invoke: (api: CoreApi, args: z.output<Schema>) => Result
-  readonly parseAndInvoke: (api: CoreApi, input: unknown) => Result
+  readonly invoke: (
+    api: CoreApi,
+    args: z.output<Schema>,
+    context: CoreOperationContext,
+  ) => Result
+  readonly parseAndInvoke: (
+    api: CoreApi,
+    input: unknown,
+    context: CoreOperationContext,
+  ) => Result
 }
 
 function operation<Schema extends AnyArgsSchema, Result>(
   args: Schema,
-  invoke: (api: CoreApi, args: z.output<Schema>) => Result,
+  invoke: (
+    api: CoreApi,
+    args: z.output<Schema>,
+    context: CoreOperationContext,
+  ) => Result,
 ): CoreOperationSpec<Schema, Result> {
   return {
     args,
     audience: 'main_renderer',
     classification: 'application_operation',
     invoke,
-    parseAndInvoke: (api, input) => invoke(api, args.parse(input)),
+    parseAndInvoke: (api, input, context) =>
+      invoke(api, args.parse(input), context),
   }
 }
 
+/** The session an input names, else the one the caller shows (KRN-01). */
+function sessionOf(
+  sessionId: string | null | undefined,
+  context: CoreOperationContext,
+): string | null | undefined {
+  return sessionId !== undefined ? sessionId : context.view?.sessionId
+}
+
+/** A named session, else the caller's (null: none in view); `SESSION_REQUIRED` with neither. */
+function requiredSession(
+  sessionId: string | null | undefined,
+  context: CoreOperationContext,
+  operation: string,
+): string | null {
+  const resolved = sessionOf(sessionId, context)
+  if (resolved === undefined) throw new SessionRequiredError(operation)
+  return resolved
+}
+
+/** The caller's view; `SESSION_REQUIRED` when the call carries none. */
+function viewOf(context: CoreOperationContext, operation: string): ViewScope {
+  if (context.view === undefined) throw new SessionRequiredError(operation)
+  return context.view
+}
+
+/** An input with its session filled in from the caller's view when it names none. */
+function withSession<T extends { sessionId?: string | null }>(
+  input: T,
+  context: CoreOperationContext,
+  operation: string,
+): T & { sessionId: string | null } {
+  const sessionId = sessionOf(input.sessionId, context)
+  if (sessionId === undefined) throw new SessionRequiredError(operation)
+  return { ...input, sessionId }
+}
+
 export const CORE_OPERATION_REGISTRY = {
+  'executors.list': operation(z.tuple([]), (api) => api.executors.list()),
+  'executors.models': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          refresh: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.models(input),
+  ),
+  'executors.probe': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input]) => api.executors.probe(input),
+  ),
+  'executors.configure': operation(
+    z.tuple([
+      z
+        .object({
+          expectedRevision: z.number().int().nonnegative(),
+          config: executorConfigSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.configure(input, viewOf(ctx, 'executors.configure')),
+  ),
+  // AGT-12: the user's own API key for Claude Code (使用 API Key); one line,
+  // no spaces. Claude.ai sign-ins are claude's own (executors.signIn).
+  'executors.setCredential': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          kind: z.literal('api-key'),
+          token: z
+            .string()
+            .trim()
+            .min(8)
+            .max(4096)
+            .regex(/^[\x21-\x7e]+$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.setCredential(
+        input,
+        viewOf(ctx, 'executors.setCredential'),
+      ),
+  ),
+  'executors.clearCredential': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.clearCredential(
+        input,
+        viewOf(ctx, 'executors.clearCredential'),
+      ),
+  ),
+  // AGT-12 / FIX-11: 登录 Claude Code starts the installed claude's own
+  // `auth login` (`--console` for API billing), finished in the browser;
+  // 取消 ends it; 退出登录 runs `claude auth logout`; 知道了 on the notice
+  // after the upgrade.
+  'executors.signIn': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          method: z.enum(['claude-ai', 'console']),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.signIn(input, viewOf(ctx, 'executors.signIn')),
+  ),
+  'executors.cancelSignIn': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.cancelSignIn(input, viewOf(ctx, 'executors.cancelSignIn')),
+  ),
+  'executors.signOut': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.signOut(input, viewOf(ctx, 'executors.signOut')),
+  ),
+  'executors.dismissNotice': operation(
+    z.tuple([z.object({ notice: z.literal('claude-sign-in') }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.dismissNotice(
+        input,
+        viewOf(ctx, 'executors.dismissNotice'),
+      ),
+  ),
+  // AGT-13: 版本 and 升级. versions reads npm's public version numbers;
+  // upgrade runs the install source's own command once the user confirmed
+  // (the target must be the one offered); 稍后 hides the notice.
+  'executors.versions': operation(
+    z.tuple([
+      z
+        .object({
+          refresh: z.union([z.boolean(), z.literal('auto')]).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.versions(input),
+  ),
+  'executors.upgrade': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          target: z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.upgrade(input, viewOf(ctx, 'executors.upgrade')),
+  ),
+  'executors.cancelUpgrade': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.cancelUpgrade(
+        input,
+        viewOf(ctx, 'executors.cancelUpgrade'),
+      ),
+  ),
+  'executors.dismissUpgrades': operation(
+    z.tuple([z.object({}).strict()]),
+    (api, [input], ctx) =>
+      api.executors.dismissUpgrades(
+        input,
+        viewOf(ctx, 'executors.dismissUpgrades'),
+      ),
+  ),
+  'delegations.get': operation(z.tuple([externalRef]), (api, [input], ctx) =>
+    api.delegations.get(withSession(input, ctx, 'delegations.get')),
+  ),
+  'delegations.history': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          before: z.string().max(1024).optional(),
+          after: z.string().max(1024).optional(),
+          limit: z.number().int().positive().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.history(withSession(input, ctx, 'delegations.history')),
+  ),
+  'delegations.send': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          messageId: z.string().regex(/^dgm-[a-zA-Z0-9-]+$/),
+          text: z.string().min(1).max(32768),
+          delivery: z.enum(['queue', 'steer']),
+          expectedRunId: externalRunSchema.optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.send(withSession(input, ctx, 'delegations.send')),
+  ),
+  'delegations.interrupt': operation(
+    z.tuple([externalRef.extend({ runId: externalRunSchema }).strict()]),
+    (api, [input], ctx) =>
+      api.delegations.interrupt(
+        withSession(input, ctx, 'delegations.interrupt'),
+      ),
+  ),
+  'delegations.recover': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          expectedRevision: z.number().int().nonnegative(),
+          inspect: z.boolean().optional(),
+          verificationId: z
+            .string()
+            .regex(/^dgr-verification-[a-f0-9-]+$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.recover(withSession(input, ctx, 'delegations.recover')),
+  ),
+  'delegations.abandon': operation(
+    z.tuple([externalRef]),
+    (api, [input], ctx) =>
+      api.delegations.abandon(withSession(input, ctx, 'delegations.abandon')),
+  ),
+  'delegations.collect': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.collect(withSession(input, ctx, 'delegations.collect')),
+  ),
+  'delegations.receipt': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.receipt(withSession(input, ctx, 'delegations.receipt')),
+  ),
+  'delegations.validate': operation(
+    z.tuple([
+      externalRunRef
+        .extend({
+          receiptId: z.string().regex(/^drr-[a-f0-9-]+$/),
+          criteria: acceptanceCriteriaSchema,
+          reviewedTreeDigest: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.validate(withSession(input, ctx, 'delegations.validate')),
+  ),
+  'delegations.integrate': operation(
+    z.tuple([
+      externalRunRef
+        .extend({
+          action: z.enum(['preview', 'apply']),
+          expectedBase: z
+            .object({
+              cwd: z.string().min(1).max(4096),
+              head: z.string().nullable(),
+              indexDigest: z.string().nullable(),
+              treeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+            })
+            .strict()
+            .optional(),
+          previewId: z
+            .string()
+            .regex(/^dpi-[a-f0-9-]+$/)
+            .optional(),
+          expectedRevision: z.number().int().nonnegative().optional(),
+          previewDigest: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.integrate(
+        withSession(input, ctx, 'delegations.integrate'),
+      ),
+  ),
+  // The result card (AGT-06): 查看差异 · 应用到项目 · 撤销 · 丢弃.
+  'delegations.diff': operation(
+    z.tuple([
+      externalRunRef.extend({ path: z.string().min(1).max(4096) }).strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.diff(withSession(input, ctx, 'delegations.diff')),
+  ),
+  'delegations.apply': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.apply(withSession(input, ctx, 'delegations.apply')),
+  ),
+  'delegations.undo': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.undo(withSession(input, ctx, 'delegations.undo')),
+  ),
+  'delegations.discard': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.discard(withSession(input, ctx, 'delegations.discard')),
+  ),
+  'delegations.close': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          failureDisposition: z.string().trim().min(1).max(4096).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.close(withSession(input, ctx, 'delegations.close')),
+  ),
+
   'attachments.rawPath': operation(z.tuple([idSchema]), (api, [id]) =>
     api.attachments.rawPath(id),
   ),
@@ -842,7 +1447,7 @@ export const CORE_OPERATION_REGISTRY = {
         ])
         .optional(),
     ]),
-    (api, [input]) => api.config.save(input),
+    (api, [input], ctx) => api.config.save(input, viewOf(ctx, 'config.save')),
   ),
   'control.answerInteraction': operation(
     z.tuple([idSchema, dictSchema, controlResumeSchema.optional()]),
@@ -863,19 +1468,24 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'control.get': operation(
     z.tuple([nullableStringSchema]),
-    (api, [sessionId]) => api.control.get(sessionId),
+    (api, [sessionId], ctx) =>
+      api.control.get(requiredSession(sessionId, ctx, 'control.get')),
   ),
   'control.setPermissionMode': operation(
-    z.tuple([
-      z.enum(['read-only', 'workspace-write', 'danger-full-access']),
-      nullableStringSchema,
-    ]),
-    (api, [preset, sessionId]) =>
-      api.control.setPermissionMode(preset, sessionId),
+    z.tuple([permissionPresetSchema, nullableStringSchema]),
+    (api, [preset, sessionId], ctx) =>
+      api.control.setPermissionMode(
+        preset,
+        requiredSession(sessionId, ctx, 'control.setPermissionMode') ?? '',
+      ),
   ),
   'control.setMode': operation(
     z.tuple([z.enum(['plan', 'default']), nullableStringSchema]),
-    (api, [mode, sessionId]) => api.control.setMode(mode, sessionId),
+    (api, [mode, sessionId], ctx) =>
+      api.control.setMode(
+        mode,
+        requiredSession(sessionId, ctx, 'control.setMode') ?? '',
+      ),
   ),
   'computerUse.status': operation(z.tuple([]), (api) =>
     api.computerUse.status(),
@@ -896,7 +1506,11 @@ export const CORE_OPERATION_REGISTRY = {
         })
         .strict(),
     ]),
-    (api, [input]) => api.computerUse.manageProfile(input),
+    (api, [input], ctx) =>
+      api.computerUse.manageProfile(
+        input,
+        viewOf(ctx, 'computerUse.manageProfile'),
+      ),
   ),
   'computerUse.listSitePermissions': operation(z.tuple([]), (api) =>
     api.computerUse.listSitePermissions(),
@@ -918,7 +1532,11 @@ export const CORE_OPERATION_REGISTRY = {
         })
         .strict(),
     ]),
-    (api, [input]) => api.computerUse.setSitePermission(input),
+    (api, [input], ctx) =>
+      api.computerUse.setSitePermission(
+        input,
+        viewOf(ctx, 'computerUse.setSitePermission'),
+      ),
   ),
   // Settings › 电脑操作 › Chrome 和 Edge (PLAN-CAP-001 RV-09).
   'computerUse.externalBrowserSettings': operation(z.tuple([]), (api) =>
@@ -952,11 +1570,19 @@ export const CORE_OPERATION_REGISTRY = {
         })
         .strict(),
     ]),
-    (api, [input]) => api.computerUse.setExternalBrowserSettings(input),
+    (api, [input], ctx) =>
+      api.computerUse.setExternalBrowserSettings(
+        input,
+        viewOf(ctx, 'computerUse.setExternalBrowserSettings'),
+      ),
   ),
   'computerUse.setEnabled': operation(
     z.tuple([z.boolean()]),
-    (api, [enabled]) => api.computerUse.setEnabled(enabled),
+    (api, [enabled], ctx) =>
+      api.computerUse.setEnabled(
+        enabled,
+        viewOf(ctx, 'computerUse.setEnabled'),
+      ),
   ),
   'computerUse.setDriverEnabled': operation(
     z.tuple([
@@ -967,7 +1593,11 @@ export const CORE_OPERATION_REGISTRY = {
         })
         .strict(),
     ]),
-    (api, [input]) => api.computerUse.setDriverEnabled(input),
+    (api, [input], ctx) =>
+      api.computerUse.setDriverEnabled(
+        input,
+        viewOf(ctx, 'computerUse.setDriverEnabled'),
+      ),
   ),
   'computerUse.acknowledgeRetiredApps': operation(z.tuple([]), (api) =>
     api.computerUse.acknowledgeRetiredApps(),
@@ -1021,15 +1651,24 @@ export const CORE_OPERATION_REGISTRY = {
         })
         .strict(),
     ]),
-    (api, [change]) => api.browser.setPreferences(change),
+    (api, [change], ctx) =>
+      api.browser.setPreferences(change, viewOf(ctx, 'browser.setPreferences')),
   ),
-  'desktopPet.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>
-    api.desktopPet.setEnabled(enabled),
+  'desktopPet.setEnabled': operation(
+    z.tuple([z.boolean()]),
+    (api, [enabled], ctx) =>
+      api.desktopPet.setEnabled(enabled, viewOf(ctx, 'desktopPet.setEnabled')),
   ),
-  'diagnostics.get': operation(z.tuple([]), (api) => api.diagnostics.get()),
+  'diagnostics.get': operation(z.tuple([]), (api, _args, ctx) =>
+    api.diagnostics.get(viewOf(ctx, 'diagnostics.get')),
+  ),
   'environment.cancelInstall': operation(
     z.tuple([environmentCancelSchema]),
-    (api, [input]) => api.environment.cancelInstall(input),
+    (api, [input], ctx) =>
+      api.environment.cancelInstall(
+        input,
+        viewOf(ctx, 'environment.cancelInstall'),
+      ),
   ),
   'environment.createInstallPlan': operation(
     z.tuple([environmentPlanSchema]),
@@ -1041,28 +1680,53 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'environment.getStatus': operation(
     z.tuple([environmentStatusSchema.optional()]),
-    (api, [input]) => api.environment.getStatus(input),
+    (api, [input], ctx) =>
+      api.environment.getStatus(input, viewOf(ctx, 'environment.getStatus')),
   ),
   'environment.install': operation(
     z.tuple([environmentInstallSchema]),
     (api, [input]) => api.environment.install(input),
   ),
+  // A goal belongs to a session: the one named, else the one in view.
   'goals.cancel': operation(
-    z.tuple([idSchema, z.string().max(2_000).nullable().optional()]),
-    (api, [id, reason]) => api.goals.cancel(id, reason),
+    z.tuple([
+      idSchema,
+      z.string().max(2_000).nullable().optional(),
+      nullableStringSchema,
+    ]),
+    (api, [id, reason, sessionId], ctx) =>
+      api.goals.cancel(
+        id,
+        reason ?? null,
+        requiredSession(sessionId, ctx, 'goals.cancel') ?? '',
+      ),
   ),
-  'goals.get': operation(z.tuple([idSchema]), (api, [id]) => api.goals.get(id)),
+  'goals.get': operation(
+    z.tuple([idSchema, nullableStringSchema]),
+    (api, [id, sessionId], ctx) =>
+      api.goals.get(id, requiredSession(sessionId, ctx, 'goals.get') ?? ''),
+  ),
   'goals.list': operation(
     z.tuple([
       z.object({ sessionId: nullableStringSchema }).strict().optional(),
     ]),
-    (api, [input]) => api.goals.list(input),
+    (api, [input], ctx) =>
+      api.goals.list({
+        sessionId: requiredSession(input?.sessionId, ctx, 'goals.list'),
+      }),
   ),
-  'goals.pause': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.goals.pause(id),
+  'goals.pause': operation(
+    z.tuple([idSchema, nullableStringSchema]),
+    (api, [id, sessionId], ctx) =>
+      api.goals.pause(id, requiredSession(sessionId, ctx, 'goals.pause') ?? ''),
   ),
-  'goals.resume': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.goals.resume(id),
+  'goals.resume': operation(
+    z.tuple([idSchema, nullableStringSchema]),
+    (api, [id, sessionId], ctx) =>
+      api.goals.resume(
+        id,
+        requiredSession(sessionId, ctx, 'goals.resume') ?? '',
+      ),
   ),
   'goals.start': operation(z.tuple([goalStartSchema]), (api, [input]) =>
     api.goals.start(input),
@@ -1073,9 +1737,15 @@ export const CORE_OPERATION_REGISTRY = {
   'files.read': operation(z.tuple([workspaceFileReadSchema]), (api, [input]) =>
     api.files.read(input),
   ),
+  'files.preview': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
+    api.files.preview(input),
+  ),
   'files.search': operation(
     z.tuple([workspaceFileSearchSchema]),
     (api, [input]) => api.files.search(input),
+  ),
+  'files.stat': operation(z.tuple([fileStatSchema]), (api, [input]) =>
+    api.files.stat(input),
   ),
   'git.branches': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
     api.git.branches(input),
@@ -1166,49 +1836,67 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'hooks.getAudit': operation(
     z.tuple([hookAuditOptionsSchema.optional()]),
-    (api, [options]) => api.hooks.getAudit(options),
+    (api, [options], ctx) =>
+      api.hooks.getAudit(options ?? {}, viewOf(ctx, 'hooks.getAudit')),
   ),
   'hooks.getConfig': operation(
     z.tuple([dictSchema.optional()]),
     (api, [options]) => api.hooks.getConfig(options),
   ),
   'hooks.getMetadata': operation(z.tuple([]), (api) => api.hooks.getMetadata()),
-  'hooks.saveConfig': operation(z.tuple([z.unknown()]), (api, [input]) =>
-    api.hooks.saveConfig(input),
+  'hooks.saveConfig': operation(z.tuple([z.unknown()]), (api, [input], ctx) =>
+    api.hooks.saveConfig(input, viewOf(ctx, 'hooks.saveConfig')),
   ),
   'hooks.setProjectTrust': operation(z.tuple([dictSchema]), (api, [input]) =>
     api.hooks.setProjectTrust(input),
   ),
-  'hooks.testMatch': operation(z.tuple([dictSchema]), (api, [input]) =>
-    api.hooks.testMatch(input),
+  'hooks.testMatch': operation(z.tuple([dictSchema]), (api, [input], ctx) =>
+    api.hooks.testMatch(input, viewOf(ctx, 'hooks.testMatch')),
   ),
-  'hooks.testRun': operation(z.tuple([dictSchema]), (api, [input]) =>
-    api.hooks.testRun(input),
+  'hooks.testRun': operation(z.tuple([dictSchema]), (api, [input], ctx) =>
+    api.hooks.testRun(input, viewOf(ctx, 'hooks.testRun')),
   ),
-  'hooks.validateConfig': operation(z.tuple([dictSchema]), (api, [input]) =>
-    api.hooks.validateConfig(input),
+  'hooks.validateConfig': operation(
+    z.tuple([dictSchema]),
+    (api, [input], ctx) => api.hooks.validateConfig(input, ctx.view),
   ),
   'mcp.getConfig': operation(z.tuple([]), (api) => api.mcp.getConfig()),
   'mcp.status': operation(z.tuple([]), (api) => api.mcp.status()),
-  'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input]) =>
-    api.mcp.saveConfig({ ...input }),
+  'mcp.serverLog': operation(z.tuple([mcpServerRefSchema]), (api, [input]) =>
+    api.mcp.serverLog(input),
   ),
-  'mcp.importServers': operation(z.tuple([mcpImportSchema]), (api, [input]) =>
-    api.mcp.importServers(input),
+  'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input], ctx) =>
+    api.mcp.saveConfig({ ...input }, viewOf(ctx, 'mcp.saveConfig')),
+  ),
+  'mcp.importServers': operation(
+    z.tuple([mcpImportSchema]),
+    (api, [input], ctx) => api.mcp.importServers(input, ctx.view),
   ),
   'mcp.setServerEnabled': operation(
     z.tuple([mcpServerEnabledSchema]),
-    (api, [input]) => api.mcp.setServerEnabled(input),
+    (api, [input], ctx) =>
+      api.mcp.setServerEnabled(input, viewOf(ctx, 'mcp.setServerEnabled')),
   ),
-  'mcp.removeServer': operation(z.tuple([mcpServerRefSchema]), (api, [input]) =>
-    api.mcp.removeServer(input),
+  'mcp.removeServer': operation(
+    z.tuple([mcpServerRefSchema]),
+    (api, [input], ctx) =>
+      api.mcp.removeServer(input, viewOf(ctx, 'mcp.removeServer')),
   ),
   'memory.checkWatchlist': operation(z.tuple([]), (api) =>
     api.memory.checkWatchlist(),
   ),
   'memory.compact': operation(
-    z.tuple([z.object({ force: z.boolean().optional() }).strict().optional()]),
-    (api, [options]) => api.memory.compact(options),
+    z.tuple([
+      z
+        .object({
+          force: z.boolean().optional(),
+          sessionId: nullableStringSchema,
+        })
+        .strict()
+        .optional(),
+    ]),
+    (api, [options], ctx) =>
+      api.memory.compact(withSession(options ?? {}, ctx, 'memory.compact')),
   ),
   'memory.explainContext': operation(
     z.tuple([
@@ -1220,9 +1908,14 @@ export const CORE_OPERATION_REGISTRY = {
         .strict()
         .optional(),
     ]),
-    (api, [options]) => api.memory.explainContext(options),
+    (api, [options], ctx) =>
+      api.memory.explainContext(
+        withSession(options ?? {}, ctx, 'memory.explainContext'),
+      ),
   ),
-  'memory.get': operation(z.tuple([]), (api) => api.memory.get()),
+  'memory.get': operation(z.tuple([]), (api, _args, ctx) =>
+    api.memory.get(viewOf(ctx, 'memory.get')),
+  ),
   'memory.getEpisode': operation(
     z.tuple([nullableStringSchema]),
     (api, [date]) => api.memory.getEpisode(date),
@@ -1245,8 +1938,8 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [options]) => api.memory.listVersions(options),
   ),
-  'memory.restoreVersion': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.memory.restoreVersion(id),
+  'memory.restoreVersion': operation(z.tuple([idSchema]), (api, [id], ctx) =>
+    api.memory.restoreVersion(id, viewOf(ctx, 'memory.restoreVersion')),
   ),
   'memory.save': operation(z.tuple([z.string()]), (api, [content]) =>
     api.memory.save(content),
@@ -1258,34 +1951,78 @@ export const CORE_OPERATION_REGISTRY = {
   'memory.saveWatchlist': operation(z.tuple([z.string()]), (api, [content]) =>
     api.memory.saveWatchlist(content),
   ),
-  'memory.tokens': operation(z.tuple([]), (api) => api.memory.tokens()),
-  'model.activate': operation(z.tuple([modelEntryIdSchema]), (api, [input]) =>
-    api.model.activate(input),
+  'memory.tokens': operation(z.tuple([]), (api, _args, ctx) =>
+    api.memory.tokens(viewOf(ctx, 'memory.tokens')),
+  ),
+  'model.activate': operation(
+    z.tuple([modelEntryIdSchema]),
+    (api, [input], ctx) =>
+      api.model.activate(input, viewOf(ctx, 'model.activate')),
   ),
   'model.deleteEntry': operation(
     z.tuple([modelEntryIdSchema]),
-    (api, [input]) => api.model.deleteEntry(input),
+    (api, [input], ctx) =>
+      api.model.deleteEntry(input, viewOf(ctx, 'model.deleteEntry')),
   ),
   'model.discoverModels': operation(
     z.tuple([modelDiscoverySchema]),
     (api, [input]) => api.model.discoverModels(input),
   ),
   'model.getConfig': operation(z.tuple([]), (api) => api.model.getConfig()),
+  'model.probeConnection': operation(
+    z.tuple([modelProbeSchema]),
+    (api, [input]) => api.model.probeConnection(input),
+  ),
   'model.resolveProfile': operation(
     z.tuple([modelProfilePreviewSchema]),
     (api, [input]) => api.model.resolveProfile(input),
   ),
   'model.saveEntry': operation(
     z.tuple([modelEntrySaveSchema]),
-    (api, [input]) => api.model.saveEntry(input),
+    (api, [input], ctx) =>
+      api.model.saveEntry(input, viewOf(ctx, 'model.saveEntry')),
+  ),
+  'model.saveEntries': operation(
+    z.tuple([modelEntriesSaveSchema]),
+    (api, [input], ctx) =>
+      api.model.saveEntries(input, viewOf(ctx, 'model.saveEntries')),
+  ),
+  'model.updateConnection': operation(
+    z.tuple([modelConnectionUpdateSchema]),
+    (api, [input], ctx) =>
+      api.model.updateConnection(input, viewOf(ctx, 'model.updateConnection')),
+  ),
+  'model.refreshMetadata': operation(
+    z.tuple([modelMetadataRefreshSchema]),
+    (api, [input], ctx) =>
+      api.model.refreshMetadata(input, viewOf(ctx, 'model.refreshMetadata')),
+  ),
+  'model.replaceEntry': operation(
+    z.tuple([modelEntryReplaceSchema]),
+    (api, [input], ctx) =>
+      api.model.replaceEntry(input, viewOf(ctx, 'model.replaceEntry')),
+  ),
+  'model.lookupDefaults': operation(
+    z.tuple([modelDefaultsSchema]),
+    (api, [input]) => api.model.lookupDefaults(input),
+  ),
+  'model.discardRejected': operation(
+    z.tuple([modelRejectedKeySchema]),
+    (api, [input], ctx) =>
+      api.model.discardRejected(input, viewOf(ctx, 'model.discardRejected')),
   ),
   'model.savePolicy': operation(
     z.tuple([modelExecutionPolicySchema]),
-    (api, [input]) => api.model.savePolicy(input),
+    (api, [input], ctx) =>
+      api.model.savePolicy(input, viewOf(ctx, 'model.savePolicy')),
   ),
   'model.setReasoningEffort': operation(
     z.tuple([modelReasoningEffortSchema]),
-    (api, [input]) => api.model.setReasoningEffort(input),
+    (api, [input], ctx) =>
+      api.model.setReasoningEffort(
+        input,
+        viewOf(ctx, 'model.setReasoningEffort'),
+      ),
   ),
   'model.test': operation(
     z.tuple([
@@ -1311,21 +2048,29 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([pluginInstallSourceSchema]),
     (api, [input]) => api.plugins.inspect(input),
   ),
-  'plugins.install': operation(z.tuple([pluginInstallSchema]), (api, [input]) =>
-    api.plugins.install(input),
+  // Plugins as the project of the session in view sees them.
+  'plugins.install': operation(
+    z.tuple([pluginInstallSchema]),
+    (api, [input], ctx) =>
+      api.plugins.install(input, viewOf(ctx, 'plugins.install')),
   ),
   'plugins.getDetail': operation(
     z.tuple([pluginTargetSchema]),
-    (api, [input]) => api.plugins.getDetail(input),
+    (api, [input], ctx) =>
+      api.plugins.getDetail(input, viewOf(ctx, 'plugins.getDetail')),
   ),
-  'plugins.list': operation(z.tuple([]), (api) => api.plugins.list()),
+  'plugins.list': operation(z.tuple([]), (api, _args, ctx) =>
+    api.plugins.list(viewOf(ctx, 'plugins.list')),
+  ),
   'plugins.setEnabled': operation(
     z.tuple([pluginTargetSchema.extend({ enabled: z.boolean() }).strict()]),
-    (api, [input]) => api.plugins.setEnabled(input),
+    (api, [input], ctx) =>
+      api.plugins.setEnabled(input, viewOf(ctx, 'plugins.setEnabled')),
   ),
   'plugins.uninstall': operation(
     z.tuple([pluginTargetSchema]),
-    (api, [input]) => api.plugins.uninstall(input),
+    (api, [input], ctx) =>
+      api.plugins.uninstall(input, viewOf(ctx, 'plugins.uninstall')),
   ),
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
@@ -1362,31 +2107,48 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'runtime.replay': operation(
     z.tuple([runtimeReplayOptionsSchema.optional()]),
-    (api, [options]) => api.runtime.replay(options),
+    (api, [options], ctx) =>
+      api.runtime.replay(withSession(options ?? {}, ctx, 'runtime.replay')),
   ),
   'scheduler.createJob': operation(
     z.tuple([schedulerCreateSchema]),
-    (api, [input]) => api.scheduler.createJob(input),
+    (api, [input], ctx) =>
+      api.scheduler.createJob(input, viewOf(ctx, 'scheduler.createJob')),
   ),
-  'scheduler.deleteJob': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.scheduler.deleteJob(id),
+  'scheduler.deleteJob': operation(z.tuple([idSchema]), (api, [id], ctx) =>
+    api.scheduler.deleteJob(id, viewOf(ctx, 'scheduler.deleteJob')),
   ),
   'scheduler.get': operation(z.tuple([]), (api) => api.scheduler.get()),
-  'scheduler.pauseJob': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.scheduler.pauseJob(id),
+  'scheduler.pauseJob': operation(z.tuple([idSchema]), (api, [id], ctx) =>
+    api.scheduler.pauseJob(id, viewOf(ctx, 'scheduler.pauseJob')),
   ),
-  'scheduler.resumeJob': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.scheduler.resumeJob(id),
+  'scheduler.resumeJob': operation(z.tuple([idSchema]), (api, [id], ctx) =>
+    api.scheduler.resumeJob(id, viewOf(ctx, 'scheduler.resumeJob')),
   ),
-  'scheduler.runJob': operation(z.tuple([idSchema]), (api, [id]) =>
-    api.scheduler.runJob(id),
+  'scheduler.runJob': operation(z.tuple([idSchema]), (api, [id], ctx) =>
+    api.scheduler.runJob(id, viewOf(ctx, 'scheduler.runJob')),
   ),
   'scheduler.updateJob': operation(
     z.tuple([idSchema, schedulerUpdateSchema]),
-    (api, [id, input]) => api.scheduler.updateJob(id, input),
+    (api, [id, input], ctx) =>
+      api.scheduler.updateJob(id, input, viewOf(ctx, 'scheduler.updateJob')),
   ),
   'sessions.activate': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.activate(id),
+  ),
+  'agents.list': operation(
+    z.tuple([
+      z.object({ rootSessionIds: z.array(idSchema).max(500) }).strict(),
+    ]),
+    (api, [input]) => api.agents.list(input),
+  ),
+  'agents.send': operation(
+    z.tuple([
+      z
+        .object({ sessionId: idSchema, text: z.string().min(1).max(32768) })
+        .strict(),
+    ]),
+    (api, [input]) => api.agents.send(input),
   ),
   'sessions.children': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
     api.sessions.children(input),
@@ -1399,6 +2161,8 @@ export const CORE_OPERATION_REGISTRY = {
           mode: z.string().optional(),
           project: dictSchema.nullable().optional(),
           project_path: nullableStringSchema,
+          plan: z.boolean().optional(),
+          preset: permissionPresetSchema.optional(),
         })
         .strict()
         .optional(),
@@ -1407,6 +2171,31 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'sessions.delete': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.delete(id),
+  ),
+  'sessions.listDeleted': operation(z.tuple([]), (api) =>
+    api.sessions.listDeleted(),
+  ),
+  'sessions.defaults': operation(z.tuple([]), (api) => api.sessions.defaults()),
+  'sessions.setDefaults': operation(
+    z.tuple([
+      z
+        .object({
+          permission: z.enum([
+            'read-only',
+            'workspace-write',
+            'danger-full-access',
+          ]),
+        })
+        .strict(),
+    ]),
+    (api, [change], ctx) =>
+      api.sessions.setDefaults(change, viewOf(ctx, 'sessions.setDefaults')),
+  ),
+  'sessions.restoreDeleted': operation(z.tuple([idSchema]), (api, [id]) =>
+    api.sessions.restoreDeleted(id),
+  ),
+  'sessions.purgeDeleted': operation(z.tuple([idSchema]), (api, [id]) =>
+    api.sessions.purgeDeleted(id),
   ),
   'sessions.event': operation(z.tuple([sessionEventSchema]), (api, [input]) =>
     api.sessions.event(input),
@@ -1428,6 +2217,17 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([idSchema, sessionPatchSchema]),
     (api, [id, patch]) => api.sessions.rename(id, patch),
   ),
+  'sessions.search': operation(
+    z.tuple([
+      z
+        .object({
+          query: z.string().max(200),
+          limit: z.number().int().min(1).max(50).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.sessions.search(input),
+  ),
   'sessions.watch': operation(z.tuple([sessionWatchSchema]), (api, [input]) =>
     api.sessions.watch(input),
   ),
@@ -1437,25 +2237,44 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'skills.copyToUser': operation(
     z.tuple([skillCopyToUserSchema]),
-    (api, [input]) => api.skills.copyToUser(input),
+    (api, [input], ctx) =>
+      api.skills.copyToUser(
+        withSession(input, ctx, 'skills.copyToUser'),
+        viewOf(ctx, 'skills.copyToUser'),
+      ),
   ),
-  'skills.create': operation(z.tuple([skillCreateSchema]), (api, [input]) =>
-    api.skills.create(input),
+  'skills.create': operation(
+    z.tuple([skillCreateSchema]),
+    (api, [input], ctx) =>
+      api.skills.create(input, viewOf(ctx, 'skills.create')),
   ),
+  // A Skill call that names no session is for the one in view (null: Chat).
   'skills.delete': operation(
     z.tuple([skillOpNameSchema, skillDeleteOptionsSchema.optional()]),
-    (api, [name, options]) => api.skills.delete(name, options ?? {}),
+    (api, [name, options], ctx) =>
+      api.skills.delete(
+        name,
+        withSession(options ?? {}, ctx, 'skills.delete'),
+        viewOf(ctx, 'skills.delete'),
+      ),
   ),
   'skills.get': operation(
     z.tuple([skillOpNameSchema, skillSessionOptionsSchema.optional()]),
-    (api, [name, options]) => api.skills.get(name, options ?? {}),
+    (api, [name, options], ctx) =>
+      api.skills.get(name, withSession(options ?? {}, ctx, 'skills.get')),
   ),
-  'skills.import': operation(z.tuple([skillImportSchema]), (api, [input]) =>
-    api.skills.import(input),
+  'skills.import': operation(
+    z.tuple([skillImportSchema]),
+    (api, [input], ctx) =>
+      api.skills.import(
+        withSession(input, ctx, 'skills.import'),
+        viewOf(ctx, 'skills.import'),
+      ),
   ),
   'skills.list': operation(
     z.tuple([skillSessionOptionsSchema.optional()]),
-    (api, [options]) => api.skills.list(options ?? {}),
+    (api, [options], ctx) =>
+      api.skills.list(withSession(options ?? {}, ctx, 'skills.list')),
   ),
   'skills.save': operation(
     z.tuple([
@@ -1463,52 +2282,120 @@ export const CORE_OPERATION_REGISTRY = {
       skillContentSchema,
       skillSessionOptionsSchema.optional(),
     ]),
-    (api, [name, content, options]) =>
-      api.skills.save(name, content, options ?? {}),
+    (api, [name, content, options], ctx) =>
+      api.skills.save(
+        name,
+        content,
+        withSession(options ?? {}, ctx, 'skills.save'),
+        viewOf(ctx, 'skills.save'),
+      ),
   ),
-  'skills.tools': operation(z.tuple([]), (api) => api.skills.tools()),
-  'skills.validate': operation(z.tuple([skillValidateSchema]), (api, [input]) =>
-    api.skills.validate(input),
+  'skills.tools': operation(z.tuple([]), (api, _args, ctx) =>
+    api.skills.tools(viewOf(ctx, 'skills.tools')),
   ),
-  'tasks.get': operation(z.tuple([idSchema]), (api, [id]) => api.tasks.get(id)),
+  'skills.validate': operation(
+    z.tuple([skillValidateSchema]),
+    (api, [input], ctx) =>
+      api.skills.validate(withSession(input, ctx, 'skills.validate')),
+  ),
+  'tasks.get': operation(
+    z.tuple([
+      idSchema,
+      z
+        .object({ sessionId: sessionLogIdSchema.optional() })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options], ctx) =>
+      api.tasks.get(id, withSession(options ?? {}, ctx, 'tasks.get')),
+  ),
+  'storage.usage': operation(z.tuple([]), (api) => api.storage.usage()),
+  'storage.clean': operation(z.tuple([]), (api, _args, ctx) =>
+    api.storage.clean(viewOf(ctx, 'storage.clean')),
+  ),
+  'storage.versions': operation(z.tuple([]), (api) => api.storage.versions()),
+  // 设置 › 常规 › 更新 (REL-02).
+  'updates.status': operation(z.tuple([]), (api) => api.updates.status()),
+  'updates.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>
+    api.updates.setEnabled(enabled),
+  ),
+  'updates.check': operation(z.tuple([]), (api) => api.updates.check()),
+  'updates.download': operation(z.tuple([]), (api) => api.updates.download()),
+  'updates.cancelDownload': operation(z.tuple([]), (api) =>
+    api.updates.cancelDownload(),
+  ),
+  'updates.reveal': operation(z.tuple([]), (api) => api.updates.reveal()),
+  'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
+  'tasks.setBudget': operation(
+    z.tuple([
+      z
+        .object({
+          maxSteps: z.number().int().optional(),
+          maxBackgroundSteps: z.number().int().optional(),
+          maxActiveAgents: z.number().int().optional(),
+          maxTotalAgents: z.number().int().optional(),
+          maxNoticeWakes: z.number().int().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change], ctx) =>
+      api.tasks.setBudget(change, viewOf(ctx, 'tasks.setBudget')),
+  ),
   'tasks.cancel': operation(
     z.tuple([
       taskIdSchema,
       z
-        .object({ reason: z.string().trim().min(1).max(500).optional() })
+        .object({
+          reason: z.string().trim().min(1).max(500).optional(),
+          sessionId: sessionLogIdSchema.optional(),
+        })
         .strict()
         .optional(),
     ]),
-    (api, [id, options]) => api.tasks.cancel(id, options),
+    (api, [id, options], ctx) =>
+      api.tasks.cancel(id, withSession(options ?? {}, ctx, 'tasks.cancel')),
   ),
   'tasks.list': operation(
     z.tuple([
       z.object({ sessionId: nullableStringSchema }).strict().optional(),
     ]),
-    (api, [options]) => api.tasks.list(options),
+    (api, [options], ctx) =>
+      api.tasks.list(withSession(options ?? {}, ctx, 'tasks.list')),
   ),
   'tasks.transcript': operation(
     z.tuple([
       taskIdSchema,
       z
         .object({
+          sessionId: sessionLogIdSchema.optional(),
           offset: z.number().int().nonnegative().optional(),
           limit: z.number().int().nonnegative().optional(),
         })
         .strict()
         .optional(),
     ]),
-    (api, [id, options]) => api.tasks.transcript(id, options),
+    (api, [id, options], ctx) =>
+      api.tasks.transcript(
+        id,
+        withSession(options ?? {}, ctx, 'tasks.transcript'),
+      ),
   ),
   'tasks.readOutput': operation(
     z.tuple([
       taskIdSchema,
       z
-        .object({ cursor: z.string().max(64).optional() })
+        .object({
+          cursor: z.string().max(64).optional(),
+          sessionId: sessionLogIdSchema.optional(),
+        })
         .strict()
         .optional(),
     ]),
-    (api, [id, options]) => api.tasks.readOutput(id, options),
+    (api, [id, options], ctx) =>
+      api.tasks.readOutput(
+        id,
+        withSession(options ?? {}, ctx, 'tasks.readOutput'),
+      ),
   ),
   'tasks.resume': operation(
     z.tuple([
@@ -1533,6 +2420,7 @@ export const CORE_OPERATION_REGISTRY = {
       taskIdSchema,
       z
         .object({
+          sessionId: sessionLogIdSchema.optional(),
           timeoutMs: z
             .number()
             .int()
@@ -1543,19 +2431,28 @@ export const CORE_OPERATION_REGISTRY = {
         .strict()
         .optional(),
     ]),
-    (api, [id, options]) => api.tasks.wait(id, options),
+    (api, [id, options], ctx) =>
+      api.tasks.wait(id, withSession(options ?? {}, ctx, 'tasks.wait')),
   ),
+  // Processes of a named session: never a default (KRN-01).
   'processes.list': operation(
     z.tuple([
-      z.object({ activeOnly: z.boolean().optional() }).strict().optional(),
+      z
+        .object({
+          sessionId: nullableStringSchema,
+          activeOnly: z.boolean().optional(),
+        })
+        .strict()
+        .optional(),
     ]),
-    (api, [options]) => api.processes.list(options),
+    (api, [options]) => api.processes.list(options ?? {}),
   ),
   'processes.cancel': operation(
     z.tuple([
       idSchema,
       z
         .object({
+          sessionId: nullableStringSchema,
           leaseId: idSchema,
           reason: z.string().trim().min(1).max(500).optional(),
         })
@@ -1568,6 +2465,7 @@ export const CORE_OPERATION_REGISTRY = {
       idSchema,
       z
         .object({
+          sessionId: nullableStringSchema,
           leaseId: idSchema,
           ownerKind: z.enum(['session', 'task', 'terminal']),
           ownerId: idSchema,
@@ -1576,9 +2474,29 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [id, options]) => api.processes.reparent(id, options),
   ),
+  'references.preview': operation(
+    z.tuple([
+      z.object({ sessionId: idSchema, referenceId: idSchema }).strict(),
+    ]),
+    (api, [input]) => api.references.preview(input),
+  ),
+  'references.siteIcon': operation(
+    z.tuple([
+      z.object({ sessionId: idSchema, referenceId: idSchema }).strict(),
+    ]),
+    (api, [input]) => api.references.siteIcon(input),
+  ),
   'references.resolve': operation(
     z.tuple([referenceResolveSchema]),
     (api, [input]) => api.references.resolve(input),
+  ),
+  'references.image': operation(
+    z.tuple([
+      z
+        .object({ sessionId: sessionLogIdSchema, referenceId: idSchema })
+        .strict(),
+    ]),
+    (api, [input]) => api.references.image(input),
   ),
   'terminals.close': operation(
     z.tuple([terminalIdentitySchema]),
@@ -1602,9 +2520,34 @@ export const CORE_OPERATION_REGISTRY = {
   'terminals.write': operation(z.tuple([terminalWriteSchema]), (api, [input]) =>
     api.terminals.write(input),
   ),
+  'tools.networkSettings': operation(z.tuple([]), (api) =>
+    api.tools.networkSettings(),
+  ),
   'tools.readResult': operation(
-    z.tuple([z.object({ ref: idSchema }).strict()]),
+    z.tuple([
+      z
+        .object({
+          ref: idSchema,
+          page: z.number().int().min(1).optional(),
+        })
+        .strict(),
+    ]),
     (api, [input]) => api.tools.readResult(input),
+  ),
+  'tools.setNetworkSettings': operation(
+    z.tuple([
+      z
+        .object({
+          webFetch: z.boolean().optional(),
+          webSearch: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change], ctx) =>
+      api.tools.setNetworkSettings(
+        change,
+        viewOf(ctx, 'tools.setNetworkSettings'),
+      ),
   ),
   'workspace.snapshot': operation(
     z.tuple([workspaceSessionSchema]),
@@ -1716,10 +2659,15 @@ export async function invokeCoreOperation<Key extends CoreOperationKey>(
   api: CoreApi,
   key: Key,
   input: unknown,
+  context: CoreOperationContext = {},
 ): Promise<CoreOperationResult<Key>> {
   const spec = CORE_OPERATION_REGISTRY[key]
   try {
-    return (await spec.parseAndInvoke(api, input)) as CoreOperationResult<Key>
+    return (await spec.parseAndInvoke(
+      api,
+      input,
+      context,
+    )) as CoreOperationResult<Key>
   } catch (error) {
     if (error instanceof z.ZodError) {
       throw new CoreOperationArgumentsError(key, error)

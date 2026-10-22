@@ -7,50 +7,69 @@
  * (Chat tab, active phase), and the composer seat: docks (changes pill /
  * todo / goal / queue) above the ComposerCard, or a takeover card while an
  * interaction is pending. A blank chat renders the hero phase: the same seat
- * centered with the headline, under a slim header that keeps the two
- * toggles.
+ * centered with the headline (and, once, the profile-interview offer under
+ * the composer, UI-S04), under a slim header that keeps the two toggles.
  *
- * The environment card floats at the top right of the view area. From a
- * 1120px conversation column (container query) the chat body and the
- * composer stack pad their inline end by the card width so nothing sits
- * under it; narrower, the card overlays the chat (Escape closes it).
+ * One region, one scrollbar (UI-S16): the chat's scroller spans the whole
+ * view area, so its scrollbar is at the far right, and the environment card
+ * floats over it at the top right (340 wide, the region less 32 when
+ * narrower), stopping above the composer stack. The 748 column and the
+ * composer stack stay centred in the region. Where the centred column would
+ * run under the card they move left just clear of it, 16 short of the card
+ * and at least 32 from the left: possible from a 1152px region
+ * (FLOAT_BESIDE_MIN; container query, `--chat-shift`). Narrower they stay
+ * centred and the card floats over the chat with a deeper shadow
+ * (`data-env-overlay`); it shows there only once opened from the header.
  *
  * The computer-use preview (read-only pictures of the windows and tabs the
  * Agent controls) sits at the bottom right of the view area, below the
- * environment card; from 1120px the chat body pads for it as well,
- * narrower it folds into a chip.
+ * environment card, and the column clears it the same way; narrower than
+ * 1152px it folds into a chip.
  *
  * A tool row's Inspect opens the trajectory inspector column and routes to
  * `/chat/:id/trajectory?call=<id>`; the trajectory selects that call (paging
  * older history in when needed) and reports `inspect-applied`, which drops
- * the query again.
+ * the query again. All of it exists only while 设置 › 常规 › 开发者 ›
+ * 显示轨迹 is on (UI-S09, trajectoryGate): off, the header has no tabs, the
+ * trajectory never loads, and a trajectory link that lands here instead says
+ * so in a toast and opens the call's tool row in the chat.
  *
  * Child (subagent) sessions — ids outside the sidebar list whose lineage has
  * ancestors — render the same timeline (live through the watch set), the
  * lineage breadcrumb in the header and a read-only composer with a stop
- * button while the child runs.
+ * button while the child runs. An id that is neither says 「没有找到这个会话。」:
+ * the composer stays, disabled, with the way out as its placeholder, and the
+ * docks of the session behind the page go (F1).
+ *
+ * The subagent status bar (UI-S14, SubagentDock, loaded on first use) sits
+ * above the todo dock while the conversation's subagents are at work and
+ * none of their rows is on screen (useSubagentDock).
  */
 import {
   computed,
   defineAsyncComponent,
   nextTick,
   onActivated,
+  onDeactivated,
   onBeforeUnmount,
   onMounted,
   provide,
   ref,
+  shallowRef,
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { pluginDetailLocation } from '../../capabilities/pluginChoices'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
-import { openLink, revealReference } from '../../api/backend'
+import { onCoreEvent, openLink, revealReference } from '../../api/backend'
 import { core } from '../../api/http'
 import { activateModelEntry, setModelReasoningEffort } from '../../api/model'
 import { fetchSessionLineage } from '../../api/sessions'
 import { deriveComposerPhase } from '../../conversation/composerPhase'
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { useSessionConversation } from '../../composables/useSessionConversation'
+import { useUiPreferences } from '../../composables/useUiPreferences'
+import { focusCallStep } from '../../conversation/focusCallRetry'
 import { useAppContext } from '../../composables/useAppContext'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../../composables/composerLifecycle'
 import { useSession } from '../../composables/useSession'
@@ -69,25 +88,60 @@ import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
-import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
+import ChildComposer from '../composer/ChildComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
-import Button from '../ui/Button.vue'
+import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
 import ChatTimeline from './ChatTimeline.vue'
+import type { SubagentRowView } from './subagentRows'
+import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
+import HeroProfilePrompt from './HeroProfilePrompt.vue'
 import {
   conversationCrumbs,
   conversationPhase,
+  sessionRunning,
   isChildLineage,
 } from './conversationModel'
 import { TrajectoryViewAsync } from '../trajectory/lazy'
+import { takeTrajectoryNotice, trajectoryNotice } from './trajectoryGate'
 import { previewShownTargets } from './computer-use/computerUsePreviewState'
 import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
-import { activeTakeover } from './takeover/takeoverModel'
-import { activeTurnTick, turnTicks } from './timelineModel'
+import type { ComposerDraft } from '../chat/composerDraft'
+import {
+  isDraftPromotion,
+  saveComposerDraft,
+  takeComposerDraft,
+} from '../../composables/useComposerDrafts'
+import { showDraftControls } from '../../runtime/draftControls'
+import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
+import {
+  activeTurnTick,
+  sameTicks,
+  turnTicks,
+  type TurnTick,
+} from './timelineModel'
+import {
+  PROVENANCE_LABEL,
+  type DisplayResource,
+} from './resources/resourceModel'
+import type { ResourceRequest } from './resources/resourceEvents'
+const ResourceDetails = defineAsyncComponent(
+  () => import('./resources/ResourceDetails.vue'),
+)
+const selectedResource = shallowRef<DisplayResource | null>(null)
+const resourceViewActive = ref(true)
+onActivated(() => {
+  resourceViewActive.value = true
+})
+onDeactivated(() => {
+  resourceViewActive.value = false
+  selectedResource.value = null
+})
 
 const EnvironmentCard = defineAsyncComponent(
   () => import('./environment/EnvironmentCard.vue'),
@@ -96,6 +150,9 @@ const ComputerUsePreviewStack = defineAsyncComponent(
   () => import('./computer-use/ComputerUsePreviewStack.vue'),
 )
 const TurnScrubber = defineAsyncComponent(() => import('./TurnScrubber.vue'))
+const SubagentDock = defineAsyncComponent(
+  () => import('../composer/SubagentDock.vue'),
+)
 /** Fewest turns that earn the scrubber. */
 const SCRUBBER_MIN_TURNS = 3
 
@@ -104,13 +161,23 @@ const sessionStore = useSession()
 const route = useRoute()
 const router = useRouter()
 const frame = useFrameState()
+const settingsRoute = useSettingsRoute()
+const { preferences: uiPrefs } = useUiPreferences()
+/** 设置 › 常规 › 开发者 › 显示轨迹 (UI-S09). */
+const trajectoryShown = computed(() => uiPrefs.value.showTrajectory)
 
 const composer = ref<{
   setDraft: (text: string) => void
   focusInput: () => void
   restoreDraft: (payload: ChatSendPayload) => void
+  takeSnapshot: () => ComposerDraft
+  applySnapshot: (draft: ComposerDraft | null) => void
 } | null>(null)
-const timeline = ref<{ scrollToKey: (key: string) => boolean } | null>(null)
+const timeline = ref<{
+  scrollToKey: (key: string) => boolean
+  revealCall: (callId: string) => boolean
+  revealAgents: (id: string) => boolean
+} | null>(null)
 
 // ── session identity / lineage ────────────────────────────────────────────
 const routeSessionId = computed(() => {
@@ -160,8 +227,9 @@ const unknownSession = computed(
     !child.value &&
     viewingId.value !== ctx.sessionId.value,
 )
+// The switch turning off shows the chat at once; App.vue moves the route.
 const tab = computed<'chat' | 'trajectory'>(() =>
-  route.name === 'trajectory' ? 'trajectory' : 'chat',
+  route.name === 'trajectory' && trajectoryShown.value ? 'trajectory' : 'chat',
 )
 /** Raw-log conversation of the viewed session (null for drafts). */
 const conversation = useSessionConversation(() => viewingId.value)
@@ -180,20 +248,95 @@ watch(viewingId, (next, previous) => {
   promptedSessions.value = new Set([...promptedSessions.value, next])
 })
 const isActiveSession = computed(() => viewingId.value === ctx.sessionId.value)
+/** A turn is open in the viewed window (its own ref: not every snapshot). */
+const conversationRunning = computed(
+  () => conversation.value?.running.value ?? false,
+)
+/** The composer and TurnStatus read the same running state (FIX-03). */
+const runningHere = computed(() =>
+  sessionRunning({
+    windowOpen:
+      conversation.value?.sessionId === viewingId.value &&
+      conversation.value.window.value.openState === 'open',
+    logRunning: conversationRunning.value,
+    active: isActiveSession.value,
+    runtimeBusy: ctx.busy.value,
+  }),
+)
 const composerPhase = computed(() =>
   deriveComposerPhase({
-    snapshot: snapshot.value,
+    content: {
+      rows: conversation.value?.order.value.length ?? 0,
+      turns: conversation.value?.turnCount.value ?? 0,
+      running: conversationRunning.value,
+    },
     promptAttempted: promptedSessions.value.has(viewingId.value),
     pendingInteraction:
       isActiveSession.value && Boolean(pendingInteraction.value),
-    busy: isActiveSession.value && ctx.busy.value,
+    busy: runningHere.value,
   }),
+)
+// Durable external tasks remain useful even when this chat has no visible messages.
+const externalActivity = ref(false)
+let externalActivityGeneration = 0
+watch(
+  viewingId,
+  async (id) => {
+    const generation = ++externalActivityGeneration
+    externalActivity.value = false
+    if (!id || sessionStore.isDraftSessionId(id)) return
+    try {
+      const tasks = await core('tasks.list', { sessionId: id })
+      if (generation === externalActivityGeneration)
+        externalActivity.value = tasks.some(
+          (task) => task.kind === 'external-agent',
+        )
+    } catch {
+      /* an unavailable optional task feature does not block chat */
+    }
+  },
+  { immediate: true },
+)
+const unsubscribeExternalActivity = onCoreEvent((input) => {
+  if (!input || typeof input !== 'object') return
+  const event = input as Record<string, unknown>
+  if (
+    event.session_id === viewingId.value &&
+    String(event.event).startsWith('delegation_')
+  ) {
+    externalActivity.value = true
+    if (
+      event.event === 'delegation_run_changed' ||
+      event.event === 'delegation_receipt'
+    )
+      linkStatus.refresh()
+  }
+})
+onBeforeUnmount(() => {
+  externalActivityGeneration++
+  unsubscribeExternalActivity()
+})
+const agentTree = useAgentTree()
+const owningRootId = computed(
+  () => lineage.value?.chain[0]?.sessionId ?? viewingId.value,
 )
 const phase = computed(() =>
   conversationPhase({
     composer: composerPhase.value,
+    externalActivity:
+      externalActivity.value ||
+      Boolean(agentTree.trees[owningRootId.value]?.agents.length),
     child: child.value || unknownSession.value,
     tab: tab.value,
+    historyState:
+      viewingId.value &&
+      !viewingDraft.value &&
+      (!promptedSessions.value.has(viewingId.value) ||
+        (knownSession.value?.message_count ?? 0) > 0)
+        ? conversation.value?.sessionId === viewingId.value
+          ? conversation.value.window.value.openState
+          : 'cold'
+        : undefined,
   }),
 )
 const crumbs = computed(() =>
@@ -217,17 +360,21 @@ const envCardShown = computed(
     phase.value !== 'hero',
 )
 /**
- * Column width from which the card sits beside the chat and shows by
- * default (the `@container conversation (min-width: 1120px)` rule below).
+ * Region width from which the column and the composer can move clear of a
+ * floating card: 748 + 340 + 2 × 32 (the `@container conversation
+ * (min-width: 1152px)` rule below; ComputerUsePreviewStack's BESIDE_MIN).
+ * From there the card shows by default; narrower it floats over the chat.
  */
-const ENV_CARD_INLINE_MIN = 1120
+const FLOAT_BESIDE_MIN = 1152
 const rootElement = ref<HTMLElement | null>(null)
 let widthObserver: ResizeObserver | null = null
 function reportWidth(): void {
-  const width = rootElement.value?.clientWidth ?? 0
-  if (width > 0)
-    frameActions.setEnvCardWide(frame, width >= ENV_CARD_INLINE_MIN)
+  // Fractional, like the container query (hairlines make half pixels).
+  const width = rootElement.value?.getBoundingClientRect().width ?? 0
+  if (width > 0) frameActions.setEnvCardWide(frame, width >= FLOAT_BESIDE_MIN)
 }
+/** The card is open where the chat cannot move clear of it. */
+const envCardOverlay = computed(() => envCardShown.value && !frame.envCardWide)
 onMounted(() => {
   reportWidth()
   if (typeof ResizeObserver === 'undefined' || !rootElement.value) return
@@ -260,7 +407,7 @@ const buildSession = computed(
     Boolean(knownSession.value.project_path) &&
     !viewingDraft.value,
 )
-const agentBusyHere = computed(() => isActiveSession.value && ctx.busy.value)
+const agentBusyHere = runningHere
 
 // ── turn scrubber ─────────────────────────────────────────────────────────
 /** Topmost visible chat row (ChatTimeline `first-visible`). */
@@ -268,7 +415,12 @@ const firstVisibleKey = ref<string | null>(null)
 watch(viewingId, () => {
   firstVisibleKey.value = null
 })
-const ticks = computed(() => turnTicks(snapshot.value))
+// A structural flush that leaves the prompts as they are keeps the same
+// array, so the scrubber does not re-render.
+const ticks = computed<TurnTick[]>((previous) => {
+  const next = turnTicks(snapshot.value)
+  return previous !== undefined && sameTicks(previous, next) ? previous : next
+})
 const activeTick = computed(() =>
   activeTurnTick(ticks.value, snapshot.value.order, firstVisibleKey.value),
 )
@@ -310,12 +462,41 @@ function backToParent(): void {
 }
 
 // ── composer inputs ───────────────────────────────────────────────────────
+// The start page shows its draft's own plan mode and preset and no goal,
+// never the previous chat's (FIX-13). Before this view renders, so the
+// previous chat's 「计划 ×」 never shows on it.
+watch(
+  () =>
+    sessionStore.isDraftSessionId(ctx.sessionId.value)
+      ? ctx.sessionId.value
+      : null,
+  (draft) => {
+    if (draft)
+      void showDraftControls(
+        ctx.boot,
+        () =>
+          ctx.sessionId.value === draft
+            ? sessionStore.getSession(draft)
+            : undefined,
+        () => core('control.get', null),
+      )
+  },
+  { flush: 'pre', immediate: true },
+)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
 )
 const providerOptions = computed(
   () => ctx.boot.value?.modelConfig?.providerOptions || [],
+)
+/** The composer's placeholder while there is no session here to act on (F1). */
+const composerUnavailableReason = computed(() =>
+  !unknownSession.value
+    ? ''
+    : lineageLoading.value
+      ? '正在读取会话…'
+      : '没有找到这个会话，请从侧栏打开其他会话',
 )
 const sendBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
@@ -326,11 +507,16 @@ const sendBlockedReason = computed(() => {
 const pendingInteraction = computed(
   () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
 )
-const takeover = computed(() => activeTakeover(pendingInteraction.value))
-const showProfileOnboardingPrompt = computed(
+// On 「没有找到这个会话」 the takeover, goal and queue docks would act on the
+// session behind the page: they go, and the composer shows disabled (F1).
+const takeover = computed(() =>
+  unknownSession.value ? null : activeTakeover(pendingInteraction.value),
+)
+/** A takeover card in the composer seat (folded with Esc, it gives the seat back). */
+const takeoverOpen = computed(
   () =>
-    ctx.boot.value?.profileOnboarding?.status === 'pending' &&
-    !pendingInteraction.value,
+    takeover.value !== null &&
+    !isTakeoverMinimized(takeover.value.interaction.id),
 )
 const activeGoal = computed(() => {
   const owner = ctx.sessionId.value
@@ -363,20 +549,31 @@ const projectName = computed(() =>
 
 // ── document links in replies ──────────────────────────────────────────────
 /** What reply file links point at in the active session (MarkdownHtml). */
-const linkStatus = createLinkStatusSource((href) =>
-  core('references.resolve', {
-    sessionId: ctx.sessionId.value,
-    sourceMessageId: 'conversation',
-    href,
-    label: href,
-  }),
+const linkStatus = createLinkStatusSource(
+  (href, sourceMessageId) =>
+    core('references.resolve', {
+      sessionId: viewingId.value,
+      sourceMessageId: sourceMessageId || viewingId.value,
+      href,
+      label: href,
+    }),
+  async (reference) => {
+    if (!reference.id) return null
+    const image = await core('references.image', {
+      sessionId: viewingId.value,
+      referenceId: reference.id,
+    })
+    return image.kind === 'image' &&
+      !image.truncated &&
+      image.dataBase64 &&
+      /^image\/(png|jpeg|gif|webp)$/.test(image.mimeType)
+      ? `data:${image.mimeType};base64,${image.dataBase64}`
+      : null
+  },
 )
 provide(LINK_STATUS_KEY, linkStatus)
 // Files come and go: check again for a new session and after each turn.
-watch(
-  () => ctx.sessionId.value,
-  () => linkStatus.refresh(),
-)
+watch(viewingId, () => linkStatus.refresh())
 watch(
   () => ctx.busy.value,
   (busy, wasBusy) => {
@@ -391,21 +588,25 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       href?: string
       label?: string
       sourceMessageId?: string
+      uses?: { nodeKey: string; label: string }[]
     }>
   ).detail
-  if (!detail?.href || !ctx.sessionId.value) return
+  if (!detail?.href || !viewingId.value || !resourceViewActive.value) return
+  const owner = viewingId.value
   try {
     const reference = await core('references.resolve', {
-      sessionId: ctx.sessionId.value,
+      sessionId: owner,
       sourceMessageId: detail.sourceMessageId || 'markdown',
       href: detail.href,
       label: detail.label || detail.href,
     })
-    linkStatus.record(detail.href, reference)
+    if (owner !== viewingId.value || !resourceViewActive.value) return
+    linkStatus.record(detail.href, reference, detail.sourceMessageId)
     if (!reference.available) return
     if (
       reference.kind === 'project_file' &&
       reference.directory &&
+      knownSession.value?.mode === 'build' &&
       reference.actions.includes('open_files')
     ) {
       requestWorkspace({
@@ -414,27 +615,27 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       })
       return
     }
-    if (
-      reference.kind === 'project_file' &&
-      reference.relativePath &&
-      reference.actions.includes('open_files')
-    ) {
+    if (reference.kind !== 'web' && !reference.actions.includes('preview')) {
+      // Files outside the session's root are never read into Emperor; they
+      // can only be shown in Finder.
+      if (reference.actions.includes('reveal'))
+        await revealReference({ sessionId: owner, referenceId: reference.id })
+      return
+    }
+    if (reference.kind !== 'web') {
       requestWorkspace({
         pane: 'files',
         file: {
-          path: reference.relativePath,
+          owner,
+          target: {
+            source: 'reference',
+            sessionId: owner,
+            referenceId: reference.id,
+          },
+          label: reference.label,
+          uses: detail.uses,
           ...(reference.line ? { line: reference.line } : {}),
         },
-      })
-      return
-    }
-    if (
-      reference.kind === 'external_file' &&
-      reference.actions.includes('reveal')
-    ) {
-      await revealReference({
-        sessionId: ctx.sessionId.value,
-        referenceId: reference.id,
       })
       return
     }
@@ -453,8 +654,103 @@ function setComposerDraftFromCommand(event: Event): void {
   void nextTick(() => composer.value?.setDraft(text))
 }
 
+function resourceRequest(event: Event): ResourceRequest | null {
+  const detail = (event as CustomEvent<ResourceRequest>).detail
+  if (
+    !resourceViewActive.value ||
+    !viewingId.value ||
+    !detail?.resource ||
+    (detail.sessionId && detail.sessionId !== viewingId.value)
+  )
+    return null
+  return detail
+}
+function showResourceDetails(event: Event) {
+  const detail = resourceRequest(event)
+  if (!detail) return
+  if (['file', 'folder', 'image', 'attachment'].includes(detail.resource.kind))
+    void openDisplayResource(detail.resource)
+  else selectedResource.value = detail.resource
+}
+async function openDisplayResource(resource: DisplayResource): Promise<void> {
+  if (['skill', 'plugin', 'mcp'].includes(resource.kind)) {
+    const id = resource.href.slice(resource.href.indexOf(':') + 1)
+    selectedResource.value = null
+    await router.push(
+      resource.kind === 'skill'
+        ? { path: '/capabilities/skills', query: { skill: id } }
+        : resource.kind === 'plugin'
+          ? { path: '/capabilities/plugins', query: { plugin: id } }
+          : { path: '/capabilities/mcp' },
+    )
+    return
+  }
+  const uses = resource.uses?.map((use) => ({
+    nodeKey: use.nodeKey,
+    label: PROVENANCE_LABEL[use.provenance],
+  }))
+  if (resource.attachmentId) {
+    selectedResource.value = null
+    requestWorkspace({
+      pane: 'files',
+      file: {
+        owner: viewingId.value,
+        target: { source: 'attachment', attachmentId: resource.attachmentId },
+        uses,
+      },
+    })
+    return
+  }
+  await resolveMarkdownReference(
+    new CustomEvent('emperor:resolve-reference', {
+      detail: {
+        href: resource.href,
+        label: resource.label,
+        sourceMessageId: resource.sourceMessageId,
+        uses,
+      },
+    }),
+  )
+}
+function openResourceRequest(event: Event) {
+  const detail = resourceRequest(event)
+  if (detail) void openDisplayResource(detail.resource)
+}
+function openInternalResource() {
+  const github = selectedResource.value?.github
+  if (!github?.repo) return
+  const [owner, repo] = github.repo.split('/')
+  const base =
+    github.type === 'pull_request'
+      ? '/pulls'
+      : github.type === 'issue'
+        ? '/github/issues'
+        : '/github/ci'
+  const id = github.number ?? github.runId
+  selectedResource.value = null
+  void router.push(
+    `${base}/${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}/${id}`,
+  )
+}
+function revealFileSource(event: Event) {
+  const detail = (event as CustomEvent<{ owner: string; nodeKey: string }>)
+    .detail
+  if (resourceViewActive.value && detail.owner === viewingId.value)
+    revealRow(detail.nodeKey)
+}
+function revealResource(nodeKey: string) {
+  selectedResource.value = null
+  revealRow(nodeKey)
+}
+watch(viewingId, () => {
+  selectedResource.value = null
+})
+
 onMounted(() => {
   window.addEventListener('emperor:resolve-reference', resolveMarkdownReference)
+  window.addEventListener('emperor:file-source', revealFileSource)
+  window.addEventListener('emperor:resource-detail', showResourceDetails)
+  window.addEventListener('emperor:resource-open', openResourceRequest)
   window.addEventListener(
     'emperor:set-composer-draft',
     setComposerDraftFromCommand,
@@ -462,6 +758,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('emperor:file-source', revealFileSource)
+  window.removeEventListener('emperor:resource-detail', showResourceDetails)
+  window.removeEventListener('emperor:resource-open', openResourceRequest)
   window.removeEventListener(
     'emperor:resolve-reference',
     resolveMarkdownReference,
@@ -493,22 +792,10 @@ watch(
   { flush: 'post', immediate: true },
 )
 
-watch(
-  [() => ctx.queueDraftRecovery.value, () => ctx.sessionId.value],
-  ([recovery, ownerSessionId]) => {
-    if (!recovery || recovery.sessionId !== ownerSessionId) return
-    void nextTick(() => {
-      composer.value?.restoreDraft(recovery.payload)
-      ctx.clearQueueDraftRecovery(recovery.sessionId)
-    })
-  },
-  { flush: 'post' },
-)
-
 // ── timeline actions ──────────────────────────────────────────────────────
 /** Tool-row Inspect: the trajectory's inspector column shows the call. */
 function inspectCall(callId: string): void {
-  if (!viewingId.value || !callId) return
+  if (!trajectoryShown.value || !viewingId.value || !callId) return
   frameActions.openInspector(frame)
   void router
     .push({
@@ -522,18 +809,64 @@ function openSubagent(childId: string): void {
   if (childId) navigate(childId)
 }
 
+// ── subagent status bar (UI-S14) ──────────────────────────────────────────
+const subagentDock = useSubagentDock({
+  snapshot: () => snapshot.value,
+  sessionId: () => viewingId.value,
+  rootSessionId: () => owningRootId.value,
+  enabled: () => !child.value && phase.value === 'active',
+})
+
+/** A status-bar row: the child's conversation, or the run's page. */
+function openAgentRow(row: SubagentRowView): void {
+  if (row.agentId === undefined) return
+  if (row.backend === 'internal') openSubagent(row.agentId)
+  else
+    void router
+      .push({
+        name: 'external-agent',
+        params: { sessionId: owningRootId.value, delegationId: row.agentId },
+      })
+      .catch(() => undefined)
+}
+
 function editMessage(text: string): void {
   if (child.value) return
   composer.value?.setDraft(text)
   void nextTick(() => composer.value?.focusInput())
 }
 
-function sendFromComposer(payload: ChatSendPayload): void {
+/**
+ * The composer's send. While the window is still switching to the chat on
+ * screen (route ahead of the runtime) nothing is sent: the message would
+ * land in the previous chat. `false` puts the draft back.
+ */
+function sendFromComposer(
+  payload: ChatSendPayload,
+): boolean | Promise<boolean> {
   const owner = ctx.sessionId.value
+  if (routeSessionId.value && routeSessionId.value !== owner) {
+    ctx.showToast('正在切换会话，稍后再发送')
+    return false
+  }
   if (owner && !promptedSessions.value.has(owner))
     promptedSessions.value = new Set([...promptedSessions.value, owner])
-  ctx.submitFromComposer(payload)
+  return ctx.submitFromComposer(payload)
 }
+
+// Each chat keeps its own unsent draft (text, chips, uploaded files). A
+// draft that became its session is the same chat: what was typed while its
+// first message went out stays (FIX-13).
+watch(
+  viewingId,
+  (next, previous) => {
+    const handle = composer.value
+    if (!handle || next === previous || isDraftPromotion(previous, next)) return
+    if (previous) saveComposerDraft(previous, handle.takeSnapshot())
+    handle.applySnapshot(takeComposerDraft(next))
+  },
+  { flush: 'pre' },
+)
 
 // ── trajectory tab ──────────────────────────────────────────────────────
 /** Chat Inspect deep link (`?call=`): the ledger selects and reveals it. */
@@ -549,12 +882,91 @@ function clearFocusCall(): void {
   void router.replace({ ...route, query }).catch(() => undefined)
 }
 
+// ── trajectory gate (UI-S09) ─────────────────────────────────────────────
+// A trajectory link opened while 显示轨迹 is off landed here: say so, and
+// open the tool row of the call it pointed at (paging older history in, as
+// the trajectory would).
+const revealCallId = ref<string | null>(null)
+let revealPagesLoaded = 0
+watch(
+  [() => trajectoryNotice.value, viewingId],
+  ([, id], previous) => {
+    if (previous?.[1] !== id) revealCallId.value = null
+    const notice = takeTrajectoryNotice(id)
+    if (notice === null) return
+    ctx.showToast('轨迹视图已关闭', {
+      action: {
+        label: '在设置中开启',
+        run: () => void settingsRoute.openSettings('general'),
+      },
+    })
+    revealCallId.value = notice.callId
+    revealPagesLoaded = 0
+  },
+  { immediate: true },
+)
+watch(
+  () =>
+    [
+      revealCallId.value,
+      timeline.value,
+      snapshot.value,
+      conversation.value?.window.value,
+    ] as const,
+  ([callId, list, , sessionWindow]) => {
+    if (callId === null || list === null || sessionWindow === undefined) return
+    if (list.revealCall(callId)) {
+      revealCallId.value = null
+      return
+    }
+    const step = focusCallStep(sessionWindow, revealPagesLoaded)
+    if (step === 'give-up') revealCallId.value = null
+    if (step !== 'load-older') return
+    revealPagesLoaded++
+    void conversation.value?.loadOlder()
+  },
+  { flush: 'post' },
+)
+
 // ── child session stop ───────────────────────────────────────────────────
-const childRunning = computed(() => child.value && snapshot.value.running)
+const childRunning = computed(() => child.value && conversationRunning.value)
 const stoppingChild = ref(false)
 watch(childRunning, (running) => {
   if (!running) stoppingChild.value = false
 })
+
+// A subagent's own page (AGT-10): the user writes to the child itself, and
+// a question it asked is answered here instead of in the main conversation.
+const childComposer = ref<InstanceType<typeof ChildComposer> | null>(null)
+const childSending = ref(false)
+const childSendError = ref('')
+const childClosed = ref('')
+const childInteraction = computed(() =>
+  child.value && viewingId.value
+    ? (ctx.pendingInteractionsBySession[viewingId.value] ?? null)
+    : null,
+)
+watch(viewingId, () => {
+  childSendError.value = ''
+  childClosed.value = ''
+})
+async function sendToChild(text: string): Promise<void> {
+  const id = viewingId.value
+  if (!id || childSending.value) return
+  childSending.value = true
+  childSendError.value = ''
+  try {
+    await core('agents.send', { sessionId: id, text })
+    childComposer.value?.clear()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if ((error as { code?: unknown } | null)?.code === 'subagent_not_live')
+      childClosed.value = message
+    else childSendError.value = message
+  } finally {
+    childSending.value = false
+  }
+}
 
 async function stopChild(): Promise<void> {
   const id = viewingId.value
@@ -564,11 +976,11 @@ async function stopChild(): Promise<void> {
     const cancelled = await core('tasks.cancel', id)
     if (!cancelled) {
       stoppingChild.value = false
-      ctx.showToast('子代理已结束或无法停止')
+      ctx.showToast('子智能体已结束或无法停止')
     }
   } catch (error) {
     stoppingChild.value = false
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   }
 }
 
@@ -579,10 +991,21 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
   try {
     await ctx.runGoalAction(goal.id, action)
   } catch (error) {
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   } finally {
     goalActionPending.value = null
   }
+}
+
+/**
+ * 编辑 a goal (GoalBar): `/goal edit <objective>` goes into the composer
+ * to be changed and sent; Core edits the goal in place (same id, rounds
+ * kept).
+ */
+function editGoal(): void {
+  const goal = activeGoal.value
+  if (!goal) return
+  composer.value?.setDraft(`/goal edit ${goal.objective}`)
 }
 
 async function activatePlan(): Promise<void> {
@@ -599,7 +1022,7 @@ async function startGoalWithLifecycle(outcome: string): Promise<void> {
   try {
     await ctx.startGoalWithLifecycle(outcome)
   } catch (error) {
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   }
 }
 
@@ -661,8 +1084,14 @@ function setReasoningEffort(level: string | null): void {
 }
 
 async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
-  if (await ctx.manageQueuedPrompt(item.id, 'cancel'))
-    composer.value?.setDraft(item.content)
+  if (!(await ctx.manageQueuedPrompt(item.id, 'cancel'))) return
+  composer.value?.restoreDraft(
+    item.payload ?? {
+      content: item.content,
+      attachments: [],
+      ...(item.references ? { references: item.references } : {}),
+    },
+  )
 }
 
 async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
@@ -671,6 +1100,11 @@ async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
 async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   await ctx.manageQueuedPrompt(item.id, 'cancel')
+}
+
+/** 发送 a held prompt (the turn before it failed or was stopped). */
+async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'send')
 }
 </script>
 
@@ -681,6 +1115,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     :data-phase="phase"
     :data-tab="tab"
     :data-env-card="envCardShown || undefined"
+    :data-env-overlay="envCardOverlay || undefined"
     :data-cu-preview="cuPreviewShown || undefined"
     aria-label="对话"
   >
@@ -691,6 +1126,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
       :workspace-open="workspaceOpen"
       :env-card-open="envCardShown"
       :tabs-disabled="!viewingId"
+      :trajectory="trajectoryShown"
       @navigate="navigate"
       @tab="switchTab"
       @toggle-workspace="toggleWorkspace"
@@ -718,10 +1154,12 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="timeline"
           :key="viewingId"
           :session-id="viewingId"
+          :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
           @first-visible="firstVisibleKey = $event"
+          @agents="subagentDock.report"
         />
         <TurnScrubber
           v-if="ticks.length >= SCRUBBER_MIN_TURNS"
@@ -731,22 +1169,36 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         />
       </div>
 
-      <!-- Environment card seat (Chat tab): positioned by the card itself. -->
+      <!-- Environment card seat (Chat tab): floats at the top right. -->
       <EnvironmentCard
         v-if="envCardShown"
         :key="viewingId"
         :session-id="viewingId"
+        :root-session-id="owningRootId"
+        :native-session-id="child ? viewingId : undefined"
         :snapshot="snapshot"
         :build="buildSession"
         :agent-busy="agentBusyHere"
         :child="child"
         :title="projectName"
+        :has-more="conversation?.window.value.hasMore ?? false"
         @reveal="revealRow"
         @open-subagent="openSubagent"
         @close="closeEnvCard"
       />
 
       <!-- Computer-use preview seat (Chat tab): bottom right, read-only. -->
+      <ResourceDetails
+        v-if="selectedResource"
+        :key="`${viewingId}:${selectedResource.id}`"
+        :resource="selectedResource"
+        :session-id="viewingId"
+        @close="selectedResource = null"
+        @open="openDisplayResource(selectedResource)"
+        @open-internal="openInternalResource"
+        @reveal="revealResource"
+      />
+
       <ComputerUsePreviewStack
         v-if="cuPreviewSeat && viewingId"
         :key="viewingId"
@@ -757,57 +1209,60 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
     <div v-if="tab === 'chat'" class="composer-seat">
       <EmptyHero v-if="phase === 'hero'" :project-name="projectName" />
-      <ReadOnlyComposer
-        v-if="child"
-        :parent-title="parentCrumb?.label"
-        :running="childRunning"
-        :stopping="stoppingChild"
-        @back="backToParent"
-        @stop="stopChild"
-      />
+      <template v-if="child">
+        <TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />
+        <ChildComposer
+          v-else
+          ref="childComposer"
+          :parent-title="parentCrumb?.label"
+          :running="childRunning"
+          :stopping="stoppingChild"
+          :sending="childSending"
+          :error="childSendError || undefined"
+          :closed="childClosed || undefined"
+          @send="sendToChild"
+          @back="backToParent"
+          @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
+          @stop="stopChild"
+        />
+      </template>
       <div v-else class="stack">
-        <div
-          v-if="showProfileOnboardingPrompt"
-          class="notice-dock"
-          role="status"
-        >
-          <span class="notice-copy">
-            <strong>补充个人偏好</strong>
-            <span>用一个简短访谈设置称呼、沟通方式和工作偏好。</span>
-          </span>
-          <Button size="sm" variant="ghost" @click="ctx.skipProfileInterview"
-            >不再提醒</Button
-          >
-          <Button size="sm" variant="accent" @click="ctx.startProfileInterview"
-            >开始访谈</Button
-          >
-        </div>
         <ChangesPill
-          v-if="!takeover && viewingId"
+          v-if="!takeoverOpen && viewingId"
           :session-id="viewingId"
           :build="buildSession"
         />
-        <TodoDock v-if="!takeover" :todos="latestTodos" />
+        <SubagentDock
+          v-if="!takeoverOpen && subagentDock.shown.value"
+          :rows="subagentDock.state.value.rows"
+          :target="subagentDock.state.value.target"
+          :root-session-id="owningRootId"
+          @open="openAgentRow"
+          @reveal="timeline?.revealAgents($event)"
+        />
+        <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
         <GoalBar
-          v-if="activeGoal"
+          v-if="activeGoal && !unknownSession"
           :goal="activeGoal"
           :action-pending="goalActionPending"
           @action="runGoalStatusAction"
+          @edit="editGoal"
         />
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
-          v-if="!takeover"
+          v-if="!takeoverOpen && !unknownSession"
           :items="ctx.queuedPrompts.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
+          @send="sendQueuedPrompt"
         />
         <ComposerCard
-          v-show="!takeover"
+          v-show="!takeoverOpen"
           ref="composer"
           :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"
-          :busy="ctx.busy.value"
+          :busy="runningHere"
           :interaction-blocked="Boolean(pendingInteraction)"
           :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
           :goal="activeGoal"
@@ -815,8 +1270,6 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :lifecycle-mode="composerLifecycleMode"
           :commands="ctx.commands.value"
           :plugins="ctx.boot.value?.plugins ?? []"
-          :tools="ctx.boot.value?.tools || []"
-          :mcp-content="ctx.mcpContent.value"
           :context-used="ctx.boot.value?.context_used ?? 0"
           :context-max="
             ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0
@@ -829,6 +1282,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
             ctx.boot.value?.modelConfig?.current?.capabilities?.vision ?? false
           "
           :send-blocked-reason="sendBlockedReason"
+          :unavailable-reason="composerUnavailableReason"
           :complete-command="ctx.completeSlashCommand"
           :refresh-commands="ctx.refreshCommands"
           @set-permission="ctx.setPermissionMode"
@@ -844,6 +1298,11 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @error="ctx.showToast"
         />
       </div>
+      <HeroProfilePrompt
+        v-if="phase === 'hero' && !child"
+        :session-id="viewingId || ''"
+        :blocked="Boolean(pendingInteraction)"
+      />
     </div>
   </section>
 </template>
@@ -853,7 +1312,8 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   container: conversation / inline-size;
   position: relative;
   --chat-content-width: 748px;
-  --env-card-width: 340px;
+  /* The floating cards (environment card, computer-use preview). */
+  --env-card-width: min(340px, 100cqi - 2 * var(--space-4));
   --composer-card-max: calc(var(--chat-content-width) + var(--space-8));
   --composer-clearance: var(--space-4);
   --dock-inset: var(--space-2);
@@ -866,8 +1326,8 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-1));
 }
 
 .view-area {
@@ -878,13 +1338,25 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
 }
 
-/* Wide column: the chat and the composer make room for the environment card
-   (no transition on the padding — the card appears at once). */
-@container conversation (min-width: 1120px) {
+/*
+ * UI-S16: no column is reserved for a floating card. `--chat-shift` moves the
+ * column (ChatTimeline's scroller) and the composer stack left of centre just
+ * far enough that the column ends 16 short of the card: half the column, the
+ * card and 16 + 16 of insets, less half the region. Only from 1152px
+ * (FLOAT_BESIDE_MIN), where 32 stay on the left; narrower the card floats
+ * over the centred chat. Both pad their inline end by twice the shift, so
+ * what is centred inside them moves by it without changing width.
+ */
+@container conversation (min-width: 1152px) {
   .conversation-root[data-env-card] .chat-body-slot,
-  .conversation-root[data-env-card] .stack,
-  .conversation-root[data-cu-preview] .chat-body-slot {
-    padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+  .conversation-root[data-env-card] .composer-seat,
+  .conversation-root[data-cu-preview] .chat-body-slot,
+  .conversation-root[data-cu-preview] .composer-seat {
+    --chat-shift: max(
+      0px,
+      var(--chat-content-width) / 2 + var(--env-card-width) + var(--space-8) -
+        50cqi
+    );
   }
 }
 
@@ -914,7 +1386,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   margin: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-align: center;
 }
 
@@ -926,10 +1398,11 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   flex-direction: column;
   margin-top: calc(0px - var(--space-8) - var(--space-1));
   padding-top: calc(var(--space-8) + var(--space-1));
+  padding-inline-end: calc(2 * var(--chat-shift, 0px));
   background: linear-gradient(
     180deg,
-    rgb(var(--bg-base) / 0) 0,
-    rgb(var(--bg-base)) calc(var(--space-8) + var(--space-1))
+    rgb(var(--surface-base) / 0) 0,
+    rgb(var(--surface-base)) calc(var(--space-8) + var(--space-1))
   );
   pointer-events: none;
 }
@@ -961,44 +1434,5 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     calc(var(--composer-card-max) + 2 * var(--composer-clearance)),
     100%
   );
-}
-
-.notice-dock {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  box-sizing: border-box;
-  width: calc(100% - 2 * var(--composer-clearance) - 4 * var(--dock-inset));
-  max-width: calc(var(--composer-card-max) - 4 * var(--dock-inset));
-  min-height: 36px;
-  margin: 0 auto;
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-card);
-  background: rgb(var(--tip-fill));
-}
-
-.notice-copy {
-  display: flex;
-  flex: 1;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
-  white-space: nowrap;
-}
-
-.notice-copy strong {
-  flex: none;
-  color: rgb(var(--label-primary));
-  font-weight: 500;
-}
-
-.notice-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 </style>

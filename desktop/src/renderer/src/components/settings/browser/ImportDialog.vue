@@ -2,10 +2,12 @@
 /**
  * 从浏览器导入 (ST-06) — a dialog that reads a local Chrome/Edge profile and
  * imports its saved passwords into the password manager and its cookies into a
- * persistent 登录状态 profile. Reading, decrypting and writing all happen in
- * main; this dialog only picks a source, shows whether the browser is still
- * running, and reports counts. It never sees a password or a cookie value.
+ * persistent 登录状态 profile (sealed with Emperor's local key, SEC-10).
+ * Reading, decrypting and writing all happen in main; this dialog only picks
+ * a source, shows whether the browser is still running, and reports counts.
+ * It never sees a password or a cookie value.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref, watch } from 'vue'
 import {
   fetchBrowserImportSources,
@@ -16,6 +18,7 @@ import {
 import { core } from '../../../api/http'
 import type { BrowserProfileView } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import Modal from '../../ui/Modal.vue'
 import { Select, Switch, type SelectOption } from '../ui'
 
@@ -151,7 +154,7 @@ const REASONS: Record<string, string> = {
   'browser-running': '请先完全关闭该浏览器，再导入。',
   'vault-locked': '请先解锁密码管理器，再导入密码。',
   'vault-unavailable': '密码管理器当前不可用。',
-  'no-target-profile': '请选择要写入登录状态的 profile。',
+  'no-target-profile': '请选择要写入的登录档案。',
   'read-failed': '读取浏览器数据失败，请确认浏览器已完全关闭。',
   'nothing-selected': '请至少选择一项要导入的数据。',
   internal: '导入失败，请稍后再试。',
@@ -181,7 +184,7 @@ async function submit(): Promise<void> {
       try {
         target = await resolveTargetProfile(source)
       } catch {
-        error.value = '无法新建登录状态 profile，请在「登录状态」里手动新建。'
+        error.value = '无法新建登录档案，请在「登录状态」里手动新建。'
         return
       }
     }
@@ -224,9 +227,11 @@ watch(
     @update:open="(value: boolean) => emit('update:open', value)"
   >
     <div class="import-body">
-      <p v-if="!loading && flatSources.length === 0" class="import-empty">
-        没有可导入的浏览器。请确认本机装有 Google Chrome 或 Microsoft Edge。
-      </p>
+      <EmptyState
+        v-if="!loading && flatSources.length === 0"
+        title="没有可导入的浏览器"
+        description="请确认本机装有 Google Chrome 或 Microsoft Edge。"
+      />
       <template v-else>
         <label class="import-source-row">
           <span class="import-label">从</span>
@@ -250,14 +255,9 @@ watch(
           role="alert"
         >
           导入前，请完全关闭 {{ current.browserName }}
-          <button
-            type="button"
-            class="import-recheck"
-            data-testid="import-recheck"
-            @click="recheck"
-          >
+          <LinkButton data-testid="import-recheck" @click="recheck">
             重新检查
-          </button>
+          </LinkButton>
         </p>
 
         <div class="import-toggles">
@@ -287,7 +287,7 @@ watch(
               :model-value="targetProfileId"
               :options="targetOptions"
               :disabled="busy"
-              aria-label="写入的登录状态 profile"
+              aria-label="写入的登录档案"
               @update:model-value="
                 (value?: string) =>
                   value !== undefined && (targetProfileId = value)
@@ -299,6 +299,14 @@ watch(
         <p class="import-note">
           导入在本机完成：读取密码需要 macOS
           钥匙串授权，系统会弹窗；不导入浏览记录。
+        </p>
+        <p
+          v-if="wantCookies"
+          class="import-note"
+          data-testid="import-cookie-note"
+        >
+          导入的登录状态由 Emperor 本地密钥加密保存，浏览中产生的新登录状态以
+          Chromium 默认方式保存。
         </p>
 
         <p
@@ -321,7 +329,7 @@ watch(
       </template>
     </div>
     <template #footer>
-      <Button variant="outline" type="button" @click="close">
+      <Button variant="secondary" type="button" @click="close">
         {{ result ? '完成' : '取消' }}
       </Button>
       <Button
@@ -354,7 +362,7 @@ watch(
 
 .import-label {
   font-size: var(--fs-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-source-row :deep(.ds-select),
@@ -367,23 +375,10 @@ watch(
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.import-recheck {
-  border: none;
-  background: none;
-  padding: 0;
-  color: rgb(var(--accent-strong));
-  cursor: pointer;
-  font: inherit;
-}
-
-.import-recheck:hover {
-  text-decoration: underline;
 }
 
 .import-toggles {
@@ -398,7 +393,7 @@ watch(
   justify-content: space-between;
   gap: var(--space-3);
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-target-row {
@@ -407,27 +402,21 @@ watch(
 
 .import-target-label {
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-note {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
-}
-
-.import-empty {
-  margin: 0;
-  font-size: var(--fs-s);
-  color: rgb(var(--label-secondary));
 }
 
 .import-result {
   margin: 0;
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-error {

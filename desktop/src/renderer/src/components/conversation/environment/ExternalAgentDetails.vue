@@ -1,0 +1,838 @@
+<script setup lang="ts">
+/** One durable external run. Execution and exact-tree acceptance are separate facts. */
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import {
+  getDelegation,
+  getDelegationReceipt,
+  interruptDelegation,
+  recoverDelegation,
+  collectDelegation,
+  validateDelegation,
+  integrateDelegation,
+  closeDelegation,
+  abandonDelegation,
+  listExecutors,
+  type DelegationView,
+  type DelegationDelivery,
+} from '../../../api/delegations'
+import {
+  agentTitle,
+  agentSourceLabel,
+  delegationNeedsExit,
+} from '@emperor/core/runtime-contract'
+import { onCoreEvent } from '../../../api/backend'
+import Modal from '../../ui/Modal.vue'
+import Button from '../../ui/Button.vue'
+import Avatar from '../../ui/Avatar.vue'
+import Checkbox from '../../ui/Checkbox.vue'
+import TextField from '../../ui/TextField.vue'
+import TaskOutputDialog from './TaskOutputDialog.vue'
+const props = defineProps<{
+  runId: string
+  delegationId: string
+  sessionId?: string
+}>()
+const emit = defineEmits<{ close: []; configure: []; root: [] }>()
+function returnRoot() {
+  emit('root')
+  emit('close')
+}
+const view = shallowRef<DelegationView | null>(null),
+  delivery = shallowRef<DelegationDelivery | null>(null),
+  busy = ref(false),
+  stopping = ref(false),
+  verifying = ref(false),
+  error = ref(''),
+  showOutput = ref(false),
+  command = ref(''),
+  args = ref('["test"]'),
+  criterion = ref('项目测试'),
+  reviewed = ref(false),
+  requiresReview = ref(false)
+let generation = 0,
+  alive = true,
+  timer: ReturnType<typeof setTimeout> | undefined,
+  unsubscribe = () => {}
+const failureDisposition = ref('')
+/**
+ * 高级 › 验证后再应用 (AGT-06): the receipt, independent check and preview
+ * chain shows only when it is on, or when this run already went through it.
+ */
+const verifyFirst = ref(false)
+const record = computed(() => view.value?.record),
+  run = computed(() => view.value?.runs[props.runId]),
+  receipt = computed(() => delivery.value?.receipt),
+  preview = computed(() => delivery.value?.preview)
+const phases: Record<string, string> = {
+  queued: '等待调度',
+  preparing: '正在准备',
+  running: '正在执行',
+  waiting_input: '等待回答',
+  cancelling: '正在停止',
+  completed: '本轮执行完成',
+  failed: '本轮执行失败',
+  cancelled: '本轮已取消',
+  interrupted: '本轮已中断',
+  outcome_unknown: '结果待确认',
+}
+const acceptance = computed(
+  () => delivery.value?.acceptance?.state ?? 'unverified',
+)
+const hasFileDelivery = computed(
+  () =>
+    delivery.value?.requiresAcceptance ??
+    ((receipt.value?.changedFiles.length ?? 0) > 0 ||
+      (receipt.value?.unresolved.length ?? 0) > 0),
+)
+const acceptanceLabel = computed(
+  () =>
+    ({
+      unverified: '交付前待检查',
+      passed: '验证通过',
+      failed: '验证失败',
+      needs_user: '需要处理',
+    })[acceptance.value],
+)
+const active = computed(() =>
+  ['queued', 'preparing', 'running', 'waiting_input', 'cancelling'].includes(
+    run.value?.phase ?? '',
+  ),
+)
+const mutable = computed(
+  () =>
+    record.value?.availability !== 'closed' &&
+    record.value?.availability !== 'needs_recovery',
+)
+/** The current run ended without an outcome: 「标记为已结束」 (AGT-04). */
+const needsExit = computed(
+  () =>
+    record.value?.currentRunId === props.runId &&
+    delegationNeedsExit(record.value, run.value),
+)
+function end() {
+  return action(() =>
+    abandonDelegation({ id: props.delegationId, sessionId: props.sessionId }),
+  )
+}
+const verifyingNow = computed(
+  () => verifying.value || delivery.value?.verificationActive === true,
+)
+const canApply = computed(
+  () => preview.value?.status === 'ready' && acceptance.value === 'passed',
+)
+const showChain = computed(
+  () =>
+    verifyFirst.value ||
+    Boolean(receipt.value || preview.value || delivery.value?.acceptance),
+)
+async function load() {
+  const current = ++generation
+  const [state, result] = await Promise.allSettled([
+    getDelegation({ id: props.delegationId, sessionId: props.sessionId }),
+    getDelegationReceipt({ runId: props.runId, sessionId: props.sessionId }),
+  ])
+  if (!alive || current !== generation) return
+  if (state.status === 'fulfilled') view.value = state.value
+  else error.value = String(state.reason)
+  if (result.status === 'fulfilled') {
+    if (result.value.receipt?.id !== delivery.value?.receipt?.id)
+      reviewed.value = false
+    delivery.value = result.value
+  } else error.value = String(result.reason)
+}
+function refresh() {
+  error.value = ''
+  void load()
+}
+async function action(task: () => Promise<unknown>) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await task()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (alive) {
+      await load()
+      busy.value = false
+    }
+  }
+}
+async function stop() {
+  if (stopping.value) return
+  stopping.value = true
+  error.value = ''
+  try {
+    await interruptDelegation({
+      id: props.delegationId,
+      runId: props.runId,
+      sessionId: props.sessionId,
+    })
+  } catch (cause) {
+    error.value = String(cause)
+  } finally {
+    if (alive) {
+      await load()
+      stopping.value = false
+    }
+  }
+}
+function verify() {
+  return action(async () => {
+    if (!receipt.value) throw new Error('请先收集成果')
+    const argumentsValue: unknown = JSON.parse(args.value)
+    if (
+      !Array.isArray(argumentsValue) ||
+      !argumentsValue.every((item) => typeof item === 'string')
+    )
+      throw new Error('参数必须是 JSON 字符串数组')
+    if (!command.value.trim()) throw new Error('请输入验证命令的可执行文件')
+    verifying.value = true
+    try {
+      await validateDelegation({
+        runId: props.runId,
+        sessionId: props.sessionId,
+        receiptId: receipt.value.id,
+        criteria: {
+          description: criterion.value,
+          commands: [
+            {
+              executable: command.value.trim(),
+              args: argumentsValue,
+              timeoutMs: 120000,
+            },
+          ],
+          requiresReview: requiresReview.value,
+        },
+        ...(reviewed.value
+          ? { reviewedTreeDigest: receipt.value.resultTreeDigest }
+          : {}),
+      })
+    } finally {
+      verifying.value = false
+    }
+  })
+}
+function recoverVerification(verificationId: string) {
+  return action(async () => {
+    await recoverDelegation({
+      id: props.delegationId,
+      sessionId: props.sessionId,
+      expectedRevision:
+        (record.value?.currentRunId
+          ? view.value?.runs[record.value.currentRunId]?.revision
+          : run.value?.revision) ?? 0,
+      inspect: false,
+      verificationId,
+    })
+  })
+}
+function makePreview() {
+  return action(() =>
+    integrateDelegation({
+      runId: props.runId,
+      sessionId: props.sessionId,
+      action: 'preview',
+    }),
+  )
+}
+function apply() {
+  const current = preview.value
+  if (!current || !canApply.value) return
+  return action(() =>
+    integrateDelegation({
+      runId: props.runId,
+      sessionId: props.sessionId,
+      action: 'apply',
+      previewId: current.id,
+      expectedRevision: current.revision,
+      previewDigest: current.digest,
+    }),
+  )
+}
+onMounted(() => {
+  void load()
+  void listExecutors()
+    .then((list) => {
+      if (alive) verifyFirst.value = list.config?.verifyBeforeApply === true
+    })
+    .catch(() => undefined)
+  unsubscribe = onCoreEvent((input) => {
+    if (!input || typeof input !== 'object') return
+    const event = input as Record<string, unknown>
+    if (event.run_id !== props.runId || event.event === 'delegation_output')
+      return
+    if (String(event.event).startsWith('delegation_')) {
+      clearTimeout(timer)
+      timer = setTimeout(() => void load(), 100)
+    }
+  })
+})
+onBeforeUnmount(() => {
+  alive = false
+  generation++
+  clearTimeout(timer)
+  unsubscribe()
+})
+
+/** The task limits a run can stop at (AGT-07); other codes show as they are. */
+const LIMIT_LABEL: Record<string, string> = {
+  BUDGET_LIMIT: '已达到单任务费用上限',
+  TOKEN_LIMIT: '已达到单任务 token 上限（模型单价未知）',
+  RUN_LIMIT: '已达到单任务运行次数上限',
+}
+/** Why a run failed and what to do next (AGT-02, AGT-12). */
+const FAILURE: Record<string, [reason: string, next: string]> = {
+  AUTH_EXPIRED: [
+    'Claude Code 的登录已失效或过期。',
+    '在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」重新登录；用 API Key 时，在那里换一个新的 API Key。',
+  ],
+  AUTH_REQUIRED: [
+    'Claude Code 还没有登录。',
+    '在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」，然后让主会话重试。',
+  ],
+  RATE_LIMITED: [
+    '被限流了：订阅额度或接口的速率已用尽。',
+    '稍后再让主会话重试，或换用另一个子智能体。',
+  ],
+  BILLING: [
+    '账户余额或计费状态不允许继续调用。',
+    '在 Anthropic Console 检查余额与付款方式（订阅账号检查订阅状态），然后重试。',
+  ],
+  MAX_TURNS: [
+    '达到了这次运行的最多轮数。',
+    '让主会话发消息继续，或在 设置 › 子智能体 › 高级 调高「每次运行最多轮数」。',
+  ],
+  CONTEXT_OVERFLOW: [
+    '对话超出了模型的上下文长度。',
+    '让主会话把任务拆小，或新开一个子智能体继续。',
+  ],
+  EXECUTOR_TURN_FAILED: [
+    '子智能体这一轮执行失败。',
+    '查看下面的子智能体报告和输出，修正后让主会话重试。',
+  ],
+  // FIX-16: the provider refused the model; the reason names it.
+  EXECUTOR_MODEL_UNSUPPORTED: [
+    '子智能体的账号不支持这个模型。',
+    '在「设置 › 子智能体」打开它的详情页，在「默认模型」里换一个这个账号可用的模型，然后让主会话重试。',
+  ],
+  // FIX-15: failures outside the subagent's own report; the run's summary
+  // carries Core's reason.
+  WORKSPACE_GIT_UNAVAILABLE: [
+    '准备工作区时没有可用的 Git。',
+    '在「设置 › 高级 › 诊断」的环境工具里查看 Git，装好或修好后让主会话重试。',
+  ],
+  WORKSPACE_GIT_FAILED: [
+    '准备工作区时 Git 命令失败。',
+    '按下面的原因处理后让主会话重试。',
+  ],
+  WORKSPACE_PREPARE_FAILED: [
+    '准备工作区失败。',
+    '按下面的原因处理后让主会话重试；仍然失败时，在「设置 › 高级 › 诊断」导出诊断包反馈。',
+  ],
+  EXECUTOR_ERROR: [
+    '子智能体意外出错。',
+    '按下面的原因处理后让主会话重试；仍然失败时，在「设置 › 高级 › 诊断」导出诊断包反馈。',
+  ],
+}
+/** Failures Core explains (FIX-15): their summary is its reason, not a report. */
+const CORE_REASON = new Set([
+  'WORKSPACE_GIT_UNAVAILABLE',
+  'WORKSPACE_GIT_FAILED',
+  'WORKSPACE_PREPARE_FAILED',
+  'EXECUTOR_ERROR',
+  'EXECUTOR_MODEL_UNSUPPORTED',
+])
+/**
+ * The model a run used instead of Codex's own default (FIX-16): before the
+ * turn, or after the provider refused the default.
+ */
+function modelChoiceText(choice: {
+  configured: string
+  used: string
+  reason: 'default-unavailable' | 'retried'
+}): string {
+  const name = agentSourceLabel(record.value?.backend ?? 'codex')
+  return choice.reason === 'retried'
+    ? `你的 ${name} 默认模型 ${choice.configured} 这个账号用不了，第一次运行被拒绝，已改用 ${choice.used} 重新运行。`
+    : `你的 ${name} 默认模型 ${choice.configured} 这个账号用不了，本次改用 ${choice.used}。`
+}
+function failureLabel(code: string): string {
+  return LIMIT_LABEL[code] ?? FAILURE[code]?.[0] ?? code
+}
+function failureNext(code: string): string {
+  return FAILURE[code]?.[1] ?? ''
+}
+/** The cost the budget counted: a subscription has none to count. */
+function costText(usage: {
+  estimatedUsd?: number
+  billing?: 'subscription' | 'api'
+}): string {
+  if (usage.billing === 'subscription') return '订阅额度，不计费用'
+  return usage.estimatedUsd === undefined
+    ? '费用未提供'
+    : `费用估算 $${Number(usage.estimatedUsd.toFixed(4))}`
+}
+</script>
+<template>
+  <Modal
+    :open="true"
+    title="子智能体"
+    :width="820"
+    @update:open="!$event && emit('close')"
+  >
+    <div class="external-agent-details">
+      <header class="external-facts">
+        <div>
+          <strong>{{
+            agentTitle(
+              record?.startSpec?.description,
+              record?.backend ?? 'codex',
+            )
+          }}</strong
+          ><Avatar
+            kind="logo"
+            v-if="record"
+            :icon-id="record.backend"
+            :label="agentSourceLabel(record.backend)"
+            :size="16"
+            :data-agent-logo="record.backend"
+          /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
+          ><span v-if="receipt"> · {{ receipt.version }}</span>
+          <p class="external-id">{{ delegationId }} / {{ runId }}</p>
+        </div>
+        <Button
+          data-open-output
+          size="sm"
+          variant="secondary"
+          @click="showOutput = true"
+          >查看输出</Button
+        >
+      </header>
+      <div class="external-status">
+        <span>{{ phases[run?.phase ?? ''] ?? '正在读取…' }}</span
+        ><span
+          v-if="hasFileDelivery || delivery?.acceptance"
+          :data-acceptance="acceptance"
+          >{{ acceptanceLabel }}</span
+        >
+      </div>
+      <p v-if="error" role="alert" class="external-error">{{ error }}</p>
+      <p
+        v-if="run?.failureCode"
+        class="external-note"
+        :title="run.failureCode"
+        :data-failure-code="run.failureCode"
+      >
+        {{ failureLabel(run.failureCode)
+        }}<span v-if="failureNext(run.failureCode)" data-failure-next>{{
+          failureNext(run.failureCode)
+        }}</span
+        ><Button
+          v-if="
+            run.failureCode.includes('AUTH') ||
+            run.failureCode.includes('EXECUTOR') ||
+            run.failureCode === 'MAX_TURNS'
+          "
+          size="sm"
+          @click="emit('configure')"
+          >打开子智能体设置</Button
+        >
+      </p>
+      <p
+        v-if="run?.summary && CORE_REASON.has(run.failureCode ?? '')"
+        class="external-note"
+        data-run-reason
+      >
+        原因：{{ run.summary }}
+      </p>
+      <p v-else-if="run?.summary" class="external-note">
+        子智能体报告：{{ run.summary }}
+      </p>
+      <p v-if="run?.modelChoice" class="external-note" data-model-choice>
+        {{ modelChoiceText(run.modelChoice) }}
+      </p>
+      <p class="external-path">成果目录 · {{ record?.cwd }}</p>
+      <p v-if="run?.usage" class="external-note" data-run-usage>
+        输入 {{ run.usage.inputTokens ?? '未提供' }} / 输出
+        {{ run.usage.outputTokens ?? '未提供' }} tokens ·
+        {{ costText(run.usage) }}
+      </p>
+      <p v-if="run?.phase === 'waiting_input'" class="external-note">
+        请返回主会话的提问卡片回答。<Button size="sm" @click="returnRoot"
+          >返回提问</Button
+        >
+      </p>
+      <div class="external-actions">
+        <Button size="sm" :disabled="busy" @click="refresh">刷新</Button
+        ><Button
+          v-if="active || verifyingNow"
+          data-stop
+          size="sm"
+          variant="danger"
+          :disabled="stopping"
+          @click="stop"
+          >{{ stopping ? '正在停止…' : '停止本轮' }}</Button
+        ><Button
+          v-for="id in delivery?.verificationRecoveryIds ?? []"
+          :key="id"
+          size="sm"
+          :disabled="busy"
+          @click="recoverVerification(id)"
+          >确认验证进程已停止</Button
+        >
+      </div>
+      <p v-if="needsExit" class="external-note" data-needs-exit>
+        这次运行没有正常结束（例如 Emperor
+        或电脑重启过，或无法确认它已停止）。确认不再需要后，可以标记为已结束：释放它占用的工作区，目标
+        可以继续；保留的文件不受影响。<Button
+          data-abandon-run
+          size="sm"
+          variant="secondary"
+          :disabled="busy"
+          @click="end"
+          >标记为已结束</Button
+        >
+      </p>
+      <p v-else-if="record?.dispatchPaused" class="external-note">
+        主会话停止后，这个子智能体的结果会在你下次给主会话发消息时送达。
+      </p>
+      <p v-if="run?.abandoned" class="external-note" data-abandoned>
+        {{
+          run.abandoned.by === 'user'
+            ? '已由你标记为已结束。'
+            : '主会话在你同意后将其标记为已结束。'
+        }}
+      </p>
+      <p class="external-note">
+        请返回主会话回答问题或继续安排任务。<Button
+          size="sm"
+          @click="returnRoot"
+          >返回主会话</Button
+        >
+      </p>
+      <p
+        v-if="
+          receipt &&
+          !hasFileDelivery &&
+          run?.phase === 'completed' &&
+          (!delivery?.acceptance || acceptance === 'passed')
+        "
+        class="external-note"
+        data-text-result
+      >
+        结果已返回，可在主会话继续安排任务。
+      </p>
+      <details
+        v-if="receipt && !hasFileDelivery && receipt.excluded.length"
+        class="external-note"
+      >
+        <summary>未收集的本地文件 · {{ receipt.excluded.length }} 项</summary>
+        <p v-for="item in receipt.excluded" :key="item.path">
+          {{ item.path }} · {{ item.reason }}
+        </p>
+      </details>
+      <section
+        v-if="
+          showChain && (!receipt || hasFileDelivery || delivery?.acceptance)
+        "
+        class="external-section"
+      >
+        <h3>文件交付与检查</h3>
+        <Button
+          v-if="!receipt && !active"
+          size="sm"
+          :disabled="busy"
+          @click="action(() => collectDelegation({ runId, sessionId }))"
+          >收集成果</Button
+        ><template v-if="receipt"
+          ><p class="external-id">成果 · {{ receipt.resultTreeDigest }}</p>
+          <ul class="external-files">
+            <li v-for="file in receipt.changedFiles" :key="file.path">
+              {{ file.status }} · {{ file.path
+              }}{{ file.binary ? ' · 二进制' : '' }}
+            </li>
+          </ul>
+          <details v-if="delivery?.patch">
+            <summary>查看差异</summary>
+            <pre class="external-code">{{ delivery.patch.content }}</pre>
+            <p v-if="delivery.patch.truncated" class="external-note">
+              差异已截断，请在成果目录查看完整改动。
+            </p>
+          </details>
+          <p
+            v-if="delivery?.patchError || delivery?.previewError"
+            class="external-error"
+          >
+            {{ delivery.patchError || delivery.previewError }}
+          </p>
+          <p v-if="receipt.excluded.length" class="external-note">
+            排除 {{ receipt.excluded.length }} 项：{{
+              receipt.excluded
+                .map((item) => `${item.path} (${item.reason})`)
+                .join('、')
+            }}
+          </p>
+          <p v-if="delivery?.acceptance?.reason" class="external-note">
+            {{ delivery.acceptance.reason }}
+          </p>
+          <ul
+            v-if="delivery?.acceptance?.evidence.length"
+            class="external-files"
+          >
+            <li
+              v-for="(evidence, index) in delivery.acceptance.evidence"
+              :key="index"
+            >
+              {{
+                evidence.source === 'host-verified'
+                  ? '宿主验证'
+                  : '子智能体自报'
+              }}
+              · 退出码 {{ evidence.exitCode ?? '未知' }} ·
+              {{ evidence.argv.join(' ') }}
+              <p class="external-id">
+                {{ evidence.cwd }} · {{ evidence.treeDigest }}
+              </p>
+            </li>
+          </ul>
+          <details v-if="hasFileDelivery || delivery?.acceptance">
+            <summary>独立验证当前成果</summary>
+            <div class="external-form">
+              <label
+                >验证要求<TextField
+                  v-model="criterion"
+                  :disabled="busy" /></label
+              ><label
+                >可执行文件<TextField
+                  v-model="command"
+                  :disabled="busy"
+                  monospace
+                  placeholder="例如 npm 或 /usr/bin/python3" /></label
+              ><label
+                >参数（JSON 数组）<TextField
+                  v-model="args"
+                  :disabled="busy"
+                  monospace
+                  spellcheck="false" /></label
+              ><Checkbox
+                v-model="requiresReview"
+                class="external-check"
+                :disabled="busy"
+                >需要人工审查</Checkbox
+              ><Checkbox
+                v-model="reviewed"
+                class="external-check"
+                :disabled="busy"
+                >我已检查上面的成果</Checkbox
+              ><Button
+                size="sm"
+                variant="secondary"
+                :disabled="busy || active"
+                @click="verify"
+                >{{ verifying ? '验证中…' : '运行宿主验证' }}</Button
+              >
+            </div>
+          </details>
+          <div v-if="hasFileDelivery" class="external-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              :disabled="busy || acceptance !== 'passed'"
+              @click="makePreview"
+              >生成整合预览</Button
+            >
+          </div>
+        </template>
+      </section>
+      <section v-if="preview" class="external-section">
+        <h3>
+          整合预览 ·
+          {{
+            preview.status === 'applied'
+              ? '已应用'
+              : preview.status === 'ready'
+                ? '待应用'
+                : '需要处理'
+          }}
+        </h3>
+        <p class="external-path">保留的预览目录 · {{ preview.cwd }}</p>
+        <p class="external-path">目标工作区 · {{ preview.target?.cwd }}</p>
+        <p class="external-id">
+          原 HEAD · {{ preview.target?.head ?? '无' }} · 原索引
+          {{ preview.target?.indexDigest ?? '无' }}
+        </p>
+        <p class="external-id">
+          预览版本 {{ preview.revision }} · 整合成果 {{ preview.treeDigest }}
+        </p>
+        <p v-if="preview.verificationId" class="external-id">
+          预览验证 · {{ preview.verificationId }}
+        </p>
+        <ul class="external-files">
+          <li v-for="operation in preview.operations" :key="operation.path">
+            {{ operation.path }}
+            <p class="external-id">
+              {{ operation.before?.sha256 ?? '新增' }} →
+              {{ operation.after?.sha256 ?? '删除' }}
+            </p>
+          </li>
+        </ul>
+
+        <p v-if="preview.reason" class="external-note">{{ preview.reason }}</p>
+        <ul class="external-files">
+          <li v-for="path in preview.conflicts" :key="path">
+            冲突 · {{ path }}
+          </li>
+        </ul>
+        <label
+          v-if="
+            record?.owner.requiredForGoal && !active && acceptance !== 'passed'
+          "
+          class="external-form"
+        >
+          明确接受本项失败的处置理由（填写后关闭会话，目标才能将其视为已处置）
+          <TextField
+            v-model="failureDisposition"
+            aria-label="必需任务失败处置理由"
+            :disabled="busy || !mutable"
+          />
+        </label>
+        <p v-if="run?.goalFailureDisposition" class="external-note">
+          用户已处置失败：{{ run.goalFailureDisposition.reason }}
+        </p>
+        <Button
+          v-if="canApply"
+          data-apply
+          size="sm"
+          variant="primary"
+          :disabled="busy"
+          @click="apply"
+          >应用此预览到原工作区</Button
+        >
+        <p class="external-note">
+          预览和双方成果目录会保留。应用前会重新检查原工作区、预览版本和验证证据。
+        </p>
+      </section>
+      <p v-if="record?.availability === 'closed'" class="external-note">
+        子智能体会话已关闭，成果目录保留。
+      </p>
+    </div>
+    <template #footer
+      ><Button
+        v-if="record?.availability !== 'closed'"
+        size="sm"
+        :disabled="busy"
+        @click="
+          action(() =>
+            closeDelegation({
+              id: delegationId,
+              sessionId,
+              ...(failureDisposition.trim()
+                ? { failureDisposition: failureDisposition.trim() }
+                : {}),
+            }),
+          )
+        "
+        >关闭子智能体会话</Button
+      ><Button size="sm" @click="emit('close')">返回聊天</Button></template
+    >
+  </Modal>
+  <TaskOutputDialog
+    v-if="showOutput"
+    :task-id="runId"
+    :session-id="sessionId"
+    :label="
+      agentTitle(record?.startSpec?.description, record?.backend ?? 'codex')
+    "
+    kind="external-agent"
+    :live="active"
+    @close="showOutput = false"
+  />
+</template>
+<style scoped>
+.external-agent-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 65vh;
+  overflow: auto;
+  min-width: 0;
+  color: rgb(var(--text-1));
+  font-size: var(--fs-xs);
+  text-wrap: pretty;
+}
+.external-facts,
+.external-status,
+.external-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.external-actions {
+  justify-content: flex-start;
+}
+.external-status {
+  padding: var(--space-2) var(--space-3);
+  background: rgb(var(--surface-base));
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-row);
+}
+.external-status [data-acceptance='passed'] {
+  color: rgb(var(--state-ok-label));
+}
+.external-section {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--stroke-2);
+}
+h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-s);
+}
+p {
+  margin: var(--space-1) 0;
+}
+.external-note {
+  color: rgb(var(--text-2));
+  overflow-wrap: anywhere;
+}
+.external-note [data-failure-next] {
+  display: block;
+  margin-top: var(--space-0-5);
+  color: rgb(var(--text-3));
+}
+.external-error {
+  color: rgb(var(--state-error-label));
+  overflow-wrap: anywhere;
+}
+.external-path,
+.external-id,
+.external-code {
+  font: var(--font-code-small);
+  overflow-wrap: anywhere;
+  color: rgb(var(--text-3));
+}
+.external-code {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}
+.external-files {
+  padding-left: var(--space-4);
+  overflow-wrap: anywhere;
+}
+.external-form {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+.external-form label:not(.external-check) {
+  display: grid;
+  gap: var(--space-1);
+}
+summary {
+  cursor: pointer;
+}
+</style>

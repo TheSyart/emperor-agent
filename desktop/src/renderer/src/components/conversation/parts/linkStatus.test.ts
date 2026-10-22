@@ -30,6 +30,70 @@ describe('linkStatusOf', () => {
 })
 
 describe('createLinkStatusSource', () => {
+  it('retains each real message identity when the same path occurs twice', async () => {
+    const sources: Array<string | undefined> = []
+    const source = createLinkStatusSource(async (href, messageId) => {
+      sources.push(messageId)
+      return file(href)
+    })
+    await source.status('a.ts', 'm1')
+    await source.status('a.ts', 'm2')
+    await source.status('a.ts', 'm1')
+    expect(sources).toEqual(['m1', 'm2'])
+  })
+  it('retries a pending image when another link changes the shared generation', async () => {
+    let release!: (value: string) => void
+    let reads = 0
+    const source = createLinkStatusSource(
+      async (href) => file(href),
+      async () => {
+        reads++
+        if (reads === 1)
+          return new Promise<string>((resolve) => {
+            release = resolve
+          })
+        return 'data:image/png;base64,new'
+      },
+    )
+    const pending = source.image('sun.png')
+    while (!release) await Promise.resolve()
+    source.record('other.md', file('other.md'))
+    release('data:image/png;base64,old')
+    expect(await pending).toBeNull()
+    expect(await source.image('sun.png')).toBe('data:image/png;base64,new')
+    expect(reads).toBe(2)
+  })
+  it('only reads owned project images, caches previews and drops pending work on session refresh', async () => {
+    const reads: string[] = []
+    let release!: (value: ResolvedLink) => void
+    const source = createLinkStatusSource(
+      async (href) =>
+        href === 'pending.png'
+          ? new Promise<ResolvedLink>((r) => {
+              release = r
+            })
+          : {
+              ...file(href),
+              kind: href === 'outside.png' ? 'external_file' : 'project_file',
+              relativePath: href,
+            },
+      async (reference) => {
+        if (reference.kind === 'external_file')
+          throw new Error('reference_image_outside_workspace')
+        reads.push(reference.tooltip)
+        return 'data:image/png;base64,c3Vu'
+      },
+    )
+    expect(await source.image('sun.png')).toBe('data:image/png;base64,c3Vu')
+    await source.image('sun.png')
+    expect(await source.image('outside.png')).toBeNull()
+    const pending = source.image('pending.png')
+    await Promise.resolve()
+    source.refresh()
+    release({ ...file('pending.png'), relativePath: 'pending.png' })
+    expect(await pending).toBeNull()
+    expect(reads).toEqual(['sun.png'])
+  })
   it('resolves each link once until refreshed', async () => {
     const asked: string[] = []
     const source = createLinkStatusSource(async (href) => {

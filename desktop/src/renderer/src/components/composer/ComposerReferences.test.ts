@@ -10,7 +10,6 @@ import { Slice } from 'prosemirror-model'
 import type { SlashPaletteItem } from '../../commands'
 import type { ChatSendPayload } from '../../types'
 import Composer from './ComposerCard.vue'
-import { COMPOSER_INPUT_FLAG } from '../chat/composerController'
 import {
   composerView,
   pressKey,
@@ -26,7 +25,6 @@ afterEach(() => {
   app = null
   container?.remove()
   container = null
-  localStorage.removeItem(COMPOSER_INPUT_FLAG)
 })
 
 function skill(name: string, title: string): SlashPaletteItem {
@@ -309,16 +307,7 @@ describe('rich composer references', () => {
     await nextTick()
     expect(onStartGoal).not.toHaveBeenCalled()
     expect(onError).toHaveBeenCalledWith(
-      'Goal Outcome 暂仅支持纯文字；请先移除附件或 Skill 引用。',
+      '目标描述暂仅支持纯文字；请先移除附件或 Skill 引用。',
     )
-  })
-
-  it('brings the old text box back behind the fallback switch', async () => {
-    localStorage.setItem(COMPOSER_INPUT_FLAG, 'textarea')
-    const { root } = mount()
-    expect(
-      root.querySelector('textarea[aria-label="消息输入框"]'),
-    ).not.toBeNull()
-    expect(root.querySelector('.composer-editor')).toBeNull()
   })
 })

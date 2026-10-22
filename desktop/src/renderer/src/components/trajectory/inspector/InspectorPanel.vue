@@ -10,6 +10,7 @@
  * Props: controller.
  * Emits: open-subagent(sessionId), collapse.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { PanelRightClose } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { TrajectoryDetailTab } from '../../../trajectory/model'
@@ -73,7 +74,7 @@ const tabItems = computed(() =>
         <span class="heading">详情</span>
         <template v-if="request !== undefined">
           <span class="request-dot" aria-hidden="true" />
-          <span class="request-name">Request #{{ request.number ?? '—' }}</span>
+          <span class="request-name">请求 #{{ request.number ?? '—' }}</span>
           <span class="location">{{ request.location }}</span>
         </template>
         <template v-else-if="record !== undefined">
@@ -112,7 +113,7 @@ const tabItems = computed(() =>
         />
       </div>
     </template>
-    <p v-else class="empty">在轨迹中选择一条记录查看详情</p>
+    <EmptyState v-else title="在轨迹中选择一条记录查看详情" />
   </aside>
 </template>
 
@@ -123,8 +124,8 @@ const tabItems = computed(() =>
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-1));
 }
 
 .header {
@@ -136,7 +137,7 @@ const tabItems = computed(() =>
   box-sizing: border-box;
   height: 42px;
   padding: 0 var(--space-2) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .title {
@@ -148,10 +149,10 @@ const tabItems = computed(() =>
 
 .heading {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .request-dot {
@@ -159,18 +160,18 @@ const tabItems = computed(() =>
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .request-name {
   flex: none;
-  font: 500 12px / 16px var(--font-mono);
+  font: var(--weight-medium) 12px / 16px var(--font-mono);
 }
 
 .location {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 11px / 16px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -179,7 +180,7 @@ const tabItems = computed(() =>
 .tabs {
   flex: none;
   padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -190,13 +191,5 @@ const tabItems = computed(() =>
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-6) var(--space-4);
-  color: rgb(var(--label-tertiary));
-  font: var(--font-xs);
-  text-align: center;
 }
 </style>

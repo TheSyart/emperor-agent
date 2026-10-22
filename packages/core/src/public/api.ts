@@ -4,10 +4,11 @@ export { coreOperationKeys, invokeCoreOperation } from '../api/operations'
 export type {
   CoreIpcErrorEnvelope,
   CoreOperationArgs,
+  CoreOperationContext,
   CoreOperationKey,
   CoreOperationResult,
 } from '../api/operations'
-export { CoreUnavailableError } from '../runtime/lifecycle'
+export type { ViewScope } from '../harness/host/scope'
 export { EnvironmentError } from '../environment/errors'
 export type {
   CommandCompletion,
@@ -16,6 +17,42 @@ export type {
   CommandSurface,
 } from '../commands/types'
 export type { MemoryScope } from '../memory/patch'
+export type {
+  ModelFacts,
+  ModelFactsSource,
+  ModelKind,
+  ReasoningControl,
+} from '../model/metadata/lookup'
+export type {
+  ConnectionFix,
+  DiscoveredFactField,
+  DiscoveredModel,
+  DiscoveryErrorCode,
+  ParserId,
+  ProbeErrorCode,
+  ProbeResult,
+} from '../model/discovery'
+export type {
+  ModelConnectionInput,
+  ModelDefaultsInput,
+  ModelDiscoveryInput,
+  ModelDiscoveryPayload,
+  ModelEntriesSaveInput,
+  ModelEntryLifecycle,
+  ModelEntryReplaceInput,
+  ModelMetadataChange,
+  ModelMetadataDiff,
+  ModelMetadataRefreshInput,
+  RejectedModelEntryPayload,
+} from '../api/services/model-service'
+export type { ModelTestRecord } from '../api/services/model-test-log'
+export type {
+  ModelEntryDetected,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  ModelMetadataField,
+} from '../config/model-config'
 export type {
   CompactionDecision,
   DiscardedItem,
@@ -55,6 +92,12 @@ export type {
   WorkspaceFileReadResult,
 } from '../workspace/files'
 export type { WorkspaceSnapshot } from '../workspace/snapshot'
+export type {
+  FilePreviewInput,
+  FilePreviewResult,
+  FileStatInput,
+  FileStatResult,
+} from '../workspace/file-preview'
 export type { TerminalEvent, TerminalSummary } from '../workspace/terminal'
 export type {
   CoreHookAuditRecordPayload,
@@ -94,3 +137,16 @@ export type {
   SessionLineage,
   SubagentChildView,
 } from '../harness/host/session-views'
+
+export type { ReferencePreview } from '../workspace/reference-preview'
+export type { ReferenceSiteIcon } from '../workspace/reference-site-icon'
+export type { CoreExecutorService } from '../api/services/executor-service'
+export type { CoreDelegationService } from '../api/services/delegation-service'
+
+export {
+  agentTitle,
+  agentSourceLabel,
+  agentPhaseLabel,
+  delegationNeedsExit,
+} from '../runtime/agent-view'
+export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

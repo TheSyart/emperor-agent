@@ -13,8 +13,22 @@ files:
   - '!out/native/**/*'
   - package.json
   - '!node_modules{,/**/*}'
+  # The Agent SDK's JavaScript drives the user's own installed, unmodified
+  # claude (AGT-12). Emperor ships no Claude Code binary: after-pack refuses
+  # a package that carries one.
+  - node_modules/@anthropic-ai/claude-agent-sdk/package.json
+  - node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+  - node_modules/@anthropic-ai/claude-agent-sdk/manifest*.json
   - node_modules/typescript/package.json
   - node_modules/typescript/lib/typescript.js
+  # web_fetch's HTML → Markdown (Core network/html-markdown.ts): the main
+  # bundle imports turndown at load, and turndown requires its DOM. Node
+  # resolves both from app.asar; after-pack refuses a main bundle that imports
+  # a package the asar does not ship (REL-05).
+  - node_modules/turndown/package.json
+  - node_modules/turndown/lib/turndown.cjs.js
+  - node_modules/@mixmark-io/domino/package.json
+  - node_modules/@mixmark-io/domino/lib/**/*.js
   - node_modules/node-pty/package.json
   - node_modules/node-pty/lib/**/*.js
   - '!node_modules/node-pty/lib/**/*.test.js'
@@ -73,6 +87,8 @@ mac:
     NSMicrophoneUsageDescription: Emperor 只在你向聊天输入框听写时使用麦克风；声音只在这台 Mac 上处理，不会保存。
     NSSpeechRecognitionUsageDescription: Emperor 在这台 Mac 上把你说的话识别成文字，填进聊天输入框；不会发送到网络。
   extraResources:
+    - from: ../packages/core/native/build/darwin-${arch}/delegation-scan
+      to: native/delegation-scan
     - from: out/native/credential-auth
       to: native/credential-auth
     # The Chrome/Edge extension; Settings copies it into
@@ -90,6 +106,23 @@ mac:
   category: public.app-category.productivity
   icon: build/icon.png
   artifactName: Emperor-Agent-${version}-mac-${arch}.${ext}
+
+# The install window (UI-S12): background.tiff holds the 660×400 art and its
+# @2x; the app and the Applications link sit level with the gold arrow.
+dmg:
+  background: build/background.tiff
+  iconSize: 96
+  window:
+    width: 660
+    height: 400
+  contents:
+    - x: 165
+      y: 185
+      type: file
+    - x: 495
+      y: 185
+      type: link
+      path: /Applications
 
 win:
   target:

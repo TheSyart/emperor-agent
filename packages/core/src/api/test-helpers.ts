@@ -5,7 +5,8 @@
 import { assertRequestInvariant } from '../harness/agent/invariant'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fakeClaude } from '../harness/delegation/testing'
 import { LlmClient } from '../llm/client'
 import type { RouteSpec } from '../llm/route'
 import type { GenerateOptions, StreamChunk } from '../llm/types'
@@ -72,6 +73,8 @@ export async function makeApi(
     replies?: ScriptedReply[]
     root?: string
     stateRoot?: string
+    /** Overrides of the one scripted model route (`test-route`). */
+    route?: Partial<RouteSpec>
     extra?: Partial<CoreApiCreateOptions>
   } = {},
 ): Promise<ApiFixture> {
@@ -85,7 +88,10 @@ export async function makeApi(
       assertRequestInvariant(request, (id) => ref.api?.host.sessionLog(id))
     },
   })
-  llm.setRoutes([testRoute()], 'test-route')
+  llm.setRoutes(
+    [testRoute({ ...options.route, id: 'test-route' })],
+    'test-route',
+  )
   const events: Array<Record<string, unknown>> = []
   const api = await CoreApi.create({
     root,
@@ -99,6 +105,20 @@ export async function makeApi(
     eventSink: (event) => {
       events.push(event)
     },
+    // External executors look for sign-ins in a temporary home, never the
+    // user's ~/.claude or ~/.codex, and never run the login shell. A fake
+    // claude comes first on PATH: tests never run the real one (AGT-12),
+    // so 登录 Claude Code runs the fake's `auth login` (FIX-11).
+    executorHome:
+      options.extra?.executorHome === undefined
+        ? {
+            home: join(root, 'executor-home'),
+            environment: {
+              PATH: `${dirname(fakeClaude(join(root, 'fake-claude-bin')))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+            },
+            loginShell: { read: async () => ({}) },
+          }
+        : options.extra.executorHome,
     ...options.extra,
   })
   ref.api = api

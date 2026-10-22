@@ -8,6 +8,14 @@ import {
   type SettingsHeaderHost,
 } from '../settingsHeader'
 import SignInProfilesPage from './SignInProfilesPage.vue'
+import { answerConfirmsForTest } from '../../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../../api/http', () => ({ core }))
@@ -61,6 +69,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   app = null
   container?.remove()
@@ -122,7 +131,7 @@ describe('登录状态', () => {
       name: '公司',
     })
 
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    const confirm = mockConfirm().mockReturnValueOnce(false)
     button(root, '清空').click()
     await settle()
     expect(core).not.toHaveBeenCalledWith(
@@ -155,16 +164,15 @@ describe('登录状态', () => {
       document.body.querySelector('.profile-form [role="alert"]')?.textContent,
     ).toBe('名称已存在')
     expect(
-      document.body.querySelector<HTMLElement>(
-        '.profile-form .ds-settings-notice',
-      )?.dataset.tone,
+      document.body.querySelector<HTMLElement>('.profile-form .ds-notice')
+        ?.dataset.tone,
     ).toBe('error')
   })
 
   it('says why the profiles could not be read, in a notice at the top', async () => {
     core.mockRejectedValue(new Error('电脑操作服务没有响应'))
     const root = await mount()
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(notice?.textContent).toContain('电脑操作服务没有响应')
     expect(

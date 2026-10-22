@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { PERMISSION_PRESET_VALUES } from '../../commands/builtins'
-import type { CommandExecutionContext } from '../../commands/platform'
+import type {
+  CommandDraftSession,
+  CommandExecutionContext,
+} from '../../commands/platform'
 import type { MessageReference } from '../../harness/host/message-references'
 import type { ParsedCommandInput } from '../../commands/parser'
 import type { SessionTransitionService } from '../../commands/session-transition'
@@ -62,6 +65,8 @@ export interface CommandApplicationServiceDeps {
   sessionTransitions: Pick<SessionTransitionService, 'clear'>
   getSession(sessionId: string): { id: string } | null
   skillsForSession(sessionId: string): SkillInfoPayload[]
+  /** The Skills a start-page draft's session will see (no session yet). */
+  skillsForDraft(draft: CommandDraftSession): SkillInfoPayload[]
   sessionBusy(sessionId: string): boolean
   /** `host.compactNow(sessionId)`. */
   compact(
@@ -69,8 +74,13 @@ export interface CommandApplicationServiceDeps {
   ): Promise<{ compacted: boolean; shadowedTokenCount?: number }>
   /** `host.stop(sessionId)`: true when a running turn was cancelled. */
   stop(sessionId: string): boolean
-  activateModel(entryId: string): Promise<unknown>
-  setReasoningEffort(entryId: string, effort: string): Promise<unknown>
+  /** Switch the model from a command typed in `sessionId` (its mutation guard). */
+  activateModel(entryId: string, sessionId: string): Promise<unknown>
+  setReasoningEffort(
+    entryId: string,
+    effort: string,
+    sessionId: string,
+  ): Promise<unknown>
   /** `host.setPermissionPreset(sessionId, preset)`; returns the control payload. */
   setPermissionPreset(
     sessionId: string,
@@ -104,6 +114,10 @@ export class CoreCommandApplicationService {
 
   skillsForSession(sessionId: string): SkillInfoPayload[] {
     return this.deps.skillsForSession(sessionId)
+  }
+
+  skillsForDraft(draft: CommandDraftSession): SkillInfoPayload[] {
+    return this.deps.skillsForDraft(draft)
   }
 
   sessionBusy(sessionId: string): boolean {
@@ -197,7 +211,7 @@ export class CoreCommandApplicationService {
         (item) => item.entryId === tail || item.modelId === tail,
       )
       if (!model) return rejected('model_not_found', `找不到模型：${tail}`)
-      await this.deps.activateModel(model.entryId)
+      await this.deps.activateModel(model.entryId, sessionId)
       return completed(
         context,
         'model_activated',
@@ -208,7 +222,11 @@ export class CoreCommandApplicationService {
       const config = await this.deps.models.getConfig()
       if (!config.current)
         return rejected('model_unavailable', '当前没有可用模型。')
-      await this.deps.setReasoningEffort(config.current.entryId, tail)
+      await this.deps.setReasoningEffort(
+        config.current.entryId,
+        tail,
+        sessionId,
+      )
       return completed(
         context,
         'reasoning_updated',
@@ -267,7 +285,7 @@ export class CoreCommandApplicationService {
       return completed(
         context,
         'skill_forked',
-        `Skill ${binding.name} 已在子代理中运行。`,
+        `Skill ${binding.name} 已在子智能体中运行。`,
         { subagentId, skill: binding.name },
       )
     }
@@ -388,13 +406,13 @@ function planMessage(
   active: boolean,
 ): string {
   if (outcome === 'noop')
-    return active ? '已处于 Plan 模式。' : '当前未处于 Plan 模式。'
+    return active ? '已处于计划模式。' : '当前未处于计划模式。'
   if (outcome === 'queued')
     return active
-      ? 'Plan 模式将在当前步骤结束后开启。'
-      : 'Plan 模式将在当前步骤结束后关闭。'
-  if (outcome === 'cancelled') return '已撤销尚未生效的 Plan 模式切换。'
-  return active ? 'Plan 模式已开启。' : 'Plan 模式已关闭。'
+      ? '计划模式将在当前步骤结束后开启。'
+      : '计划模式将在当前步骤结束后关闭。'
+  if (outcome === 'cancelled') return '已撤销尚未生效的计划模式切换。'
+  return active ? '计划模式已开启。' : '计划模式已关闭。'
 }
 
 function rejected(code: string, message: string): CommandInvocationResult {

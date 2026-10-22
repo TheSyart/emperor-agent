@@ -11,11 +11,30 @@ describe('preload core IPC bridge (MIG-IPC-002)', () => {
       },
     })
 
+    await bridge.invokeCore('delegations.get', { id: 'dlg-one' })
+    await bridge.invokeCore('executors.list')
+    calls.length = 0
     await expect(
       bridge.invokeCore('sessions.create', { title: 'A' }),
     ).resolves.toEqual({ ok: true })
+    // Every call carries the session the window shows (KRN-01).
     expect(calls).toEqual([
-      { channel: 'emperor:core:sessions:create', args: [{ title: 'A' }] },
+      {
+        channel: 'emperor:core:sessions:create',
+        args: [
+          { emperorCoreCall: 1, view: { sessionId: null } },
+          { title: 'A' },
+        ],
+      },
+    ])
+    calls.length = 0
+    bridge.setViewingSession('s1')
+    await bridge.invokeCore('plugins.list')
+    bridge.setViewingSession(null)
+    await bridge.invokeCore('plugins.list')
+    expect(calls.map((call) => call.args)).toEqual([
+      [{ emperorCoreCall: 1, view: { sessionId: 's1' } }],
+      [{ emperorCoreCall: 1, view: { sessionId: null } }],
     ])
   })
 })
@@ -34,6 +53,21 @@ function _assertCoreBridgeTypes(): void {
   // @ts-expect-error desktopPet.setEnabled requires a boolean
   void typedBridge.invokeCore('desktopPet.setEnabled', 'true')
 
+  void typedBridge.invokeCore('delegations.send', {
+    id: 'dlg-one',
+    messageId: 'dgm-one',
+    text: 'continue',
+    delivery: 'queue',
+  })
+  void typedBridge.invokeCore('delegations.interrupt', {
+    id: 'dlg-one',
+    runId: 'dgr-one',
+  })
+  void typedBridge.invokeCore('executors.probe', {
+    profileId: 'codex-default',
+    // @ts-expect-error executor startup environment is not exposed
+    env: { KEY: 'secret' },
+  })
   void typedBridge.invokeCore('environment.getStatus', { forceRefresh: true })
   void typedBridge.invokeCore('environment.createInstallPlan', {
     toolIds: ['git', 'node'],

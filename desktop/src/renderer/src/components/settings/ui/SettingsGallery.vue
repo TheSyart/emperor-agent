@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
  * SettingsGallery — dev-only showcase of the settings primitives inside a
- * mock settings panel (188px nav + 54px header + 564px options column), so
+ * mock settings panel (200px nav + 54px header + 632px options column), so
  * they are judged at their real width. Mounted by main.ts on
  * `?settings-gallery`; captured by tests/visual/settings-gallery.spec.ts in
  * light and dark.
  */
 import { ref } from 'vue'
 import Button from '../../ui/Button.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
+import IconButton from '../../ui/IconButton.vue'
 import {
   DsClose,
   DsCode,
@@ -32,12 +33,12 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsHero,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
   SettingsTable,
   SettingsTableRow,
-  StatusBadge,
+  Badge,
   Switch,
   TextArea,
   TextField,
@@ -166,40 +167,44 @@ const facts = [
 <template>
   <div class="gallery" data-testid="settings-gallery">
     <div class="panel">
-      <SettingsNav active="hooks" title-id="gallery-title" @select="() => {}" />
+      <SettingsNav
+        active="advanced"
+        title-id="gallery-title"
+        @select="() => {}"
+      />
       <div class="content">
         <div class="header">
           <h2 class="title">组件库</h2>
           <div class="header-actions">
             <SettingsHeaderBar :actions="header.actions.value" />
-            <button type="button" class="close" aria-label="关闭设置">
+            <IconButton class="close" label="关闭设置" :tooltip="false">
               <DsClose :size="14" />
-            </button>
+            </IconButton>
           </div>
         </div>
         <div class="options">
           <SettingsSection
-            intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按 dsh 设置面板，内容区 564px。"
+            intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按设置面板，内容区 632px。"
           >
-            <SettingsNotice
+            <Notice
               tone="warn"
               title="还缺 2 项系统权限"
-              description="SettingsNotice：只在出问题时出现在页面最上面，写明缺什么、怎么修。"
+              description="Notice：只在出问题时出现在页面最上面，写明缺什么、怎么修。"
             >
               <template #actions>
                 <Button size="sm" variant="primary">请求权限</Button>
-                <Button size="sm" variant="outline">打开系统设置</Button>
+                <Button size="sm" variant="secondary">打开系统设置</Button>
               </template>
-            </SettingsNotice>
+            </Notice>
             <SettingsHero
               title="Chrome 和 Edge"
               description="SettingsHero：只用于讲一件事的二级页"
             >
               <template #badge>
-                <StatusBadge tone="ok" dot>已连接 1 个浏览器</StatusBadge>
+                <Badge tone="ok" variant="dot-label">已连接 1 个浏览器</Badge>
               </template>
               <template #actions>
-                <Button size="sm" variant="outline">重新安装扩展程序</Button>
+                <Button size="sm" variant="secondary">重新安装扩展程序</Button>
               </template>
             </SettingsHero>
             <SettingsGroup
@@ -215,7 +220,7 @@ const facts = [
               </SettingsRow>
               <SettingsRow title="失败回退" label-for="gallery-fallback">
                 <template #badge>
-                  <StatusBadge tone="accent">实验</StatusBadge>
+                  <Badge tone="accent">实验</Badge>
                 </template>
                 <Switch id="gallery-fallback" v-model="fallback" />
               </SettingsRow>
@@ -259,7 +264,7 @@ const facts = [
                 description="eyebrow 插槽：标题上方的风险标签"
               >
                 <template #eyebrow>
-                  <DsWarning :size="13" aria-hidden="true" />风险升高
+                  <DsWarning :size="14" aria-hidden="true" />风险升高
                 </template>
                 <Switch v-model="fullAccess" aria-label="启用完整访问" />
               </SettingsRow>
@@ -350,10 +355,10 @@ const facts = [
                 description="热点聚合 · 12 个工具"
                 expandable
               >
-                <template #leading><StateDot state="ok" /></template>
+                <template #leading><Dot state="ok" /></template>
                 <template #meta>
-                  <StatusBadge mono>http</StatusBadge>
-                  <StatusBadge tone="ok" dot>已连接</StatusBadge>
+                  <Badge mono>http</Badge>
+                  <Badge tone="ok" variant="dot-label">已连接</Badge>
                 </template>
                 <template #actions>
                   <Switch :model-value="true" aria-label="启用 aihot" />
@@ -361,7 +366,7 @@ const facts = [
                 <DefinitionList :items="facts" />
                 <template #footer>
                   <Button size="sm" variant="danger">删除</Button>
-                  <Button size="sm" variant="outline">取消</Button>
+                  <Button size="sm" variant="secondary">取消</Button>
                   <Button size="sm" variant="primary">保存</Button>
                 </template>
               </SettingsCard>
@@ -371,10 +376,10 @@ const facts = [
                 description="npx exa-mcp-server"
                 expandable
               >
-                <template #leading><StateDot state="error" /></template>
+                <template #leading><Dot state="error" /></template>
                 <template #meta>
-                  <StatusBadge mono>stdio</StatusBadge>
-                  <StatusBadge tone="error" dot>启动失败</StatusBadge>
+                  <Badge mono>stdio</Badge>
+                  <Badge tone="error" variant="dot-label">启动失败</Badge>
                 </template>
                 <template #actions>
                   <Switch :model-value="false" aria-label="启用 exa" />
@@ -387,7 +392,7 @@ const facts = [
                 variant="outline"
               >
                 <template #actions>
-                  <Button size="sm" variant="outline">编辑</Button>
+                  <Button size="sm" variant="secondary">编辑</Button>
                 </template>
               </SettingsCard>
               <SettingsCard variant="filled">
@@ -395,7 +400,7 @@ const facts = [
                   <TextField v-model="name" />
                 </Field>
                 <template #footer>
-                  <Button size="sm" variant="outline">取消</Button>
+                  <Button size="sm" variant="secondary">取消</Button>
                   <Button size="sm" variant="primary">添加</Button>
                 </template>
               </SettingsCard>
@@ -408,25 +413,27 @@ const facts = [
               <EmptyState
                 title="还没有 MCP 服务器"
                 description="粘贴 Claude / Cursor / VS Code 的配置，或手动填写 URL 与命令。"
+                framed
               >
-                <Button size="sm" variant="outline">粘贴 JSON</Button>
+                <Button size="sm" variant="secondary">粘贴 JSON</Button>
                 <Button size="sm" variant="primary">添加服务器</Button>
               </EmptyState>
               <EmptyState
                 title="暂无归档对话。"
                 description="compact 变体：列表内的单行空状态"
-                compact
+                variant="inline"
+                framed
               />
             </SettingsGroup>
 
             <SettingsGroup title="状态与指标" variant="stack">
               <div class="badges">
-                <StatusBadge tone="ok" dot>已连接</StatusBadge>
-                <StatusBadge tone="warn" dot>版本不匹配</StatusBadge>
-                <StatusBadge tone="error" dot>启动失败</StatusBadge>
-                <StatusBadge tone="neutral">已禁用</StatusBadge>
-                <StatusBadge tone="accent">推荐</StatusBadge>
-                <StatusBadge mono>v1.29.0</StatusBadge>
+                <Badge tone="ok" variant="dot-label">已连接</Badge>
+                <Badge tone="warn" variant="dot-label">版本不匹配</Badge>
+                <Badge tone="error" variant="dot-label">启动失败</Badge>
+                <Badge tone="neutral">已禁用</Badge>
+                <Badge tone="accent">推荐</Badge>
+                <Badge mono>v1.29.0</Badge>
               </div>
               <div class="metrics">
                 <Metric label="总 Token" value="1.28M" hint="近 30 天" />
@@ -481,19 +488,19 @@ const facts = [
   gap: var(--space-6);
   min-height: 100vh;
   padding: var(--space-6);
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
 .panel {
   container: settings-panel / inline-size;
   display: flex;
-  width: 800px;
+  width: 880px;
   max-width: 100%;
   overflow: hidden;
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -518,25 +525,13 @@ const facts = [
   padding-left: var(--space-3-5);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.close {
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-primary));
 }
 
 .options {
@@ -565,7 +560,7 @@ const facts = [
   width: 360px;
   padding: 0 var(--space-6) var(--space-3);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -573,6 +568,6 @@ const facts = [
   padding-top: var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

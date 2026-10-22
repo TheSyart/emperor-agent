@@ -83,7 +83,7 @@ function activate() {
   background: transparent;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
@@ -96,7 +96,7 @@ function activate() {
 .item:hover:not(:disabled),
 .item:focus-visible {
   outline: none;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .item:disabled {
@@ -106,11 +106,11 @@ function activate() {
 
 .item[data-danger],
 .item[data-danger] .icon {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .item[data-danger]:hover:not(:disabled) {
-  background: var(--interactive-bg-hover-danger);
+  background: var(--surface-hover-danger);
 }
 
 .icon {
@@ -120,7 +120,7 @@ function activate() {
   justify-content: center;
   width: var(--space-4);
   height: var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .text {
@@ -139,24 +139,24 @@ function activate() {
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .check {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .label {
   padding: var(--space-2) var(--space-2-5);
   font-size: var(--fs-xxs);
   line-height: var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .separator {
   height: 1px;
   margin: var(--space-1) 2px;
-  background: var(--border-l1);
+  background: var(--stroke-1);
 }
 </style>

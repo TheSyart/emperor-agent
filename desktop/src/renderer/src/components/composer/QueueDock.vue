@@ -3,8 +3,11 @@
  * QueueDock — dsh queue panel attached to the top of the composer card
  * (radius 12 12 0 0, tip fill, square bottom tucked under the card). A 36px
  * header counts the queued messages; each 36px row previews one message with
- * interject / edit / delete actions.
+ * interject / edit / delete actions. A message the agent did not run (the
+ * turn before it failed or was stopped, or the app restarted) waits as
+ * 「待发送」 with send / edit / discard actions instead (KRN-02).
  */
+import IconButton from '../ui/IconButton.vue'
 import { computed, ref } from 'vue'
 import type { QueuedPromptItem } from '../../types'
 import { DsChevronDown, DsEdit, DsQueue, DsSend, DsTrash } from '../icons/ds'
@@ -16,7 +19,25 @@ const emit = defineEmits<{
   edit: [item: QueuedPromptItem]
   interject: [item: QueuedPromptItem]
   cancel: [item: QueuedPromptItem]
+  send: [item: QueuedPromptItem]
 }>()
+
+const HOLD_LABELS: Record<
+  NonNullable<QueuedPromptItem['holdReason']>,
+  string
+> = {
+  'previous-turn-failed': '待发送 · 上一轮失败',
+  'previous-turn-stopped': '待发送 · 上一轮已停止',
+  interrupted: '待发送 · 应用重启前未发出',
+}
+
+function held(item: QueuedPromptItem): boolean {
+  return item.status === 'failed-previous'
+}
+
+function holdLabel(item: QueuedPromptItem): string {
+  return item.holdReason ? HOLD_LABELS[item.holdReason] : '待发送'
+}
 
 const expanded = ref(true)
 const ordered = computed(() =>
@@ -29,7 +50,10 @@ const headline = computed(() => {
   const interjecting = ordered.value.some(
     (item) => item.status === 'interjecting',
   )
-  return interjecting ? `${count} 条消息准备插入` : `${count} 条消息排队中`
+  if (interjecting) return `${count} 条消息准备插入`
+  return ordered.value.every(held)
+    ? `${count} 条消息待发送`
+    : `${count} 条消息排队中`
 })
 </script>
 
@@ -57,6 +81,9 @@ const headline = computed(() => {
             <span v-if="item.status === 'interjecting'" class="state"
               >准备插入 ·</span
             >
+            <span v-else-if="held(item)" class="state held"
+              >{{ holdLabel(item) }} ·</span
+            >
             <ReferencedText
               v-if="item.content"
               :text="item.content"
@@ -64,39 +91,51 @@ const headline = computed(() => {
             />
             <template v-else>（附件消息）</template>
           </span>
-          <span class="actions">
-            <button
-              type="button"
-              class="action"
-              :disabled="!item.supportsInterjection"
-              :title="
+          <span v-if="held(item)" class="actions">
+            <IconButton
+              label="发送排队消息"
+              tooltip="发送"
+              size="xs"
+              @click="emit('send', item)"
+            >
+              <DsSend :size="14" />
+            </IconButton>
+            <IconButton label="编辑消息" size="xs" @click="emit('edit', item)">
+              <DsEdit :size="14" />
+            </IconButton>
+            <IconButton
+              label="丢弃排队消息"
+              tooltip="丢弃"
+              size="xs"
+              @click="emit('cancel', item)"
+            >
+              <DsTrash :size="14" />
+            </IconButton>
+          </span>
+          <span v-else class="actions">
+            <IconButton
+              label="插入当前执行"
+              :tooltip="
                 item.supportsInterjection
                   ? '插入当前执行'
                   : '包含附件或 Skill 的消息不支持插入当前执行'
               "
-              aria-label="插入当前执行"
+              size="xs"
+              :disabled="!item.supportsInterjection"
               @click="emit('interject', item)"
             >
               <DsSend :size="14" />
-            </button>
-            <button
-              type="button"
-              class="action"
-              title="编辑消息"
-              aria-label="编辑消息"
-              @click="emit('edit', item)"
-            >
+            </IconButton>
+            <IconButton label="编辑消息" size="xs" @click="emit('edit', item)">
               <DsEdit :size="14" />
-            </button>
-            <button
-              type="button"
-              class="action"
-              title="删除排队消息"
-              aria-label="删除排队消息"
+            </IconButton>
+            <IconButton
+              label="删除排队消息"
+              size="xs"
               @click="emit('cancel', item)"
             >
               <DsTrash :size="14" />
-            </button>
+            </IconButton>
           </span>
         </li>
       </ul>
@@ -127,7 +166,7 @@ const headline = computed(() => {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-bottom: none;
   border-radius: inherit;
   pointer-events: none;
@@ -144,20 +183,19 @@ const headline = computed(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
 
-.header:focus-visible,
-.action:focus-visible {
-  outline: 2px solid rgb(var(--label-tertiary));
+.header:focus-visible {
+  outline: 2px solid rgb(var(--text-3));
   outline-offset: -2px;
 }
 
 .lead {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .count {
@@ -165,14 +203,14 @@ const headline = computed(() => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transform: rotate(180deg);
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .chevron[data-open] {
@@ -196,7 +234,7 @@ const headline = computed(() => {
   height: 36px;
   padding: var(--space-1) calc(var(--space-1) + 1px) var(--space-1)
     var(--space-3);
-  box-shadow: inset 0 1px 0 var(--border-l1);
+  box-shadow: inset 0 1px 0 var(--stroke-1);
 }
 
 .preview {
@@ -205,13 +243,19 @@ const headline = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .state {
-  color: rgb(var(--accent-strong));
+  margin-right: var(--space-1);
+  color: rgb(var(--text-link));
+}
+
+.state.held {
+  color: rgb(var(--text-2));
+  font-weight: var(--weight-medium);
 }
 
 .actions {
@@ -219,28 +263,5 @@ const headline = computed(() => {
   flex: none;
   align-items: center;
   gap: var(--space-0-5);
-}
-
-.action {
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.action:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
-}
-
-.action:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 </style>

@@ -118,6 +118,19 @@ describe('planSummary', () => {
     })
   })
 
+  it('reports a dismissed review as not approved', () => {
+    const log = start()
+    presented(log, 'call_plan')
+    log.result(
+      1,
+      1,
+      'call_plan',
+      'The user dismissed the plan review to reply in their own words; plan mode remains active.',
+      { meta: { approved: false, dismissed: true, title: null } },
+    )
+    expect(summaryOf(log)).toMatchObject({ status: 'stopped' })
+  })
+
   it('falls back to an untitled plan', () => {
     const log = start()
     presented(log, 'call_plan', 'no heading here')

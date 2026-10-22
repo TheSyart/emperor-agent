@@ -16,6 +16,8 @@ export interface PtyHandle {
   ): () => void
   emitData?(data: string): void
   emitExit?(event: { exitCode: number; signal?: number }): void
+  /** Name of the process in the foreground (node-pty `process`), if known. */
+  foregroundProcess?(): string | undefined
 }
 
 export interface PtyHost {
@@ -53,9 +55,14 @@ export interface TerminalSummary {
   createdAt: number
   exited: boolean
   exitCode: number | null
+  /**
+   * A program other than the shell is in the foreground (closing the tab
+   * would end it); false when the host cannot tell (FIX-01).
+   */
+  busy: boolean
 }
 
-interface TerminalRecord extends TerminalSummary {
+interface TerminalRecord extends Omit<TerminalSummary, 'busy'> {
   pid: number
   cwd: string
   handle: PtyHandle
@@ -334,7 +341,22 @@ function stripTerminal(record: TerminalRecord): TerminalSummary {
     createdAt: record.createdAt,
     exited: record.exited,
     exitCode: record.exitCode,
+    busy: terminalBusy(record),
   }
+}
+
+function terminalBusy(record: TerminalRecord): boolean {
+  if (record.exited) return false
+  let name: string | undefined
+  try {
+    name = record.handle.foregroundProcess?.()
+  } catch {
+    return false
+  }
+  if (!name) return false
+  // A login shell shows up as -zsh.
+  const program = name.replace(/^-/, '').split('/').pop()
+  return Boolean(program) && program !== record.title
 }
 
 function clampDimension(value: number, fallback: number): number {

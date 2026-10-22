@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Skill 作者和桌面端开发者<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/commands/`、`packages/core/src/api/services/command-application-service.ts`、CoreApi `commands.*`、`desktop/src/renderer/src/composables/useSlashCommands.ts`
+> 最后核验：2026-10-22（对照 `5ec88219`）<br>
+> 事实源：`packages/core/src/commands/`、`packages/core/src/api/services/command-application-service.ts`、CoreApi `commands.*`、`desktop/src/renderer/src/composables/useSlashCommands.ts`、`desktop/src/renderer/src/commandCatalog.ts`
 
 Emperor 的斜杠命令由 Core 注册、解析、校验和调度。Renderer 只展示候选、补全参数、打开界面并投影结果；它不能提供 handler、Skill 路径、来源或工具范围。
 
@@ -20,8 +20,15 @@ Emperor 的斜杠命令由 Core 注册、解析、校验和调度。Renderer 只
 ## Core 接口
 
 ```ts
-commands.list({ sessionId, includeUnavailable?, invocationSource? })
-commands.complete({ sessionId, commandId, rawArgs, cursor, invocationSource })
+commands.list({ sessionId, draftSession?, includeUnavailable?, invocationSource? })
+commands.complete({
+  sessionId,
+  draftSession?,
+  commandId,
+  rawArgs,
+  cursor,
+  invocationSource,
+})
 commands.invoke({
   sessionId,
   commandId,
@@ -34,7 +41,14 @@ commands.invoke({
 
 `commands.list` 每次从内置目录和当前 active Skill 重新构造注册表，按 session 是否存在与调用来源计算可用性。`commands.invoke` 同时校验稳定 `commandId` 与输入中的名称。
 
-解析器是确定性的 tokenizer，支持单引号、双引号、反斜杠、`--key=value` 和 `--`，不做任何 Shell 展开。参数先通过命令声明的 schema 才能产生副作用。未知命令返回本地错误，不会降级成普通模型请求。只有 `agent_prompt` 命令可以携带附件。
+起始页的新对话还只是界面里的草稿（`draft:<uuid>`），Core 里没有这个会话。`commands.list` 和 `commands.complete` 接受草稿的 ID 加上 `draftSession: { mode, project }`，与 `chat.submit`、`goals.start` 建会话时带的是同一份草稿上下文（同一个 `draftSessionSchema`）：
+
+- 内置命令、个人 Skill 和插件 Skill 总是列出；Build 草稿另外列出 `project.project_path` 那个项目的 Skill，解析方式与 Build 会话相同；Chat 草稿或没有带上下文的草稿 ID 没有项目 Skill；
+- 草稿按「刚建好、空闲的会话」计算可用性，所以命令全部可用；参数补全（模型、思考强度、权限预设）本来就与会话无关；
+- `draftSession` 只能和草稿 ID 一起出现；既没有 `sessionId`，或给真实会话带了 `draftSession`，都按参数错误拒绝（`invalid_core_arguments`，界面显示「这次请求的参数不正确，请刷新后重试。」）；
+- `commands.invoke` 仍然需要真实会话：桌面输入框在草稿上执行命令时先 `sessions.create` 建会话，再调用它。
+
+解析器是确定性的 tokenizer，支持单引号、双引号、反斜杠、`--key=value` 和 `--`，不做任何 Shell 展开。参数先通过命令声明的 schema 才能产生副作用。未知命令返回本地错误，不会降级成普通模型请求。桌面输入框在调用 Core 之前就把不是任何命令的 `/词` 当作普通消息发送（输入时已提示），所以它们不会到达 `commands.invoke`；命令列表为空时先等待加载，最多 2 秒。只有 `agent_prompt` 命令可以携带附件。
 
 `invocationId` 是一次调用的幂等键。`stateRoot/control/command-invocations.json` 只保存 session、命令 ID、来源、输入摘要和结果；重复 IPC、双击或重试返回第一次的结果。
 
@@ -102,10 +116,10 @@ metadata:
       effort: high
 ```
 
-`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子代理运行：子代理的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子代理 ID，结果在对话中的子代理卡片里查看，点击可打开子会话。仅在 fork 时生效的字段：
+`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子智能体运行：子智能体的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子智能体 ID，结果在对话中的子智能体卡片里查看，点击可打开子会话。仅在 fork 时生效的字段：
 
-- `allowed_tools`：子代理可用工具的白名单，必须是已注册的工具名，否则命令被拒绝（`skill_fork_tool_scope_invalid`）。
-- `effort`：子代理的推理强度，映射到当前模型路由支持的档位；路由不支持时忽略。
+- `allowed_tools`：子智能体可用工具的白名单，必须是已注册的工具名，否则命令被拒绝（`skill_fork_tool_scope_invalid`）。
+- `effort`：子智能体的推理强度，映射到当前模型路由支持的档位；路由不支持时忽略。
 
 fork 命令不接受附件。`agent` 字段已无对应的 Agent 定义，会被忽略并在 Diagnostics 的 `commandCatalog.warnings` 中提示；内联命令上的 `allowed_tools` / `effort` 同样只产生 warning。
 
@@ -113,9 +127,9 @@ Token 默认由 Skill 名称规范化为小写 kebab-case；显式 `name` 时以
 
 ## Renderer 投影
 
-Composer 输入 `/` 后用 Core descriptor 构建候选列表，分为 `Commands` 与 `Skills`；Skill 显示 `Personal`、`Project`、`Built-in` 或 `Plugin` 来源。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
+Composer 输入 `/` 后用 Core descriptor 构建候选列表，分为「命令」与「Skills」两组。内置命令的标题由 renderer 的 `BUILTIN_TITLES` 给出中文名（说明与分类来自 Core descriptor，也是中文），右侧显示命令名；Skill 显示「项目 Skill」「个人 Skill」「插件 Skill」「内置 Skill」来源。参数补全的类型显示为中文（模型、思考强度、执行权限），思考强度的值用与模型芯片相同的中文名。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
 
-Renderer 在启动、切换会话、收到 `assistant_done`、收到 `skill_catalog_changed` 以及每次打开菜单时调用 `commands.list`；刷新是 single-flight，失败时保留上一次成功的列表。
+Renderer 在启动、切换会话、收到 `assistant_done`、收到 `skill_catalog_changed` 以及每次打开菜单时调用 `commands.list`；刷新是 single-flight，失败时保留上一次成功的列表。列表属于屏幕上的会话；在起始页的草稿上，列表和补全都带上草稿自己的类型和项目（`commandCatalog.ts`），不再借用侧栏里第一个真实会话，所以新装、或者会话全部删掉后，起始页照样有命令和 Skill。还没有任何会话显示时（启动途中）保留当前列表。single-flight 按「会话 ID」或「草稿 ID + 类型 + 项目路径」区分，换会话、换草稿或换项目都会重新读取。
 
 ## 扩展门禁
 

@@ -42,6 +42,7 @@ const schema = z
 
 const CODEC: SnapshotCodec<SitePermission[]> = {
   schemaVersion: 1,
+  versionKey: 'schemaVersion',
   encode: (value) => ({ schemaVersion: 1, permissions: value }),
   decode(input) {
     return { value: schema.parse(input).permissions, schemaVersion: 1 }

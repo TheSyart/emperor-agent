@@ -73,6 +73,6 @@ describe('main process without the Keychain', () => {
     expect(index).toContain("app.commandLine.appendSwitch('use-mock-keychain')")
     expect(index).toContain('new LocalSecretStore(')
     expect(index).toContain('localPairingCipher(localSecrets)')
-    expect(index).toContain('verifyPackagedSecrets(config.stateRoot)')
+    expect(index).toContain('await verifyPackagedSecrets(config.stateRoot)')
   })
 })

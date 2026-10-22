@@ -786,7 +786,7 @@ export function workflowScenario(now = Date.now()): Scenario {
   )
   return {
     id: 'workflow',
-    label: '工作流 / 子代理',
+    label: '工作流 / 子智能体',
     sessions: [{ id: 'workflow', events }],
   }
 }
@@ -1091,7 +1091,10 @@ export function linksScenario(now = Date.now()): Scenario {
   }
 }
 
-/** Turns that changed files: a recorded card, an undone one, an unrecorded one. */
+/**
+ * Tasks of one turn each that changed files: a recorded card, an undone
+ * one, an unrecorded one (UI-S15: every record names its task).
+ */
 export function turnFilesScenario(now = Date.now()): Scenario {
   const log = new ShowcaseLog(now - 8 * 60_000)
   const files = [
@@ -1108,7 +1111,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
       deletions: 0,
     },
     {
-      path: 'src/styles/login-old.css',
+      path: 'src/styles/很长的中文目录/with spaces/desktop-styles-and-resource-presentation-compatibility/login-old.css',
       status: 'deleted',
       additions: 0,
       deletions: 31,
@@ -1145,6 +1148,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   )
   log.add('turn/files', {
     turn: 1,
+    task: { firstTurn: 1, lastTurn: 1 },
     mode: 'git',
     status: 'recorded',
     files,
@@ -1155,6 +1159,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   turn(2, '顺便更新一下 README。', 'README 已更新。')
   log.add('turn/files', {
     turn: 2,
+    task: { firstTurn: 2, lastTurn: 2 },
     mode: 'git',
     status: 'recorded',
     files: [
@@ -1172,6 +1177,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   turn(3, '整理一下 dist 目录。', '整理完成。')
   log.add('turn/files', {
     turn: 3,
+    task: { firstTurn: 3, lastTurn: 3 },
     mode: 'git',
     status: 'skipped',
     skipReason: 'timeout',
@@ -1180,8 +1186,880 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   })
   return {
     id: 'turn-files',
-    label: '本轮改动',
+    label: '改动卡',
     sessions: [{ id: 'turn-files', events: log.events }],
+  }
+}
+
+/**
+ * UI-S15: one task, two turns — the user's message starts three background
+ * writers; their results wake Emperor, which assembles the book. While the
+ * writers run there is no files card (`running`); once the woken turn ends
+ * one card sums the whole task, after that turn, before its footer.
+ */
+export function taskFilesScenario(
+  now = Date.now(),
+  phase: 'running' | 'done' = 'done',
+): Scenario {
+  const log = new ShowcaseLog(now - (phase === 'done' ? 7 : 2) * 60_000)
+  const writers = [
+    { id: 'writer-1', chapter: '01-订单.md', title: '写第 1 章 订单' },
+    { id: 'writer-2', chapter: '02-回声.md', title: '写第 2 章 回声' },
+    { id: 'writer-3', chapter: '03-另一个我.md', title: '写第 3 章 另一个我' },
+  ]
+  log.user('设定圣经写好了。派三个子智能体各写一章，写完汇编成全书。')
+  log.turnStart(1)
+  log.toolStep(
+    1,
+    1,
+    [{ reasoning: '先把设定圣经落盘，再把三章分给三个执笔者。' }],
+    [
+      {
+        id: 'call_bible',
+        name: 'write',
+        args: { file_path: 'novel/00-设定圣经.md', content: '# 设定圣经\n' },
+        result:
+          '<path>novel/00-设定圣经.md</path>\n<type>file</type>\n<content>\nCreated file\n</content>',
+        extra: {
+          meta: {
+            path: 'novel/00-设定圣经.md',
+            kind: 'write',
+            operation: 'create',
+            added: 153,
+            removed: 0,
+          },
+        },
+      },
+      ...writers.map((writer) => ({
+        id: `call_${writer.id}`,
+        name: 'subagent',
+        args: {
+          description: writer.title,
+          prompt: `按设定圣经${writer.title}，写进 novel/${writer.chapter}。`,
+          run_in_background: true,
+        },
+        between: (l: ShowcaseLog) => {
+          l.add('subagent/started', {
+            subagentId: writer.id,
+            description: writer.title,
+            mode: 'spawn',
+            background: true,
+            callId: `call_${writer.id}`,
+          })
+        },
+        result: `started subagent ${writer.id}`,
+        extra: {
+          meta: {
+            kind: 'continuable',
+            subagentId: writer.id,
+            description: writer.title,
+            mode: 'spawn',
+          },
+        },
+      })),
+    ],
+  )
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
+    { text: '三位执笔者已经开工，三章都交回后我再统一校对、汇编全书。' },
+  ])
+  log.stepEnd(1, 2)
+  log.turnEnd(1)
+  if (phase === 'running')
+    return {
+      id: 'task-files-running',
+      label: '任务进行中',
+      sessions: [{ id: 'task-files-running', events: log.events }],
+    }
+
+  log.tick(5 * 60_000)
+  for (const writer of writers)
+    log.add('subagent/settled', {
+      subagentId: writer.id,
+      stopReason: 'completed',
+      text: `${writer.chapter} 已写完。`,
+    })
+  // The writers' results wake Emperor: the same task goes on.
+  log.turnStart(2)
+  log.stepStart(2, 1)
+  for (const writer of writers)
+    log.context('subagent', `Subagent ${writer.id} completed.`, {
+      form: 'notice',
+      summary: `${writer.title} 已完成`,
+    })
+  log.stream(2, 1, [
+    { reasoning: '三章都在了，读一遍再汇编。' },
+    {
+      tool: {
+        id: 'call_read',
+        name: 'read',
+        args: { file_path: 'novel/02-回声.md' },
+      },
+    },
+    {
+      tool: {
+        id: 'call_book',
+        name: 'write',
+        args: { file_path: 'novel/全书.md', content: '# 全书\n' },
+      },
+    },
+  ])
+  log.call(2, 1, 'call_read', 'read', { file_path: 'novel/02-回声.md' })
+  log.result(2, 1, 'call_read', '# 第 2 章 回声\n……')
+  log.call(2, 1, 'call_book', 'write', {
+    file_path: 'novel/全书.md',
+    content: '# 全书\n',
+  })
+  log.result(
+    2,
+    1,
+    'call_book',
+    '<path>novel/全书.md</path>\n<type>file</type>\n<content>\nCreated file\n</content>',
+    {
+      meta: {
+        path: 'novel/全书.md',
+        kind: 'write',
+        operation: 'create',
+        added: 640,
+        removed: 0,
+      },
+    },
+  )
+  log.stepEnd(2, 1)
+  log.stepStart(2, 2)
+  log.stream(2, 2, [
+    {
+      text: '全书已汇编并校对：第 2 章执笔者交回的是改过的版本，时间线和人物称谓都已统一。',
+    },
+  ])
+  log.stepEnd(2, 2)
+  log.turnEnd(2)
+  log.add('turn/files', {
+    turn: 2,
+    task: { firstTurn: 1, lastTurn: 2 },
+    mode: 'git',
+    status: 'recorded',
+    files: [
+      {
+        path: 'novel/00-设定圣经.md',
+        status: 'added',
+        additions: 153,
+        deletions: 0,
+      },
+      {
+        path: 'novel/01-订单.md',
+        status: 'added',
+        additions: 214,
+        deletions: 0,
+      },
+      {
+        path: 'novel/02-回声.md',
+        status: 'added',
+        additions: 192,
+        deletions: 0,
+      },
+      {
+        path: 'novel/03-另一个我.md',
+        status: 'added',
+        additions: 201,
+        deletions: 0,
+      },
+      { path: 'novel/全书.md', status: 'added', additions: 640, deletions: 0 },
+    ],
+    totals: { files: 5, additions: 1400, deletions: 0 },
+    snapshot: { before: 'e'.repeat(40), after: 'f'.repeat(40) },
+  })
+  return {
+    id: 'task-files',
+    label: '这次任务的改动',
+    sessions: [{ id: 'task-files', events: log.events }],
+  }
+}
+
+/**
+ * AGT-06: subagent result cards — waiting to be applied, conflicting with
+ * the project, applied (with 撤销), and one left alone for 15 days.
+ */
+export function subagentResultsScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 120_000)
+  const turn = (number: number, prompt: string, reply: string) => {
+    log.user(prompt)
+    log.turnStart(number)
+    log.stepStart(number, 1)
+    log.stream(number, 1, [{ text: reply }])
+    log.stepEnd(number, 1)
+    log.turnEnd(number)
+  }
+  const result = (data: Record<string, unknown>) =>
+    log.add('delegation/result', {
+      backend: 'codex',
+      state: 'ready',
+      at: now - 60_000,
+      ...data,
+    })
+  turn(
+    1,
+    '让 Codex 把登录页重构成响应式，Claude Code 补上测试。',
+    '已经分别派给 Codex 和 Claude Code，它们在各自独立的工作区里改，完成后成果会出现在这里。',
+  )
+  result({
+    delegation_id: 'dlg-login',
+    run_id: 'dgr-login',
+    title: '重构登录页',
+    files: [
+      {
+        path: 'src/login/LoginForm.vue',
+        status: 'modified',
+        additions: 64,
+        deletions: 5,
+      },
+      {
+        path: 'src/login/useLogin.ts',
+        status: 'added',
+        additions: 38,
+        deletions: 0,
+      },
+      {
+        path: 'src/login/login.css',
+        status: 'modified',
+        additions: 12,
+        deletions: 3,
+      },
+      {
+        path: 'src/login/legacy.css',
+        status: 'deleted',
+        additions: 0,
+        deletions: 0,
+      },
+      {
+        path: 'public/login-hero.png',
+        status: 'added',
+        additions: null,
+        deletions: null,
+        binary: true,
+      },
+      { path: 'package.json', status: 'modified', additions: 6, deletions: 0 },
+    ],
+    totals: { files: 6, additions: 120, deletions: 8 },
+  })
+  result({
+    delegation_id: 'dlg-tests',
+    run_id: 'dgr-tests',
+    backend: 'claude-code',
+    title: '补全登录测试',
+    state: 'conflicted',
+    conflicts: ['src/login/LoginForm.vue'],
+    files: [
+      {
+        path: 'src/login/LoginForm.vue',
+        status: 'modified',
+        additions: 3,
+        deletions: 1,
+      },
+      {
+        path: 'tests/login.spec.ts',
+        status: 'added',
+        additions: 42,
+        deletions: 0,
+      },
+    ],
+    totals: { files: 2, additions: 45, deletions: 1 },
+  })
+  turn(2, '文档也顺手更新一下。', 'Codex 改好了文档，我已经帮你应用到项目里。')
+  result({
+    delegation_id: 'dlg-docs',
+    run_id: 'dgr-docs',
+    title: '更新登录文档',
+    state: 'applied',
+    by: 'model',
+    undoable: true,
+    files: [
+      {
+        path: 'docs/login.md',
+        status: 'modified',
+        additions: 18,
+        deletions: 6,
+      },
+      { path: 'README.md', status: 'modified', additions: 2, deletions: 1 },
+    ],
+    totals: { files: 2, additions: 20, deletions: 7 },
+  })
+  result({
+    delegation_id: 'dlg-old',
+    run_id: 'dgr-old',
+    title: '清理旧脚本',
+    at: now - 15 * 86_400_000,
+    files: [
+      {
+        path: 'scripts/old-build.sh',
+        status: 'deleted',
+        additions: 0,
+        deletions: 24,
+      },
+    ],
+    totals: { files: 1, additions: 0, deletions: 24 },
+  })
+  return {
+    id: 'subagent-results',
+    label: '子智能体成果',
+    sessions: [{ id: 'subagent-results', events: log.events }],
+  }
+}
+
+/**
+ * DSH-23: the model is writing an `edit` call — the file name is complete,
+ * the replacement is still arriving (the replay stops mid-arguments).
+ */
+export function preparingScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 2_000)
+  log.user('把登录卡片改成响应式宽度。')
+  log.turnStart(1)
+  log.stepStart(1, 1)
+  const cut = log.events.length
+  const chunk = (value: unknown): void => {
+    log.add('assistant/chunk', { turn: 1, step: 1, chunk: value })
+  }
+  chunk({ type: 'block-start', index: 0, blockType: 'reasoning' })
+  chunk({ type: 'reasoning-delta', index: 0, text: '直接改样式里的宽度。' })
+  chunk({
+    type: 'block-end',
+    index: 0,
+    block: { type: 'reasoning', text: '直接改样式里的宽度。' },
+  })
+  chunk({ type: 'block-start', index: 1, blockType: 'tool-call' })
+  const args = JSON.stringify({
+    file_path: 'src/components/LoginForm.vue',
+    old_string: '.login-card {\n  width: 480px;\n}'.repeat(8),
+    new_string: '.login-card {\n  width: min(480px, 100%);\n}',
+  })
+  for (let index = 0; index < args.length - 20; index += 8)
+    chunk({
+      type: 'tool-call-delta',
+      index: 1,
+      id: 'prep_edit',
+      name: 'edit',
+      argumentsDelta: args.slice(index, index + 8),
+    })
+  return {
+    id: 'preparing',
+    label: '准备工具调用',
+    sessions: [
+      {
+        id: 'preparing',
+        events: log.events.slice(0, cut),
+        live: log.events.slice(cut),
+      },
+    ],
+  }
+}
+
+/** UI-S03 scroll check: 500 finished turns, each with a process group. */
+export function longProcessScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 48 * 3600_000)
+  for (let turn = 1; turn <= 500; turn++) {
+    log.user(`第 ${turn} 轮：检查 module-${turn}。`)
+    log.turnStart(turn)
+    log.toolStep(
+      turn,
+      1,
+      [{ reasoning: `看看 module-${turn} 的导出。` }],
+      [
+        {
+          id: `lp_${turn}`,
+          name: 'grep',
+          args: { pattern: 'export ', path: `src/module-${turn}` },
+          result: `Found 1 match\n\nsrc/module-${turn}/index.ts\nLine 1: export * from './core'`,
+        },
+      ],
+    )
+    log.stepStart(turn, 2)
+    log.stream(turn, 2, [{ text: `module-${turn} 没有问题。` }], {
+      firstTokenMs: 200,
+    })
+    log.stepEnd(turn, 2)
+    log.turnEnd(turn)
+  }
+  return {
+    id: 'long-process',
+    label: '500 轮',
+    sessions: [{ id: 'long-process', events: log.events }],
+  }
+}
+
+/** UI-S03 typography: a long prompt with a file, a reply with headings. */
+export function typographyScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 3 * 60_000)
+  log.user(
+    '帮我整理一下登录页这次改动的说明：为什么会在移动端横向溢出、改了哪些文件、怎么验证，最好写成可以直接贴进 PR 描述的样子，标题层级清楚一点。',
+    {
+      attachments: [
+        {
+          id: 'att-notes',
+          name: 'login-notes.md',
+          mime: 'text/markdown',
+          size: 2_310,
+          kind: 'file',
+        },
+      ],
+    },
+  )
+  log.turnStart(1)
+  log.stepStart(1, 1)
+  log.stream(1, 1, [
+    {
+      text: [
+        '# 登录页移动端布局修复',
+        '',
+        '问题出在 [布局说明](docs/login-layout.md) 里记下的固定宽度：`.login-card` 写死了 `width: 480px`，375px 宽的屏幕会横向溢出。',
+        '',
+        '改成 `min(480px, 100%)` 之后，外边距用 `clamp()` 收紧，参见 [MDN · min()](https://developer.mozilla.org/docs/Web/CSS/min)。',
+        '',
+        '## 改动的文件',
+        '',
+        '- `LoginForm.vue`：卡片宽度与外边距',
+        '- `LoginForm.spec.ts`：提交态与禁用态',
+        '',
+        '### 怎么验证',
+        '',
+        '在 375 × 812 的视口里打开登录页，页面不再出现横向滚动条。',
+      ].join('\n'),
+    },
+  ])
+  log.stepEnd(1, 1)
+  log.turnEnd(1)
+  return {
+    id: 'typography',
+    label: '排版',
+    sessions: [{ id: 'typography', events: log.events }],
+  }
+}
+
+// ── UI-S14: subagents in the conversation ──────────────────────────────
+
+const CHAPTERS = [
+  '订单',
+  '回声',
+  '旧磁带',
+  '桥下',
+  '另一个我',
+  '白噪',
+  '物证',
+  '潮汐舱',
+  '回声的源头',
+  '末班潮',
+] as const
+
+const COVER_REFUSED = '模型 gpt-6.1-sol 被这个 ChatGPT 账号拒绝（400）'
+
+interface Writer {
+  readonly callId: string
+  readonly id: string
+  readonly description: string
+  readonly backend?: 'codex' | 'claude-code'
+}
+
+/** The eleven subagents of the novel: ten chapters and a cover. */
+function novelWriters(): Writer[] {
+  const writers: Writer[] = CHAPTERS.map((title, index) => {
+    const chapter = index + 1
+    const description = `写第 ${chapter} 章 ${title}`
+    if (chapter === 5)
+      return {
+        callId: `call_ch${chapter}`,
+        id: `dlg-ch${chapter}`,
+        description: `codex ${description}`,
+        backend: 'codex',
+      }
+    if (chapter === 10)
+      return {
+        callId: `call_ch${chapter}`,
+        id: `dlg-ch${chapter}`,
+        description,
+        backend: 'claude-code',
+      }
+    return { callId: `call_ch${chapter}`, id: `sub-ch${chapter}`, description }
+  })
+  writers.push({
+    callId: 'call_cover',
+    id: 'dlg-cover',
+    description: 'codex 生图做小说封面',
+    backend: 'codex',
+  })
+  return writers
+}
+
+function externalRun(
+  log: ShowcaseLog,
+  writer: Writer,
+  task: Record<string, unknown>,
+): void {
+  log.add('delegation/projection', {
+    event: 'delegation_run_changed',
+    delegation_id: writer.id,
+    run_id: `run-${writer.id}`,
+    current_run_id: `run-${writer.id}`,
+    parent_call_id: writer.callId,
+    backend: writer.backend,
+    journal_seq: 1,
+    task: { description: writer.description, ...task },
+  })
+}
+
+/**
+ * One step sends the ten chapters and the cover out in the background
+ * (UI-S14). `running`: eight still write, Codex refused both of its tasks,
+ * Claude Code's run could not confirm its outcome. `continued`: two minutes
+ * on, three chapters are back and the conversation went on below the group
+ * (the status bar's case). `done`: every chapter is back, 6 分 12 秒 after
+ * they started.
+ */
+export function subagentsScenario(
+  now = Date.now(),
+  stage: 'running' | 'continued' | 'done' = 'running',
+): Scenario {
+  const started =
+    stage === 'running'
+      ? now - 49_000
+      : stage === 'continued'
+        ? now - 130_000
+        : now - 420_000
+  const log = new ShowcaseLog(started - 41_000)
+  log.user(
+    '设定圣经写好了。派 10 个子智能体并行写十章，每章 1100 字左右；再让 Codex 生成一张封面。',
+  )
+  log.turnStart(1)
+  log.toolStep(
+    1,
+    1,
+    [
+      { reasoning: '先读设定圣经，再分章节交给执笔者。' },
+      { text: '先读一下设定圣经。' },
+    ],
+    [
+      {
+        id: 'call_bible',
+        name: 'read',
+        args: { file_path: 'novel/00-设定圣经.md' },
+        result: readResult(
+          'novel/00-设定圣经.md',
+          '# 设定圣经\n\n时间线：九月。',
+        ),
+        extra: {
+          meta: {
+            path: 'novel/00-设定圣经.md',
+            startLine: 1,
+            endLine: 3,
+            totalLines: 3,
+          },
+        },
+      },
+    ],
+  )
+  const writers = novelWriters()
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
+    { text: '我把设定圣经交给每个执笔者，十章同时开写；封面交给 Codex。' },
+    ...writers.map((writer) => ({
+      tool: {
+        id: writer.callId,
+        name: 'subagent',
+        args: { description: writer.description },
+      },
+    })),
+  ])
+  log.tick(Math.max(0, started - (log.events.at(-1)?.time ?? started)))
+  for (const writer of writers) {
+    const args = {
+      description: writer.description,
+      prompt: `按设定圣经写「${writer.description}」，1100 字左右。`,
+      run_in_background: true,
+      ...(writer.backend ? { backend: writer.backend } : {}),
+    }
+    log.call(1, 2, writer.callId, 'subagent', args)
+    if (writer.backend)
+      externalRun(log, writer, { status: 'running', started_at: started })
+    else
+      log.add('subagent/started', {
+        subagentId: writer.id,
+        description: writer.description,
+        mode: 'spawn',
+        background: true,
+        callId: writer.callId,
+      })
+    log.add(
+      'tool/result',
+      {
+        turn: 1,
+        step: 2,
+        message: {
+          id: `result-${writer.callId}`,
+          role: 'user',
+          source: { kind: 'tool', callId: writer.callId },
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: writer.callId,
+              content: [{ type: 'text', text: `started ${writer.id}` }],
+            },
+          ],
+        },
+        meta: { kind: 'continuable', subagentId: writer.id },
+      },
+      { surfaceOp: 'append' },
+    )
+  }
+  log.stepEnd(1, 2)
+  // Codex refused both of its tasks within seconds.
+  for (const writer of writers.filter((item) => item.backend === 'codex'))
+    externalRun(log, writer, {
+      status: 'failed',
+      started_at: started,
+      finished_at: started + (writer.id === 'dlg-cover' ? 7_000 : 14_000),
+      detail: COVER_REFUSED,
+    })
+  log.stepStart(1, 3)
+  log.stream(1, 3, [
+    {
+      text: '十章都在写，封面那边 Codex 报错了（账号不支持 gpt-6.1-sol），我改用本地生图脚本补上。等剩下的章节写完，我再统一校对、汇编全书。',
+    },
+  ])
+  log.stepEnd(1, 3)
+  log.turnEnd(1)
+  const chapterTen = writers.find((writer) => writer.id === 'dlg-ch10')!
+  if (stage !== 'done') {
+    externalRun(log, chapterTen, {
+      status: 'outcome_unknown',
+      started_at: started,
+    })
+    if (stage === 'continued') continueBelow(log, writers, started)
+  } else {
+    writers.forEach((writer, index) => {
+      if (writer.backend === 'codex') return
+      const ended = started + 300_000 + index * 8_000
+      const report = `${writer.description.replace(/^写/u, '')}已写完，1100 字左右；人物称谓与时间线按设定圣经统一为九月。`
+      if (writer.backend)
+        externalRun(log, writer, {
+          status: 'completed',
+          started_at: started,
+          finished_at: started + 372_000,
+          detail: report,
+        })
+      else {
+        log.tick(Math.max(0, ended - (log.events.at(-1)?.time ?? ended)))
+        log.add('subagent/settled', {
+          subagentId: writer.id,
+          stopReason: 'completed',
+          text: `## ${writer.description}\n\n${report}`,
+        })
+      }
+    })
+  }
+  return {
+    id: stage === 'done' ? 'subagents-done' : `subagents-${stage}`,
+    label: stage === 'done' ? '子智能体（已结束）' : '子智能体（进行中）',
+    sessions: [{ id: `subagents-${stage}`, events: log.events }],
+  }
+}
+
+/** Chapters 1–3 come back; the user asks to check them; a long answer. */
+function continueBelow(
+  log: ShowcaseLog,
+  writers: readonly Writer[],
+  started: number,
+): void {
+  writers.slice(0, 3).forEach((writer, index) => {
+    log.tick(
+      Math.max(
+        0,
+        started + 70_000 + index * 4_000 - (log.events.at(-1)?.time ?? 0),
+      ),
+    )
+    log.add('subagent/settled', {
+      subagentId: writer.id,
+      stopReason: 'completed',
+      text: `${writer.description} 已写完，1100 字左右。`,
+    })
+  })
+  log.user('先核对已经交回的章节。')
+  log.turnStart(2)
+  log.toolStep(
+    2,
+    1,
+    [{ text: '逐章对照设定圣经。' }],
+    ['01-订单', '02-回声', '03-旧磁带'].map((name, index) => ({
+      id: `call_check_${index + 1}`,
+      name: 'read',
+      args: { file_path: `novel/${name}.md` },
+      result: readResult(`novel/${name}.md`, `# ${name}\n\n正文……`),
+      extra: {
+        meta: {
+          path: `novel/${name}.md`,
+          startLine: 1,
+          endLine: 3,
+          totalLines: 3,
+        },
+      },
+    })),
+  )
+  log.stepStart(2, 2)
+  log.stream(2, 2, [
+    {
+      text: [
+        '## 先核对已经交回的 3 章',
+        '',
+        '趁其他章节还在写，我把已经交回的第 1、2、3 章逐段对照设定圣经：',
+        '',
+        '- 第 1 章「订单」：人物出场顺序与设定一致；「七月」日期与时间线冲突，已记下，汇编时统一改成九月。',
+        '- 第 2 章「回声」：林砚的病理写成「重复三天前听到的话」，与设定一致，后面几章都要沿用。',
+        '- 第 3 章「旧磁带」：1542 字，比其余章节长；节奏偏慢，汇编时再看要不要压。',
+        '',
+        '## 封面',
+        '',
+        'Codex 那边的账号不支持 gpt-6.1-sol，我改写本地脚本 `tools/compose_cover.py`：标题、作者和副标题排版，背景用纯色渐变，生成后你再看一眼。',
+        '',
+        '## 接下来',
+        '',
+        '等第 4 到第 10 章交回，我再整体校对：统一时间线和人物称谓，检查每章的字数，最后汇编成 `novel/全书.md`。',
+      ].join('\n'),
+    },
+  ])
+  log.stepEnd(2, 2)
+  log.turnEnd(2)
+}
+
+/**
+ * UI-S14: one subagent per turn, in each state a single row shows — a
+ * report, a refusal, Claude Code's review, a question, one still writing.
+ */
+export function subagentRowsScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 600_000)
+  let turn = 0
+  const dispatch = (
+    prompt: string,
+    writer: Writer,
+    settle: (log: ShowcaseLog, startedAt: number) => void,
+    answer: string,
+  ): void => {
+    turn += 1
+    log.user(prompt)
+    log.turnStart(turn)
+    log.stepStart(turn, 1)
+    log.stream(turn, 1, [
+      {
+        tool: {
+          id: writer.callId,
+          name: 'subagent',
+          args: { description: writer.description },
+        },
+      },
+    ])
+    log.call(turn, 1, writer.callId, 'subagent', {
+      description: writer.description,
+      prompt: writer.description,
+      run_in_background: true,
+      ...(writer.backend ? { backend: writer.backend } : {}),
+    })
+    const startedAt = log.events.at(-1)?.time ?? now
+    if (writer.backend)
+      externalRun(log, writer, { status: 'running', started_at: startedAt })
+    else
+      log.add('subagent/started', {
+        subagentId: writer.id,
+        description: writer.description,
+        mode: 'spawn',
+        background: true,
+        callId: writer.callId,
+      })
+    log.result(turn, 1, writer.callId, `started ${writer.id}`, {
+      meta: { kind: 'continuable', subagentId: writer.id },
+    })
+    log.stepEnd(turn, 1)
+    settle(log, startedAt)
+    log.stepStart(turn, 2)
+    log.stream(turn, 2, [{ text: answer }])
+    log.stepEnd(turn, 2)
+    log.turnEnd(turn)
+  }
+  dispatch(
+    '看看 tankwar 的素材和文档能不能瘦身。',
+    {
+      callId: 'call_assets',
+      id: 'sub-assets',
+      description: '分析 tankwar 的素材与文档',
+    },
+    (l) => {
+      l.tick(60_000)
+      l.add('subagent/settled', {
+        subagentId: 'sub-assets',
+        stopReason: 'completed',
+        text: '报告已交回：public/ 没有 publicDir 覆盖，assets/audio 24.4 MB 可以压缩到 6 MB 以内，docs/ 里有 3 份重复的截图。',
+      })
+    },
+    '报告交回来了，音频是大头。',
+  )
+  const chapterFive: Writer = {
+    callId: 'call_codex_ch5',
+    id: 'dlg-codex-ch5',
+    description: 'codex 写第 5 章 另一个我',
+    backend: 'codex',
+  }
+  dispatch(
+    '第 5 章交给 Codex 写。',
+    chapterFive,
+    (l, startedAt) =>
+      externalRun(l, chapterFive, {
+        status: 'failed',
+        started_at: startedAt,
+        finished_at: startedAt + 14_000,
+        detail: COVER_REFUSED,
+      }),
+    'Codex 那边账号不支持这个模型，第 5 章我改派本地子智能体。',
+  )
+  const review: Writer = {
+    callId: 'call_review',
+    id: 'dlg-review',
+    description: '审查 math.js',
+    backend: 'claude-code',
+  }
+  dispatch(
+    '让 Claude Code 审一下 math.js。',
+    review,
+    (l, startedAt) =>
+      externalRun(l, review, {
+        status: 'completed',
+        started_at: startedAt,
+        finished_at: startedAt + 38_000,
+        detail: '没有参数校验；PI 精度只有两位，建议用 Math.PI。',
+      }),
+    '审查结果在上面，两处都值得改。',
+  )
+  const question: Writer = {
+    callId: 'call_question',
+    id: 'dlg-question',
+    description: '整理发布说明',
+    backend: 'codex',
+  }
+  dispatch(
+    '发布说明交给 Codex 整理。',
+    question,
+    (l, startedAt) =>
+      externalRun(l, question, {
+        status: 'waiting_input',
+        started_at: startedAt,
+      }),
+    'Codex 在问版本号写 0.2.0 还是 0.2，回答后它会继续。',
+  )
+  log.tick(Math.max(0, now - 49_000 - (log.events.at(-1)?.time ?? now)))
+  dispatch(
+    '第 9 章也开始写吧。',
+    { callId: 'call_ch9', id: 'sub-ch9', description: '写第 9 章 回声的源头' },
+    () => undefined,
+    '第 9 章在写，写完我再看。',
+  )
+  return {
+    id: 'subagent-rows',
+    label: '子智能体行',
+    sessions: [{ id: 'subagent-rows', events: log.events }],
   }
 }
 
@@ -1198,6 +2076,15 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   long: longScenario,
   links: linksScenario,
   'turn-files': turnFilesScenario,
+  'task-files': (now) => taskFilesScenario(now, 'done'),
+  'task-files-running': (now) => taskFilesScenario(now, 'running'),
+  'subagent-results': subagentResultsScenario,
+  preparing: preparingScenario,
+  'long-process': longProcessScenario,
+  typography: typographyScenario,
+  subagents: (now) => subagentsScenario(now, 'running'),
+  'subagents-done': (now) => subagentsScenario(now, 'done'),
+  'subagent-rows': subagentRowsScenario,
 }
 
 /** History page over one fixture session (cut at turn boundaries). */

@@ -135,6 +135,36 @@ describe('useWorkspaceSnapshot', () => {
     expect(snapshotCalls()).toBe(before + 1)
   })
 
+  it('refresh({ force: true }) starts over and drops the reply still in flight (FIX-05)', async () => {
+    // A Git write in the 审查 pane must not be undone by a poll that read
+    // the repository before the write landed.
+    let release: (value: unknown) => void = () => undefined
+    core.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    const { view } = consumer()
+    await settle()
+    expect(snapshotCalls()).toBe(1)
+    // A plain refresh joins the request in flight…
+    await view.refresh()
+    expect(snapshotCalls()).toBe(1)
+    // …a forced one does not.
+    core.mockImplementationOnce(() =>
+      Promise.resolve(snapshotOf('s1', { fresh: true })),
+    )
+    await view.refresh({ force: true })
+    await settle()
+    expect(snapshotCalls()).toBe(2)
+    expect(view.snapshot.value?.git).toEqual({ fresh: true })
+    release(snapshotOf('s1', { stale: true }))
+    await settle()
+    expect(view.snapshot.value?.git).toEqual({ fresh: true })
+    expect(view.loading.value).toBe(false)
+  })
+
   it('drops a reply that lands after the session switched', async () => {
     let release: (value: unknown) => void = () => undefined
     core.mockImplementationOnce(

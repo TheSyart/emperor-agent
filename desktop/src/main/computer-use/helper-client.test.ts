@@ -5,7 +5,7 @@ import {
   type Socket,
 } from 'node:net'
 import { unlink } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FrameDecoder,
@@ -23,11 +23,23 @@ const hello = {
   capabilities: [],
   permissions: { accessibility: 'unknown' },
 }
-const nonce = '0123456789abcdef0123456789abcdef'
+/** The one-time launch secret main hands the Helper on stdin (SEC-09). */
+const secret = Buffer.alloc(32, 9)
 
+function proof(label: string, server: string, client: string): string {
+  return createHmac('sha256', secret)
+    .update(`${label}\0${server}\0${client}`)
+    .digest('hex')
+}
+
+/**
+ * A Helper that answers main's challenge with `greeting`, proved with the
+ * launch secret unless `prove` is false.
+ */
 async function fakeHelper(
   onMessage: (message: Record<string, unknown>, socket: Socket) => void,
   greeting: Record<string, unknown> = hello,
+  options: { prove?: boolean } = {},
 ): Promise<{ client: HelperClient; socket: Socket; close(): Promise<void> }> {
   const path = `/tmp/emperor-cu-${randomUUID()}.sock`
   let peer!: Socket
@@ -38,13 +50,31 @@ async function fakeHelper(
     // closed peer; the fixture must also consume that expected EPIPE.
     socket.on('error', () => undefined)
     const decoder = new FrameDecoder()
+    const clientNonce = 'c'.repeat(64)
     socket.on('data', (chunk: Buffer) => {
       for (const frame of decoder.push(chunk)) {
         if (frame.kind !== 'json') throw new Error('Expected JSON')
-        onMessage(frame.value as Record<string, unknown>, socket)
+        const message = frame.value as Record<string, unknown>
+        if (message.type === 'challenge') {
+          const server = message.nonce as string
+          socket.write(
+            Buffer.from(
+              encodeJsonFrame(
+                options.prove === false
+                  ? greeting
+                  : {
+                      ...greeting,
+                      nonce: clientNonce,
+                      proof: proof('emperor-helper-hello', server, clientNonce),
+                    },
+              ),
+            ),
+          )
+          continue
+        }
+        onMessage(message, socket)
       }
     })
-    socket.write(Buffer.from(encodeJsonFrame(greeting)))
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -53,7 +83,7 @@ async function fakeHelper(
   const stream = createConnection(path)
   const client = new HelperClient(stream, {
     platform: 'macos',
-    nonce,
+    secret,
     heartbeatMs: 30,
     maxMissedPings: 3,
   })
@@ -72,7 +102,7 @@ async function fakeHelper(
 }
 
 describe('HelperClient', () => {
-  it('validates hello, sends nonce welcome, and validates request results', async () => {
+  it('challenges the Helper, checks its proof, proves itself in welcome, and validates results', async () => {
     const received: Record<string, unknown>[] = []
     const helper = await fakeHelper((message, socket) => {
       received.push(message)
@@ -94,9 +124,13 @@ describe('HelperClient', () => {
     })
     try {
       expect((await helper.client.ready).platform).toBe('macos')
-      await vi.waitFor(() =>
-        expect(received[0]).toEqual({ type: 'welcome', protocol: 1, nonce }),
-      )
+      await vi.waitFor(() => expect(received[0]?.type).toBe('welcome'))
+      expect(Object.keys(received[0]!).sort()).toEqual([
+        'proof',
+        'protocol',
+        'type',
+      ])
+      expect(received[0]!.proof).toMatch(/^[0-9a-f]{64}$/)
       expect(await helper.client.request('permissions.status', {})).toEqual({
         permissions: { accessibility: 'granted' },
       })
@@ -390,7 +424,7 @@ describe('HelperClient', () => {
     })
     const stream = createConnection(path)
     try {
-      const client = new HelperClient(stream, { platform: 'macos', nonce })
+      const client = new HelperClient(stream, { platform: 'macos', secret })
       await expect(client.ready).rejects.toMatchObject({
         code: 'DRIVER_UNAVAILABLE',
         message:
@@ -586,6 +620,51 @@ describe('HelperClient', () => {
       )
     } finally {
       await helper.close()
+    }
+  })
+
+  it('drops a peer whose hello does not prove the launch secret (SEC-09 #8)', async () => {
+    for (const greeting of [
+      { ...hello, nonce: 'c'.repeat(64), proof: '0'.repeat(64) },
+      { ...hello, nonce: 'c'.repeat(64) },
+      hello,
+    ]) {
+      const welcomes: Record<string, unknown>[] = []
+      const helper = await fakeHelper(
+        (message) => {
+          if (message.type === 'welcome') welcomes.push(message)
+        },
+        greeting,
+        { prove: false },
+      )
+      try {
+        await expect(helper.client.ready).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+          message: 'Helper failed the launch challenge',
+        })
+        expect(welcomes).toEqual([])
+      } finally {
+        await helper.close()
+      }
+    }
+  })
+
+  it('needs a 32-byte launch secret for the macOS Helper', () => {
+    const stream = createConnection('/tmp/emperor-cu-never.sock')
+    stream.on('error', () => undefined)
+    try {
+      expect(() => new HelperClient(stream, { platform: 'macos' })).toThrow(
+        'macOS helper launch secret is missing or invalid',
+      )
+      expect(
+        () =>
+          new HelperClient(stream, {
+            platform: 'macos',
+            secret: Buffer.alloc(16),
+          }),
+      ).toThrow('macOS helper launch secret is missing or invalid')
+    } finally {
+      stream.destroy()
     }
   })
 })

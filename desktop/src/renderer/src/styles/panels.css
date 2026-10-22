@@ -1,26 +1,40 @@
 /* Global surfaces still shared outside scoped SFC styles: the composer
    attachment chip + image preview lightbox (AttachmentChip.vue), the
    first-run model setup dialog (ModelSetupRequiredDialog.vue, incl. its
-   .tool-button / .asset-button / .action-icon controls) and BrandMark. The
-   retired settings views / panels no longer have rules here: settings
-   sections style themselves (components/settings, scoped). */
+   .model-setup-button controls). The retired settings views / panels no
+   longer have rules here: settings sections style themselves
+   (components/settings, scoped). */
 
 /* ─── 附件 chip：草稿条 + 用户气泡通用 ─── */
 
 .attach-chip {
-  @apply inline-flex items-center gap-2 border px-2 py-1.5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   max-width: 16rem;
-  border-radius: var(--radius-md);
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
+  padding: var(--space-1-5) var(--space-2);
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid));
+  background: rgb(var(--surface-base));
   box-shadow: none;
 }
 .attach-chip.is-image .attach-thumb {
-  @apply h-12 w-12 rounded-lg object-cover;
   flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--r-sm);
+  object-fit: cover;
 }
 .attach-preview-trigger {
-  @apply block shrink-0 rounded-lg outline-none transition;
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform var(--duration) var(--ease-standard),
+    box-shadow var(--duration) var(--ease-standard);
 }
 .attach-preview-trigger:hover {
   transform: scale(1.03);
@@ -29,30 +43,67 @@
   box-shadow: 0 0 0 2px rgb(var(--accent) / 0.62);
 }
 .attach-chip .attach-doc-icon {
-  @apply grid h-12 w-12 place-items-center rounded-lg border border-border/45 bg-bg-inset;
+  display: grid;
   flex-shrink: 0;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid) / 0.45);
+  background-color: rgb(var(--surface-sunken));
 }
 .attach-chip .attach-doc-icon img {
-  @apply h-9 w-9;
+  width: 2.25rem;
+  height: 2.25rem;
   transform: scale(1.08);
 }
 .attach-chip.uploading {
-  @apply border-warn/40 bg-warn/10;
+  border-color: rgb(var(--warn) / 0.4);
+  background-color: rgb(var(--warn) / 0.1);
 }
 .attach-chip .attach-meta {
-  @apply min-w-0 flex-1 leading-tight;
+  flex: 1 1 0%;
+  min-width: 0;
+  line-height: 1.25;
 }
 .attach-chip .attach-name {
-  @apply truncate font-mono text-xs font-bold text-fg;
+  overflow: hidden;
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  font-weight: var(--weight-semibold);
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-sub {
-  @apply truncate font-mono text-[10px] text-secondary;
+  overflow: hidden;
+  color: rgb(var(--text-2));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-remove {
-  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-secondary transition;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  margin-left: var(--space-1);
+  border-radius: var(--r-full);
+  background-color: rgb(var(--surface-sunken));
+  color: rgb(var(--text-2));
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  transition:
+    background-color var(--duration) var(--ease-standard),
+    color var(--duration) var(--ease-standard);
 }
 .attach-chip .attach-remove:hover {
-  @apply bg-accent/15 text-accent;
+  background-color: rgb(var(--accent) / 0.15);
+  color: rgb(var(--accent));
 }
 
 /* 用户消息气泡上方的 attach 行 */
@@ -64,7 +115,7 @@
   place-items: center;
   padding: var(--space-6);
   background: rgb(var(--shadow-color) / 0.78);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .attachment-preview-stage {
@@ -74,9 +125,9 @@
   max-width: min(94vw, 1440px);
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(var(--border-strong));
-  border-radius: var(--radius-xl);
-  background: rgb(var(--bg-elevated));
+  border: 1px solid rgb(var(--stroke-solid-strong));
+  border-radius: var(--r-xl);
+  background: rgb(var(--surface-base));
   box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
 }
 
@@ -85,7 +136,7 @@
   max-height: calc(100vh - 118px);
   max-width: min(94vw, 1440px);
   object-fit: contain;
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
 }
 
 .attachment-preview-close {
@@ -97,10 +148,10 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid rgb(var(--border-strong));
+  border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: 999px;
-  background: rgb(var(--bg-elevated) / 0.9);
-  color: rgb(var(--fg));
+  background: rgb(var(--surface-base) / 0.9);
+  color: rgb(var(--text-1));
   font-size: 22px;
   line-height: 1;
   box-shadow: 0 6px 20px rgb(var(--shadow-color) / 0.24);
@@ -120,7 +171,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 11px var(--space-3);
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .attachment-preview-caption strong {
@@ -132,39 +183,70 @@
 
 .attachment-preview-caption span {
   flex-shrink: 0;
-  color: rgb(var(--fg) / var(--text-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
+  font-size: var(--fs-xxxs);
 }
 
-/* ─── 首次运行：模型未配置对话框 ─── */
+/* ─── 首次运行：模型未配置对话框（UI-S12） ───
+   The illustration fills the dialog; its left 40% is empty studio surface
+   in --surface-canvas, so the copy sits on it behind a soft fade. */
 
+/* Above the page, its sticky bars and overlays; below popovers, toasts,
+   modals and menus (the order the former z-index 70 gave it). */
 .onboarding-backdrop {
-  @apply fixed inset-0 z-[70] grid place-items-center bg-black/55 p-4 backdrop-blur-sm;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
 }
 
 .model-setup-backdrop {
-  background: rgb(var(--shadow-color) / 0.46);
-  backdrop-filter: blur(var(--material-1-blur));
+  background: var(--scrim);
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-modal {
   position: relative;
-  display: grid;
-  width: min(860px, calc(100vw - 32px));
-  max-height: min(620px, calc(100vh - 48px));
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 390px);
+  isolation: isolate;
+  display: flex;
+  width: min(920px, calc(100vw - 32px));
+  aspect-ratio: 16 / 10;
+  max-height: calc(100vh - 48px);
   overflow: hidden;
-  border: 1px solid rgb(var(--border-strong) / 0.74);
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(
-      135deg,
-      rgb(var(--bg-elevated) / 0.98),
-      rgb(var(--bg) / 0.98)
-    ),
-    rgb(var(--bg));
-  box-shadow: 0 24px 72px rgb(var(--shadow-color) / 0.42);
+  border-radius: var(--r-lg);
+  background: rgb(var(--surface-canvas));
+  box-shadow: var(--elev-3);
+}
+
+.model-setup-art {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-base);
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 100% 50%;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Painted after the art on the same layer, under the copy: keeps the copy
+   side calm. */
+.model-setup-modal::after {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-base);
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgb(var(--surface-canvas)) 0%,
+    rgb(var(--surface-canvas) / 0.88) 34%,
+    rgb(var(--surface-canvas) / 0) 58%
+  );
 }
 
 .model-setup-close {
@@ -173,233 +255,181 @@
   right: var(--space-3);
   z-index: var(--z-raised);
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: var(--control-md);
+  height: var(--control-md);
   place-items: center;
-  border: 1px solid rgb(var(--border) / 0.72);
-  border-radius: var(--radius-md);
-  background: rgb(var(--bg) / 0.62);
-  color: rgb(var(--fg) / var(--text-secondary));
-  backdrop-filter: blur(var(--material-1-blur));
+  border: none;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: rgb(var(--text-3));
+  cursor: pointer;
   transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease;
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .model-setup-close:hover {
-  border-color: rgb(var(--border-strong) / 0.9);
-  background: rgb(var(--bg-elevated) / 0.86);
-  color: rgb(var(--fg));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
-.model-setup-close:focus-visible {
-  outline: 2px solid rgb(var(--brand) / 0.72);
+.model-setup-close:focus-visible,
+.model-setup-button:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring) / 0.6);
   outline-offset: 2px;
 }
 
 .model-setup-copy {
+  position: relative;
+  z-index: var(--z-raised);
   display: flex;
+  width: min(400px, 44%);
   min-width: 0;
   flex-direction: column;
   gap: var(--space-6);
-  padding: 32px 30px 28px;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-8) var(--space-7);
 }
 
 .model-setup-head {
   display: flex;
   align-items: center;
+  gap: var(--space-2-5);
 }
 
 .model-setup-wordmark {
-  width: 184px;
-  max-width: min(52vw, 208px);
-  height: auto;
-  object-fit: contain;
+  color: rgb(var(--text-1));
+  font: var(--weight-semibold) var(--type-title-sm) var(--font-sans);
+  letter-spacing: 0.01em;
 }
 
 .model-setup-intro {
   display: grid;
   gap: var(--space-3);
-  margin-top: var(--space-4);
+  margin-top: var(--space-6);
 }
 
 .model-setup-intro h2 {
-  color: rgb(var(--fg));
-  font-size: 32px;
-  font-weight: 760;
-  line-height: 1.08;
-  letter-spacing: 0;
-  text-wrap: pretty;
+  color: rgb(var(--text-1));
+  font: var(--weight-semibold) var(--type-display) var(--font-sans);
+  text-wrap: balance;
 }
 
 .model-setup-intro p {
-  max-width: 420px;
-  color: rgb(var(--fg) / var(--text-secondary));
-  font-size: var(--font-size-lg);
-  line-height: 1.72;
+  color: rgb(var(--text-2));
+  font: var(--weight-regular) var(--type-body) var(--font-sans);
   text-wrap: pretty;
 }
 
+/* Not an error: the first step, marked with the brand gold. */
 .model-setup-status {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  max-width: 420px;
-  border: 1px solid rgb(var(--border) / 0.72);
-  border-radius: var(--radius-md);
-  background: rgb(var(--bg-inset) / 0.36);
-  padding: var(--space-3);
+  gap: var(--space-2-5);
+  border: 0.5px solid var(--stroke-2);
+  border-radius: var(--r-md);
+  background: rgb(var(--surface-base) / 0.72);
+  padding: var(--space-2-5) var(--space-3);
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-status::before {
   width: 6px;
   height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgb(var(--danger));
-  box-shadow: 0 0 0 3px rgb(var(--danger) / 0.12);
+  flex: none;
+  border-radius: var(--r-full);
+  background: rgb(var(--brand));
+  box-shadow: 0 0 0 3px rgb(var(--brand) / 0.18);
   content: '';
 }
 
 .model-setup-status p {
-  color: rgb(var(--fg) / var(--text-secondary));
-  font-size: var(--font-size-md);
-  line-height: 1.55;
+  color: rgb(var(--text-2));
+  font: var(--weight-regular) var(--type-footnote) var(--font-sans);
 }
 
 .model-setup-actions {
-  display: flex;
+  display: grid;
+  gap: var(--space-3);
   margin-top: auto;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-4);
-  border-top: 1px solid rgb(var(--border) / 0.7);
-  padding-top: var(--space-5);
 }
 
 .model-setup-actions p {
-  max-width: 250px;
-  color: rgb(var(--fg) / var(--text-tertiary));
-  font-size: var(--font-size-sm);
-  line-height: 1.55;
-  text-wrap: pretty;
+  color: rgb(var(--text-3));
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
 .model-setup-action-row {
   display: flex;
-  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
-.model-setup-visual {
-  position: relative;
-  min-height: 100%;
-  overflow: hidden;
-  border-left: 1px solid rgb(var(--border) / 0.72);
-  background: rgb(var(--bg-inset));
+.model-setup-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1-5);
+  height: var(--control-lg);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
+  font: var(--weight-medium) var(--type-body-sm) var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
-.model-setup-visual::after {
-  position: absolute;
-  inset: 0;
-  content: '';
-  pointer-events: none;
-  background:
-    linear-gradient(180deg, rgb(var(--brand) / 0.08), transparent 32%),
-    linear-gradient(90deg, rgb(var(--bg) / 0.28), transparent 42%);
+.model-setup-button:hover {
+  background: var(--surface-active);
 }
 
-.model-setup-visual img {
-  width: 100%;
-  height: 100%;
-  min-height: 430px;
-  object-fit: cover;
-  object-position: 58% 50%;
+.model-setup-button.primary {
+  background: rgb(var(--accent));
+  color: rgb(var(--text-on-accent));
+  box-shadow: var(--elev-1);
+}
+
+.model-setup-button.primary:hover {
+  background: rgb(var(--accent-hover));
+  box-shadow: var(--elev-2);
 }
 
 @media (max-width: 760px) {
   .model-setup-modal {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
+    aspect-ratio: auto;
     overflow-y: auto;
   }
 
+  .model-setup-art {
+    position: relative;
+    inset: auto;
+    height: 200px;
+    flex: none;
+    object-position: 72% 40%;
+  }
+
+  .model-setup-modal::after {
+    display: none;
+  }
+
   .model-setup-copy {
+    width: auto;
+    overflow: visible;
     padding: var(--space-6);
   }
 
-  .model-setup-visual {
-    min-height: 210px;
-    border-top: 1px solid rgb(var(--border) / 0.72);
-    border-left: 0;
-  }
-
-  .model-setup-visual img {
-    min-height: 210px;
-    max-height: 260px;
-    object-position: 50% 42%;
+  .model-setup-intro {
+    margin-top: 0;
   }
 
   .model-setup-intro h2 {
-    font-size: 26px;
+    font: var(--weight-semibold) var(--type-title) var(--font-sans);
   }
-
-  .model-setup-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .model-setup-actions p {
-    max-width: none;
-  }
-
-  .model-setup-action-row {
-    justify-content: flex-end;
-    flex-wrap: wrap;
-  }
-}
-
-/* ─── Brand mark ─── */
-.brand-mark {
-  @apply block object-contain;
-  image-rendering: auto;
-}
-
-/* ─── Model setup dialog controls ─── */
-.tool-button {
-  @apply inline-flex items-center justify-center gap-2 border px-3 py-1.5 text-sm font-medium transition;
-  min-height: 34px;
-  border-radius: var(--radius-md);
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
-  color: rgb(var(--fg));
-}
-
-.tool-button:hover {
-  border-color: rgb(var(--border-strong));
-  background: rgb(var(--bg-inset));
-}
-
-.tool-button:disabled {
-  @apply opacity-50;
-}
-
-.tool-button.ink {
-  border-color: transparent;
-  background: rgb(var(--fg));
-  color: rgb(var(--bg));
-}
-
-.tool-button.ink:hover {
-  background: rgb(var(--fg) / var(--text-secondary));
-}
-
-.action-icon {
-  @apply shrink-0;
-  display: block;
-}
-
-.asset-button {
-  @apply gap-2;
 }

@@ -1,6 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -125,6 +124,18 @@ function caught(action: () => unknown): CredentialVaultError {
   throw new Error('expected a vault error')
 }
 
+async function caughtAsync(
+  action: () => Promise<unknown>,
+): Promise<CredentialVaultError> {
+  try {
+    await action()
+  } catch (error) {
+    expect(error).toBeInstanceOf(CredentialVaultError)
+    return error as CredentialVaultError
+  }
+  throw new Error('expected a vault error')
+}
+
 function vaultPath(): string {
   return join(
     mkdtempSync(join(tmpdir(), 'emperor-vault-')),
@@ -177,6 +188,41 @@ describe('CredentialVault', () => {
     ).toBe('not-in-cleartext-74')
   })
 
+  it('saves many entries in one write, or none of them (MAIN-7)', () => {
+    const path = vaultPath()
+    const vault = new CredentialVault({ path, storage })
+    const handles = vault.saveMany(
+      Array.from({ length: 3 }, (_v, index) => ({
+        label: `Site ${index}`,
+        bindings: [
+          { kind: 'origin' as const, origin: `https://s${index}.test` },
+        ],
+        username: `user${index}`,
+        password: `pw-${index}`,
+      })),
+    )
+    expect(handles).toHaveLength(3)
+    const reloaded = new CredentialVault({ path, storage })
+    expect(reloaded.secret(handles[2]!.handleId, 'password')).toBe('pw-2')
+    const before = readFileSync(path, 'utf8')
+    caught(() =>
+      vault.saveMany([
+        {
+          label: 'ok',
+          bindings: [{ kind: 'origin', origin: 'https://fine.test' }],
+          password: 'x',
+        },
+        {
+          label: '',
+          bindings: [{ kind: 'origin', origin: 'https://bad.test' }],
+          password: 'y',
+        },
+      ]),
+    )
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(vault.entries()).toHaveLength(3)
+  })
+
   it('requires exact origin bindings and drops deleted entries', () => {
     const vault = new CredentialVault({ path: vaultPath(), storage })
     expect(() =>
@@ -222,7 +268,7 @@ describe('CredentialVault', () => {
     ])
   })
 
-  it('uses a scrypt master password, locks on restart and after inactivity', () => {
+  it('uses a scrypt master password, locks on restart and after inactivity', async () => {
     const path = vaultPath()
     let now = 10_000
     const vault = new CredentialVault({ path, storage, now: () => now })
@@ -231,7 +277,10 @@ describe('CredentialVault', () => {
       bindings: [{ kind: 'origin', origin: 'https://x.test' }],
       password: 'private',
     })
-    vault.setMasterPassword('correct horse battery')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     const stored = JSON.parse(readFileSync(path, 'utf8')) as {
       master: { kind: string; params: unknown }
     }
@@ -247,8 +296,8 @@ describe('CredentialVault', () => {
     vault.lock()
     expect(vault.locked).toBe(true)
     expect(() => vault.secret(handle.handleId, 'password')).toThrow()
-    expect(vault.unlock('incorrect')).toBe(false)
-    expect(vault.unlock('correct horse battery')).toBe(true)
+    expect(await vault.unlock('incorrect')).toBe(false)
+    expect(await vault.unlock('correct horse battery')).toBe(true)
     expect(vault.secret(handle.handleId, 'password')).toBe('private')
     now += 30 * 60_000 + 1
     expect(vault.locked).toBe(true)
@@ -297,7 +346,7 @@ describe('CredentialVault', () => {
     ).toThrow()
   })
 
-  it('gives every failure a stable reason and code without echoing values', () => {
+  it('gives every failure a stable reason and code without echoing values', async () => {
     const path = vaultPath()
     const clock = manualClock(10_000)
     const vault = new CredentialVault({
@@ -341,10 +390,14 @@ describe('CredentialVault', () => {
         }),
       ).reason,
     ).toBe('invalid-totp')
-    expect(caught(() => vault.setMasterPassword('short')).reason).toBe(
-      'master-password-too-short',
+    expect(
+      (await caughtAsync(() => vault.setMasterPassword('short', 'short')))
+        .reason,
+    ).toBe('master-password-too-short')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
     )
-    vault.setMasterPassword('correct horse battery')
     vault.lock()
     const locked = caught(() => vault.secret(handle.handleId, 'password'))
     expect([locked.reason, locked.code]).toEqual([
@@ -382,7 +435,7 @@ describe('CredentialVault', () => {
       )
   })
 
-  it('drops the master key on an idle timer and extends it on use', () => {
+  it('drops the master key on an idle timer and extends it on use', async () => {
     const clock = manualClock(10_000)
     const vault = new CredentialVault({
       path: vaultPath(),
@@ -397,7 +450,10 @@ describe('CredentialVault', () => {
       password: 'private',
     })
     expect(clock.pending()).toBe(0)
-    vault.setMasterPassword('correct horse battery')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     expect(clock.pending()).toBe(1)
     clock.advance(20 * 60_000)
     expect(vault.secret(handle.handleId, 'password')).toBe('private')
@@ -411,17 +467,17 @@ describe('CredentialVault', () => {
     clock.set(10_000)
     expect(vault.locked).toBe(true)
     expect(vault.list()[0]!.username).toBeUndefined()
-    expect(vault.unlock('correct horse battery')).toBe(true)
+    expect(await vault.unlock('correct horse battery')).toBe(true)
     expect(clock.pending()).toBe(1)
     vault.lock()
     expect(clock.pending()).toBe(0)
-    expect(vault.unlock('correct horse battery')).toBe(true)
-    vault.setMasterPassword(null)
+    expect(await vault.unlock('correct horse battery')).toBe(true)
+    await vault.removeMasterPassword('correct horse battery')
     expect(clock.pending()).toBe(0)
     expect(vault.locked).toBe(false)
   })
 
-  it('stores the KDF cost with the salt and reads it back on unlock', () => {
+  it('stores the KDF cost with the salt and reads it back on unlock', async () => {
     const path = vaultPath()
     const vault = new CredentialVault({ path, storage, kdf: CHEAP_KDF })
     const handle = vault.save({
@@ -429,7 +485,10 @@ describe('CredentialVault', () => {
       bindings: [{ kind: 'origin', origin: 'https://x.test' }],
       password: 'private',
     })
-    vault.setMasterPassword('correct horse battery')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     const stored = JSON.parse(readFileSync(path, 'utf8')) as {
       master: { kind: string; params: unknown }
     }
@@ -437,7 +496,7 @@ describe('CredentialVault', () => {
     expect(stored.master.params).toEqual(CHEAP_KDF.params)
     // A later build with other defaults still opens this vault.
     const reopened = new CredentialVault({ path, storage })
-    expect(reopened.unlock('correct horse battery')).toBe(true)
+    expect(await reopened.unlock('correct horse battery')).toBe(true)
     expect(reopened.secret(handle.handleId, 'password')).toBe('private')
 
     const tampered = vaultPath()
@@ -453,15 +512,17 @@ describe('CredentialVault', () => {
       }),
     )
     expect(
-      caught(() =>
-        new CredentialVault({ path: tampered, storage }).unlock(
-          'correct horse battery',
-        ),
+      (
+        await caughtAsync(() =>
+          new CredentialVault({ path: tampered, storage }).unlock(
+            'correct horse battery',
+          ),
+        )
       ).reason,
     ).toBe('vault-file-invalid')
   })
 
-  it('opens Argon2id vaults written before KDF parameters were stored', () => {
+  it('opens Argon2id vaults written before KDF parameters were stored', async () => {
     const path = vaultPath()
     const vault = new CredentialVault({ path, storage, kdf: LEGACY_ARGON2_KDF })
     const handle = vault.save({
@@ -469,7 +530,10 @@ describe('CredentialVault', () => {
       bindings: [{ kind: 'origin', origin: 'https://x.test' }],
       password: 'private',
     })
-    vault.setMasterPassword('correct horse battery')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     const data = JSON.parse(readFileSync(path, 'utf8')) as {
       master: { params?: unknown }
     }
@@ -482,12 +546,12 @@ describe('CredentialVault', () => {
     delete data.master.params
     writeFileSync(path, JSON.stringify(data))
     const legacy = new CredentialVault({ path, storage, kdf: CHEAP_KDF })
-    expect(legacy.unlock('wrong password here')).toBe(false)
-    expect(legacy.unlock('correct horse battery')).toBe(true)
+    expect(await legacy.unlock('wrong password here')).toBe(false)
+    expect(await legacy.unlock('correct horse battery')).toBe(true)
     expect(legacy.secret(handle.handleId, 'password')).toBe('private')
   })
 
-  it('sets a master password where the runtime has no Argon2', () => {
+  it('sets a master password where the runtime has no Argon2', async () => {
     runtime.argon2 = false
     try {
       const path = vaultPath()
@@ -497,21 +561,24 @@ describe('CredentialVault', () => {
         bindings: [{ kind: 'origin', origin: 'https://x.test' }],
         password: 'private',
       })
-      vault.setMasterPassword('correct horse battery')
+      await vault.setMasterPassword(
+        'correct horse battery',
+        'correct horse battery',
+      )
       vault.lock()
-      expect(vault.unlock('correct horse battery')).toBe(true)
+      expect(await vault.unlock('correct horse battery')).toBe(true)
       expect(vault.secret(handle.handleId, 'password')).toBe('private')
 
       // An Argon2id vault written where Argon2 existed cannot open here.
       const older = vaultPath()
       runtime.argon2 = true
-      new CredentialVault({
+      await new CredentialVault({
         path: older,
         storage,
         kdf: LEGACY_ARGON2_KDF,
-      }).setMasterPassword('correct horse battery')
+      }).setMasterPassword('correct horse battery', 'correct horse battery')
       runtime.argon2 = false
-      const failure = caught(() =>
+      const failure = await caughtAsync(() =>
         new CredentialVault({ path: older, storage }).unlock(
           'correct horse battery',
         ),
@@ -539,7 +606,7 @@ describe('CredentialVault', () => {
     ).toBe('unknown')
   })
 
-  it('writes version 2: l: envelopes under the local key, m: around them with a master password', () => {
+  it('writes version 3: l: envelopes under the local key, m: around them with a master password', async () => {
     const path = vaultPath()
     const vault = new CredentialVault({
       path,
@@ -558,7 +625,7 @@ describe('CredentialVault', () => {
       version: number
       entries: Array<{ fields: Record<string, string> }>
     }
-    expect(plain.version).toBe(2)
+    expect(plain.version).toBe(3)
     for (const value of Object.values(plain.entries[0]!.fields)) {
       expect(value).toMatch(/^l:/)
       // The local store's own versioned envelope sits inside.
@@ -567,19 +634,22 @@ describe('CredentialVault', () => {
       ).toBe('el1')
     }
     expect(existsSync(join(dirname(path), 'secrets', 'local.key'))).toBe(true)
-    vault.setMasterPassword('correct horse battery')
+    await vault.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     const sealed = JSON.parse(readFileSync(path, 'utf8')) as {
       version: number
       master: Record<string, unknown>
       entries: Array<{ fields: Record<string, string> }>
     }
-    expect(sealed.version).toBe(2)
+    expect(sealed.version).toBe(3)
     expect(sealed.master).not.toHaveProperty('biometricKey')
     for (const value of Object.values(sealed.entries[0]!.fields))
       expect(value).toMatch(/^m:/)
     expect(JSON.stringify(sealed)).not.toContain('private-value-26')
     const reopened = new CredentialVault({ path, storage: localKey(path) })
-    expect(reopened.unlock('correct horse battery')).toBe(true)
+    expect(await reopened.unlock('correct horse battery')).toBe(true)
     expect(reopened.secret(handle.handleId, 'password')).toBe(
       'private-value-26',
     )
@@ -623,14 +693,14 @@ describe('CredentialVault', () => {
     })
     expect(
       (JSON.parse(readFileSync(path, 'utf8')) as { version: number }).version,
-    ).toBe(2)
-    // Formats it does not know still fail closed.
+    ).toBe(3)
+    // A format it does not know is kept and left alone (SEC-09).
     const future = vaultPath()
     mkdirSync(dirname(future), { recursive: true })
-    writeFileSync(future, JSON.stringify({ version: 3, entries: [] }))
-    expect(
-      caught(() => new CredentialVault({ path: future, storage })).reason,
-    ).toBe('vault-file-invalid')
+    writeFileSync(future, JSON.stringify({ version: 4, entries: [] }))
+    expect(new CredentialVault({ path: future, storage }).problem).toBe(
+      'vault-newer',
+    )
     expect(existsSync(future)).toBe(true)
   })
 
@@ -683,7 +753,7 @@ describe('CredentialVault', () => {
     expect(vault.secret(fresh.handleId, 'password')).toBe('again')
   })
 
-  it('resets past a key file that fails its checks, with a new key', () => {
+  it('resets past a key file that fails its checks, with a new key', async () => {
     const path = vaultPath()
     const first = new CredentialVault({ path, storage: localKey(path) })
     first.save({
@@ -691,15 +761,18 @@ describe('CredentialVault', () => {
       bindings: [{ kind: 'origin', origin: 'https://x.test' }],
       password: 'private',
     })
-    first.setMasterPassword('correct horse battery')
+    await first.setMasterPassword(
+      'correct horse battery',
+      'correct horse battery',
+    )
     const key = join(dirname(path), 'secrets', 'local.key')
-    chmodSync(key, 0o644)
+    writeFileSync(key, randomBytes(16))
     const vault = new CredentialVault({ path, storage: localKey(path) })
     expect(vault.problem).toBe('key-invalid')
     expect(vault.available).toBe(false)
-    expect(caught(() => vault.unlock('correct horse battery')).reason).toBe(
-      'vault-key-invalid',
-    )
+    expect(
+      (await caughtAsync(() => vault.unlock('correct horse battery'))).reason,
+    ).toBe('vault-key-invalid')
     vault.reset()
     expect(vault.hasMasterPassword).toBe(false)
     expect(vault.problem).toBeNull()

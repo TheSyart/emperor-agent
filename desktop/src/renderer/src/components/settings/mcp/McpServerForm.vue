@@ -160,19 +160,19 @@ const remote = computed(() => form.value.transport !== 'stdio')
 .label {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .label em {
   margin-left: var(--space-1-5);
   font-size: var(--fs-xxs);
   font-style: normal;
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 
-.transport > .ds-segmented {
+.transport > .ds-tabs {
   align-self: flex-start;
 }
 
@@ -180,6 +180,6 @@ const remote = computed(() => form.value.transport !== 'stdio')
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -1,12 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   statSync,
+  unlinkSync,
+  writeSync,
 } from 'node:fs'
+import { uptime } from 'node:os'
 import { join } from 'node:path'
 import { SCHEMA_VERSION, SchedulerJob, validateJobId } from './models'
 import {
@@ -21,18 +26,74 @@ import {
 
 export class SchedulerStoreCorrupt extends Error {}
 
+/** Another live process runs the scheduler on this data directory. */
+export class SchedulerLockHeld extends Error {
+  constructor(readonly holder: SchedulerLockHolder) {
+    super(
+      `另一个 Emperor 进程（pid ${holder.pid}）正在运行定时任务，本进程不启动定时任务`,
+    )
+    this.name = 'SchedulerLockHeld'
+  }
+}
+
+export interface SchedulerLockHolder {
+  pid: number
+  startedAt: number
+  /** When the machine booted, to tell a lock left before a reboot. */
+  bootAt: number | null
+}
+
+/**
+ * A job entry that could not be read (KRN-10): set aside in
+ * `jobs.rejected.json` so the other jobs still load.
+ */
+export interface SchedulerRejectedJob {
+  id: string | null
+  name: string | null
+  error: string
+  raw: unknown
+  rejected_at_ms?: number
+}
+
 export class SchedulerStoreData {
   version: number
   jobs: SchedulerJob[]
-  constructor(opts: { version?: number; jobs?: SchedulerJob[] } = {}) {
+  /** Entries that failed to parse; never written back to `jobs.json`. */
+  rejected: SchedulerRejectedJob[]
+  constructor(
+    opts: {
+      version?: number
+      jobs?: SchedulerJob[]
+      rejected?: SchedulerRejectedJob[]
+    } = {},
+  ) {
     this.version = opts.version ?? SCHEMA_VERSION
     this.jobs = opts.jobs ?? []
+    this.rejected = opts.rejected ?? []
   }
   static fromDict(raw: Record<string, any>): SchedulerStoreData {
-    const jobs = (raw.jobs ?? []).filter(isObject).map(SchedulerJob.fromDict)
+    const jobs: SchedulerJob[] = []
+    const rejected: SchedulerRejectedJob[] = []
+    for (const entry of Array.isArray(raw.jobs) ? raw.jobs : []) {
+      try {
+        if (!isObject(entry)) throw new Error('job entry must be an object')
+        jobs.push(SchedulerJob.fromDict(entry))
+      } catch (error) {
+        rejected.push({
+          id: isObject(entry) && typeof entry.id === 'string' ? entry.id : null,
+          name:
+            isObject(entry) && typeof entry.name === 'string'
+              ? entry.name
+              : null,
+          error: String(error instanceof Error ? error.message : error),
+          raw: entry,
+        })
+      }
+    }
     return new SchedulerStoreData({
       version: Number(raw.version || SCHEMA_VERSION),
       jobs,
+      rejected,
     })
   }
   toDict(): Record<string, unknown> {
@@ -49,8 +110,12 @@ export class SchedulerStore {
   readonly jobsFile: string
   readonly actionFile: string
   readonly lockFile: string
+  readonly rejectedFile: string
   private lastActionErrors: Array<Record<string, unknown>> = []
   private lastGood: SchedulerStoreData | null = null
+  /** Entries this process set aside (the page says so once). */
+  private rejectedThisRun = 0
+  private lockHeld = false
   private readonly jobsSnapshot: AtomicSnapshotSync<SchedulerStoreData>
   private readonly actionJournal: AppendOnlyJournalSync<Record<string, unknown>>
   private readonly persistenceAdapter?: SyncPersistenceAdapter
@@ -64,6 +129,7 @@ export class SchedulerStore {
     this.jobsFile = join(this.schedulerDir, 'jobs.json')
     this.actionFile = join(this.schedulerDir, 'action.jsonl')
     this.lockFile = join(this.schedulerDir, 'scheduler.lock')
+    this.rejectedFile = join(this.schedulerDir, 'jobs.rejected.json')
     this.persistenceAdapter = opts.persistenceAdapter
     this.jobsSnapshot = new AtomicSnapshotSync({
       path: this.jobsFile,
@@ -161,6 +227,63 @@ export class SchedulerStore {
     this.actionJournal.append(payload)
   }
 
+  /** Entries set aside since this store was opened. */
+  rejectedCount(): number {
+    return this.rejectedThisRun
+  }
+
+  /**
+   * Take `scheduler.lock` for this process. Another live process keeps it
+   * (SchedulerLockHeld); a lock left by a process that is gone, by this
+   * process, or before the last reboot (its pid may belong to something
+   * else now) is taken over.
+   */
+  acquireLock(startedAt: number): void {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const fd = openSync(this.lockFile, 'wx', 0o600)
+        try {
+          writeSync(
+            fd,
+            JSON.stringify({ pid: process.pid, startedAt, bootAt: bootTime() }),
+          )
+        } finally {
+          closeSync(fd)
+        }
+        this.lockHeld = true
+        return
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      const holder = readLockHolder(this.lockFile)
+      if (
+        holder &&
+        holder.pid !== process.pid &&
+        !beforeThisBoot(holder) &&
+        processAlive(holder.pid)
+      )
+        throw new SchedulerLockHeld(holder)
+      try {
+        unlinkSync(this.lockFile)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+    throw new Error(`could not take ${this.lockFile}`)
+  }
+
+  /** Give `scheduler.lock` back (only when this process holds it). */
+  releaseLock(): void {
+    if (!this.lockHeld) return
+    this.lockHeld = false
+    if (readLockHolder(this.lockFile)?.pid !== process.pid) return
+    try {
+      unlinkSync(this.lockFile)
+    } catch {
+      /* already gone */
+    }
+  }
+
   diagnostics(): Record<string, unknown> {
     const corrupt = existsSync(this.schedulerDir)
       ? readdirSync(this.schedulerDir)
@@ -174,6 +297,13 @@ export class SchedulerStore {
     return {
       jobsFile: this.jobsFile,
       actionFile: this.actionFile,
+      rejectedFile: this.rejectedFile,
+      rejectedJobs: readRejected(this.rejectedFile).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        error: entry.error,
+        rejectedAtMs: entry.rejected_at_ms ?? null,
+      })),
       lastActionErrors: this.lastActionErrors.slice(-20),
       corruptActionFiles: corrupt.slice(0, 10).map((name) => {
         const path = join(this.schedulerDir, name)
@@ -185,9 +315,13 @@ export class SchedulerStore {
 
   private readStore(): SchedulerStoreData {
     try {
-      const data = this.jobsSnapshot.read({
+      const read = this.jobsSnapshot.read({
         fallback: new SchedulerStoreData(),
-      }).value
+      })
+      const data = read.value
+      // A newer Emperor's jobs.json (REL-03) is only read: nothing set aside.
+      const newer = read.receipt.recoveryAction === 'newer_version_read_only'
+      if (data.rejected.length && !newer) this.setAside(data.rejected)
       this.lastGood = data
       return data
     } catch (error) {
@@ -200,6 +334,36 @@ export class SchedulerStore {
         { cause: error },
       )
     }
+  }
+
+  /**
+   * Add entries to `jobs.rejected.json` (an entry already there is not
+   * repeated: `jobs.json` keeps it until the next save).
+   */
+  private setAside(entries: SchedulerRejectedJob[]): void {
+    const existing = readRejected(this.rejectedFile)
+    const seen = new Set(existing.map((entry) => rejectedDigest(entry.raw)))
+    const added = entries.filter(
+      (entry) => !seen.has(rejectedDigest(entry.raw)),
+    )
+    if (!added.length) return
+    const stamp = Date.now()
+    durableReplaceSync(
+      this.rejectedFile,
+      `${JSON.stringify(
+        {
+          version: 1,
+          jobs: [
+            ...existing,
+            ...added.map((entry) => ({ ...entry, rejected_at_ms: stamp })),
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      { adapter: this.persistenceAdapter, fileMode: 0o600 },
+    )
+    this.rejectedThisRun += added.length
   }
 
   private copyLegacyFilesIfNeeded(): void {
@@ -287,6 +451,7 @@ export class SchedulerStore {
 
 const SCHEDULER_STORE_CODEC: SnapshotCodec<SchedulerStoreData> = {
   schemaVersion: SCHEMA_VERSION,
+  versionKey: 'version',
   encode(value) {
     return value.toDict()
   },
@@ -347,6 +512,59 @@ function collectInvalidSchedulerActionRows(
     }
   }
   return records
+}
+
+function readRejected(path: string): SchedulerRejectedJob[] {
+  if (!existsSync(path)) return []
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    return Array.isArray(parsed?.jobs) ? parsed.jobs.filter(isObject) : []
+  } catch {
+    // Keep an unreadable file instead of writing over it.
+    copyFileSync(path, `${path}.corrupt-${Math.trunc(Date.now() / 1000)}`)
+    return []
+  }
+}
+
+function rejectedDigest(raw: unknown): string {
+  return createHash('sha256')
+    .update(JSON.stringify(raw) ?? 'undefined')
+    .digest('hex')
+}
+
+function readLockHolder(path: string): SchedulerLockHolder | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    const pid = Number(parsed?.pid)
+    if (!Number.isSafeInteger(pid) || pid <= 0) return null
+    const bootAt = Number(parsed?.bootAt)
+    return {
+      pid,
+      startedAt: Number(parsed?.startedAt) || 0,
+      bootAt: Number.isFinite(bootAt) && bootAt > 0 ? bootAt : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function bootTime(): number {
+  return Math.round(Date.now() - uptime() * 1000)
+}
+
+/** Written during an earlier boot (a minute of slack for clock drift). */
+function beforeThisBoot(holder: SchedulerLockHolder): boolean {
+  return holder.bootAt !== null && bootTime() - holder.bootAt > 60_000
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
 }
 
 function isObject(value: unknown): value is Record<string, any> {

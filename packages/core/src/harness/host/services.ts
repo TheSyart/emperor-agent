@@ -25,13 +25,18 @@ import {
   missingSkillRequirementsFromStatus,
 } from '../../environment/probe'
 import { OsSandboxController } from '../../environment/sandbox'
+import { UnsandboxedConsentRegistry } from '../../sandbox/consent'
+import { ContainmentBackend } from '../../sandbox/policy'
 import { ExecutionEnvironmentService } from '../../environment/snapshot'
 import { MCPClient } from '../../mcp/client'
 import { MemoryStore } from '../../memory/store'
 import { TokenTracker } from '../../memory/token-tracker'
 import { OwnedProcessRuntime } from '../../processes/runtime'
 import { ProjectStore } from '../../projects/store'
-import { bootstrapEmperorHome } from '../../runtime/installation'
+import {
+  bootstrapEmperorHome,
+  runPendingDataMigrations,
+} from '../../runtime/installation'
 import {
   migrateLegacyStateRoot,
   type LegacyStateMigrationResult,
@@ -42,6 +47,10 @@ import {
   resolveRuntimePaths,
   type RuntimePaths,
 } from '../../runtime/paths'
+import {
+  createLocalKeySealer,
+  type SecretSealer,
+} from '../../security/secret-sealer'
 import { SchedulerService } from '../../scheduler/service'
 import { SchedulerStore } from '../../scheduler/store'
 import { ensureUserProfileFile } from '../../sessions/onboarding'
@@ -88,6 +97,17 @@ export interface KeptServicesOptions {
   legacyRuntimeSkillsHandled?: boolean
   /** Host public-HTTPS client (Plugin installs, Skill URL imports). */
   webFetchClient?: WebFetchClient | null
+  /**
+   * Seals model API keys and MCP tokens at rest (SEC-06). The desktop main
+   * process passes one over its `LocalSecretStore`; absent (ACP, headless),
+   * Core uses its own implementation over the same key file.
+   */
+  secretSealer?: SecretSealer | null
+  /**
+   * The one process containment (SEC-08) for the Shell, MCP stdio servers,
+   * plugin hooks and the environment installer; tests replace it.
+   */
+  containmentBackend?: ContainmentBackend
 }
 
 export interface KeptServices {
@@ -98,6 +118,8 @@ export interface KeptServices {
   /** Where pre-harness sessions were moved on first start, if any. */
   archivedLegacySessions: string | null
   localConfig: Awaited<ReturnType<typeof loadLocalConfig>>
+  /** The one sealer for `model_config.json` and `mcp_config.json` secrets. */
+  secretSealer: SecretSealer
   modelConfig: ModelConfig
   sessionStore: SessionStore
   sharedMemory: MemoryStore
@@ -106,8 +128,12 @@ export interface KeptServices {
   environmentCatalog: LoadedToolCatalog
   environmentProbe: EnvironmentProbe
   executionEnvironmentService: ExecutionEnvironmentService
+  /** The one process containment backend (SEC-08). */
+  containment: ContainmentBackend
   processSandbox: OsSandboxController
   processRuntime: OwnedProcessRuntime
+  /** The user's answers for running their MCP servers outside an unavailable sandbox. */
+  unsandboxedConsent: UnsandboxedConsentRegistry
   skillManager: SkillManager
   skillInstallService: SkillInstallService
   managedEnvironmentService: ManagedEnvironmentService
@@ -126,9 +152,6 @@ export interface KeptServices {
 export interface KeptServiceHooks {
   /** Host event sink (non-session events: scheduler, MCP, environment, skills). */
   emit(event: Record<string, unknown>): Promise<void> | void
-  activeSessionId(): string | null
-  activeWorkspaceRoot(): string
-  refreshRuntimeContext(): void
 }
 
 export async function createKeptServices(
@@ -153,6 +176,9 @@ export async function createKeptServices(
       appVersion: opts.appVersion ?? '0.0.0-headless',
       runtimeRevision: opts.runtimeRevision ?? environmentCatalog.revision,
     })
+    await runPendingDataMigrations(paths.stateRoot, {
+      ...(opts.appVersion ? { appVersion: opts.appVersion } : {}),
+    })
   }
   ensureRuntimeStateDirs(paths)
   const migrationPaths = opts.legacyRuntimeRoot
@@ -175,7 +201,12 @@ export async function createKeptServices(
       ? join(templatesDir, 'init', 'MEMORY.md')
       : null,
   })
-  const modelConfig = await loadModelConfig(paths.stateRoot, { create: true })
+  const secretSealer =
+    opts.secretSealer ?? createLocalKeySealer(paths.stateRoot)
+  const modelConfig = await loadModelConfig(paths.stateRoot, {
+    create: true,
+    sealer: secretSealer,
+  })
   const archivedLegacySessions = archiveLegacySessions(paths.sessionsRoot)
   const sessionStore = new SessionStore(paths.stateRoot)
   const projectStore = new ProjectStore(paths.stateRoot, {
@@ -196,21 +227,26 @@ export async function createKeptServices(
     environmentRoot: paths.environmentRoot,
     scratchRoot: join(paths.sessionsRoot, '.scratch'),
   })
-  const processSandbox = new OsSandboxController()
+  const containment = opts.containmentBackend ?? new ContainmentBackend()
+  const processSandbox = new OsSandboxController({ backend: containment })
   const processRuntime = new OwnedProcessRuntime(paths.stateRoot, {
     sandbox: processSandbox,
   })
+  const unsandboxedConsent = new UnsandboxedConsentRegistry(paths.stateRoot)
   const skillManager = new SkillManager({
     runtimeRoot: root,
     stateRoot: paths.stateRoot,
   })
+  // Chat sessions work here; user-wide services (Skill installs, the global
+  // MCP servers) use it instead of whichever session is in view (KRN-01).
+  const chatWorkspace = join(paths.stateRoot, 'workspace')
   const skillInstallService = new SkillInstallService({
     manager: skillManager,
     stateRoot: paths.stateRoot,
     resolveMissing: async (requirements) => {
       const skillName = 'install-candidate'
       const status = await environmentProbe.getStatus({
-        projectRoot: hooks.activeWorkspaceRoot(),
+        projectRoot: chatWorkspace,
         forceRefresh: true,
         skillRequirements: [{ skillName, skillStatus: 'active', requirements }],
       })
@@ -220,12 +256,6 @@ export async function createKeptServices(
   const managedEnvironmentService = new ManagedEnvironmentService({
     stateRoot: paths.stateRoot,
     skillManager,
-    processRunner: processRuntime,
-    onEnvironmentChanged: async () => {
-      environmentProbe.invalidate()
-      hooks.refreshRuntimeContext()
-      await skillInstallService.reconcileBlocked()
-    },
     onInstallEvent: async (event) => {
       const name =
         event.phase === 'started'
@@ -255,7 +285,6 @@ export async function createKeptServices(
   const skillChangeDetector = new SkillChangeDetector(
     [paths.userSkillsRoot],
     async ({ catalogVersion }) => {
-      hooks.refreshRuntimeContext()
       await hooks.emit({
         event: 'skill_catalog_changed',
         catalog_version: catalogVersion,
@@ -274,12 +303,14 @@ export async function createKeptServices(
     eventSink: async (event) => {
       await hooks.emit(event)
     },
-    targetSessionId: () => hooks.activeSessionId(),
   })
+  // The global MCP servers (mcp_config.json and user-wide plugins) serve
+  // every session; project-scoped plugins run in per-project instances.
   const mcpClient = new MCPClient(paths.stateRoot, {
+    sealer: secretSealer,
     processRuntime,
-    workspaceRoot: () => hooks.activeWorkspaceRoot(),
-    ownerSessionId: () => hooks.activeSessionId(),
+    unsandboxedConsent,
+    workspaceRoot: chatWorkspace,
     onStateChange: async (snapshot) => {
       await hooks.emit({
         event: 'mcp_connection_state',
@@ -294,6 +325,7 @@ export async function createKeptServices(
     legacyStateMigration,
     archivedLegacySessions,
     localConfig,
+    secretSealer,
     modelConfig,
     sessionStore,
     sharedMemory,
@@ -302,8 +334,10 @@ export async function createKeptServices(
     environmentCatalog,
     environmentProbe,
     executionEnvironmentService,
+    containment,
     processSandbox,
     processRuntime,
+    unsandboxedConsent,
     skillManager,
     skillInstallService,
     managedEnvironmentService,

@@ -118,27 +118,26 @@ describe('TurnFilesCard', () => {
     expect(root.querySelector('.headline')?.textContent).toBe('已编辑 7 个文件')
     expect(root.querySelector('.head .add')?.textContent).toBe('+9')
     expect(root.querySelector('.head .del')?.textContent).toBe('−6')
-    expect(rowNames(root)).toEqual([
-      'a.ts',
-      'b.ts',
-      'old.md',
-      'logo.png',
-      'c.ts',
-    ])
+    expect(rowNames(root)).toEqual(['a.ts', 'b.ts', 'old.md'])
     expect(root.querySelector('.file .dir')?.textContent).toBe('src/')
     const text = root.textContent ?? ''
     expect(text).toContain('新建')
     expect(text).toContain('删除')
-    expect(text).toContain('二进制')
-    expect(text).toContain('由 b0.ts 重命名')
-    expect(text).toContain('按本轮开始与结束时的项目对比')
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按本轮开始与结束时的项目对比',
+    )
+    expect(root.querySelector('.more')?.textContent).toContain(
+      '再显示 4 个文件',
+    )
     root.querySelector<HTMLButtonElement>('.more')!.click()
     await flush()
     expect(rowNames(root)).toHaveLength(7)
+    expect(root.textContent).toContain('二进制')
+    expect(root.textContent).toContain('由 b0.ts 重命名')
     expect(root.textContent).toContain('过大，未记录内容')
   })
 
-  it('opens the review on the turn, or on one file', async () => {
+  it('keeps review separate from current file preview', async () => {
     const root = mount(data())
     root.querySelector<HTMLButtonElement>('[data-action="review"]')!.click()
     expect(requestWorkspace).toHaveBeenLastCalledWith({
@@ -147,8 +146,11 @@ describe('TurnFilesCard', () => {
     })
     root.querySelectorAll<HTMLButtonElement>('.file')[1]!.click()
     expect(requestWorkspace).toHaveBeenLastCalledWith({
-      pane: 'review',
-      turn: { sessionId: 's1', turn: 3, files, path: 'src/b.ts' },
+      pane: 'files',
+      file: {
+        owner: 's1',
+        target: { source: 'turn', sessionId: 's1', turn: 3, path: 'src/b.ts' },
+      },
     })
   })
 
@@ -217,7 +219,7 @@ describe('TurnFilesCard', () => {
     expect(root.textContent).toContain('之后又改过，已跳过')
   })
 
-  it('says when a turn was not recorded, and offers nothing outside Git', () => {
+  it('says when a turn was not recorded, and previews files outside Git', async () => {
     const skipped = mount(
       data({
         status: 'skipped',
@@ -234,8 +236,109 @@ describe('TurnFilesCard', () => {
     const tools = mount(data({ mode: 'tools', reviewable: false }))
     expect(tools.querySelector('[data-action="review"]')).toBeNull()
     expect(tools.querySelector('[data-action="undo"]')).toBeNull()
-    expect(tools.textContent).toContain('只统计 Emperor 文件工具写入的文件')
+    expect(tools.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '只统计 Emperor 文件工具写入的文件',
+    )
     tools.querySelectorAll<HTMLButtonElement>('.file')[0]!.click()
-    expect(requestWorkspace).not.toHaveBeenCalled()
+    expect(requestWorkspace).toHaveBeenLastCalledWith({
+      pane: 'files',
+      file: {
+        owner: 's1',
+        target: { source: 'turn', sessionId: 's1', turn: 3, path: 'src/a.ts' },
+      },
+    })
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('keeps a single-file summary compact without an empty footer', () => {
+    const root = mount(
+      data({
+        mode: 'tools',
+        reviewable: false,
+        files: [files[0]!],
+        totals: { files: 1, additions: 3, deletions: 1 },
+      }),
+    )
+    expect(root.querySelector('.headline')?.textContent).toBe('已编辑 1 个文件')
+    expect(root.querySelector('.totals')?.getAttribute('aria-label')).toBe(
+      '新增 3 行，删除 1 行',
+    )
+    expect(root.querySelector('.foot')).toBeNull()
+    expect(root.querySelector('.file .document-icon')).not.toBeNull()
+    expect(root.textContent).not.toContain('只统计')
+  })
+
+  it('labels a task’s card 「这次任务」; 查看变更 and 撤销 cover the task (UI-S15)', async () => {
+    core.mockResolvedValue({ turn: 3, reverted: ['src/a.ts'], skipped: [] })
+    const task = { firstTurn: 1, lastTurn: 3 }
+    const root = mount(data({ task, concurrent: true }))
+    const card = root.querySelector('.turn-files')!
+    expect(card.getAttribute('aria-label')).toBe('这次任务的改动')
+    expect(card.getAttribute('data-task-first-turn')).toBe('1')
+    expect(root.querySelector('.scope')?.textContent?.trim()).toBe('这次任务')
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按这次任务开始与结束时的项目对比',
+    )
+    root.querySelector<HTMLButtonElement>('[data-action="review"]')!.click()
+    expect(requestWorkspace).toHaveBeenLastCalledWith({
+      pane: 'review',
+      turn: { sessionId: 's1', turn: 3, files, task },
+    })
+    root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.click()
+    await flush()
+    const dialog = document.body.querySelector('[role="dialog"]')!
+    expect(dialog.textContent).toContain('撤销这次任务的改动？')
+    expect(dialog.textContent).toContain('只恢复这次任务结束后没有再改过的文件')
+    expect(
+      dialog.querySelector('[data-turn-revert-concurrent]')?.textContent,
+    ).toContain('这次任务期间')
+    dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')!.click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('workspace.revertTurn', {
+      sessionId: 's1',
+      turn: 3,
+      paths: [
+        'src/a.ts',
+        'src/b.ts',
+        'docs/old.md',
+        'logo.png',
+        'c.ts',
+        'z.ts',
+      ],
+    })
+  })
+
+  it('says a task went unrecorded in the task’s words, and keeps older cards unlabeled', () => {
+    const skipped = mount(
+      data({
+        task: { firstTurn: 2, lastTurn: 4 },
+        status: 'skipped',
+        skipReason: 'git-error',
+        files: [],
+        totals: { files: 0, additions: 0, deletions: 0 },
+        reviewable: false,
+      }),
+    )
+    expect(skipped.textContent?.trim()).toBe('这次任务的改动未记录：Git 出错')
+    container?.remove()
+    const older = mount(data())
+    expect(older.querySelector('.scope')).toBeNull()
+    expect(older.querySelector('.turn-files')?.getAttribute('aria-label')).toBe(
+      '本轮改动',
+    )
+  })
+
+  it('warns that a task recorded after Emperor came back may hold outside changes', async () => {
+    const root = mount(
+      data({ task: { firstTurn: 1, lastTurn: 3 }, recovered: true }),
+    )
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按这次任务开始与重新打开 Emperor 时的项目对比（任务中途 Emperor 退出过，这段时间在 Emperor 之外的改动也算在内）',
+    )
+    root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.click()
+    await flush()
+    expect(
+      document.body.querySelector('[data-turn-revert-recovered]')?.textContent,
+    ).toContain('Emperor 退出过')
   })
 })

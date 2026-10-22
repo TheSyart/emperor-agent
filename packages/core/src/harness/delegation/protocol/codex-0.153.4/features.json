@@ -1,0 +1,547 @@
+{
+  "schemaVersion": 1,
+  "codexVersion": "0.153.4",
+  "generatedBy": "codex features list (private HOME and CODEX_HOME, no overrides)",
+  "features": {
+    "apply_patch_freeform": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "apply_patch_preserve_line_endings": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "apply_patch_streaming_events": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "apps": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "apps_mcp_path_override": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "artifact": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "auth_elicitation": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "background_paginated_rollout_migration": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "bedrock_setup_wizard": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "browser_use": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "browser_use_external": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "browser_use_full_cdp_access": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "chronicle": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "code_mode": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "code_mode_buffered_exec": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "code_mode_host": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "code_mode_interrupt": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "code_mode_only": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "code_mode_prewarm": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "codex_git_commit": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "collaboration_modes": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "compaction_image_budget": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "computer_use": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "concurrent_reasoning_summaries": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "content_item_kinds": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "context_management": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "current_time_reminder": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "cwd_relative_turn_diffs": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "default_mode_request_user_input": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "deferred_executor": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "deferred_tool_world_state": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "elevated_windows_sandbox": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "enable_fanout": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "enable_mcp_apps": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "enable_request_compression": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "exec_permission_approvals": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "executed_tool_call_metadata": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "executor_capability_discovery": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "experimental_windows_sandbox": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "external_agent_memory_import": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "external_migration": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "fast_mode": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "goals": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "guardian_approval": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "guardian_enhanced_node_repl_transcripts": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "guardian_ext": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "guardian_node_repl_transcript_images": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "guardian_reuse_parent_compaction": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "guardianv2": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "hooks": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "image_detail_original": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "image_generation": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "image_resize_notice": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "in_app_browser": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "in_app_chat": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "in_app_dictation": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "in_app_local_automation": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "in_app_updates": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "item_ids": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "js_repl": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "js_repl_tools_only": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "local_thread_store_compression": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "local_thread_store_shared_compression": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "mcp_2026_07_28": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "mcp_oauth_refresh_coordination": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "memories": {
+      "stage": "stable",
+      "enabled": false
+    },
+    "mentions_v2": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "multi_agent": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "multi_agent_mode": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "multi_agent_v2": {
+      "stage": "stable",
+      "enabled": false
+    },
+    "network_proxy": {
+      "stage": "experimental",
+      "enabled": false
+    },
+    "non_prefixed_mcp_tool_names": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "omit_app_server_notification_media": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "personality": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "plugin_hooks": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "plugin_sharing": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "plugins": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "powershell_shell_version": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "prevent_idle_sleep": {
+      "stage": "experimental",
+      "enabled": false
+    },
+    "psp": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "realtime_conversation": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "recommended_plugins": {
+      "stage": "stable",
+      "enabled": false
+    },
+    "remote_compaction_v2": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "remote_control": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "remote_models": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "remote_plugin": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "request_permissions_tool": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "request_rule": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "resize_all_images": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "respect_system_proxy": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "responses_websockets": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "responses_websockets_v2": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "retain_client_developer_messages": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "rollout_budget": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "runtime_metrics": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "search_tool": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "secret_auth_storage": {
+      "stage": "stable",
+      "enabled": false
+    },
+    "send_async_message": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "shell_snapshot": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "shell_snapshot_v2": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "shell_tool": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "shell_zsh_fork": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "skill_env_var_dependency_prompt": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "skill_mcp_dependency_install": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "skill_search": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "skip_host_skill_discovery": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "sleep_tool": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "sqlite": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "standalone_web_search": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "steer": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "step_model_switching": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "terminal_resize_reflow": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "terminal_visualization_instructions": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "token_budget": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "tool_call_mcp_elicitation": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "tool_search": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "tool_search_always_defer_mcp_tools": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "tool_suggest": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "transcript_v2": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "tui_app_server": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "unavailable_dummy_tools": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "unbounded_connection_retries": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "undo": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "unified_exec": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "unified_exec_zsh_fork": {
+      "stage": "removed",
+      "enabled": true
+    },
+    "unified_image_budget": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "use_agent_identity": {
+      "stage": "under development",
+      "enabled": false
+    },
+    "use_legacy_landlock": {
+      "stage": "deprecated",
+      "enabled": false
+    },
+    "use_linux_sandbox_bwrap": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "view_image": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "web_search_cached": {
+      "stage": "deprecated",
+      "enabled": false
+    },
+    "web_search_request": {
+      "stage": "deprecated",
+      "enabled": false
+    },
+    "workspace_dependencies": {
+      "stage": "stable",
+      "enabled": true
+    },
+    "workspace_owner_usage_nudge": {
+      "stage": "removed",
+      "enabled": false
+    },
+    "write_stdin_approval": {
+      "stage": "under development",
+      "enabled": false
+    }
+  }
+}

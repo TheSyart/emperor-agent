@@ -153,7 +153,7 @@ onMounted(async () => {
     <template #actions>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         data-action="add-site-rule"
         :disabled="settings === null || saving"
         @click="openDialog"
@@ -257,7 +257,7 @@ onMounted(async () => {
       </Field>
     </form>
     <template #footer>
-      <Button variant="outline" type="button" @click="dialogOpen = false"
+      <Button variant="secondary" type="button" @click="dialogOpen = false"
         >取消</Button
       >
       <Button
@@ -276,14 +276,14 @@ onMounted(async () => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .site.mono {
   font-family: var(--font-mono);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 /* 需要批准 reads as a warning, 阻止 as an error (as in the preview). */
@@ -299,7 +299,7 @@ onMounted(async () => {
   margin: var(--space-2) var(--space-0-5) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .agent-permissions-error {

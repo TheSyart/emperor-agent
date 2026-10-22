@@ -7,8 +7,8 @@ import { computed } from 'vue'
 import type { GoalChatNode } from '../../../conversation/types'
 import { DsGoal } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
-import StateDot from '../../ui/StateDot.vue'
-import type { StateDotState } from '../../ui/stateDot'
+import Dot from '../../ui/Dot.vue'
+import type { DotState } from '../../ui/dot'
 import { useExpansion } from '../chatContext'
 
 const props = defineProps<{ node: GoalChatNode }>()
@@ -23,8 +23,8 @@ const OPERATION_LABEL: Record<string, string> = {
   block: '受阻',
   clear: '已清除',
 }
-const PHASE_DOT: Record<string, StateDotState> = {
-  active: 'ongoing',
+const PHASE_DOT: Record<string, DotState> = {
+  active: 'running',
   paused: 'warn',
   blocked: 'error',
   complete: 'ok',
@@ -58,7 +58,7 @@ const dot = computed(() =>
       :tone="data.phase === 'blocked' ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="dot && dot !== 'ongoing'" :state="dot" />
+        <Dot v-if="dot && dot !== 'running'" :state="dot" />
         <DsGoal v-else :size="14" />
       </template>
       <div v-if="data.blockedReason" class="reason">
@@ -74,12 +74,12 @@ const dot = computed(() =>
   margin: var(--space-1) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   margin-left: var(--space-1-5);
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

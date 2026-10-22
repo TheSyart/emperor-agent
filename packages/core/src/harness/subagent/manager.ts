@@ -15,6 +15,7 @@
  * every settled run notifies the parent (followup when idle, steer when busy).
  */
 
+import { SUBAGENT_IDENTITY, subagentTask } from './contract'
 import { randomUUID } from 'node:crypto'
 import {
   contextMessage,
@@ -23,10 +24,15 @@ import {
   type UserMessage,
 } from '../../llm/message'
 import type { Session } from '../../session-log/session'
-import type { SessionLogStore } from '../../session-log/store'
+import type {
+  RepairContributor,
+  RepairStep,
+  SessionLogStore,
+} from '../../session-log/store'
+import type { LlmCallConfig } from '../../llm/call-config'
 import type { SessionEvent, TurnEndReason } from '../../session-log/types'
 import { logger } from '../../util/log'
-import type { Agent, AgentOptions } from '../agent/agent'
+import type { Agent, AgentAdmission, AgentOptions } from '../agent/agent'
 import type { ApprovalService } from '../approval/service'
 import type { ObjectJsonSchema } from '../tools/json-schema'
 import type { SandboxPolicyService } from '../sandbox/policy'
@@ -49,7 +55,11 @@ declare module '../../session-log/types' {
     'subagent/settled': {
       subagentId: string
       stopReason: SubagentStopReason
+      /** Exact own child turn/end position; absent in older persisted logs. */
+      childTurnEndSeq?: number
       text?: string
+      /** Written by crash repair: the app stopped before the child settled. */
+      repaired?: true
     }
     /** Log-only on the CHILD: its creation facts (first event). */
     'subagent/descriptor': {
@@ -61,11 +71,42 @@ declare module '../../session-log/types' {
   }
 }
 
+/** Crash repair (parent log): a child started but never settled was cut short. */
+export const subagentRepair: RepairContributor = {
+  id: 'subagent',
+  pairs: [['subagent/started', 'subagent/settled']],
+  repair(events) {
+    const open = new Map<string, number>()
+    for (const event of events) {
+      if (event.type === 'subagent/started')
+        open.set(event.data.subagentId, event.seq)
+      else if (event.type === 'subagent/settled')
+        open.delete(event.data.subagentId)
+    }
+    return [...open].map(
+      ([subagentId, openedAt]) =>
+        ({
+          type: 'subagent/settled',
+          data: { subagentId, stopReason: 'interrupted', repaired: true },
+          openedAt,
+        }) as RepairStep,
+    )
+  },
+}
+
 export type SubagentStopReason =
-  'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal' | 'interrupted'
+  | 'completed'
+  | 'aborted'
+  | 'error'
+  | 'max-tokens'
+  | 'refusal'
+  | 'interrupted'
+  | 'budget'
 
 export const SUBAGENT_DELEGATION_CONTEXT =
-  'You are a delegated subagent: your permission scope was fixed when you were started and cannot be ' +
+  SUBAGENT_IDENTITY +
+  '\n\n' +
+  'Your permission scope was fixed when you were started and cannot be ' +
   'widened from inside this session — operations that require approval are rejected automatically. ' +
   'When the task needs access beyond that scope, do not retry the denied operation; state the ' +
   'limitation in your reply so the delegating agent can handle it.'
@@ -106,6 +147,36 @@ interface StructuredState {
 export interface SubagentObserver {
   started?(child: Agent, record: SubagentRecord): void
   settled?(child: Agent, settlement: SubagentSettlement): void
+  /**
+   * The child was disposed (stopped for good). Its log closes once its
+   * driver is idle and every returned promise settled (KRN-03: its jobs
+   * are torn down and the host forgets it first).
+   */
+  disposed?(child: Agent): void | Promise<void>
+}
+
+/**
+ * The task budget the manager consults (KRN-03; the host's task tree).
+ * Without one, children are unbounded (tests, embedders).
+ */
+export interface SubagentBudget {
+  /**
+   * Count one more child of `parent`'s task. Throws (code
+   * `AGENT_BUDGET_EXCEEDED`) when the task may not start another.
+   */
+  reserve(parent: Agent): void
+  /** Agent options that gate a new child's runs on the task's pool. */
+  admission(parent: Agent): AgentAdmission | undefined
+  /**
+   * `parent` waits for a child in the foreground (+1) or no longer (-1):
+   * while it waits, its own slot in the pool is lent to its children.
+   */
+  waiting(parent: Agent, delta: 1 | -1): void
+  /**
+   * Whether a child's result may wake its idle parent. False: the result
+   * waits for the parent's next step (the budget explains why).
+   */
+  takeWake(parent: Agent): boolean
 }
 
 export class SubagentError extends Error {
@@ -127,6 +198,14 @@ export interface SubagentManagerDeps {
   sandbox: SandboxPolicyService
   approval: ApprovalService
   maxDepth?: number
+  /** The task budget (total, pool, result wakes); none: unbounded. */
+  budget?: SubagentBudget
+  /**
+   * The request config of a child nobody narrowed: the model chosen in
+   * 设置 › 子智能体 › 本地子智能体 (AGT-10). Undefined follows the
+   * conversation's model.
+   */
+  childCallConfig?: () => (() => LlmCallConfig) | undefined
 }
 
 function stopReasonOf(reason: TurnEndReason | undefined): SubagentStopReason {
@@ -143,6 +222,10 @@ function stopReasonOf(reason: TurnEndReason | undefined): SubagentStopReason {
       return 'refusal'
     case 'interrupted':
       return 'interrupted'
+    case 'plan-dismissed':
+      return 'completed'
+    case 'budget':
+      return 'budget'
     default:
       return 'completed'
   }
@@ -179,6 +262,8 @@ export function settlementSummary(
       return `${subject} failed before it finished.`
     case 'interrupted':
       return `${subject} was interrupted before it finished.`
+    case 'budget':
+      return `${subject} stopped at the task budget before it finished.`
   }
 }
 
@@ -274,8 +359,9 @@ export class SubagentManager {
         'DEPTH',
       )
     }
+    this.deps.budget?.reserve(parent)
     const childId = `sub-${randomUUID()}`
-    const cwd = parent.session.header.cwd
+    const cwd = parent.session.cwd
     let session: Session
     if (request.mode === 'fork') {
       const boundary = lastCompletedTurnEnd(parent.session.events)
@@ -320,9 +406,14 @@ export class SubagentManager {
         schema: request.outputSchema,
         staged: new Map(),
       })
+    const admission = this.deps.budget?.admission(parent)
+    const callConfig =
+      request.agentOptions?.callConfig ?? this.deps.childCallConfig?.()
     const child = this.deps.createAgent(session, {
       ...request.agentOptions,
+      ...(callConfig === undefined ? {} : { callConfig }),
       owner: parent,
+      ...(admission === undefined ? {} : { admission }),
     })
     const record: SubagentRecord = {
       id: childId,
@@ -357,7 +448,12 @@ export class SubagentManager {
     }
     child.followup(
       createUserMessage({
-        content: [{ type: 'text', text: request.prompt }],
+        content: [
+          {
+            type: 'text',
+            text: subagentTask(request.description, request.prompt),
+          },
+        ],
         source: { kind: 'context', producer: 'subagent', form: 'relay' },
       }),
     )
@@ -374,13 +470,24 @@ export class SubagentManager {
       return Promise.reject(
         new SubagentError(`subagent "${childId}" is not live`, 'NOT_FOUND'),
       )
+    const parent = this.deps.lookupAgent(entry.record.parentId)
+    // While the parent waits, its slot in the task's pool goes to the child.
+    if (parent !== undefined) this.deps.budget?.waiting(parent, 1)
+    let lent = parent !== undefined
+    const unlend = (): void => {
+      if (!lent || parent === undefined) return
+      lent = false
+      this.deps.budget?.waiting(parent, -1)
+    }
     return new Promise<SubagentSettlement>((resolve) => {
       const onAbort = (): void => {
+        unlend()
         entry.agent.cancel({ kind: 'parent' })
       }
       signal.addEventListener('abort', onAbort, { once: true })
       entry.foreground = (settlement) => {
         signal.removeEventListener('abort', onAbort)
+        unlend()
         resolve(settlement)
       }
     })
@@ -417,6 +524,7 @@ export class SubagentManager {
       parent?.session.append('subagent/settled', {
         subagentId: entry.record.id,
         stopReason: settlement.stopReason,
+        ...(lastEnd === undefined ? {} : { childTurnEndSeq: lastEnd.seq }),
         ...(text === undefined ? {} : { text }),
       })
     } catch (error: unknown) {
@@ -455,13 +563,29 @@ export class SubagentManager {
       },
     })
     try {
-      if (parent.status === 'idle') parent.followup(notice)
-      else parent.steer(notice)
+      this.deliverToParent(parent, notice, 'followup')
     } catch (error: unknown) {
       logger.warn('subagent settlement notice was not delivered', {
         error: String(error),
       })
     }
+  }
+
+  /**
+   * A child's result for its parent: a running parent reads it with its
+   * next step; an idle one is woken while the task budget allows result
+   * wakes, else the result waits for its next step (KRN-03).
+   */
+  private deliverToParent(
+    parent: Agent,
+    message: UserMessage,
+    wake: 'followup' | 'steer',
+  ): void {
+    if (parent.status !== 'idle') parent.steer(message)
+    else if (this.deps.budget?.takeWake(parent) === false)
+      parent.inject(message)
+    else if (wake === 'followup') parent.followup(message)
+    else parent.steer(message)
   }
 
   /** Queue a message as the child's next turn (`send_message`). */
@@ -474,7 +598,25 @@ export class SubagentManager {
         `subagent "${childId}" is not a direct child of agent "${parent.id}"`,
         'UNAUTHORIZED',
       )
+    // A follow-up is the parent's new instruction, delivered as written; only
+    // the first turn carries the task's name (AGT-05, SUB-27).
     const message = contextMessage('subagent-parent', text, { form: 'relay' })
+    entry.agent.followup(message)
+    return message.id
+  }
+
+  /**
+   * The user writes to a live child from its conversation page (AGT-10): the
+   * message starts the child's next turn as the user's own words.
+   */
+  userFollowup(childId: string, text: string): string {
+    const entry = this.children.get(childId)
+    if (entry === undefined)
+      throw new SubagentError(`subagent "${childId}" is not live`, 'NOT_FOUND')
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    })
     entry.agent.followup(message)
     return message.id
   }
@@ -531,7 +673,7 @@ export class SubagentManager {
         summary: `report from ${entry.record.description}`,
       },
     })
-    parent.steer(message)
+    this.deliverToParent(parent, message, 'steer')
     return message.id
   }
 
@@ -550,12 +692,30 @@ export class SubagentManager {
   }
 
   private disposeEntry(entry: ChildEntry): void {
-    this.disposeChildrenOf(entry.record.id)
+    const childId = entry.record.id
+    this.disposeChildrenOf(childId)
     entry.unobserve()
     entry.agent.dispose()
-    this.deps.sessions.close(entry.record.id)
-    this.children.delete(entry.record.id)
-    this.structured.delete(entry.record.id)
+    this.children.delete(childId)
+    this.structured.delete(childId)
+    const teardown: Array<Promise<unknown>> = []
+    for (const observer of this.observers) {
+      try {
+        const done = observer.disposed?.(entry.agent)
+        if (done !== undefined) teardown.push(done.catch(() => undefined))
+      } catch {
+        // ignore
+      }
+    }
+    // The cancelled run appends its closing events on a later tick (and a
+    // torn-down job its `job/finished`): keep the log attached until the
+    // driver is idle and the observers are done, then flush and close it.
+    void Promise.all([
+      entry.agent.whenIdle().catch(() => undefined),
+      ...teardown,
+    ]).then(() => {
+      this.deps.sessions.close(childId)
+    })
   }
 
   // ── structured output (dsh subagent-in-process-driver `structured.ts`) ──

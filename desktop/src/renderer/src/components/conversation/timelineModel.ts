@@ -47,7 +47,7 @@ export function turnStatusLabel(snapshot: ChatSnapshot): string {
       if (node.data.question !== undefined) return '等待你的回答…'
       if (node.data.approvals.some((a) => a.outcome === undefined))
         return '等待审批…'
-      if (node.data.subagent?.status === 'running') return '子代理运行中…'
+      if (node.data.subagent?.status === 'running') return '子智能体运行中…'
       if (node.data.workflow?.status === 'running') return '工作流运行中…'
       return `${toolView(node.data.name).title(node.data)}中…`
     }
@@ -68,7 +68,10 @@ export function turnStatusLabel(snapshot: ChatSnapshot): string {
   }
 }
 
-/** Keys of assistant rows directly followed by their turn tail. */
+/**
+ * Keys of assistant rows followed by their turn tail, with at most the
+ * turn's files card between them (UI-S13).
+ */
 export function closingAssistantKeys(
   order: readonly string[],
   nodes: ReadonlyMap<string, ChatNode>,
@@ -77,7 +80,9 @@ export function closingAssistantKeys(
   for (let index = 1; index < order.length; index++) {
     const node = nodes.get(order[index] ?? '')
     if (node?.kind !== 'turnTail') continue
-    const previous = order[index - 1]
+    let previous = order[index - 1]
+    if (previous !== undefined && nodes.get(previous)?.kind === 'turnFiles')
+      previous = order[index - 2]
     if (previous !== undefined && nodes.get(previous)?.kind === 'assistant')
       keys.add(previous)
   }
@@ -133,6 +138,26 @@ export function turnTicks(
     })
   })
   return ticks
+}
+
+/** Whether two tick lists are equal tick by tick. */
+export function sameTicks(
+  left: readonly TurnTick[],
+  right: readonly TurnTick[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((tick, index) => {
+      const other = right[index]
+      return (
+        other !== undefined &&
+        tick.key === other.key &&
+        tick.index === other.index &&
+        tick.turn === other.turn &&
+        tick.label === other.label
+      )
+    })
+  )
 }
 
 /**

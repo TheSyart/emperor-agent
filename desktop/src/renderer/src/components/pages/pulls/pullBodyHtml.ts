@@ -7,6 +7,8 @@
  * the viewer's IP and the moment they opened the PR. Images are therefore
  * turned into plain links (「图片：alt」) the user can choose to open in the
  * browser. Parsing happens in an inert <template>, so nothing loads here.
+ * (useMarkdown renders remote images as placeholders already, UI-38; they
+ * get the same treatment.)
  */
 
 const HTTPS = /^https:\/\//i
@@ -15,12 +17,20 @@ export function neutralizeRemoteImages(
   html: string,
   doc: Document | null = typeof document === 'undefined' ? null : document,
 ): string {
-  if (!doc || !/<img\b/i.test(html)) return html
+  if (!doc || !/<img\b|data-md-remote-image/i.test(html)) return html
   const template = doc.createElement('template')
   template.innerHTML = html
-  for (const image of [...template.content.querySelectorAll('img')]) {
-    const src = image.getAttribute('src') ?? ''
-    const alt = (image.getAttribute('alt') ?? '').trim()
+  // useMarkdown already turns a remote image into a click-to-load
+  // placeholder (data-md-remote-image); a PR body keeps its own rule.
+  for (const image of [
+    ...template.content.querySelectorAll('img, [data-md-remote-image]'),
+  ]) {
+    const placeholder = image.hasAttribute('data-md-remote-image')
+    const src =
+      image.getAttribute(placeholder ? 'data-md-remote-image' : 'src') ?? ''
+    const alt = (
+      image.getAttribute(placeholder ? 'data-md-remote-alt' : 'alt') ?? ''
+    ).trim()
     const label = `图片：${alt || '未命名'}`
     let replacement: HTMLElement
     if (HTTPS.test(src)) {

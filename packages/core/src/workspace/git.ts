@@ -894,7 +894,7 @@ export class WorkspaceGitService {
     if (current.truncated)
       throw new WorkspaceOperationError(
         'git_status_truncated',
-        'Git 状态超过安全读取上限，不能执行写操作；请缩小项目范围或使用 Terminal。',
+        'Git 状态超过安全读取上限，不能执行写操作；请缩小项目范围或使用终端。',
       )
     if (current.revision !== expectedRevision)
       throw new WorkspaceOperationError(
@@ -945,7 +945,7 @@ export class WorkspaceGitService {
     if (outside)
       throw new WorkspaceOperationError(
         'git_staged_outside_project',
-        '仓库中存在当前 Build 项目之外的暂存变更，请先在 Terminal 中处理。',
+        '仓库中存在当前 Build 项目之外的暂存变更，请先在终端中处理。',
       )
   }
 
@@ -956,7 +956,7 @@ export class WorkspaceGitService {
     if (!context.repositoryPrefix) return
     throw new WorkspaceOperationError(
       'git_repository_wide_operation',
-      `当前 Build 项目是 Git 仓库子目录，不能从该会话${operation}整个仓库。请在仓库根项目或 Terminal 中操作。`,
+      `当前 Build 项目是 Git 仓库子目录，不能从该会话${operation}整个仓库。请在仓库根项目或终端中操作。`,
     )
   }
 
@@ -1473,7 +1473,7 @@ function invalidGitArgument(message: string): never {
 function gitOutputTooLarge(label: string): never {
   throw new WorkspaceOperationError(
     'git_output_too_large',
-    `${label}超过安全读取上限，请通过 Terminal 处理。`,
+    `${label}超过安全读取上限，请在终端中处理。`,
   )
 }
 

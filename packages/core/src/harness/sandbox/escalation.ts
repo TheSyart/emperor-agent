@@ -35,6 +35,11 @@ export interface EscalationRequest {
   effectiveMode: SandboxMode
   /** e.g. "command" or "write" — used in messages. */
   subject: string
+  /**
+   * Credential paths the call reads (`~/.ssh/id_rsa`), named in the approval
+   * prompt (SEC-06). Only for a request to danger-full-access.
+   */
+  reads?: string
 }
 
 export async function approveEscalation(
@@ -47,7 +52,13 @@ export async function approveEscalation(
     signal?: AbortSignal
   },
 ): Promise<SandboxMode> {
-  const { requestedMode: mode, effectiveMode, justification, subject } = request
+  const {
+    requestedMode: mode,
+    effectiveMode,
+    justification,
+    subject,
+    reads,
+  } = request
   if (!(WIDER_MODES[effectiveMode] ?? []).includes(mode as SandboxMode)) {
     throw new Error(
       `sandbox escalation to "${mode}" is not strictly wider than this call's current "${effectiveMode}" mode`,
@@ -65,7 +76,7 @@ export async function approveEscalation(
     agent: approval.agent,
     toolName: approval.toolName,
     callId: approval.callId,
-    reason: `escalate sandbox to ${mode}: ${justification}`,
+    reason: `escalate sandbox to ${mode}${reads ? ` to read credentials (${reads})` : ''}: ${justification}`,
     ...(approval.signal === undefined ? {} : { signal: approval.signal }),
   })
   switch (outcome) {

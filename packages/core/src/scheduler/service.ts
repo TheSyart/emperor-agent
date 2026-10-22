@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import * as runtimeEvents from '../runtime/events'
+import { logger } from '../util/log'
 import { cleanString } from '../util/strings'
 import { resolveStartupMisfire } from './misfire'
 import {
@@ -26,11 +27,20 @@ import {
   SchedulerRunPoolLimits,
 } from './run-pool'
 import {
+  SchedulerLockHeld,
   SchedulerStore,
   SchedulerStoreCorrupt,
   SchedulerStoreData,
 } from './store'
 import { defaultSystemJobs } from './system-jobs'
+
+/**
+ * How late a timer may fire and still count as the trigger it was armed for
+ * (KRN-10). Later than this the computer was asleep (or the process stalled)
+ * across the trigger, and the job's misfire policy decides, as on a cold
+ * start.
+ */
+export const SCHEDULER_WAKE_GRACE_MS = 60_000
 
 export type SchedulerTimerCallback = () => void | Promise<void>
 export type SchedulerSetTimer = (
@@ -38,7 +48,6 @@ export type SchedulerSetTimer = (
   delayMs: number,
 ) => unknown
 export type SchedulerClearTimer = (handle: unknown) => void
-export type SchedulerTargetSession = () => string | null | undefined
 
 export interface SchedulerRunContext {
   runId: string
@@ -49,6 +58,25 @@ export interface SchedulerRunContext {
   missedCount: number
   countCapped: boolean
   signal: AbortSignal
+}
+
+/**
+ * How a run ended when it did not complete (KRN-01): the executor maps a
+ * turn's typed result to Failed (with the error code), Cancelled or
+ * Blocked, and the record says so.
+ */
+export class SchedulerRunFailure extends Error {
+  constructor(
+    readonly status:
+      | SchedulerStatus.ERROR
+      | SchedulerStatus.CANCELLED
+      | SchedulerStatus.BLOCKED,
+    message: string,
+    readonly code: string | null = null,
+  ) {
+    super(message)
+    this.name = 'SchedulerRunFailure'
+  }
 }
 
 export interface SchedulerTaskTerminalSnapshot {
@@ -63,6 +91,10 @@ export interface SchedulerStatusPayload {
   enabled: number
   nextRunAtMs: number | null
   lastError: string | null
+  /** Why the last start failed (KRN-10); null once a start succeeds. */
+  startError: string | null
+  /** Job entries set aside in `jobs.rejected.json` by this process. */
+  rejectedJobs: number
   active: number
   queued: number
   maxConcurrentRuns: number
@@ -94,7 +126,6 @@ export class SchedulerService {
   timeFunc: () => number
   maxSleepMs: number
   readonly misfirePolicy = SchedulerMisfirePolicy.SKIP
-  private readonly targetSessionId: SchedulerTargetSession
   private readonly setTimer: SchedulerSetTimer
   private readonly clearTimer: SchedulerClearTimer
   private readonly runPoolLimits: SchedulerRunPoolLimits
@@ -107,6 +138,7 @@ export class SchedulerService {
   private timer: unknown = null
   private stopping: Promise<void> | null = null
   private shutdownReason: string | null = null
+  private startError: string | null = null
   private readonly inFlightJobIds = new Set<string>()
   private readonly runSettlements = new Map<string, Promise<void>>()
 
@@ -122,7 +154,6 @@ export class SchedulerService {
       eventSink?: ((event: Record<string, unknown>) => Promise<void>) | null
       timeFunc?: () => number
       maxSleepMs?: number
-      targetSessionId?: SchedulerTargetSession | null
       setTimer?: SchedulerSetTimer
       clearTimer?: SchedulerClearTimer
       runPoolLimits?: Partial<SchedulerRunPoolLimits>
@@ -135,12 +166,15 @@ export class SchedulerService {
     this.eventSink = opts.eventSink ?? null
     this.timeFunc = opts.timeFunc ?? nowMs
     this.maxSleepMs = Math.max(1, Math.trunc(opts.maxSleepMs ?? 300_000))
-    this.targetSessionId = opts.targetSessionId ?? (() => null)
     this.setTimer =
       opts.setTimer ??
       ((callback, delayMs) =>
         setTimeout(() => {
-          void callback()
+          void Promise.resolve()
+            .then(callback)
+            .catch((error: unknown) =>
+              logger.warn('scheduler tick failed', { error: String(error) }),
+            )
         }, delayMs))
     this.clearTimer =
       opts.clearTimer ??
@@ -152,10 +186,44 @@ export class SchedulerService {
     this.taskTerminal = opts.taskTerminal ?? (() => null)
   }
 
+  /**
+   * Take `scheduler.lock`, reconcile what a restart left behind and arm the
+   * timer. A failure is kept for diagnostics (`status().startError`) and
+   * rethrown; the lock is given back. While another process holds the lock,
+   * start is tried again after the longest sleep, so the scheduler takes
+   * over when that process exits.
+   */
   async start(): Promise<void> {
     if (this.running) return
     if (this.stopping) await this.stopping
     if (this.running) return
+    try {
+      this.store.acquireLock(this.timeFunc())
+      this.startRunning()
+      this.startError = null
+    } catch (error) {
+      this.store.releaseLock()
+      this.startError = String(error instanceof Error ? error.message : error)
+      if (error instanceof SchedulerLockHeld) this.retryStartLater()
+      throw error
+    }
+  }
+
+  /** Why the last start failed, or null (KRN-10; 诊断 shows it). */
+  startFailure(): string | null {
+    return this.startError
+  }
+
+  private retryStartLater(): void {
+    if (this.timer !== null) this.clearTimer(this.timer)
+    this.timer = this.setTimer(async () => {
+      this.timer = null
+      if (this.running || this.stopping) return
+      await this.start().catch(() => undefined)
+    }, this.maxSleepMs)
+  }
+
+  private startRunning(): void {
     if (!this.accepting) this.runPool = new SchedulerRunPool(this.runPoolLimits)
 
     const data = this.store.load({ allowLastGood: false })
@@ -213,6 +281,8 @@ export class SchedulerService {
       enabled: enabled.length,
       nextRunAtMs: this.nextWakeMs(jobs),
       lastError: errors.at(-1)?.state.last_error ?? null,
+      startError: this.startFailure(),
+      rejectedJobs: this.store.rejectedCount(),
       active: pool.active,
       queued: pool.queued,
       maxConcurrentRuns: this.runPool.limits.maxConcurrentRuns,
@@ -230,10 +300,12 @@ export class SchedulerService {
     misfirePolicy?: SchedulerMisfirePolicy
     protected?: boolean
     purpose?: string | null
+    /** The session a payload without one runs in (the one the creator shows). */
+    targetSessionId?: string | null
   }): SchedulerJob {
     validateSchedule(opts.schedule)
     const current = this.timeFunc()
-    const payload = this.withTargetSession(opts.payload)
+    const payload = withTargetSession(opts.payload, opts.targetSessionId)
     const job = SchedulerJob.create({
       name: opts.name,
       schedule: opts.schedule,
@@ -258,6 +330,8 @@ export class SchedulerService {
       payload?: SchedulerPayload | null
       deleteAfterRun?: boolean | null
       misfirePolicy?: SchedulerMisfirePolicy | null
+      /** The session a new payload without one runs in. */
+      targetSessionId?: string | null
     },
   ): SchedulerJob | 'not_found' | 'protected' {
     const job = this.store.getJob(jobId)
@@ -272,7 +346,8 @@ export class SchedulerService {
           this.timeFunc(),
         )
     }
-    if (opts.payload) job.payload = this.withTargetSession(opts.payload)
+    if (opts.payload)
+      job.payload = withTargetSession(opts.payload, opts.targetSessionId)
     if (opts.name !== undefined && opts.name !== null)
       job.name = String(opts.name || '').trim() || job.name
     if (opts.deleteAfterRun !== undefined && opts.deleteAfterRun !== null)
@@ -357,13 +432,28 @@ export class SchedulerService {
     return admission.accepted
   }
 
+  /**
+   * One timer tick: admit every due job, then re-arm the timer whatever
+   * happened (a tick that throws, or finds the store corrupt, still leaves
+   * the next one armed).
+   */
   async onTimer(): Promise<void> {
     if (!this.accepting) return
+    let settlements: Promise<void>[] = []
+    try {
+      settlements = this.admitDueJobs()
+    } finally {
+      this.armTimer()
+    }
+    await Promise.allSettled(settlements)
+  }
+
+  private admitDueJobs(): Promise<void>[] {
     let data: SchedulerStoreData
     try {
       data = this.store.load()
     } catch (error) {
-      if (error instanceof SchedulerStoreCorrupt) return
+      if (error instanceof SchedulerStoreCorrupt) return []
       throw error
     }
     const current = this.timeFunc()
@@ -384,6 +474,11 @@ export class SchedulerService {
     for (const job of dueJobs) {
       if (this.inFlightJobIds.has(job.id)) continue
       const scheduledForMs = job.state.next_run_at_ms!
+      if (current - scheduledForMs > SCHEDULER_WAKE_GRACE_MS) {
+        const settled = this.admitWakeMisfire(job, current)
+        if (settled) settlements.push(settled)
+        continue
+      }
       const activeRun = this.newActiveRun(job, {
         trigger: SchedulerRunTrigger.TIMER,
         scheduledForMs,
@@ -400,8 +495,52 @@ export class SchedulerService {
         this.admitDurableRun(job, activeRun, false, true).settled,
       )
     }
-    this.armTimer()
-    await Promise.allSettled(settlements)
+    return settlements
+  }
+
+  /**
+   * The trigger passed while the computer was asleep (CORE-29): the job's
+   * misfire policy decides, the same way as on a cold start — 「跳过」 records
+   * a skipped run and moves on, 「补跑一次」 / 「最近一次」 run once.
+   */
+  private admitWakeMisfire(
+    job: SchedulerJob,
+    current: number,
+  ): Promise<void> | null {
+    const decision = resolveStartupMisfire(
+      job.schedule,
+      job.misfire_policy,
+      job.state.next_run_at_ms,
+      current,
+    )
+    if (decision.kind === 'none') return null
+    if (decision.kind === 'skip') {
+      job.state.recordRun({
+        ...newRunIdentity(),
+        runAtMs: current,
+        scheduledForMs: decision.scheduledForMs,
+        trigger: SchedulerRunTrigger.MISFIRE,
+        misfirePolicy: job.misfire_policy,
+        missedCount: decision.window.missedCount,
+        countCapped: decision.window.countCapped,
+        status: SchedulerStatus.SKIPPED,
+        error: 'missed while the computer was asleep; skipped by policy',
+      })
+      job.state.next_run_at_ms = decision.window.nextFutureMs
+      if (job.schedule.kind === 'at') job.enabled = false
+      job.updated_at_ms = current
+      this.store.appendAction('update', { job })
+      return null
+    }
+    const activeRun = this.newActiveRun(job, {
+      trigger: SchedulerRunTrigger.MISFIRE,
+      scheduledForMs: decision.scheduledForMs,
+      misfirePolicy: job.misfire_policy,
+      missedCount: decision.window.missedCount,
+      countCapped: decision.window.countCapped,
+      resumeNextRunAtMs: decision.window.nextFutureMs,
+    })
+    return this.admitDurableRun(job, activeRun, false, true).settled
   }
 
   private async performStop(
@@ -415,6 +554,7 @@ export class SchedulerService {
       this.clearTimer(this.timer)
       this.timer = null
     }
+    this.store.releaseLock()
     const settlements = [...this.runSettlements.values()]
     await this.runPool.shutdown(reason, signal)
     if (signal?.aborted) return
@@ -661,6 +801,8 @@ export class SchedulerService {
     const end = this.timeFunc()
     const status = terminalStatus(active, failure, this.shutdownReason !== null)
     const error = terminalError(status, failure, this.shutdownReason)
+    const errorCode =
+      failure instanceof SchedulerRunFailure ? failure.code : null
     job.state.recordRun({
       runId: active.run_id,
       taskId: active.task_id,
@@ -676,6 +818,7 @@ export class SchedulerService {
         end - (active.started_at_ms ?? active.enqueued_at_ms),
       ),
       error,
+      errorCode,
     })
     const automaticAt =
       job.schedule.kind === 'at' &&
@@ -695,11 +838,13 @@ export class SchedulerService {
       deleted ? 'delete' : 'update',
       deleted ? { jobId: job.id } : { job },
     )
-    if (status === SchedulerStatus.ERROR)
+    if (status === SchedulerStatus.ERROR || status === SchedulerStatus.BLOCKED)
       await this.emit(
         this.withEventSession(
           runtimeEvents.schedulerRunError(schedulerJobPublicPayload(job), {
             error: error ?? 'unknown error',
+            status,
+            code: errorCode,
             run: schedulerRunEventPayload(active),
           }),
           job,
@@ -819,7 +964,15 @@ export class SchedulerService {
   private armTimer(data?: SchedulerStoreData): void {
     if (!this.running || !this.accepting) return
     if (this.timer !== null) this.clearTimer(this.timer)
-    const jobs = data?.jobs ?? this.store.listJobs({ includeDisabled: true })
+    let jobs: SchedulerJob[] = []
+    try {
+      jobs = data?.jobs ?? this.store.listJobs({ includeDisabled: true })
+    } catch (error) {
+      // Unreadable now: wake after the longest sleep and look again.
+      logger.warn('scheduler could not read jobs to arm its timer', {
+        error: String(error),
+      })
+    }
     const nextWake = this.nextWakeMs(jobs)
     const delayMs =
       nextWake === null
@@ -870,19 +1023,6 @@ export class SchedulerService {
     if (this.eventSink) await this.eventSink(event)
   }
 
-  private withTargetSession(payload: SchedulerPayload): SchedulerPayload {
-    if (schedulerPayloadSessionId(payload)) return payload
-    const sessionId = cleanString(this.targetSessionId())
-    if (!sessionId) return payload
-    return SchedulerPayload.fromDict({
-      ...payload.toDict(),
-      meta: {
-        ...payload.meta,
-        [SCHEDULER_TARGET_SESSION_METADATA_KEY]: sessionId,
-      },
-    })
-  }
-
   private withEventSession(
     event: Record<string, unknown>,
     job: SchedulerJob,
@@ -890,6 +1030,23 @@ export class SchedulerService {
     const sessionId = schedulerPayloadSessionId(job.payload) || 'scheduler'
     return { ...event, session_id: sessionId }
   }
+}
+
+/** A payload without a session gets `targetSessionId` (explicit; never a focus). */
+function withTargetSession(
+  payload: SchedulerPayload,
+  targetSessionId: string | null | undefined,
+): SchedulerPayload {
+  if (schedulerPayloadSessionId(payload)) return payload
+  const sessionId = cleanString(targetSessionId)
+  if (!sessionId) return payload
+  return SchedulerPayload.fromDict({
+    ...payload.toDict(),
+    meta: {
+      ...payload.meta,
+      [SCHEDULER_TARGET_SESSION_METADATA_KEY]: sessionId,
+    },
+  })
 }
 
 function newRunIdentity(): { runId: string; taskId: string } {
@@ -946,6 +1103,7 @@ function terminalStatus(
   shuttingDown: boolean,
 ): SchedulerStatus {
   if (!failure) return SchedulerStatus.OK
+  if (failure instanceof SchedulerRunFailure) return failure.status
   if (failure instanceof SchedulerRunPoolCapacityError)
     return SchedulerStatus.SKIPPED
   if (failure instanceof SchedulerRunPoolCancelledError)

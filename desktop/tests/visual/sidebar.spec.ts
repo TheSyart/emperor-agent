@@ -1,12 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 
-// Sidebar rebuild: top row (collapse, ← →), 「Emperor ▾」 brand row with
-// search + bell, nav rows, 置顶 / 项目 / 对话 sections, the 56px rail and the
-// notifications popover.
+// The sidebar (UI-S11: Emperor's own layout, redesigned): top row
+// (collapse, ← →), brand row with search + bell, the 新对话 primary row and
+// the pages, 置顶 / 项目 / 对话 sections, the footer, the 56px rail when
+// folded, search with content hits, and the notifications popover.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'sidebar')
 
 test.beforeAll(() => {
@@ -127,7 +128,7 @@ async function sessionMenu(page: Page, title: string) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`expanded sidebar (${theme})`, async ({ page }) => {
+  test(`expanded sidebar (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)
     await expect(root).toBeVisible()
@@ -143,13 +144,44 @@ for (const theme of ['dark', 'light'] as const) {
       root.getByRole('button', { name: 'Emperor 菜单' }),
     ).toHaveCount(0)
     const nav = root.getByRole('navigation', { name: '侧栏导航' })
-    for (const label of ['新对话', 'Pull Request', '定时任务', '能力', '探索'])
+    for (const label of ['新对话', 'Pull Request', '定时任务', '能力'])
       await expect(nav.getByRole('button', { name: label })).toBeVisible()
+    // 探索 is part of 能力 since UI-S08.
+    await expect(nav.getByRole('button', { name: '探索' })).toHaveCount(0)
+    // UI-S11: Emperor's own order, flat columns, no ISO dates on rows.
+    expect(
+      await root
+        .locator('[data-sidebar-block]')
+        .evaluateAll((els) =>
+          els.map((el) => (el as HTMLElement).dataset.sidebarBlock),
+        ),
+    ).toEqual(['top', 'brand', 'new', 'pages', 'sections', 'footer'])
+    await expect(page.locator('.shell-panel')).toHaveCount(0)
+    await expect(page.locator('.app-rail')).toHaveCount(0)
+    // One hairline between the sidebar and the conversation (0.5px; a 1x
+    // screen draws it as 1px).
+    const edge = await page.locator('.sidebar-col').evaluate((el) => {
+      const style = getComputedStyle(el)
+      return [style.borderRightStyle, parseFloat(style.borderRightWidth)]
+    })
+    expect(edge[0]).toBe('solid')
+    expect(edge[1]).toBeLessThanOrEqual(1)
+    expect(await root.innerText()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    const row = root.locator('.session-row', { hasText: '普通对话' })
+    await expect(row.locator('.time')).toBeVisible()
+    await row.hover()
+    await expect(row.getByRole('button', { name: '会话操作' })).toBeVisible()
+    await expect(row.locator('.time')).toBeHidden()
+    await page.screenshot({
+      path: resolve(screenshotDir, `row-hover-${theme}.png`),
+      animations: 'disabled',
+    })
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(0)
     await expect(root.getByRole('button', { name: '帮助' })).toHaveCount(0)
     // The search capsule stays folded until the search icon opens it.
     await expect(page.getByLabel('搜索对话')).toHaveCount(0)
     await shot(page, `expanded-${theme}`)
+    await expectBaseline(page, 'shell', `sidebar-${theme}`)
 
     // The footer's theme toggle flips light / dark in place of 帮助.
     const other = theme === 'dark' ? 'light' : 'dark'
@@ -168,7 +200,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
   })
 
-  test(`collapsed rail (${theme})`, async ({ page }) => {
+  test(`collapsed rail (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme, frame: { sidebar: 0 } })
     const rail = page.locator('.sidebar-rail')
     await expect(rail).toBeVisible()
@@ -183,7 +215,6 @@ for (const theme of ['dark', 'light'] as const) {
       'Pull Request',
       '定时任务',
       '能力',
-      '探索',
       '设置',
       theme === 'dark' ? '切换浅色' : '切换深色',
     ])
@@ -199,6 +230,7 @@ for (const theme of ['dark', 'light'] as const) {
     await rail.getByRole('button', { name: '能力' }).hover()
     await expect(page.getByRole('tooltip', { name: '能力' })).toBeVisible()
     await shot(page, `rail-${theme}`)
+    await expectBaseline(page, 'shell', `rail-${theme}`)
 
     await rail.getByRole('button', { name: '定时任务' }).click()
     await expect(page).toHaveURL(/\/scheduler/)
@@ -265,7 +297,7 @@ for (const theme of ['dark', 'light'] as const) {
     ).not.toHaveAttribute('aria-current', 'page')
   })
 
-  test(`notifications popover (${theme})`, async ({ page }) => {
+  test(`notifications popover (${theme}) @baseline`, async ({ page }) => {
     await seedNotifications(page)
     await open(page, '/chat/chat-main', { theme })
     await expect(bell(page)).toHaveAccessibleName('通知，2 条未读')
@@ -278,6 +310,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(popover.getByText('2 分钟前')).toBeVisible()
     await expect(popover.getByText('3 天前')).toBeVisible()
     await shot(page, `notifications-${theme}`)
+    await expectBaseline(page, 'shell', `notifications-${theme}`)
 
     await popover.getByRole('button', { name: '全部已读' }).click()
     await expect(popover.locator('.row[data-unread]')).toHaveCount(0)
@@ -301,9 +334,9 @@ for (const theme of ['dark', 'light'] as const) {
 
     await root
       .getByRole('navigation', { name: '侧栏导航' })
-      .getByRole('button', { name: '探索' })
+      .getByRole('button', { name: '能力' })
       .click()
-    await expect(page).toHaveURL(/\/explore/)
+    await expect(page).toHaveURL(/\/capabilities/)
     await expect(back).toBeEnabled()
     await expect(forward).toBeDisabled()
 
@@ -313,7 +346,7 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `history-${theme}`)
 
     await forward.click()
-    await expect(page).toHaveURL(/\/explore/)
+    await expect(page).toHaveURL(/\/capabilities/)
     await expect(forward).toBeDisabled()
   })
 }
@@ -341,6 +374,26 @@ test('search icon toggles the capsule and Esc closes it', async ({ page }) => {
   // ⌘K / Ctrl+K opens it from anywhere.
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByLabel('搜索对话')).toBeFocused()
+
+  // UI-S11: what was said in a session is found after a short pause.
+  await page.getByLabel('搜索对话').fill('设计稿')
+  const hit = page.locator('[data-search-result="chat-main"]')
+  await expect(hit).toContainText('侧栏的间距')
+  await expect(sidebar(page).getByText('内容', { exact: true })).toBeVisible()
+  await shot(page, 'search-contents')
+})
+
+test('↑ and ↓ move between sidebar sessions (UI-S11)', async ({ page }) => {
+  await open(page, '/chat/build-ui')
+  const rows = sidebar(page).locator('.session-row')
+  await rows.first().focus()
+  await page.keyboard.press('ArrowDown')
+  const second = rows.nth(1)
+  await expect(second).toBeFocused()
+  const id = await second.getAttribute('data-session-id')
+  await expect(page).toHaveURL(new RegExp(`/chat/${id}$`))
+  await page.keyboard.press('ArrowUp')
+  await expect(rows.first()).toBeFocused()
 })
 
 test('live runtime events reach the bell and navigate on click', async ({

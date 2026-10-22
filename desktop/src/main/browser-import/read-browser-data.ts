@@ -195,18 +195,20 @@ export async function readBrowserData(
   let passwords: PasswordRecord[] = []
   let cookies: CookieRecord[] = []
   let key: Buffer | undefined
-  const getKey = (browser: BrowserId): Buffer =>
-    (key ??= deriveKey(readPassword(browser)))
+  const getKey = async (browser: BrowserId): Promise<Buffer> =>
+    (key ??= deriveKey(await readPassword(browser)))
 
   if (opts.want.passwords) {
     const loginData = join(profilePath, 'Login Data')
-    if (existsSync(loginData))
+    if (existsSync(loginData)) {
+      const passwordKey = await getKey(opts.browser)
       passwords = await withCopiedDb(
         loginData,
         tmpParent,
         deps.onCopied,
-        (db) => readPasswords(db, getKey(opts.browser)),
+        (db) => readPasswords(db, passwordKey),
       )
+    }
   }
 
   if (opts.want.cookies) {
@@ -217,13 +219,15 @@ export async function readBrowserData(
       : existsSync(legacyCookies)
         ? legacyCookies
         : undefined
-    if (cookiesPath)
+    if (cookiesPath) {
+      const cookieKey = await getKey(opts.browser)
       cookies = await withCopiedDb(
         cookiesPath,
         tmpParent,
         deps.onCopied,
-        (db) => readCookies(db, getKey(opts.browser), nowSec),
+        (db) => readCookies(db, cookieKey, nowSec),
       )
+    }
   }
 
   return {

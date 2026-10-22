@@ -12,6 +12,7 @@
  */
 
 import type { Session } from '../../session-log/session'
+import type { RepairContributor, RepairStep } from '../../session-log/store'
 import type { SessionEvent, SessionEventMap } from '../../session-log/types'
 import { logger } from '../../util/log'
 import { realm } from './realm'
@@ -46,17 +47,23 @@ declare module '../../session-log/types' {
       label: string
       phase?: string
       childId: string
+      externalRunId?: string
+      backend?: 'internal' | 'claude-code' | 'codex'
     }
     /** Log-only: one member settled. */
     'tool-workflow/agent-end': {
       runId: string
       seq: number
       outcome: WorkflowAgentOutcome
+      /** Written by crash repair. */
+      repaired?: true
     }
-    /** Log-only: the run closed after cleanup. */
+    /** Log-only: the run closed after cleanup (`interrupted`: by crash repair). */
     'tool-workflow/run-end': {
       runId: string
-      stopReason: WorkflowStopReason
+      stopReason: WorkflowStopReason | 'interrupted'
+      /** Written by crash repair. */
+      repaired?: true
       agentsStarted?: number
       error?: string
       /** Rendered (bounded) result text the tool returned. */
@@ -77,6 +84,8 @@ export type WorkflowRecordStatus =
   'running' | 'completed' | 'cancelled' | 'error' | 'interrupted'
 
 export interface WorkflowAgentRecord {
+  externalRunId?: string
+  backend?: 'internal' | 'claude-code' | 'codex'
   seq: number
   label: string
   phase?: string
@@ -162,6 +171,12 @@ export class WorkflowRunFold {
             ? {}
             : { phase: event.data.phase }),
           childId: event.data.childId,
+          ...(event.data.externalRunId === undefined
+            ? {}
+            : { externalRunId: event.data.externalRunId }),
+          ...(event.data.backend === undefined
+            ? {}
+            : { backend: event.data.backend }),
         })
         record.agentsStarted = Math.max(record.agentsStarted, event.data.seq)
         return snapshot(record)
@@ -223,6 +238,76 @@ function snapshot(record: WorkflowRunRecord): WorkflowRunRecord {
   }
 }
 
+/**
+ * Crash repair: a run the process died inside ends `interrupted`, after
+ * its members that never settled end `cancelled` (the fold ignores member
+ * events once a run is closed).
+ */
+export const workflowRepair: RepairContributor = {
+  id: 'workflow',
+  pairs: [
+    ['tool-workflow/run-start', 'tool-workflow/run-end'],
+    ['tool-workflow/agent-start', 'tool-workflow/agent-end'],
+  ],
+  repair(events) {
+    const runs = new Map<string, number>()
+    const members = new Map<
+      string,
+      { runId: string; seq: number; at: number }
+    >()
+    for (const event of events) {
+      switch (event.type) {
+        case 'tool-workflow/run-start':
+          runs.set(event.data.runId, event.seq)
+          break
+        case 'tool-workflow/agent-start':
+          members.set(`${event.data.runId}#${event.data.seq}`, {
+            runId: event.data.runId,
+            seq: event.data.seq,
+            at: event.seq,
+          })
+          break
+        case 'tool-workflow/agent-end':
+          members.delete(`${event.data.runId}#${event.data.seq}`)
+          break
+        case 'tool-workflow/run-end':
+          runs.delete(event.data.runId)
+          for (const [key, member] of members)
+            if (member.runId === event.data.runId) members.delete(key)
+          break
+        default:
+          break
+      }
+    }
+    const out: RepairStep[] = []
+    for (const [runId, openedAt] of runs) {
+      for (const member of members.values())
+        if (member.runId === runId)
+          out.push({
+            type: 'tool-workflow/agent-end',
+            data: {
+              runId,
+              seq: member.seq,
+              outcome: 'cancelled',
+              repaired: true,
+            },
+            openedAt,
+          } as RepairStep)
+      out.push({
+        type: 'tool-workflow/run-end',
+        data: {
+          runId,
+          stopReason: 'interrupted',
+          error: 'interrupted',
+          repaired: true,
+        },
+        openedAt,
+      } as RepairStep)
+    }
+    return out
+  },
+}
+
 // ── live runs ──────────────────────────────────────────────────────────
 
 interface LiveRun {
@@ -256,6 +341,10 @@ export class WorkflowRunRegistry {
         label: agent.label,
         ...(agent.phase === undefined ? {} : { phase: agent.phase }),
         childId: agent.childId,
+        ...(agent.externalRunId === undefined
+          ? {}
+          : { externalRunId: agent.externalRunId }),
+        ...(agent.backend === undefined ? {} : { backend: agent.backend }),
       })
     },
     agentEnd: (info, agent) => {

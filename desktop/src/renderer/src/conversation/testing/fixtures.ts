@@ -82,6 +82,7 @@ export function structural(snapshot: ChatSnapshot): unknown {
     turnStatus: snapshot.turnStatus,
     todos: snapshot.todos,
     contextUsage: snapshot.contextUsage,
+    planSummary: snapshot.planSummary,
   }
 }
 
@@ -130,6 +131,8 @@ export function describeNode(node: ChatNode): string {
       return `turnTail: turn ${node.data.turn} steps=${node.data.steps}`
     case 'turnFiles':
       return `turnFiles: turn ${node.data.turn} files=${node.data.totals.files}`
+    case 'delegationResult':
+      return `delegationResult[${node.data.state}]: ${node.data.backend} files=${node.data.totals.files}`
     case 'turnError':
       return `turnError: ${node.data.message}`
     case 'turnMaxTokens':
@@ -140,6 +143,8 @@ export function describeNode(node: ChatNode): string {
       return `hook[${node.data.status}]: ${node.data.point}`
     case 'fallback':
       return `fallback: ${node.data.from} -> ${node.data.to}`
+    case 'turnBudget':
+      return `turnBudget: turn ${node.data.turn} ${node.data.reason.limit}`
     case 'costCap':
       return `costCap: turn ${node.data.turn}`
     case 'workflowRun':

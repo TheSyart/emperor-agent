@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：插件设计者、前端开发者、维护者<br>
-> 最后核验：2026-09-30<br>
-> 事实源：`assets/generated/plugin-logos/`、`packages/core/bundled-plugins/*/assets/logo.png`、`assets/generated/emperor-agent-logo-mark.png`、`desktop/src/renderer/src/theme/{dark,light}.css`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`assets/generated/plugin-logos/`、`packages/core/bundled-plugins/*/assets/logo.png`、`assets/generated/emperor-mark.svg`、`desktop/src/renderer/src/theme/`（`semantic.dark.css`、`semantic.light.css`）
 
 本规范约束 Emperor Agent **插件包的展示 Logo**。当前两张设计源图是 [Computer Use](../../assets/generated/plugin-logos/computer-use.png) 和 [GitHub](../../assets/generated/plugin-logos/github.png)。两个受管插件的包内资源是 `packages/core/bundled-plugins/<name>/assets/logo.png`，由源图等比缩小到 384 × 384（`sips -Z 384`，没有其他改动，约 200 KB）；插件列表与详情通过宿主地址显示它们。
 
@@ -35,7 +35,7 @@
 3. 列表和详情使用**同一张** Logo，根据容器缩放；不要为同一插件生成材质或渐变方向不同的大小版本。缺失、不合规或加载失败时，显示由插件名决定的首字母色块。
 4. 新增插件时，先并排查看现有两张源图，再写新图的提示词：固定方框、渐变、光照和材质，仅替换中心识别图形及必要的对比衬底。第三方插件自带品牌资源可以保留自身身份，不强制改色；受管插件采用本规范。
 
-## 验收
+## 检查
 
 - 在深色与浅色主题中并排检查所有受管插件；方框大小、圆角、渐变方向、玻璃质感和高光位置应一致。
 - 按 16、32、64、128 px 检查：16 px 仍能区分光标与猫形；不能只在原始大图中清楚。

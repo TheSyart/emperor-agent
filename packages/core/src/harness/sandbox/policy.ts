@@ -39,6 +39,18 @@ export interface SandboxExecutionPolicy {
   mode: SandboxMode
   workspaceRoot: string
   sessionId?: string
+  /** Host-only grants for an external runtime. Never accepted from model or IPC arguments. */
+  runtimeStateRoots?: readonly string[]
+  privateTempRoot?: string
+  /** Unforgeable host nonce carried by inherited macOS Seatbelt policy. */
+  processBoundaryTag?: string
+  readOnlyRoots?: readonly string[]
+  /**
+   * Host-only: single existing files an external runtime may rewrite in place
+   * (the user's Codex auth.json behind the isolated home's link, AGT-03).
+   * Never a directory, never from model or IPC arguments.
+   */
+  writableFiles?: readonly string[]
 }
 
 export interface SandboxPolicy extends SandboxExecutionPolicy {
@@ -59,11 +71,14 @@ export const ESCALATION_TARGETS: readonly SandboxMode[] = [
 export const SANDBOX_UNAVAILABLE = 'SANDBOX_UNAVAILABLE'
 
 export class SandboxUnavailableError extends HarnessError {
-  constructor(mode: ConfinedSandboxMode, detail?: string) {
+  constructor(mode: SandboxMode, detail?: string) {
     super(
-      `sandbox mode "${mode}" is requested but no sandbox backend is usable on this host; ` +
-        'refusing to run the command unconfined. Install bubblewrap (Linux) or ensure sandbox-exec is usable (macOS); ' +
-        'on other platforms switch the session to danger-full-access.' +
+      (mode === 'danger-full-access'
+        ? "the protected-path guard (sandbox-exec) that keeps Emperor's private data, settings files and credential files out of Shell could not start; " +
+          'refusing to run the command without it.'
+        : `sandbox mode "${mode}" is requested but no sandbox backend is usable on this host; ` +
+          'refusing to run the command unconfined. Install bubblewrap (Linux) or ensure sandbox-exec is usable (macOS); ' +
+          'on other platforms switch the session to danger-full-access.') +
         (detail === undefined ? '' : ` Runner failure: ${detail}`),
       SANDBOX_UNAVAILABLE,
     )
@@ -81,7 +96,36 @@ export function canonicalPath(path: string): string {
 }
 
 /** Writable roots for one policy (workspace + temp under workspace-write; none otherwise). */
+/**
+ * Git control files a repository can use to run programs on the user's
+ * machine (config with filters or credential helpers, hooks, info
+ * attributes). Under workspace-write the file tools treat them as outside
+ * the writable roots, so changing one needs a one-time approval; Shell is
+ * kept from writing hooks (see backend.ts). Hook samples written by
+ * `git init` / `git clone` do not run and stay writable.
+ */
+export function isGitControlPath(path: string): boolean {
+  const posix = path.split('\\').join('/')
+  return (
+    /\/\.git\/(config|config\.worktree|info\/attributes)$/i.test(posix) ||
+    /\/\.git\/(modules\/.+\/)?config$/i.test(posix) ||
+    (/\/\.git\/(modules\/.+\/)?hooks\/[^/]+$/i.test(posix) &&
+      !/\.sample$/i.test(posix))
+  )
+}
+
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
+  if (policy.privateTempRoot !== undefined) {
+    return [
+      ...new Set(
+        [
+          ...(policy.mode === 'workspace-write' ? [policy.workspaceRoot] : []),
+          ...(policy.runtimeStateRoots ?? []),
+          policy.privateTempRoot,
+        ].map(canonicalPath),
+      ),
+    ]
+  }
   if (policy.mode !== 'workspace-write') return []
   return [
     ...new Set([policy.workspaceRoot, '/tmp', tmpdir()].map(canonicalPath)),
@@ -91,6 +135,10 @@ export function writableRoots(policy: SandboxExecutionPolicy): string[] {
 export function sandboxDenialMarker(mode: SandboxMode): string {
   return `[sandbox: file access denied under ${mode} mode]`
 }
+
+/** A denial no wider mode lifts: the protected-path table (SEC-06). */
+export const PROTECTED_PATH_DENIAL_MARKER =
+  "[sandbox: Emperor's protected paths are closed to Shell in every mode — its private data and settings files (read and write) and the user's credential files (write); no escalation opens them, use Emperor's own tools for its settings]"
 
 export function escalationHintMarker(subject: string): string {
   return `[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`
@@ -178,7 +226,7 @@ export class SandboxPolicyService {
         (session === undefined ? undefined : this.overrideOf(session)) ??
         this.defaultMode,
       workspaceRoot: resolvePath(
-        canonicalPath(session?.header.cwd ?? this.workspaceRoot),
+        canonicalPath(session?.cwd ?? this.workspaceRoot),
       ),
       ...(session === undefined ? {} : { sessionId: session.id }),
     }

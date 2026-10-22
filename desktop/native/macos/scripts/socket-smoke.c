@@ -1,5 +1,14 @@
+/*
+ * Socket and handshake smoke for the Computer Use Helper (SEC-09). This
+ * binary plays Emperor's main process: it listens, hands the Helper a
+ * one-time secret on stdin, and runs the challenge handshake. It is copied
+ * into a fixture app as `Emperor Agent` so the Helper's peer check passes.
+ */
+#include <CommonCrypto/CommonHMAC.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,47 +51,81 @@ static int send_json(int fd, const char *text) {
          write(fd, text, length - 1) == (ssize_t)(length - 1) ? 0 : -1;
 }
 
-static int connect_retry(const struct sockaddr_un *address) {
-  int fd = -1;
-  for (int attempt = 0; attempt < 100; attempt++) {
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd >= 0 && connect(fd, (const struct sockaddr *)address, sizeof(*address)) == 0) return fd;
-    if (fd >= 0) close(fd);
-    fd = -1;
-    usleep(100000);
-  }
-  return -1;
+static void hex(const unsigned char *bytes, size_t length, char *out) {
+  for (size_t index = 0; index < length; index++)
+    snprintf(out + index * 2, 3, "%02x", bytes[index]);
 }
 
-/* The helper creates its socket 0600 inside a 0700 directory (01 §2.3). */
-static int check_modes(const char *socket_path) {
-  struct stat info;
-  if (lstat(socket_path, &info) != 0 || !S_ISSOCK(info.st_mode) ||
-      info.st_uid != getuid() || (info.st_mode & 0777) != 0600) return -1;
-  char directory[PATH_MAX];
-  snprintf(directory, sizeof(directory), "%s", socket_path);
-  char *slash = strrchr(directory, '/');
-  if (!slash || slash == directory) return -1;
-  *slash = '\0';
-  if (lstat(directory, &info) != 0 || !S_ISDIR(info.st_mode) ||
-      info.st_uid != getuid() || (info.st_mode & 0777) != 0700) return -1;
+/* HMAC-SHA256(secret, label \0 server \0 client) as hex (protocol/handshake.ts). */
+static void proof(const unsigned char secret[32], const char *label,
+                  const char *server, const char *client, char out[65]) {
+  char message[256];
+  size_t length = 0;
+  size_t parts[3] = {strlen(label), strlen(server), strlen(client)};
+  memcpy(message, label, parts[0]); length += parts[0]; message[length++] = 0;
+  memcpy(message + length, server, parts[1]); length += parts[1]; message[length++] = 0;
+  memcpy(message + length, client, parts[2]); length += parts[2];
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CCHmac(kCCHmacAlgSHA256, secret, 32, message, length, digest);
+  hex(digest, sizeof(digest), out);
+}
+
+/* The 64-hex value of "key":"…" in a JSON text, or -1. */
+static int token(const char *json, const char *key, char out[65]) {
+  char pattern[32];
+  snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+  const char *start = strstr(json, pattern);
+  if (!start) return -1;
+  start += strlen(pattern);
+  if (strlen(start) < 65 || start[64] != '"') return -1;
+  memcpy(out, start, 64);
+  out[64] = '\0';
   return 0;
 }
 
-/* Runs the helper executable directly and waits up to 10 s for it to exit. */
-static int run_helper(const char *helper_app, const char *socket_path,
-                      const char *nonce, int *status) {
+static int listen_on(const char *path) {
+  struct sockaddr_un address = {.sun_family = AF_UNIX};
+  if (strlen(path) >= sizeof(address.sun_path)) return -1;
+  strncpy(address.sun_path, path, sizeof(address.sun_path) - 1);
+  unlink(path);
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) return -1;
+  if (bind(fd, (const struct sockaddr *)&address, sizeof(address)) != 0 ||
+      chmod(path, 0600) != 0 || listen(fd, 4) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+static int accept_within(int listener, int milliseconds) {
+  struct pollfd ready = {.fd = listener, .events = POLLIN};
+  if (poll(&ready, 1, milliseconds) <= 0) return -1;
+  int fd = accept(listener, NULL, NULL);
+  if (fd >= 0) {
+    struct timeval timeout = {.tv_sec = 10};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  }
+  return fd;
+}
+
+/* Starts the helper executable directly with `stdin_fd` as its stdin. */
+static pid_t spawn_helper(const char *helper_app, const char *socket_path, int stdin_fd) {
   char executable[PATH_MAX], pid[32];
   snprintf(executable, sizeof(executable), "%s/Contents/MacOS/emperor-computer-helper", helper_app);
   snprintf(pid, sizeof(pid), "%d", getpid());
   pid_t child = fork();
   if (child == 0) {
-    execl(executable, executable, "--parent-pid", pid, "--nonce", nonce,
-          "--socket", socket_path, NULL);
+    dup2(stdin_fd, STDIN_FILENO);
+    execl(executable, executable, "--parent-pid", pid, "--socket", socket_path, NULL);
     _exit(127);
   }
-  if (child < 0) return -1;
-  for (int attempt = 0; attempt < 100; attempt++) {
+  return child;
+}
+
+/* Waits up to 15 s for `child`; kills it after that. Returns its status. */
+static int wait_helper(pid_t child, int *status) {
+  for (int attempt = 0; attempt < 150; attempt++) {
     if (waitpid(child, status, WNOHANG) == child) return 0;
     usleep(100000);
   }
@@ -91,119 +134,193 @@ static int run_helper(const char *helper_app, const char *socket_path,
   return -1;
 }
 
+/* A pipe whose read end holds the secret line; the caller closes both. */
+static int secret_pipe(const unsigned char secret[32], int fds[2]) {
+  if (pipe(fds) != 0) return -1;
+  char line[66];
+  hex(secret, 32, line);
+  line[64] = '\n';
+  line[65] = '\0';
+  return write(fds[1], line, 65) == 65 ? 0 : -1;
+}
+
+/*
+ * Challenge, check the hello's proof, then send welcome with the right
+ * proof or, with `bad_welcome`, a wrong one. Returns 0 when the hello
+ * proved the secret.
+ */
+static int handshake(int fd, const unsigned char secret[32], int bad_welcome,
+                     char *message, size_t capacity) {
+  unsigned char nonce_bytes[32];
+  char server[65], client[65], received[65], expected[65], welcome[160], challenge[160];
+  arc4random_buf(nonce_bytes, sizeof(nonce_bytes));
+  hex(nonce_bytes, sizeof(nonce_bytes), server);
+  snprintf(challenge, sizeof(challenge), "{\"type\":\"challenge\",\"protocol\":1,\"nonce\":\"%s\"}", server);
+  if (send_json(fd, challenge) != 0) return -1;
+  if (read_json(fd, message, capacity) != 0 || !strstr(message, "\"type\":\"hello\"")) return -2;
+  if (token(message, "nonce", client) != 0 || token(message, "proof", received) != 0) return -3;
+  proof(secret, "emperor-helper-hello", server, client, expected);
+  if (strcmp(expected, received) != 0) return -4;
+  if (bad_welcome) memset(expected, '0', 64);
+  else proof(secret, "emperor-main-welcome", server, client, expected);
+  snprintf(welcome, sizeof(welcome), "{\"type\":\"welcome\",\"protocol\":1,\"proof\":\"%s\"}", expected);
+  return send_json(fd, welcome) == 0 ? 0 : -5;
+}
+
+static int request(int fd, char *message, size_t capacity, const char *text, const char *expect) {
+  if (send_json(fd, text) != 0) return -1;
+  if (read_json(fd, message, capacity) != 0 || !strstr(message, expect)) return -1;
+  return 0;
+}
+
 int main(int argc, char **argv) {
-  if (argc != 4 && argc != 5) return 2;
-  int bad_nonce = argc == 5 && strcmp(argv[4], "--bad-nonce") == 0;
-  const char *helper_app = argv[1], *socket_path = argv[2], *nonce = argv[3];
+  if (argc != 3) return 2;
+  const char *helper_app = argv[1], *directory = argv[2];
+  char path[PATH_MAX], fifo[PATH_MAX];
+  size_t capacity = 1024 * 1024 + 1;
+  char *message = calloc(1, capacity);
+  if (!message) return 13;
+  unsigned char secret[32];
+  arc4random_buf(secret, sizeof(secret));
+
+  /* 1. No secret on stdin: the Helper exits before connecting anywhere. */
+  {
+    int null_fd = open("/dev/null", O_RDONLY);
+    snprintf(path, sizeof(path), "%s/none.sock", directory);
+    int listener = listen_on(path);
+    pid_t child = spawn_helper(helper_app, path, null_fd);
+    int status = 0;
+    if (listener < 0 || wait_helper(child, &status) != 0 || !WIFEXITED(status) || WEXITSTATUS(status) == 0)
+      return 20;
+    if (accept_within(listener, 0) >= 0) return 21;
+    close(listener);
+    close(null_fd);
+    printf("helper without a launch secret exited with status %d\n", WEXITSTATUS(status));
+  }
+
+  /* 2. Another process listening: the Helper checks the listener's pid and hangs up. */
+  {
+    snprintf(path, sizeof(path), "%s/rogue.sock", directory);
+    int ready[2];
+    if (pipe(ready) != 0) return 22;
+    pid_t rogue = fork();
+    if (rogue == 0) {
+      alarm(15);
+      int listener = listen_on(path);
+      char byte = 1;
+      write(ready[1], &byte, 1);
+      int fd = accept_within(listener, 12000);
+      int hung_up = fd >= 0 && read(fd, &byte, 1) == 0;
+      _exit(hung_up ? 0 : 1);
+    }
+    char byte;
+    if (read(ready[0], &byte, 1) != 1) return 23;
+    int fds[2];
+    if (secret_pipe(secret, fds) != 0) return 24;
+    pid_t helper = spawn_helper(helper_app, path, fds[0]);
+    int status = 0;
+    if (waitpid(rogue, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) return 25;
+    kill(helper, SIGKILL);
+    waitpid(helper, &status, 0);
+    close(fds[0]);
+    close(fds[1]);
+    printf("listener with the wrong pid rejected\n");
+  }
+
+  /* 3. A wrong welcome proof: the Helper hangs up. */
+  {
+    snprintf(path, sizeof(path), "%s/bad.sock", directory);
+    int listener = listen_on(path);
+    int fds[2];
+    if (listener < 0 || secret_pipe(secret, fds) != 0) return 26;
+    pid_t helper = spawn_helper(helper_app, path, fds[0]);
+    int fd = accept_within(listener, 10000);
+    if (fd < 0) return 27;
+    int result = handshake(fd, secret, 1, message, capacity);
+    if (result != 0) { fprintf(stderr, "bad-proof handshake failed: %d\n", result); return 28; }
+    char byte;
+    if (read(fd, &byte, 1) != 0) return 29;
+    int status = 0;
+    if (wait_helper(helper, &status) != 0 || !WIFEXITED(status) || WEXITSTATUS(status) == 0) return 30;
+    close(fd);
+    close(listener);
+    close(fds[0]);
+    close(fds[1]);
+    printf("wrong welcome proof rejected (status %d)\n", WEXITSTATUS(status));
+  }
+
+  /* 4. A socket in a directory others can enter: refused at once. */
+  {
+    char shared[PATH_MAX];
+    snprintf(shared, sizeof(shared), "%s/shared", directory);
+    if (mkdir(shared, 0755) != 0 || chmod(shared, 0755) != 0) return 31;
+    snprintf(path, sizeof(path), "%s/cu.sock", shared);
+    int listener = listen_on(path);
+    int fds[2];
+    if (listener < 0 || secret_pipe(secret, fds) != 0) return 32;
+    pid_t helper = spawn_helper(helper_app, path, fds[0]);
+    int status = 0;
+    if (wait_helper(helper, &status) != 0 || !WIFEXITED(status) || WEXITSTATUS(status) == 0) return 33;
+    if (accept_within(listener, 0) >= 0) return 34;
+    close(listener);
+    close(fds[0]);
+    close(fds[1]);
+    printf("socket directory with group/other access refused\n");
+  }
+
+  /* 5. LaunchServices with the secret on stdin through a FIFO, then requests. */
+  snprintf(path, sizeof(path), "%s/cu.sock", directory);
+  snprintf(fifo, sizeof(fifo), "%s/cu.in", directory);
+  int listener = listen_on(path);
+  if (listener < 0 || mkfifo(fifo, 0600) != 0) return 3;
+  int fifo_fd = open(fifo, O_RDWR | O_NONBLOCK);
+  char line[66];
+  hex(secret, 32, line);
+  line[64] = '\n';
+  if (fifo_fd < 0 || write(fifo_fd, line, 65) != 65) return 4;
   char pid[32];
   snprintf(pid, sizeof(pid), "%d", getpid());
   pid_t launcher = fork();
   if (launcher == 0) {
-    execl("/usr/bin/open", "open", "-g", "-a", helper_app, "--args",
-          "--parent-pid", pid, "--nonce", nonce, "--socket", socket_path, NULL);
+    execl("/usr/bin/open", "open", "-g", "-a", helper_app, "--stdin", fifo, "--args",
+          "--parent-pid", pid, "--socket", path, NULL);
     _exit(127);
   }
-  struct sockaddr_un address = {.sun_family = AF_UNIX};
-  if (strlen(socket_path) >= sizeof(address.sun_path)) return 3;
-  strncpy(address.sun_path, socket_path, sizeof(address.sun_path) - 1);
-  pid_t rogue = fork();
-  if (rogue == 0) {
-    alarm(10);
-    int other = connect_retry(&address);
-    char byte;
-    int refused = other >= 0 && read(other, &byte, 1) == 0;
-    if (other >= 0) close(other);
-    _exit(refused ? 0 : 1);
-  }
-  int status = 0;
-  if (rogue < 0 || waitpid(rogue, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
-    return 12;
-  printf("wrong peer PID rejected\n");
-  int fd = connect_retry(&address);
-  if (fd < 0) { fprintf(stderr, "socket connect failed: %s\n", strerror(errno)); return 4; }
-  char *message = calloc(1, 1024 * 1024 + 1);
-  if (!message) return 13;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"type\":\"hello\"")) {
-    fprintf(stderr, "hello failed\n"); return 5;
-  }
-  printf("hello: %s\n", message);
-  char welcome[256];
-  snprintf(welcome, sizeof(welcome), "{\"type\":\"welcome\",\"protocol\":1,\"nonce\":\"%s\"}",
-           bad_nonce ? "00000000000000000000000000000000" : nonce);
-  if (send_json(fd, welcome) != 0) return 6;
-  if (bad_nonce) {
-    if (read_json(fd, message, 1024 * 1024 + 1) == 0) return 11;
-    printf("bad nonce rejected\n");
-    close(fd);
-    return 0;
-  }
-  if (send_json(fd, "{\"type\":\"ping\",\"seq\":42}") != 0) return 7;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"type\":\"pong\"")) {
-    fprintf(stderr, "pong failed\n"); return 8;
-  }
+  int fd = accept_within(listener, 15000);
+  if (fd < 0) { fprintf(stderr, "helper did not connect\n"); return 5; }
+  int result = handshake(fd, secret, 0, message, capacity);
+  if (result != 0) { fprintf(stderr, "handshake failed: %d\n", result); return 6; }
+  close(listener);
+  unlink(path);
+  close(fifo_fd);
+  unlink(fifo);
+  printf("hello proved the launch secret; welcome sent\n");
+  if (request(fd, message, capacity, "{\"type\":\"ping\",\"seq\":42}", "\"type\":\"pong\"") != 0) return 7;
   printf("pong: %s\n", message);
-  if (check_modes(socket_path) != 0) { fprintf(stderr, "socket mode check failed\n"); return 30; }
-  printf("socket mode 0600, directory 0700\n");
-  struct stat before, after;
-  if (lstat(socket_path, &before) != 0) return 31;
-  int second = 0;
-  if (run_helper(helper_app, socket_path, nonce, &second) != 0 ||
-      !WIFEXITED(second) || WEXITSTATUS(second) == 0) {
-    fprintf(stderr, "second helper did not exit\n"); return 32;
-  }
-  if (lstat(socket_path, &after) != 0 || after.st_ino != before.st_ino) return 33;
-  printf("second helper on the same socket exited with status %d; socket kept\n", WEXITSTATUS(second));
-  if (send_json(fd, "{\"type\":\"request\",\"id\":1,\"method\":\"permissions.status\",\"params\":{},\"deadlineMs\":2000}") != 0) return 14;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"permissions\"")) return 15;
+  if (request(fd, message, capacity, "{\"type\":\"request\",\"id\":1,\"method\":\"permissions.status\",\"params\":{},\"deadlineMs\":2000}", "\"permissions\"") != 0) return 14;
   printf("permissions.status: %s\n", message);
-  if (send_json(fd, "{\"type\":\"request\",\"id\":2,\"method\":\"apps.list\",\"params\":{},\"deadlineMs\":3000}") != 0) return 16;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"apps\"")) return 17;
+  if (request(fd, message, capacity, "{\"type\":\"request\",\"id\":2,\"method\":\"apps.list\",\"params\":{},\"deadlineMs\":3000}", "\"apps\"") != 0) return 16;
   int app_count = 0;
   for (char *cursor = message; (cursor = strstr(cursor, "\"appId\"")) != NULL; cursor += 7) app_count++;
   printf("apps.list: %d regular apps\n", app_count);
-  if (send_json(fd, "{\"type\":\"request\",\"id\":3,\"method\":\"windows.list\",\"params\":{},\"deadlineMs\":3000}") != 0) return 18;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"type\":\"response\"")) return 19;
+  if (request(fd, message, capacity, "{\"type\":\"request\",\"id\":3,\"method\":\"windows.list\",\"params\":{},\"deadlineMs\":3000}", "\"type\":\"response\"") != 0) return 18;
   printf("windows.list: %s\n", strstr(message, "PERMISSION_REQUIRED") ? "permission required" : "success");
-  if (send_json(fd, "{\"type\":\"request\",\"id\":4,\"method\":\"observe.semantic\",\"params\":{\"targetId\":\"t-missing\",\"generation\":1,\"budget\":{\"maxElements\":200,\"maxTextBytes\":16384,\"maxDepth\":8,\"timeoutMs\":3000},\"includeText\":true},\"deadlineMs\":5000}") != 0) return 20;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "PERMISSION_REQUIRED")) return 21;
-  printf("observe.semantic: permission required\n");
-  if (send_json(fd, "{\"type\":\"request\",\"id\":5,\"method\":\"observe.screenshot\",\"params\":{\"targetId\":\"t-missing\",\"generation\":1,\"modelCopy\":true,\"modelMaxEdge\":1600},\"deadlineMs\":5000}") != 0) return 22;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "PERMISSION_REQUIRED")) return 23;
-  printf("observe.screenshot: permission required\n");
-  if (send_json(fd, "{\"type\":\"request\",\"id\":7,\"method\":\"act\",\"params\":{\"operationId\":\"smoke-denied\",\"targetId\":\"t-missing\",\"generation\":1,\"expectedRevision\":0,\"action\":{\"kind\":\"press\",\"key\":\"Enter\"}},\"deadlineMs\":2000}") != 0) return 24;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 ||
-      !strstr(message, "\"type\":\"response\"") ||
-      (!strstr(message, "PERMISSION_REQUIRED") && !strstr(message, "STALE_TARGET"))) return 25;
-  printf("act with missing target: rejected before dispatch\n");
-  if (send_json(fd, "{\"type\":\"request\",\"id\":8,\"method\":\"input.releaseAll\",\"params\":{},\"deadlineMs\":1000}") != 0) return 26;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"ok\":true")) return 27;
+  if (request(fd, message, capacity, "{\"type\":\"request\",\"id\":8,\"method\":\"input.releaseAll\",\"params\":{},\"deadlineMs\":1000}", "\"ok\":true") != 0) return 26;
   printf("input.releaseAll: %s\n", message);
   if (send_json(fd, "{\"type\":\"request\",\"id\":9,\"method\":\"act.fillSecret\",\"params\":{\"operationId\":\"smoke-secret\",\"targetId\":\"t-missing\",\"generation\":1,\"expectedRevision\":0,\"ref\":\"r0.1\",\"field\":\"password\",\"secret\":\"dummy-secret-never-echo\",\"binding\":{\"bundleId\":\"com.example.fixture\",\"path\":\"/tmp/fixture\"}},\"deadlineMs\":2000}") != 0) return 28;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 ||
+  if (read_json(fd, message, capacity) != 0 ||
       !strstr(message, "\"type\":\"response\"") ||
       strstr(message, "dummy-secret-never-echo") ||
       (!strstr(message, "PERMISSION_REQUIRED") && !strstr(message, "STALE_TARGET"))) return 29;
   printf("act.fillSecret with missing target: rejected without secret echo\n");
-  if (send_json(fd, "{\"type\":\"request\",\"id\":6,\"method\":\"shutdown\",\"params\":{},\"deadlineMs\":2000}") != 0) return 9;
-  if (read_json(fd, message, 1024 * 1024 + 1) != 0 || !strstr(message, "\"ok\":true")) {
-    fprintf(stderr, "shutdown failed\n"); return 10;
+  if (request(fd, message, capacity, "{\"type\":\"request\",\"id\":6,\"method\":\"shutdown\",\"params\":{},\"deadlineMs\":2000}", "\"ok\":true") != 0) {
+    fprintf(stderr, "shutdown failed\n");
+    return 10;
   }
   printf("shutdown: %s\n", message);
   free(message);
   close(fd);
-  char open_directory[PATH_MAX], open_socket[PATH_MAX];
-  snprintf(open_directory, sizeof(open_directory), "%s", socket_path);
-  char *slash = strrchr(open_directory, '/');
-  if (!slash) return 34;
-  snprintf(slash, sizeof(open_directory) - (size_t)(slash - open_directory), "/shared");
-  if (mkdir(open_directory, 0755) != 0 || chmod(open_directory, 0755) != 0) return 35;
-  snprintf(open_socket, sizeof(open_socket), "%s/cu.sock", open_directory);
-  int refused = 0;
-  if (run_helper(helper_app, open_socket, nonce, &refused) != 0 ||
-      !WIFEXITED(refused) || WEXITSTATUS(refused) == 0 ||
-      access(open_socket, F_OK) == 0) {
-    fprintf(stderr, "helper accepted a shared socket directory\n"); return 36;
-  }
-  printf("socket directory with group/other access refused\n");
+  int status = 0;
+  waitpid(launcher, &status, 0);
   return 0;
 }

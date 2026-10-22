@@ -11,8 +11,10 @@ import {
 } from 'vue-router'
 import {
   normalizeSettingsSection,
+  settingsAlias,
   type SettingsSectionKey,
 } from './components/settings/settingsSections'
+import { trajectoryRouteGuard } from './components/conversation/trajectoryGate'
 
 // Every route view is its own chunk.
 const ConversationView = () =>
@@ -27,12 +29,12 @@ const GitHubIssuesPage = () =>
   import('./components/pages/github/GitHubIssuesPage.vue')
 const GitHubRunsPage = () =>
   import('./components/pages/github/GitHubRunsPage.vue')
-const ExplorePage = () => import('./components/pages/explore/ExplorePage.vue')
 
 /** Routes that render inside the conversation shell (workspace available). */
 export const CONVERSATION_ROUTE_NAMES: readonly string[] = [
   'chat',
   'trajectory',
+  'external-agent',
 ]
 
 export function isConversationRoute(name: unknown): boolean {
@@ -61,16 +63,25 @@ export function settingsRedirect(
 export const routeRecords: RouteRecordRaw[] = [
   { path: '/', redirect: '/chat' },
   {
+    path: '/chat/:sessionId/agents/:delegationId',
+    name: 'external-agent',
+    component: () =>
+      import('./components/conversation/ExternalAgentConversation.vue'),
+    meta: { label: '子智能体', tab: 'chat' },
+  },
+  {
     path: '/chat/:sessionId/trajectory',
     name: 'trajectory',
     component: ConversationView,
-    meta: { label: 'Trajectory', tab: 'trajectory' },
+    meta: { label: '轨迹', tab: 'trajectory' },
+    // UI-S09: opens only while 设置 › 常规 › 开发者 › 显示轨迹 is on.
+    beforeEnter: trajectoryRouteGuard,
   },
   {
     path: '/chat/:sessionId?',
     name: 'chat',
     component: ConversationView,
-    meta: { label: 'Chat', tab: 'chat' },
+    meta: { label: '对话', tab: 'chat' },
   },
   // Full pages (no workspace column).
   {
@@ -107,7 +118,7 @@ export const routeRecords: RouteRecordRaw[] = [
     path: '/github/issues/:owner?/:repo?/:number?',
     name: 'github-issues',
     component: GitHubIssuesPage,
-    meta: { label: 'Issue', page: true },
+    meta: { label: '议题', page: true },
   },
   {
     path: '/github/ci/:owner?/:repo?/:runId?',
@@ -116,11 +127,14 @@ export const routeRecords: RouteRecordRaw[] = [
     meta: { label: 'CI', page: true },
   },
   { path: '/github', redirect: '/github/issues' },
+  // 探索 is the 推荐 block of 能力 now (UI-S08).
   {
     path: '/explore',
-    name: 'explore',
-    component: ExplorePage,
-    meta: { label: '探索', page: true },
+    redirect: (to) => ({
+      path: '/capabilities',
+      query: to.query,
+      hash: '#recommended',
+    }),
   },
   {
     path: '/skills/:name?',
@@ -137,13 +151,18 @@ export const routeRecords: RouteRecordRaw[] = [
   // Retired standalone pages: deep links open the settings modal instead.
   {
     path: '/settings/:section?',
-    redirect: settingsRedirect((to) =>
-      normalizeSettingsSection(firstParam(to.params.section)),
+    redirect: settingsRedirect(
+      (to) => normalizeSettingsSection(firstParam(to.params.section)),
+      (to): Record<string, string> => {
+        const page = settingsAlias(firstParam(to.params.section))?.page
+        return page ? { page } : {}
+      },
     ),
   },
   { path: '/model', redirect: settingsRedirect('model') },
   { path: '/configs', redirect: settingsRedirect('memory') },
-  { path: '/pet', redirect: settingsRedirect('pet') },
+  // 桌宠 is a switch in 常规 › 外观 now.
+  { path: '/pet', redirect: settingsRedirect('general') },
   { path: '/memory', redirect: settingsRedirect('memory') },
   { path: '/tokens', redirect: settingsRedirect('tokens') },
   { path: '/team', redirect: '/chat' },
@@ -161,12 +180,26 @@ const SETTINGS_PAGE_PATHS: Record<string, string> = {
 
 /**
  * Where a `?settings=<section>` link of a section that became a page goes
- * (null: stay). Other query keys carry over; `skill` only for Skills.
+ * (null: stay). Other query keys carry over; `skill` only for Skills. A
+ * section folded into another one (Hooks, 诊断 → 高级; 桌宠 → 常规) opens
+ * there, on its sub page when it has one.
  */
 export function settingsPageRedirect(
-  to: Pick<RouteLocationNormalized, 'query'>,
+  to: Pick<RouteLocationNormalized, 'query' | 'path'>,
 ): RouteLocationRaw | null {
   const section = firstParam(to.query.settings)
+  const alias = settingsAlias(section)
+  if (alias) {
+    const { settings: _settings, page: _page, ...rest } = to.query
+    return {
+      path: to.path,
+      query: {
+        ...rest,
+        settings: alias.section,
+        ...(alias.page ? { page: alias.page } : {}),
+      },
+    }
+  }
   const path = SETTINGS_PAGE_PATHS[section]
   if (!path) return null
   const { settings: _settings, page: _page, skill, ...rest } = to.query

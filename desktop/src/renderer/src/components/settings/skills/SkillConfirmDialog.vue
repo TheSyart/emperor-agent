@@ -43,7 +43,7 @@ const emit = defineEmits<{ confirm: [] }>()
   >
     <p v-if="detail" class="detail">{{ detail }}</p>
     <template #footer>
-      <Button variant="outline" :disabled="busy" @click="open = false">
+      <Button variant="secondary" :disabled="busy" @click="open = false">
         取消
       </Button>
       <Button
@@ -67,7 +67,7 @@ const emit = defineEmits<{ confirm: [] }>()
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 </style>

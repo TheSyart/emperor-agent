@@ -30,8 +30,13 @@ import {
 } from './schedulerModel'
 
 const props = withDefaults(
-  defineProps<{ disabled?: boolean; mode?: 'create' | 'edit' }>(),
-  { disabled: false, mode: 'edit' },
+  defineProps<{
+    disabled?: boolean
+    mode?: 'create' | 'edit'
+    /** Why the 「指定时间」 cannot be saved (scheduleProblem), shown on it. */
+    scheduleError?: string | null
+  }>(),
+  { disabled: false, mode: 'edit', scheduleError: null },
 )
 
 const draft = defineModel<SchedulerJobDraft>({ required: true })
@@ -126,11 +131,14 @@ defineExpose({
           :disabled="disabled"
         />
       </Field>
-      <Field v-else-if="scheduleKind === 'at'" :id="atId" label="指定时间">
-        <input
-          :id="atId"
+      <Field
+        v-else-if="scheduleKind === 'at'"
+        :id="atId"
+        label="指定时间"
+        :error="scheduleError ?? undefined"
+      >
+        <TextField
           v-model="atLocal"
-          class="native-input"
           type="datetime-local"
           :disabled="disabled"
         />
@@ -206,34 +214,8 @@ defineExpose({
 .label {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
-}
-
-.native-input {
-  width: 100%;
-  min-width: 0;
-  height: calc(var(--space-8) + 2px);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  outline: none;
-  background: rgb(var(--bg-layer-3));
-  box-shadow: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
-  transition: border-color var(--duration-ds-fast) ease;
-}
-
-.native-input:focus {
-  border-color: rgb(var(--accent-fill));
-}
-
-.native-input:disabled {
-  background: transparent;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .select-wrap {

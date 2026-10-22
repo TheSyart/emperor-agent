@@ -55,7 +55,7 @@ function isEmpty(value: DefinitionItem['value']) {
   min-width: 0;
   font-size: var(--fs-xxxs);
   line-height: calc(var(--lh-xxxs) + 3px);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -64,12 +64,12 @@ function isEmpty(value: DefinitionItem['value']) {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: calc(var(--lh-xxxs) + 3px);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
 .value[data-mono] {
   font-family: var(--font-mono);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 </style>

@@ -18,6 +18,8 @@ import { extractBoundedZip } from '../environment/zip'
 import { isPublicHttpRedirectResponse } from '../network/public-http'
 import type { WebFetchClient } from '../network/web-fetch-client'
 import { EmperorError } from '../errors'
+import { projectIdForPath } from '../projects/store'
+import { canonicalizeExistingPath } from '../util/paths'
 import type { ActivePluginPackage } from './activation'
 import {
   NO_PLUGIN_RUNTIME,
@@ -52,6 +54,7 @@ import {
 } from './models'
 import { PluginStore } from './store'
 import { pluginToolsView } from './tools'
+import { assertNotNewerSync } from '../store/persistence'
 
 const MAX_PLUGIN_FILES = 4_000
 const MAX_PLUGIN_FILE_BYTES = 20 * 1024 * 1024
@@ -59,6 +62,14 @@ const MAX_PLUGIN_TOTAL_BYTES = 200 * 1024 * 1024
 const PREVIEW_ID = /^plugin_preview_[a-f0-9]{24}$/
 /** Previews live only in memory; their folders outlive a restart. */
 const STALE_PREVIEW_MS = 24 * 60 * 60 * 1000
+/** Written once the pre-0.2 project choices have moved to stateRoot (SEC-07). */
+const PROJECT_INTENTS_MIGRATION = 'project-intents-migration.json'
+
+/** A project's own choices, by scope (`<stateRoot>/projects/<id>/plugins.json`). */
+interface ProjectIntents {
+  project: Record<string, boolean>
+  local: Record<string, boolean>
+}
 
 interface PreviewState extends PluginInstallPreview {
   readonly payloadRoot: string
@@ -78,13 +89,18 @@ export interface PluginApplicationServiceOptions {
   /** Folders that may hold the packages shipped with Emperor; the first that exists is used. */
   readonly bundledPluginRoots?: readonly string[]
   readonly computerUse?: PluginComputerUseSwitch | null
-  readonly activeWorkspaceRoot?: (() => string | null) | null
   readonly onChanged?: (() => void) | null
   readonly now?: () => Date
   readonly idFactory?: () => string
   readonly webFetchClient?: WebFetchClient | null
   /** Live MCP and Skill facts for member states; defaults to none. */
   readonly runtime?: PluginRuntimeView | null
+  /**
+   * Projects Emperor knew before this start. Given, the project choices of
+   * a pre-0.2 install move from each project's `.emperor` files to
+   * stateRoot, once (SEC-07).
+   */
+  readonly knownProjects?: (() => readonly string[]) | null
 }
 
 export class PluginApplicationService {
@@ -93,7 +109,6 @@ export class PluginApplicationService {
   readonly stagingRoot: string
   readonly cacheRoot: string
   readonly store: PluginStore
-  private readonly activeWorkspaceRoot: () => string | null
   private readonly onChanged: () => void
   private readonly now: () => Date
   private readonly idFactory: () => string
@@ -117,7 +132,6 @@ export class PluginApplicationService {
     this.stagingRoot = join(this.pluginsRoot, 'staging')
     this.cacheRoot = join(this.pluginsRoot, 'cache')
     this.store = new PluginStore({ pluginsRoot: this.pluginsRoot })
-    this.activeWorkspaceRoot = opts.activeWorkspaceRoot ?? (() => null)
     this.onChanged = opts.onChanged ?? (() => {})
     this.now = opts.now ?? (() => new Date())
     this.idFactory =
@@ -134,17 +148,23 @@ export class PluginApplicationService {
     mkdirPrivate(join(this.pluginsRoot, 'data'))
     this.store.ensure()
     this.removeStalePreviews()
+    if (opts.knownProjects) this.migrateProjectIntents(opts.knownProjects)
   }
 
-  /** Installed packages as the active session's project sees them. */
-  list(): PluginSummary[] {
-    return this.summariesFor(this.activeWorkspaceRoot())
+  /**
+   * Installed packages as one project sees them (`null`: a Chat session or
+   * no session). Callers pass the project of the session the UI shows.
+   */
+  list(workspace: string | null = null): PluginSummary[] {
+    return this.summariesFor(workspace)
   }
 
   /** Everything the detail page shows (contract §6.2); throws `plugin_not_found`. */
-  detail(input: PluginScopeTarget): PluginDetail {
+  detail(
+    input: PluginScopeTarget,
+    workspace: string | null = null,
+  ): PluginDetail {
     const pluginId = assertPluginId(input.pluginId)
-    const workspace = this.activeWorkspaceRoot()
     const summaries = this.summariesFor(workspace)
     const summary = summaries.find(
       (item) => item.pluginId === pluginId && item.scope === input.scope,
@@ -204,6 +224,7 @@ export class PluginApplicationService {
           : {}),
         components,
         runtime: this.runtime,
+        projectRoot: workspace,
         scrub,
       }),
     }
@@ -244,8 +265,11 @@ export class PluginApplicationService {
   }
 
   /** The result row of a mutation, including a package that is no longer registered. */
-  private summaryOf(pluginId: string, scope: PluginScope): PluginSummary {
-    const workspace = this.activeWorkspaceRoot()
+  private summaryOf(
+    pluginId: string,
+    scope: PluginScope,
+    workspace: string | null,
+  ): PluginSummary {
     return (
       this.summariesFor(workspace).find(
         (item) => item.pluginId === pluginId && item.scope === scope,
@@ -351,7 +375,11 @@ export class PluginApplicationService {
     }
   }
 
-  async install(input: ConfirmedPluginInstall): Promise<PluginOperationResult> {
+  /** `workspace`: the project a `project` / `local` install is for. */
+  async install(
+    input: ConfirmedPluginInstall,
+    workspace: string | null = null,
+  ): Promise<PluginOperationResult> {
     const preview = this.previews.get(String(input.previewId ?? ''))
     if (!preview) throw new Error('Plugin preview is missing or expired')
     if (preview.digest !== String(input.digest ?? '').toLowerCase())
@@ -359,7 +387,7 @@ export class PluginApplicationService {
     if (!isPluginScope(input.scope) || input.scope === 'managed')
       throw new Error('Plugin install scope is not user-mutable')
     // Checked before anything is written: a refused scope leaves no registry row.
-    this.assertMutableScope(input.scope)
+    this.assertMutableScope(input.scope, workspace)
     const currentDigest = digestTree(preview.payloadRoot)
     if (currentDigest !== preview.digest)
       throw new Error('Plugin preview content changed after inspection')
@@ -386,7 +414,7 @@ export class PluginApplicationService {
       updatedAt: timestamp,
     }
     this.store.upsert(entry)
-    this.writeIntent(input.scope, preview.pluginId, true)
+    this.writeIntent(input.scope, preview.pluginId, true, workspace)
     this.previews.delete(preview.previewId)
     rmSync(join(this.stagingRoot, preview.previewId), {
       recursive: true,
@@ -395,49 +423,50 @@ export class PluginApplicationService {
     this.onChanged()
     return {
       changed: true,
-      plugin: this.summaryOf(preview.pluginId, input.scope),
+      plugin: this.summaryOf(preview.pluginId, input.scope, workspace),
     }
   }
 
   setEnabled(
     input: PluginScopeTarget & { enabled: boolean },
+    workspace: string | null = null,
   ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     if (input.scope === 'managed')
-      return this.setManagedEnabled(pluginId, input.enabled)
-    this.assertMutableScope(input.scope)
-    const workspace = this.activeWorkspaceRoot()
+      return this.setManagedEnabled(pluginId, input.enabled, workspace)
+    this.assertMutableScope(input.scope, workspace)
     const before = this.readIntent(input.scope, workspace)[pluginId] === true
-    this.writeIntent(input.scope, pluginId, input.enabled)
+    this.writeIntent(input.scope, pluginId, input.enabled, workspace)
     this.onChanged()
     return {
       changed: before !== input.enabled,
-      plugin: this.summaryOf(pluginId, input.scope),
+      plugin: this.summaryOf(pluginId, input.scope, workspace),
     }
   }
 
   /** Remove the registration and its intent; the immutable cache stays. */
-  uninstall(input: PluginScopeTarget): PluginOperationResult {
+  uninstall(
+    input: PluginScopeTarget,
+    workspace: string | null = null,
+  ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     if (input.scope === 'managed')
       throw new EmperorError(
         '随 Emperor 提供的插件不能卸载，可以停用',
         'plugin_managed_uninstall_denied',
       )
-    this.assertMutableScope(input.scope)
+    this.assertMutableScope(input.scope, workspace)
     const changed = this.store.remove(pluginId, input.scope)
-    this.deleteIntent(input.scope, pluginId)
+    this.deleteIntent(input.scope, pluginId, workspace)
     this.onChanged()
-    return { changed, plugin: this.summaryOf(pluginId, input.scope) }
+    return { changed, plugin: this.summaryOf(pluginId, input.scope, workspace) }
   }
 
   /**
    * Skill folders of the packages in effect for one project (`null` = chat),
    * so project-scoped plugins never leak into chat or other projects.
    */
-  enabledSkillRoots(
-    projectRoot: string | null = this.activeWorkspaceRoot(),
-  ): string[] {
+  enabledSkillRoots(projectRoot: string | null): string[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
       const entry = this.entryOf(summary.pluginId, summary.scope)
@@ -459,9 +488,7 @@ export class PluginApplicationService {
   }
 
   /** Packages in effect for one project (`null` = chat): active and winning their scope. */
-  effectivePackages(
-    projectRoot: string | null = this.activeWorkspaceRoot(),
-  ): ActivePluginPackage[] {
+  effectivePackages(projectRoot: string | null): ActivePluginPackage[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
       const entry = this.entryOf(summary.pluginId, summary.scope)
@@ -496,10 +523,11 @@ export class PluginApplicationService {
     workspace: string | null,
   ): PluginSummary {
     const entry = this.entryOf(pluginId, scope)
+    const intents = scope === 'managed' ? {} : this.readIntent(scope, workspace)
     const enabled =
       scope === 'managed'
         ? this.managedEnabled(pluginId)
-        : this.readIntent(scope, workspace)[pluginId] === true
+        : intents[pluginId] === true
     const resolved = entry ? this.resolveInstalled(entry) : null
     const signature = pluginEntrySignature(entry)
     const materialization = entry && resolved ? 'installed' : 'missing'
@@ -515,6 +543,15 @@ export class PluginApplicationService {
     const members = memberIds(resolved)
     const displayName =
       resolved?.displayName ?? pluginId.split('/').at(-1) ?? pluginId
+    // SEC-07: the repository may only suggest; the user's choice decides.
+    const suggested =
+      scope === 'project' &&
+      workspace !== null &&
+      materialization === 'installed' &&
+      !(pluginId in intents) &&
+      readEnabledPlugins(join(resolve(workspace), '.emperor', 'settings.json'))[
+        pluginId
+      ] === true
     return {
       pluginId,
       name: displayName,
@@ -540,6 +577,7 @@ export class PluginApplicationService {
         pluginId !== COMPUTER_USE_PLUGIN_ID ||
         this.computerUse?.enabled() != null,
       uninstallable: scope !== 'managed',
+      ...(suggested ? { suggested: true } : {}),
       capabilities: {
         skills: members.skills.length,
         agents: members.agents.length,
@@ -627,6 +665,7 @@ export class PluginApplicationService {
   private setManagedEnabled(
     pluginId: string,
     enabled: boolean,
+    workspace: string | null,
   ): PluginOperationResult {
     if (!this.managed().has(pluginId))
       throw new EmperorError('找不到这个插件', 'plugin_not_found')
@@ -648,7 +687,7 @@ export class PluginApplicationService {
     this.onChanged()
     return {
       changed: before !== enabled,
-      plugin: this.summaryOf(pluginId, 'managed'),
+      plugin: this.summaryOf(pluginId, 'managed', workspace),
     }
   }
 
@@ -704,67 +743,47 @@ export class PluginApplicationService {
     }
   }
 
-  private assertMutableScope(scope: PluginScope): void {
+  private assertMutableScope(
+    scope: PluginScope,
+    workspace: string | null,
+  ): void {
     if (!isPluginScope(scope) || scope === 'managed')
       throw new Error('managed Plugin scope is read-only')
-    if (
-      (scope === 'project' || scope === 'local') &&
-      !this.activeWorkspaceRoot()
-    )
+    if ((scope === 'project' || scope === 'local') && !workspace)
       throw new Error('Plugin project scope requires an active workspace')
   }
 
-  private settingsPath(
-    scope: PluginScope,
-    workspace: string | null = this.activeWorkspaceRoot(),
-  ): string {
-    if (scope === 'user') return join(this.emperorHome, 'settings.json')
-    if (!workspace) return ''
-    return join(
-      resolve(workspace),
-      '.emperor',
-      scope === 'local' ? 'settings.local.json' : 'settings.json',
-    )
-  }
-
+  /**
+   * Where a scope's choices live: the user's in `stateRoot/settings.json`
+   * (`enabledPlugins`); a project's, both `project` and `local`, in
+   * `stateRoot/projects/<project-id>/plugins.json` (SEC-07). Nothing in the
+   * workspace decides: its `.emperor/settings.json` only suggests.
+   */
   private readIntent(
     scope: PluginScope,
     workspace: string | null,
   ): Record<string, boolean> {
-    const path = this.settingsPath(scope, workspace)
-    if (!path || !existsSync(path)) return {}
-    let raw: Record<string, unknown>
-    try {
-      raw = readJsonObject(path)
-    } catch {
-      // This bootstrap read must not mutate or quarantine configuration. The
-      // owning config service performs recovery and reports the corruption.
-      return {}
-    }
-    const enabled = raw.enabledPlugins
-    if (!enabled || typeof enabled !== 'object' || Array.isArray(enabled))
-      return {}
-    return Object.fromEntries(
-      Object.entries(enabled as Record<string, unknown>)
-        .filter(([id, value]) => {
-          try {
-            assertPluginId(id)
-            return typeof value === 'boolean'
-          } catch {
-            return false
-          }
-        })
-        .map(([id, value]) => [id, value === true]),
-    )
+    if (scope === 'user')
+      return readEnabledPlugins(join(this.emperorHome, 'settings.json'))
+    if ((scope === 'project' || scope === 'local') && workspace)
+      return this.readProjectIntents(workspace)[scope]
+    return {}
   }
 
   private writeIntent(
     scope: PluginScope,
     pluginId: string,
     enabled: boolean,
+    workspace: string | null,
   ): void {
-    this.assertMutableScope(scope)
-    const path = this.settingsPath(scope)
+    this.assertMutableScope(scope, workspace)
+    if (scope === 'project' || scope === 'local') {
+      const intents = this.readProjectIntents(workspace!, true)
+      intents[scope][pluginId] = enabled
+      this.writeProjectIntents(workspace!, intents)
+      return
+    }
+    const path = join(this.emperorHome, 'settings.json')
     const settings = existsSync(path) ? readJsonObject(path) : {}
     const current =
       settings.enabledPlugins &&
@@ -774,13 +793,25 @@ export class PluginApplicationService {
         : {}
     current[pluginId] = enabled
     settings.enabledPlugins = current
-    writePrivateJsonAtomic(path, settings)
+    writeSettings(path, settings)
   }
 
   /** Drop the intent key so an uninstalled package leaves no row behind. */
-  private deleteIntent(scope: PluginScope, pluginId: string): void {
-    const path = this.settingsPath(scope)
-    if (!path || !existsSync(path)) return
+  private deleteIntent(
+    scope: PluginScope,
+    pluginId: string,
+    workspace: string | null,
+  ): void {
+    if (scope === 'project' || scope === 'local') {
+      if (!workspace || !existsSync(this.projectIntentsPath(workspace))) return
+      const intents = this.readProjectIntents(workspace, true)
+      if (!(pluginId in intents[scope])) return
+      delete intents[scope][pluginId]
+      this.writeProjectIntents(workspace, intents)
+      return
+    }
+    const path = join(this.emperorHome, 'settings.json')
+    if (!existsSync(path)) return
     const settings = readJsonObject(path)
     const current = settings.enabledPlugins
     if (
@@ -793,8 +824,138 @@ export class PluginApplicationService {
     const next = { ...(current as Record<string, unknown>) }
     delete next[pluginId]
     settings.enabledPlugins = next
-    writePrivateJsonAtomic(path, settings)
+    writeSettings(path, settings)
   }
+
+  /**
+   * Keyed by the project's real path, so every spelling of one folder (a
+   * symlink, macOS `/var` and `/private/var`) shares its choices, as the
+   * folder's own `.emperor` files did before.
+   */
+  private projectIntentsPath(workspace: string): string {
+    return join(
+      this.emperorHome,
+      'projects',
+      projectIdForPath(canonicalizeExistingPath(workspace)),
+      'plugins.json',
+    )
+  }
+
+  /** A project's choices; `strict` (before a write) refuses an unreadable file instead of starting over. */
+  private readProjectIntents(
+    workspace: string,
+    strict = false,
+  ): ProjectIntents {
+    const path = this.projectIntentsPath(workspace)
+    if (!existsSync(path)) return { project: {}, local: {} }
+    let raw: Record<string, unknown>
+    try {
+      raw = readJsonObject(path)
+    } catch (error) {
+      if (strict) throw error
+      return { project: {}, local: {} }
+    }
+    const enabled = objectOf(raw.enabledPlugins)
+    return {
+      project: booleanIntents(enabled?.project),
+      local: booleanIntents(enabled?.local),
+    }
+  }
+
+  private writeProjectIntents(
+    workspace: string,
+    intents: ProjectIntents,
+  ): void {
+    writePrivateJsonAtomic(this.projectIntentsPath(workspace), {
+      schemaVersion: 1,
+      workspace: canonicalizeExistingPath(workspace),
+      enabledPlugins: intents,
+    })
+  }
+
+  /**
+   * Before 0.2 a project's choices sat in its own `.emperor/settings.json`
+   * (`project`) and `settings.local.json` (`local`). At the first start they
+   * move to stateRoot for every project Emperor already knew, for packages
+   * registered in that scope, and stay as they were; afterwards (the marker
+   * is written) those files only suggest. A failure leaves no marker, so
+   * the next start tries again.
+   */
+  private migrateProjectIntents(knownProjects: () => readonly string[]): void {
+    const marker = join(this.pluginsRoot, PROJECT_INTENTS_MIGRATION)
+    if (existsSync(marker)) return
+    try {
+      const registered = (scope: PluginScope) =>
+        new Set(
+          this.store
+            .list()
+            .filter((entry) => entry.scope === scope)
+            .map((entry) => entry.pluginId),
+        )
+      const scopes = {
+        project: registered('project'),
+        local: registered('local'),
+      }
+      const moved: string[] = []
+      const projects =
+        scopes.project.size || scopes.local.size ? knownProjects() : []
+      for (const workspace of new Set(projects.map((path) => resolve(path)))) {
+        const intents = this.readProjectIntents(workspace)
+        let changed = false
+        for (const scope of ['project', 'local'] as const) {
+          const file =
+            scope === 'local' ? 'settings.local.json' : 'settings.json'
+          const legacy = readEnabledPlugins(join(workspace, '.emperor', file))
+          for (const [pluginId, enabled] of Object.entries(legacy)) {
+            if (!scopes[scope].has(pluginId) || pluginId in intents[scope])
+              continue
+            intents[scope][pluginId] = enabled
+            changed = true
+          }
+        }
+        if (!changed) continue
+        this.writeProjectIntents(workspace, intents)
+        moved.push(canonicalizeExistingPath(workspace))
+      }
+      writePrivateJsonAtomic(marker, {
+        schemaVersion: 1,
+        migratedAt: this.now().toISOString(),
+        projects: moved,
+      })
+    } catch {
+      // No marker: the next start moves what is left.
+    }
+  }
+}
+
+/** `enabledPlugins` of a settings file; a missing or unreadable file has none. */
+function readEnabledPlugins(path: string): Record<string, boolean> {
+  if (!existsSync(path)) return {}
+  try {
+    // This read never mutates or quarantines configuration; the owning
+    // config service recovers and reports corruption.
+    return booleanIntents(readJsonObject(path).enabledPlugins)
+  } catch {
+    return {}
+  }
+}
+
+/** Valid plugin ids with boolean values; anything else is dropped. */
+function booleanIntents(value: unknown): Record<string, boolean> {
+  const map = objectOf(value)
+  if (!map) return {}
+  return Object.fromEntries(
+    Object.entries(map).filter(
+      (entry): entry is [string, boolean] =>
+        typeof entry[1] === 'boolean' && isValidPluginId(entry[0]),
+    ),
+  )
+}
+
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function isValidPluginId(value: string): boolean {
@@ -955,6 +1116,12 @@ function readJsonObject(path: string): Record<string, unknown> {
 
 function mkdirPrivate(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
+}
+
+/** settings.json keeps its version; a newer Emperor's file is read-only (REL-03). */
+function writeSettings(path: string, settings: Record<string, unknown>): void {
+  assertNotNewerSync(path, 'version', 1)
+  writePrivateJsonAtomic(path, { version: 1, ...settings })
 }
 
 function writePrivateJsonAtomic(path: string, value: unknown): void {

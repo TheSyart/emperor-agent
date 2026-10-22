@@ -14,6 +14,7 @@ import {
 import { ensureUserProfileFile } from '../../sessions/onboarding'
 import { applyUserProfileMarkdownPatch } from '../../memory/user-profile'
 import { MemoryVersionStore } from '../../memory/versions'
+import type { SecretSealer } from '../../security/secret-sealer'
 
 export interface UserConfigPayload {
   path: 'memory/profile/USER.local.md'
@@ -21,7 +22,6 @@ export interface UserConfigPayload {
 }
 
 export interface CoreConfigServiceHooks {
-  refreshRuntimeContext?: () => void
   reconcileProfileOnboarding?: () => void
   reloadMcp?: () => void | Promise<void>
 }
@@ -30,13 +30,16 @@ export class CoreConfigService {
   readonly root: string
   readonly templatesDir: string
   private readonly hooks: CoreConfigServiceHooks
+  /** Seals MCP tokens on write (SEC-06). */
+  private readonly store: { sealer: SecretSealer | null }
 
   constructor(
     root: string,
     hooks: CoreConfigServiceHooks = {},
-    opts: { templatesDir?: string } = {},
+    opts: { templatesDir?: string; sealer?: SecretSealer | null } = {},
   ) {
     this.root = resolve(root)
+    this.store = { sealer: opts.sealer ?? null }
     this.templatesDir = resolve(
       opts.templatesDir ?? join(this.root, 'templates'),
     )
@@ -71,17 +74,16 @@ export class CoreConfigService {
       throw new Error('save_user_config requires at least one ## section')
     if (!result.ok)
       throw new Error(`save_user_config rejected: ${result.errors.join(', ')}`)
-    this.hooks.refreshRuntimeContext?.()
     this.hooks.reconcileProfileOnboarding?.()
     return this.getUserConfig()
   }
 
   async getMcpConfig(): Promise<MCPConfig> {
-    return await loadMcpConfigUnresolved(this.root)
+    return await loadMcpConfigUnresolved(this.root, this.store)
   }
 
   async saveMcpConfig(raw: Record<string, unknown>): Promise<MCPConfig> {
-    await saveMcpConfig(this.root, raw)
+    await saveMcpConfig(this.root, raw, this.store)
     await this.hooks.reloadMcp?.()
     return await this.getMcpConfig()
   }
@@ -93,6 +95,7 @@ export class CoreConfigService {
     dryRun?: boolean
   }): Promise<McpImportPlan & { config: MCPConfig }> {
     const plan = await importMcpServers(this.root, input.raw, {
+      ...this.store,
       ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
       ...(input.dryRun === undefined ? {} : { dryRun: input.dryRun }),
     })
@@ -114,6 +117,7 @@ export class CoreConfigService {
       this.root,
       input.name,
       input.enabled,
+      this.store,
     )
     if (result.changed) await this.hooks.reloadMcp?.()
     return { ...result, config: await this.getMcpConfig() }
@@ -122,7 +126,7 @@ export class CoreConfigService {
   async removeMcpServer(input: {
     name: string
   }): Promise<{ removed: string; config: MCPConfig }> {
-    const result = await removeMcpServer(this.root, input.name)
+    const result = await removeMcpServer(this.root, input.name, this.store)
     await this.hooks.reloadMcp?.()
     return { ...result, config: await this.getMcpConfig() }
   }

@@ -6,7 +6,16 @@ import {
   withSchedulerPayloadSession,
 } from '../../scheduler/models'
 import type { SchedulerRunContext } from '../../scheduler/service'
-import { createSchedulerExecutor, type SchedulerTurnRequest } from './scheduler'
+import {
+  createSchedulerExecutor,
+  schedulerRunResult,
+  type SchedulerTurnRequest,
+} from './scheduler'
+import type { TurnResult } from './scope'
+
+function completed(content: string): { result: TurnResult } {
+  return { result: { kind: 'completed', content, turnId: 't:1' } }
+}
 
 function job(payload: SchedulerPayload): SchedulerJob {
   return SchedulerJob.create({
@@ -32,9 +41,9 @@ describe('scheduler executor on the harness kernel', () => {
   it('submits agent_turn jobs to their session and returns the reply', async () => {
     const requests: SchedulerTurnRequest[] = []
     const run = createSchedulerExecutor({
-      submitTurn: async (request) => {
+      runTurn: async (request) => {
         requests.push(request)
-        return 'done'
+        return completed('done')
       },
       hasPendingInteraction: () => false,
     })
@@ -58,7 +67,7 @@ describe('scheduler executor on the harness kernel', () => {
 
   it('refuses to run while an interaction is pending and rejects team_wake', async () => {
     const run = createSchedulerExecutor({
-      submitTurn: async () => 'x',
+      runTurn: async () => completed('x'),
       hasPendingInteraction: () => true,
     })
     const payload = new SchedulerPayload({
@@ -79,9 +88,9 @@ describe('scheduler executor on the harness kernel', () => {
     const contents: string[] = []
     let decision = { action: 'skip', reason: 'quiet', message: '' }
     const run = createSchedulerExecutor({
-      submitTurn: async (request) => {
+      runTurn: async (request) => {
         contents.push(request.content)
-        return 'ran'
+        return completed('ran')
       },
       hasPendingInteraction: () => false,
       watchlistCheck: async () => decision,
@@ -98,5 +107,37 @@ describe('scheduler executor on the harness kernel', () => {
     await expect(run(job(payload), context())).resolves.toBe('ran')
     expect(contents[0]).toContain('[WATCHLIST_TRIGGER]')
     expect(contents[0]).toContain('Check the queue')
+  })
+
+  it('maps each turn result onto the run record (KRN-01)', () => {
+    expect(schedulerRunResult(completed('ok').result)).toBe('ok')
+    const failure = (result: TurnResult) => {
+      try {
+        schedulerRunResult(result)
+      } catch (error) {
+        return error as { status: string; code: string | null; message: string }
+      }
+      throw new Error('expected a failure')
+    }
+    expect(
+      failure({ kind: 'error', code: 'AUTH', message: '401', turnId: 't' }),
+    ).toMatchObject({ status: 'error', code: 'AUTH' })
+    expect(
+      failure({ kind: 'aborted', by: 'timeout', turnId: 't' }),
+    ).toMatchObject({ status: 'cancelled', code: 'TIMEOUT' })
+    expect(failure({ kind: 'aborted', by: 'user', turnId: 't' })).toMatchObject(
+      { status: 'cancelled', message: '已被用户停止' },
+    )
+    expect(
+      failure({
+        kind: 'blocked',
+        reason: 'interaction-rejected',
+        turnId: 't',
+        detail: 'bash',
+      }).message,
+    ).toContain('自动拒绝')
+    expect(
+      failure({ kind: 'not-consumed', reason: 'previous-turn-failed' }),
+    ).toMatchObject({ status: 'error', code: 'NOT_CONSUMED' })
   })
 })

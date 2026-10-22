@@ -1,13 +1,22 @@
 <script setup lang="ts">
 /**
- * FilesPane — the right workspace's 文件 pane: an open-file tab strip with
- * 「+」 over a path breadcrumb and the preview, and the project tree as a
- * column on the far right with a 「筛选文件…」 filter (files.search).
+ * FilesPane — the right workspace's 文件 pane: an open-file tab strip
+ * (WorkspaceTabBar, shared with 终端) with 「+」 over a path breadcrumb and
+ * the preview, and the project tree as a column on the far right with a
+ * 「筛选文件…」 filter (files.search).
  *
- * Tabs: every opened file is a tab; 「打开文件」 is the draft tab shown when
- * nothing is open or after 「+」 (which also focuses the filter). Picking a
- * file while the draft is active replaces the draft. ⌘W (Ctrl+W off macOS)
- * closes the active tab only while focus is inside this pane.
+ * Tabs: every opened file is a tab (the strip is empty while nothing is
+ * open; UI-S06 dropped the 「打开文件」 draft tab). 「+」 shows the tree and
+ * puts the caret in its filter. ⌘W (Ctrl+W off macOS) closes the active tab
+ * only while focus is inside this pane. One 「复制路径」 menu copies the
+ * relative or the absolute path.
+ *
+ * Reopening (FIX-05): a request for a file that already has a tab first
+ * asks Core for its size and mtime (files.stat); when either changed — or
+ * the stat fails — the tab is read again, so a link to line N shows the
+ * current text. Turn snapshots and attachments never change and are reused.
+ * WorkspacePanel keeps this pane alive across pane switches (KeepAlive); the
+ * scroll positions are put back on reactivation.
  *
  * Props:
  * - sessionId, projectPath.
@@ -16,34 +25,56 @@
  * Emits: treeWidth(px) once a column resize settles.
  * Exposes: openPath(path, line?) — open (or activate) a file at a line.
  */
-import type {
-  WorkspaceFileEntry,
-  WorkspaceFileReadResult,
-} from '@emperor/core/api'
+import EmptyState from '../ui/EmptyState.vue'
+import LinkButton from '../ui/LinkButton.vue'
+import Button from '../ui/Button.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
+import SearchField from '../ui/SearchField.vue'
+import type { TabItem } from '../ui/blockTypes'
+import type { WorkspaceFileEntry, FilePreviewResult } from '@emperor/core/api'
 import {
   ChevronDown,
   ChevronRight,
-  Clipboard,
   Copy,
   FileText,
-  Folder,
   FolderOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
   RefreshCw,
-  Search,
-  X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  h,
+  inject,
+  markRaw,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type Component,
+} from 'vue'
+import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import { core } from '../../api/http'
+import type { WorkspaceFileRequest } from './workspaceState'
+import { revealReference } from '../../api/backend'
+import { openImageViewer } from '../ui/imageViewer'
 import { useMarkdown } from '../../composables/useMarkdown'
-import { handleMarkdownChipClick } from '../../composables/useMarkdownLinks'
+import {
+  handleMarkdownClick as routeMarkdownClick,
+  handleMarkdownKeydown,
+} from '../../composables/useMarkdownLinks'
+import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
 import { useResizable } from '../../composables/useResizable'
 import { detectShortcutPlatform } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
-import { fileIconFor } from './fileIcon'
+import DocumentIcon from '../ui/DocumentIcon.vue'
+import WorkspaceTabBar from './WorkspaceTabBar.vue'
 import {
   FILES_TREE_MAX,
   FILES_TREE_MIN,
@@ -53,7 +84,9 @@ import {
 
 interface FileTab {
   path: string
-  preview: WorkspaceFileReadResult
+  key: string
+  request: WorkspaceFileRequest
+  preview: FilePreviewResult
   sourceMode: boolean
 }
 
@@ -64,6 +97,7 @@ interface TreeRow {
   hint: string
 }
 
+const { viewedSessionId } = useWorkspaceSnapshot({ active: false })
 const props = defineProps<{
   sessionId: string
   projectPath: string
@@ -72,30 +106,35 @@ const props = defineProps<{
 const emit = defineEmits<{ treeWidth: [width: number] }>()
 
 const SEARCH_DEBOUNCE_MS = 180
+/** Open file tabs kept at once; the oldest one is dropped beyond this. */
+const MAX_FILE_TABS = 12
 const platform = detectShortcutPlatform()
 
 const paneRoot = ref<HTMLElement | null>(null)
-const tabStrip = ref<HTMLElement | null>(null)
+const tabBar = ref<HTMLElement | null>(null)
+const copyAnchor = ref<HTMLElement | null>(null)
+const copyMenu = ref(false)
 const previewBody = ref<HTMLElement | null>(null)
 const treeList = ref<HTMLElement | null>(null)
-const filterInput = ref<HTMLInputElement | null>(null)
+const filterInput = ref<InstanceType<typeof SearchField> | null>(null)
 const treeByDirectory = ref<Record<string, WorkspaceFileEntry[]>>({})
 const expanded = ref(new Set<string>())
 const searchResults = ref<WorkspaceFileEntry[] | null>(null)
 const tabs = ref<FileTab[]>([])
-/** '' = the 「打开文件」 draft tab. */
+/** Key of the active tab ('' while nothing is open). */
 const activePath = ref('')
-const draftOpen = ref(false)
 const projectRoot = ref('')
 const query = ref('')
 const loading = ref(false)
 const treeError = ref('')
 const openError = ref('')
+const currentRequest = ref<WorkspaceFileRequest | null>(null)
 const resultsTruncated = ref(false)
 const treeVisible = ref(true)
 const activeLine = ref<number | null>(null)
 const columnWidth = ref(clampFilesTreeWidth(props.treeWidth))
 let requestGeneration = 0
+let fileGeneration = 0
 /**
  * Directory listings belong to the tree, not to the latest request: they
  * go stale only when the tree starts over (a new session, a reload), so
@@ -104,10 +143,32 @@ let requestGeneration = 0
 let treeGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
-const activeTab = computed(
-  () => tabs.value.find((tab) => tab.path === activePath.value) || null,
+const isDraftSession = computed(() => props.sessionId.startsWith('draft:'))
+const hasProject = computed(() =>
+  Boolean(props.projectPath && !isDraftSession.value),
 )
-const showDraftTab = computed(() => !tabs.value.length || draftOpen.value)
+const activeTab = computed(
+  () => tabs.value.find((tab) => tab.key === activePath.value) || null,
+)
+/** A file's type glyph as a Tabs icon (one per name, kept). */
+const glyphs = new Map<string, Component>()
+function fileGlyph(name: string): Component {
+  let glyph = glyphs.get(name)
+  if (!glyph) {
+    glyph = markRaw(() => h(DocumentIcon, { path: name, size: 13 }))
+    glyphs.set(name, glyph)
+  }
+  return glyph
+}
+const tabItems = computed<TabItem[]>(() =>
+  tabs.value.map((tab) => ({
+    id: tab.key,
+    label: tab.preview.name,
+    title: tab.path,
+    icon: fileGlyph(tab.preview.name),
+    closable: true,
+  })),
+)
 const crumbs = computed(() => filePathCrumbs(activeTab.value?.path ?? ''))
 
 watch(
@@ -147,20 +208,47 @@ const treeRows = computed<TreeRow[]>(() => {
   return rows
 })
 
-onMounted(() => void loadDirectory(''))
-onBeforeUnmount(() => clearTimeout(searchTimer))
+onMounted(() => {
+  if (hasProject.value) void loadDirectory('')
+})
+onBeforeUnmount(() => {
+  clearTimeout(searchTimer)
+  requestGeneration += 1
+  fileGeneration += 1
+  treeGeneration += 1
+})
+
+// KeepAlive detaches the DOM while another pane shows, and a detached
+// scroller forgets its offset (already gone when onDeactivated runs): keep
+// the last offsets as they change and put them back on reactivation.
+const scrollOffsets = new Map<HTMLElement, [top: number, left: number]>()
+function rememberScroll(event: Event): void {
+  const target = event.target
+  if (target instanceof HTMLElement)
+    scrollOffsets.set(target, [target.scrollTop, target.scrollLeft])
+}
+onActivated(() => {
+  void nextTick(() => {
+    for (const [element, [top, left]] of scrollOffsets) {
+      if (!element.isConnected) {
+        scrollOffsets.delete(element)
+        continue
+      }
+      element.scrollTop = top
+      element.scrollLeft = left
+    }
+  })
+})
 watch(
   () => props.sessionId,
   () => void resetSession(),
 )
 // Keep the active tab scrolled into the (scrollbar-less) strip.
-watch([activePath, showDraftTab, () => tabs.value.length], () =>
-  nextTick(revealActiveTab),
-)
+watch([activePath, () => tabs.value.length], () => nextTick(revealActiveTab))
 
 function revealActiveTab(): void {
-  const strip = tabStrip.value
-  const tab = strip?.querySelector<HTMLElement>('.file-tab.active')
+  const strip = tabBar.value?.querySelector<HTMLElement>('.ds-tabs')
+  const tab = strip?.querySelector<HTMLElement>('.tab-item[data-active]')
   if (!strip || !tab) return
   const bounds = strip.getBoundingClientRect()
   const rect = tab.getBoundingClientRect()
@@ -186,6 +274,7 @@ function isDirectory(entry: WorkspaceFileEntry) {
 
 async function resetSession(): Promise<void> {
   requestGeneration += 1
+  fileGeneration += 1
   treeGeneration += 1
   clearTimeout(searchTimer)
   treeByDirectory.value = {}
@@ -193,11 +282,11 @@ async function resetSession(): Promise<void> {
   searchResults.value = null
   tabs.value = []
   activePath.value = ''
-  draftOpen.value = false
   query.value = ''
   treeError.value = ''
   openError.value = ''
-  await loadDirectory('')
+  currentRequest.value = null
+  if (hasProject.value) await loadDirectory('')
 }
 
 async function reloadTree(): Promise<void> {
@@ -320,40 +409,167 @@ async function openPath(relativePath: string, line?: number): Promise<void> {
   await openFile(path, normalizeLine(line), true)
 }
 
-/** Open (or activate) `path`; a draft tab gives way to the file. */
+/** Project tree entry; other sources arrive through openPreview. */
 async function openFile(
   path: string,
   line: number | null,
   reveal = false,
 ): Promise<void> {
-  activeLine.value = line
-  openError.value = ''
-  const existing = tabs.value.find((tab) => tab.path === path)
-  if (existing) {
-    activePath.value = path
-    draftOpen.value = false
-    await revealActiveLine()
+  await openPreview({
+    owner: props.sessionId,
+    target: { source: 'project', sessionId: props.sessionId, path },
+    ...(line ? { line } : {}),
+  })
+  if (reveal && hasProject.value) await expandAncestors(path)
+}
+
+async function openPreview(
+  request: WorkspaceFileRequest,
+  refresh = false,
+): Promise<void> {
+  // Requests come from the active session or the child log on screen; Core
+  // re-checks that the owner may read the target.
+  if (
+    !request.owner ||
+    (request.owner !== props.sessionId &&
+      request.owner !== viewedSessionId.value)
+  )
     return
-  }
+  currentRequest.value = request
+  const key = JSON.stringify(request.target)
+  const existing = tabs.value.find(
+    (tab) => JSON.stringify(tab.request.target) === key,
+  )
+  activeLine.value = normalizeLine(request.line)
+  openError.value = ''
   const owner = props.sessionId
-  const generation = ++requestGeneration
+  if (existing && !refresh) {
+    const generation = ++fileGeneration
+    const changed = await changedOnDisk(existing)
+    if (owner !== props.sessionId || generation !== fileGeneration) return
+    if (!changed) {
+      activePath.value = existing.key
+      await revealActiveLine()
+      return
+    }
+  }
+  const generation = ++fileGeneration
   loading.value = true
   try {
-    const preview = await core('files.read', {
-      sessionId: owner,
-      relativePath: path,
-    })
-    if (!isCurrent(owner, generation)) return
-    tabs.value = [...tabs.value, { path, preview, sourceMode: false }]
-    activePath.value = path
-    draftOpen.value = false
-    if (reveal) await expandAncestors(path)
+    const preview = await core('files.preview', { ...request.target })
+    if (owner !== props.sessionId || generation !== fileGeneration) return
+    const tab = tabs.value.find((tab) => tab.key === preview.id)
+    const path =
+      request.target.source === 'project' || request.target.source === 'turn'
+        ? request.target.path
+        : preview.path
+    // Previews can hold megabytes of base64; keep them out of deep reactivity.
+    const raw = markRaw(preview)
+    if (tab) {
+      tab.preview = raw
+      tab.request = request
+    } else {
+      const next = [
+        ...tabs.value,
+        { key: preview.id, path, request, preview: raw, sourceMode: false },
+      ]
+      while (next.length > MAX_FILE_TABS) next.shift()
+      tabs.value = next
+    }
+    activePath.value = preview.id
     await revealActiveLine()
   } catch (cause) {
-    if (isCurrent(owner, generation)) openError.value = message(cause)
+    if (owner === props.sessionId && generation === fileGeneration)
+      openError.value = message(cause)
   } finally {
-    if (isCurrent(owner, generation)) loading.value = false
+    if (owner === props.sessionId && generation === fileGeneration)
+      loading.value = false
   }
+}
+
+/**
+ * Whether a tab's file changed since it was read: size or mtime differ, or
+ * the stat failed (gone, moved: reading again shows why).
+ */
+async function changedOnDisk(tab: FileTab): Promise<boolean> {
+  const target = tab.request.target
+  if (target.source !== 'project' && target.source !== 'reference') return false
+  if (tab.preview.kind === 'directory') return false
+  try {
+    const stat = await core('files.stat', { ...target })
+    return (
+      stat.bytes !== tab.preview.bytes ||
+      stat.modifiedAt !== tab.preview.modifiedAt
+    )
+  } catch {
+    return true
+  }
+}
+
+function revealSource(nodeKey: string): void {
+  window.dispatchEvent(
+    new CustomEvent('emperor:file-source', {
+      detail: { owner: props.sessionId, nodeKey },
+    }),
+  )
+}
+
+function refreshFile(): void {
+  const request = currentRequest.value ?? activeTab.value?.request
+  if (request) void openPreview(request, true)
+}
+
+async function revealFile(): Promise<void> {
+  const target = activeTab.value?.request.target
+  try {
+    if (target?.source === 'reference')
+      await revealReference({
+        sessionId: target.sessionId,
+        referenceId: target.referenceId,
+      })
+    else if (
+      target?.source === 'attachment' &&
+      !props.sessionId.startsWith('draft:')
+    ) {
+      const owner = props.sessionId
+      const reference = await core('references.resolve', {
+        sessionId: owner,
+        sourceMessageId: `file-preview:${target.attachmentId}`,
+        href: `attachment:${target.attachmentId}`,
+        label: activeTab.value?.preview.name || '附件',
+      })
+      if (owner === props.sessionId)
+        await revealReference({ sessionId: owner, referenceId: reference.id })
+    }
+  } catch (cause) {
+    openError.value = message(cause)
+  }
+}
+function imageSrc(preview: FilePreviewResult): string | null {
+  return preview.kind === 'image' &&
+    preview.dataBase64 &&
+    /^image\/(?:png|jpeg|webp|gif)$/.test(preview.mimeType)
+    ? `data:${preview.mimeType};base64,${preview.dataBase64}`
+    : null
+}
+const activeImageSrc = computed(() =>
+  activeTab.value ? imageSrc(activeTab.value.preview) : null,
+)
+function enlargeImage(): void {
+  const items = tabs.value.flatMap((tab) => {
+    const src = imageSrc(tab.preview)
+    return src
+      ? [{ id: tab.key, src, name: tab.preview.name, file: tab.request }]
+      : []
+  })
+  openImageViewer({
+    owner: props.sessionId,
+    items,
+    index: Math.max(
+      0,
+      items.findIndex((item) => item.id === activePath.value),
+    ),
+  })
 }
 
 async function expandAncestors(path: string): Promise<void> {
@@ -377,39 +593,45 @@ async function revealActiveLine(): Promise<void> {
     ?.querySelector<HTMLElement>(
       `.file-code-line[data-line="${activeLine.value}"]`,
     )
-    ?.scrollIntoView({ block: 'center' })
+    ?.scrollIntoView?.({ block: 'center' })
+}
+
+const appContext = inject(APP_CONTEXT_KEY, null)
+const markdownLinkOptions = {
+  notify: (message: string) => appContext?.showToast(message),
 }
 
 function handleMarkdownClick(event: MouseEvent): void {
-  handleMarkdownChipClick(
+  routeMarkdownClick(
     event,
     `file-preview:${activeTab.value?.path || 'unknown'}`,
+    markdownLinkOptions,
   )
 }
 
-defineExpose({ openPath, openDirectory })
+defineExpose({ openPath, openDirectory, openPreview })
 
 function activateTab(path: string): void {
   activePath.value = path
+  currentRequest.value =
+    tabs.value.find((tab) => tab.key === path)?.request ?? null
   activeLine.value = null
   openError.value = ''
 }
 
 function closeTab(path: string): void {
-  const index = tabs.value.findIndex((tab) => tab.path === path)
+  const index = tabs.value.findIndex((tab) => tab.key === path)
   if (index < 0) return
-  tabs.value = tabs.value.filter((tab) => tab.path !== path)
+  tabs.value = tabs.value.filter((tab) => tab.key !== path)
   if (activePath.value === path)
-    activePath.value = tabs.value[Math.max(0, index - 1)]?.path || ''
-  if (!tabs.value.length) draftOpen.value = false
+    activePath.value = tabs.value[Math.max(0, index - 1)]?.key || ''
+  currentRequest.value = activeTab.value?.request ?? null
+  openError.value = ''
   keepFocusInPane()
 }
 
-/** 「+」: show the draft tab and put the caret in the tree filter. */
+/** 「+」: show the tree and put the caret in its filter. */
 function startOpenFile(): void {
-  if (tabs.value.length) draftOpen.value = true
-  activePath.value = ''
-  openError.value = ''
   treeVisible.value = true
   void nextTick(() => {
     filterInput.value?.focus()
@@ -417,16 +639,8 @@ function startOpenFile(): void {
   })
 }
 
-function closeDraft(): void {
-  draftOpen.value = false
-  if (!activePath.value)
-    activePath.value = tabs.value[tabs.value.length - 1]?.path || ''
-  keepFocusInPane()
-}
-
 function closeActiveTab(): void {
   if (activePath.value) closeTab(activePath.value)
-  else if (tabs.value.length) closeDraft()
 }
 
 /** ⌘W / Ctrl+W: handled here so it never reaches the window while in the pane. */
@@ -448,8 +662,8 @@ function keepFocusInPane(): void {
   void nextTick(() => {
     const root = paneRoot.value
     if (!root || root.contains(document.activeElement)) return
-    const active = tabStrip.value?.querySelector<HTMLElement>(
-      '.file-tab.active [role="tab"]',
+    const active = tabBar.value?.querySelector<HTMLElement>(
+      '.tab-item[data-active] [role="tab"]',
     )
     ;(active ?? root).focus()
   })
@@ -461,14 +675,17 @@ function toggleSourceMode(): void {
 }
 
 async function copyPath(relative: boolean): Promise<void> {
-  const path = activeTab.value?.path
-  if (!path) return
-  const base = projectRoot.value.replace(/[\\/]$/, '')
-  const separator = base.includes('\\') ? '\\' : '/'
-  await navigator.clipboard.writeText(
-    relative ? path : `${base}${separator}${path}`,
-  )
+  const tab = activeTab.value
+  if (!tab) return
+  await navigator.clipboard.writeText(relative ? tab.path : tab.preview.path)
 }
+
+/** What a preview that shows no content says instead. */
+const noPreviewNote = computed(() =>
+  activeTab.value?.preview.kind === 'directory'
+    ? '目录位置 · 可在访达中查看'
+    : '此格式暂不支持内容预览。',
+)
 
 function isCurrent(owner: string, generation: number): boolean {
   return props.sessionId === owner && requestGeneration === generation
@@ -486,82 +703,34 @@ function message(value: unknown): string {
     tabindex="-1"
     :data-tree="treeVisible ? 'shown' : 'hidden'"
     @keydown="onPaneKeydown"
+    @scroll.capture.passive="rememberScroll"
   >
     <section class="files-main" aria-label="文件预览">
-      <header class="file-tabs-bar">
-        <div
-          ref="tabStrip"
-          class="file-tabs"
-          role="tablist"
-          aria-label="已打开文件"
+      <div ref="tabBar" class="file-tab-bar">
+        <WorkspaceTabBar
+          :model-value="activePath"
+          :tabs="tabItems"
+          label="已打开文件"
+          @update:model-value="activateTab"
+          @close="closeTab"
         >
-          <div
-            v-for="tab in tabs"
-            :key="tab.path"
-            class="file-tab"
-            :class="{ active: tab.path === activePath }"
-            :title="tab.path"
-          >
-            <button
-              type="button"
-              role="tab"
-              class="file-tab-main"
-              :aria-selected="tab.path === activePath"
-              @click="activateTab(tab.path)"
+          <template v-if="hasProject" #after>
+            <IconButton label="打开文件" @click="startOpenFile">
+              <Plus :size="16" />
+            </IconButton>
+          </template>
+          <template v-if="hasProject" #actions>
+            <IconButton
+              :label="treeVisible ? '隐藏目录树' : '显示目录树'"
+              :aria-pressed="treeVisible"
+              @click="treeVisible = !treeVisible"
             >
-              <component
-                :is="fileIconFor(tab.preview.name, false).icon"
-                :size="13"
-                :class="`file-icon-tone-${fileIconFor(tab.preview.name, false).tone}`"
-              />
-              <span>{{ tab.preview.name }}</span>
-            </button>
-            <button
-              type="button"
-              class="file-tab-close"
-              :aria-label="`关闭 ${tab.preview.name}`"
-              @click="closeTab(tab.path)"
-            >
-              <X :size="12" />
-            </button>
-          </div>
-          <div
-            v-if="showDraftTab"
-            class="file-tab draft"
-            :class="{ active: !activePath }"
-          >
-            <button
-              type="button"
-              role="tab"
-              class="file-tab-main"
-              :aria-selected="!activePath"
-              @click="activateTab('')"
-            >
-              <span>打开文件</span>
-            </button>
-            <button
-              v-if="tabs.length"
-              type="button"
-              class="file-tab-close"
-              aria-label="关闭 打开文件"
-              @click="closeDraft"
-            >
-              <X :size="12" />
-            </button>
-          </div>
-        </div>
-        <IconButton label="打开文件" @click="startOpenFile">
-          <Plus :size="15" />
-        </IconButton>
-        <IconButton
-          :label="treeVisible ? '隐藏目录树' : '显示目录树'"
-          :aria-pressed="treeVisible"
-          @click="treeVisible = !treeVisible"
-        >
-          <PanelRightClose v-if="treeVisible" :size="15" />
-          <PanelRightOpen v-else :size="15" />
-        </IconButton>
-      </header>
+              <PanelRightClose v-if="treeVisible" :size="16" />
+              <PanelRightOpen v-else :size="16" />
+            </IconButton>
+          </template>
+        </WorkspaceTabBar>
+      </div>
 
       <div class="file-crumbs-bar">
         <nav
@@ -580,20 +749,45 @@ function message(value: unknown): string {
           </template>
         </nav>
         <div v-if="activeTab" class="file-preview-actions">
-          <button
+          <IconButton label="刷新文件" :disabled="loading" @click="refreshFile"
+            ><RefreshCw :size="14"
+          /></IconButton>
+          <IconButton
+            v-if="activeTab.preview.revealable && !isDraftSession"
+            label="在访达中显示"
+            @click="revealFile"
+          >
+            <FolderOpen :size="14" />
+          </IconButton>
+          <Button
             v-if="isMarkdown"
-            type="button"
             class="source-toggle"
+            size="sm"
             @click="toggleSourceMode"
           >
             {{ activeTab.sourceMode ? '预览' : '源码' }}
-          </button>
-          <IconButton label="复制相对路径" @click="copyPath(true)">
-            <Copy :size="13" />
-          </IconButton>
-          <IconButton label="复制绝对路径" @click="copyPath(false)">
-            <Clipboard :size="13" />
-          </IconButton>
+          </Button>
+          <span ref="copyAnchor" class="copy-anchor">
+            <IconButton
+              label="复制路径"
+              aria-haspopup="menu"
+              :aria-expanded="copyMenu"
+              @click="copyMenu = !copyMenu"
+            >
+              <Copy :size="14" />
+            </IconButton>
+          </span>
+          <Menu
+            v-model:open="copyMenu"
+            :anchor="copyAnchor"
+            placement="bottom"
+            :width="180"
+            dense
+            label="复制路径"
+          >
+            <MenuItem @select="copyPath(true)">复制相对路径</MenuItem>
+            <MenuItem @select="copyPath(false)">复制绝对路径</MenuItem>
+          </Menu>
         </div>
       </div>
 
@@ -603,22 +797,31 @@ function message(value: unknown): string {
         tabindex="0"
         :aria-label="activeTab ? `${activeTab.preview.name} 预览` : '文件预览'"
       >
+        <p v-if="loading" class="files-muted" role="status">正在读取文件…</p>
         <div v-if="openError" class="files-inline-error" role="alert">
           {{ openError }}
+          <LinkButton v-if="activeTab" @click="refreshFile">重试</LinkButton>
         </div>
-        <template v-if="activeTab">
-          <img
-            v-if="
-              activeTab.preview.kind === 'image' && activeTab.preview.dataBase64
-            "
-            :src="`data:${activeTab.preview.mimeType};base64,${activeTab.preview.dataBase64}`"
-            :alt="activeTab.preview.name"
-          />
+        <template v-if="activeTab && !openError">
+          <button
+            v-if="activeImageSrc"
+            class="file-image-preview"
+            type="button"
+            :aria-label="`放大图片：${activeTab.preview.name}`"
+            @click="enlargeImage"
+          >
+            <img :src="activeImageSrc!" :alt="activeTab.preview.name" />
+            <span>点击放大</span>
+          </button>
+          <p v-else-if="activeTab.preview.kind === 'image'" class="files-muted">
+            图片超过预览大小限制（8 MiB）。
+          </p>
           <div
             v-else-if="isMarkdown && !activeTab.sourceMode"
             class="markdown-body file-markdown-preview"
             v-html="renderedMarkdown"
             @click="handleMarkdownClick"
+            @keydown="handleMarkdownKeydown($event, markdownLinkOptions)"
           ></div>
           <div
             v-else-if="activeTab.preview.kind === 'text'"
@@ -635,23 +838,44 @@ function message(value: unknown): string {
               ><code v-html="line || ' '"></code>
             </div>
           </div>
-          <div v-else class="files-muted">
-            二进制文件仅提供元数据，不在应用内预览。
+          <div v-else class="files-muted">{{ noPreviewNote }}</div>
+          <div v-if="activeTab.request.uses?.length" class="file-source-uses">
+            <button
+              v-for="(use, index) in activeTab.request.uses"
+              :key="`${use.nodeKey}:${index}`"
+              type="button"
+              @click="revealSource(use.nodeKey)"
+            >
+              定位出处 · {{ use.label }} {{ index + 1 }}
+            </button>
           </div>
+          <p class="file-preview-meta">
+            {{ activeTab.preview.mimeType }} ·
+            {{ activeTab.preview.bytes.toLocaleString() }} 字节 · 只读
+          </p>
+          <small v-if="activeTab.preview.extractedText" class="file-truncated"
+            >PDF 提取文本 · 不含原始排版</small
+          >
           <small v-if="activeTab.preview.truncated" class="file-truncated">
-            预览已截断 · {{ activeTab.preview.bytes }} bytes
+            预览已截断 · {{ activeTab.preview.bytes.toLocaleString() }} 字节
           </small>
         </template>
-        <div v-else class="files-empty">
-          <FileText :size="22" class="files-empty-glyph" aria-hidden="true" />
-          <strong>打开文件</strong>
-          <p>从项目目录树中选择文件</p>
-        </div>
+        <EmptyState
+          v-else-if="!openError"
+          class="files-empty"
+          title="打开文件"
+          :icon="FileText"
+          :description="
+            hasProject
+              ? '从项目目录树中选择文件'
+              : '点击对话中的文件名或附件，在这里查看'
+          "
+        />
       </div>
     </section>
 
     <aside
-      v-if="treeVisible"
+      v-if="hasProject && treeVisible"
       class="file-tree-column"
       aria-label="目录树"
       :style="{ width: `${columnWidth}px` }"
@@ -663,18 +887,19 @@ function message(value: unknown): string {
       ></div>
       <div class="file-tree-toolbar">
         <form class="files-search" role="search" @submit.prevent="searchFiles">
-          <Search :size="14" aria-hidden="true" />
-          <input
+          <SearchField
             ref="filterInput"
             v-model="query"
+            size="sm"
             placeholder="筛选文件…"
             aria-label="筛选文件"
             @input="onQueryInput"
-            @keydown.esc.prevent="clearQuery"
+            @clear="clearQuery"
           />
         </form>
         <IconButton label="刷新目录树" @click="reloadTree">
-          <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
+          <Spinner v-if="loading" size="sm" />
+          <RefreshCw v-else :size="14" />
         </IconButton>
       </div>
       <div v-if="treeError" class="files-inline-error" role="alert">
@@ -708,20 +933,14 @@ function message(value: unknown): string {
         >
           <ChevronDown
             v-if="isDirectory(row.entry) && expanded.has(row.entry.path)"
-            :size="13"
+            :size="14"
           />
-          <ChevronRight v-else-if="isDirectory(row.entry)" :size="13" />
+          <ChevronRight v-else-if="isDirectory(row.entry)" :size="14" />
           <span v-else class="file-tree-spacer"></span>
-          <FolderOpen
-            v-if="isDirectory(row.entry) && expanded.has(row.entry.path)"
+          <DocumentIcon
+            :path="row.entry.name"
+            :directory="isDirectory(row.entry)"
             :size="14"
-          />
-          <Folder v-else-if="isDirectory(row.entry)" :size="14" />
-          <component
-            :is="fileIconFor(row.entry.name, false).icon"
-            v-else
-            :size="14"
-            :class="`file-icon-tone-${fileIconFor(row.entry.name, false).tone}`"
           />
           <span class="file-tree-name">
             {{ row.entry.name }}
@@ -737,6 +956,47 @@ function message(value: unknown): string {
 </template>
 
 <style scoped>
+.file-source-uses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.file-source-uses button {
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-row);
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
+  font: var(--font-xs);
+  cursor: pointer;
+}
+.file-preview-meta {
+  margin: var(--space-4) 0 0;
+  color: rgb(var(--text-3));
+  font: var(--font-xs);
+  overflow-wrap: anywhere;
+}
+.file-image-preview {
+  display: grid;
+  place-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4);
+  border: 0;
+  background: transparent;
+  color: rgb(var(--text-3));
+  cursor: zoom-in;
+}
+.file-image-preview img {
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}
+.file-image-preview span {
+  font: var(--font-xs);
+}
+
 .files-pane {
   display: flex;
   height: 100%;
@@ -754,123 +1014,21 @@ function message(value: unknown): string {
   overflow: hidden;
 }
 
-/* ── tab strip ─────────────────────────────────────────────────────── */
-.file-tabs-bar {
-  display: flex;
-  min-height: calc(var(--space-8) + var(--space-2));
+.file-tab-bar {
   flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: 0 var(--space-1-5) 0 0;
-  border-bottom: 1px solid var(--border-l1);
-}
-
-.file-tabs {
-  display: flex;
   min-width: 0;
-  flex: 1;
-  align-self: stretch;
-  align-items: stretch;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.file-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.file-tab {
-  position: relative;
-  display: inline-flex;
-  max-width: 180px;
-  flex: none;
-  align-items: stretch;
-  border-right: 1px solid var(--border-l1);
-  color: rgb(var(--label-tertiary));
-}
-
-.file-tab:hover {
-  color: rgb(var(--label-secondary));
-}
-
-.file-tab.active {
-  color: rgb(var(--label-primary));
-  background: rgb(var(--bg-layer-1));
-}
-
-.file-tab.active::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  background: rgb(var(--accent-fill));
-}
-
-.file-tab-main {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: 0 var(--space-1) 0 var(--space-3);
-  color: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.file-tab.draft .file-tab-main {
-  padding-right: var(--space-3);
-}
-
-.file-tab.draft:has(.file-tab-close) .file-tab-main {
-  padding-right: var(--space-1);
-}
-
-.file-tab-main span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-tab-main:focus-visible,
-.file-tab-close:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.file-tab-close {
-  display: inline-grid;
-  align-self: center;
-  place-items: center;
-  margin-right: var(--space-1-5);
-  padding: 2px;
-  border-radius: var(--radius-xs);
-  color: rgb(var(--label-tertiary));
-  opacity: 0;
-}
-
-.file-tab:hover .file-tab-close,
-.file-tab.active .file-tab-close,
-.file-tab-close:focus-visible {
-  opacity: 1;
-}
-
-.file-tab-close:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
 }
 
 /* ── breadcrumb ────────────────────────────────────────────────────── */
 .file-crumbs-bar {
   display: flex;
-  min-height: var(--space-8);
+  min-height: var(--row-h);
   flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
   padding: 0 var(--space-1-5) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l1);
+  box-shadow: inset 0 -0.5px 0 var(--hairline);
 }
 
 .file-crumbs {
@@ -878,29 +1036,26 @@ function message(value: unknown): string {
   min-width: 0;
   align-items: center;
   gap: var(--space-1);
-  overflow: hidden;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  white-space: nowrap;
+  flex-wrap: wrap;
+  padding-block: var(--space-1);
+  color: rgb(var(--text-3));
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
 .crumb {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .crumb:last-child {
-  flex: none;
   max-width: 100%;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .crumb-root,
 .crumb-sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-4));
 }
 
 .file-preview-actions {
@@ -910,17 +1065,21 @@ function message(value: unknown): string {
   gap: var(--space-0-5);
 }
 
+.copy-anchor {
+  display: inline-flex;
+}
+
 .source-toggle {
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .source-toggle:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 /* ── preview ───────────────────────────────────────────────────────── */
@@ -946,7 +1105,7 @@ function message(value: unknown): string {
 }
 
 .file-markdown-preview {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -967,20 +1126,20 @@ function message(value: unknown): string {
   position: sticky;
   left: 0;
   padding-right: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   user-select: none;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .file-code-line code {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   white-space: pre;
 }
 
 .file-code-line.reference-line-active {
-  background: rgb(var(--accent-fill) / 0.12);
-  box-shadow: inset 2px 0 0 rgb(var(--accent-fill));
+  background: rgb(var(--accent) / 0.12);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
 }
 
 .file-code-line.reference-line-active > span {
@@ -990,39 +1149,14 @@ function message(value: unknown): string {
 .file-truncated {
   display: block;
   margin-top: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .files-empty {
-  display: flex;
   height: 100%;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  padding: var(--space-4);
-  text-align: center;
-}
-
-.files-empty-glyph {
-  margin-bottom: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
-}
-
-.files-empty strong {
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  font-weight: 500;
-}
-
-.files-empty p {
-  margin: 0;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 
 /* ── tree column (far right) ──────────────────────────────────────── */
@@ -1032,8 +1166,8 @@ function message(value: unknown): string {
   min-height: 0;
   flex: none;
   flex-direction: column;
-  border-left: 1px solid var(--border-l1);
-  background: rgb(var(--bg-layer-1) / 0.5);
+  background: rgb(var(--surface-canvas));
+  box-shadow: inset 0.5px 0 0 var(--hairline);
 }
 
 .file-tree-resizer {
@@ -1050,7 +1184,7 @@ function message(value: unknown): string {
 .file-tree-resizer:hover,
 .file-tree-resizer:focus-visible {
   outline: none;
-  background: rgb(var(--accent-fill) / 0.35);
+  background: rgb(var(--accent) / 0.35);
 }
 
 .file-tree-toolbar {
@@ -1065,36 +1199,6 @@ function message(value: unknown): string {
   display: flex;
   min-width: 0;
   flex: 1;
-  align-items: center;
-  gap: var(--space-1-5);
-  height: var(--space-7);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
-  background: rgb(var(--input-major));
-}
-
-.files-search:focus-within {
-  border-color: var(--border-l4);
-}
-
-.files-search input {
-  min-width: 0;
-  flex: 1;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  outline: none;
-  color: rgb(var(--label-primary));
-  background: transparent;
-  box-shadow: none;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.files-search input::placeholder {
-  color: rgb(var(--label-tertiary));
 }
 
 .file-tree-list {
@@ -1114,20 +1218,20 @@ function message(value: unknown): string {
   padding-block: var(--space-1);
   padding-right: var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .file-tree-row:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 .file-tree-row.active {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-active);
+  color: rgb(var(--text-1));
+  background: var(--surface-active);
 }
 
 .file-tree-row:focus-visible {
@@ -1146,7 +1250,7 @@ function message(value: unknown): string {
 
 .file-tree-hint {
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   text-overflow: ellipsis;
@@ -1158,7 +1262,7 @@ function message(value: unknown): string {
 
 .files-muted {
   padding: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -1177,41 +1281,12 @@ function message(value: unknown): string {
 }
 
 .files-inline-error {
-  color: rgb(var(--danger));
-  background: rgb(var(--danger-soft));
+  color: rgb(var(--error));
+  background: rgb(var(--error-soft));
 }
 
 .files-inline-warning {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: rgb(var(--warn-soft));
-}
-
-/* File icons colored by extension (tree + tabs), theme tokens only. */
-.file-icon-tone-accent {
-  color: rgb(var(--accent));
-}
-.file-icon-tone-brand {
-  color: rgb(var(--brand));
-}
-.file-icon-tone-warn {
-  color: rgb(var(--warn));
-}
-.file-icon-tone-ok {
-  color: rgb(var(--ok));
-}
-.file-icon-tone-cyan {
-  color: rgb(var(--tone-cyan));
-}
-.file-icon-tone-violet {
-  color: rgb(var(--tone-violet));
-}
-.file-icon-tone-blue {
-  color: rgb(var(--tone-blue));
-}
-.file-icon-tone-muted {
-  color: rgb(var(--label-secondary));
-}
-.file-icon-tone-subtle {
-  color: rgb(var(--label-tertiary));
 }
 </style>

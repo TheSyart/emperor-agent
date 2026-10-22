@@ -3,12 +3,17 @@
  * Notification list under the sidebar bell (async chunk). Rows show the
  * source glyph, title, detail and relative time; clicking one marks it read
  * and navigates: a session → its conversation, a git receipt → that
- * session with the workspace 「审查」 pane, a scheduler run → /scheduler.
- * Positioned like ui/Menu (chat/floatingMenu), dismissed on outside
- * click / focus and Escape.
+ * session with the workspace 「审查」 pane, a scheduler run → /scheduler,
+ * a newer Emperor → 设置 › 常规. An update row also carries 查看更新说明
+ * and 下载 (REL-02; 下载 opens 设置 › 常规, where the progress shows).
+ * The shell is ui/Popover: anchored under the bell, dismissed on outside
+ * click / focus and Escape (focus goes back to the bell).
  */
+import Button from '../ui/Button.vue'
+import Popover from '../ui/Popover.vue'
 import {
   CircleAlert,
+  CircleArrowUp,
   CircleCheck,
   Clock,
   GitCommitHorizontal,
@@ -20,7 +25,6 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
-  toRef,
   type Component,
 } from 'vue'
 import { useRouter } from 'vue-router'
@@ -30,31 +34,25 @@ import {
   notificationRelativeTime,
   type AppNotification,
 } from '../../runtime/notifications'
-import { useFloatingMenu } from '../chat/floatingMenu'
 import { requestWorkspace } from '../workspace/workspaceState'
+import { openLink } from '../../api/backend'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
+import { useUpdateStatus } from '../settings/updates/useUpdateStatus'
 
-const props = defineProps<{ anchor: HTMLElement | null }>()
+defineProps<{ anchor: HTMLElement | null }>()
 const open = defineModel<boolean>('open', { default: false })
 
 const router = useRouter()
+const settingsRoute = useSettingsRoute()
+const updates = useUpdateStatus()
 const { items, unreadCount, markRead, markAllRead, clear } = useNotifications()
-const panel = ref<HTMLElement | null>(null)
+const popover = ref<InstanceType<typeof Popover> | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 
 function close(): void {
   open.value = false
 }
-
-const floating = useFloatingMenu({
-  open,
-  button: toRef(props, 'anchor'),
-  menu: panel,
-  fallbackWidth: 340,
-  fallbackHeight: 320,
-  onClose: close,
-  prefer: () => 'bottom',
-})
 
 const rows = computed(() =>
   items.value.map((item) => ({
@@ -67,6 +65,7 @@ function glyph(item: AppNotification): Component {
   if (item.kind === 'scheduler') return Clock
   if (item.kind === 'git') return GitCommitHorizontal
   if (item.kind === 'pending') return MessageCircleQuestion
+  if (item.kind === 'update') return CircleArrowUp
   return item.tone === 'error' ? CircleAlert : CircleCheck
 }
 
@@ -74,6 +73,10 @@ async function openItem(item: AppNotification): Promise<void> {
   markRead([item.key])
   close()
   const target = item.target
+  if (target.type === 'settings') {
+    await settingsRoute.openSettings('general')
+    return
+  }
   if (target.type === 'scheduler') {
     await router.push({ name: 'scheduler' }).catch(() => undefined)
     return
@@ -82,21 +85,35 @@ async function openItem(item: AppNotification): Promise<void> {
   if (target.type === 'review') requestWorkspace({ pane: 'review' })
 }
 
-// Escape closes the popover wherever focus is: 清空 / 全部已读 disable
-// themselves once used, and a disabled button drops focus to <body>, so a
-// listener on the panel alone would stop hearing the key. Capture phase, so
-// the popover (the topmost floating layer) wins over card / page handlers.
-function onDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || event.defaultPrevented) return
-  event.preventDefault()
-  event.stopPropagation()
+/** The version an update notification names (`update:<version>`). */
+function updateVersion(item: AppNotification): string {
+  return item.key.startsWith('update:') ? item.key.slice('update:'.length) : ''
+}
+
+async function openUpdateNotes(item: AppNotification): Promise<void> {
+  markRead([item.key])
   close()
-  props.anchor?.focus()
+  await updates.load()
+  if (updates.status.value?.available) {
+    await updates.openNotes()
+    return
+  }
+  await openLink(
+    `https://github.com/TheSyart/emperor-agent/releases/tag/v${encodeURIComponent(updateVersion(item))}`,
+  ).catch(() => undefined)
+}
+
+async function downloadUpdate(item: AppNotification): Promise<void> {
+  markRead([item.key])
+  close()
+  await updates.load()
+  await settingsRoute.openSettings('general')
+  await updates.download()
 }
 
 /** Keep keyboard focus inside the panel after a header action disables itself. */
 function afterHeaderAction(): void {
-  void nextTick(() => panel.value?.focus())
+  void nextTick(() => popover.value?.panel?.focus())
 }
 
 function clearAll(): void {
@@ -109,99 +126,72 @@ function readAll(): void {
   afterHeaderAction()
 }
 
-onMounted(async () => {
+onMounted(() => {
   clock = setInterval(() => {
     now.value = Date.now()
   }, 30_000)
-  document.addEventListener('keydown', onDocumentKeydown, true)
-  await nextTick()
-  floating.position()
-  floating.addListeners()
 })
 
 onBeforeUnmount(() => {
   clearInterval(clock)
-  document.removeEventListener('keydown', onDocumentKeydown, true)
-  floating.removeListeners()
 })
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      ref="panel"
-      class="notifications ds-fade-in"
-      role="dialog"
-      aria-label="通知"
-      tabindex="-1"
-      :style="floating.style.value"
-    >
-      <header class="head">
-        <span class="heading">通知</span>
+  <Popover
+    ref="popover"
+    v-model:open="open"
+    class="notifications"
+    :anchor="anchor"
+    label="通知"
+    :width="340"
+    :padded="false"
+  >
+    <header class="head">
+      <span class="heading">通知</span>
+      <Button size="sm" :disabled="!unreadCount" @click="readAll()">
+        全部已读
+      </Button>
+      <Button size="sm" :disabled="!items.length" @click="clearAll()">
+        清空
+      </Button>
+    </header>
+    <ul v-if="rows.length" class="list">
+      <li v-for="{ item, time } in rows" :key="item.key">
         <button
           type="button"
-          class="head-action"
-          :disabled="!unreadCount"
-          @click="readAll()"
+          class="row"
+          :data-unread="!item.read || undefined"
+          :data-tone="item.tone"
+          @click="openItem(item)"
         >
-          全部已读
+          <component :is="glyph(item)" :size="16" class="glyph" />
+          <span class="body">
+            <span class="title">{{ item.title }}</span>
+            <span v-if="item.detail" class="detail">{{ item.detail }}</span>
+          </span>
+          <span class="meta">
+            <span class="time">{{ time }}</span>
+            <span v-if="!item.read" class="unread" aria-hidden="true" />
+          </span>
         </button>
-        <button
-          type="button"
-          class="head-action"
-          :disabled="!items.length"
-          @click="clearAll()"
+        <div
+          v-if="item.kind === 'update'"
+          class="row-actions"
+          data-update-actions
         >
-          清空
-        </button>
-      </header>
-      <ul v-if="rows.length" class="list">
-        <li v-for="{ item, time } in rows" :key="item.key">
-          <button
-            type="button"
-            class="row"
-            :data-unread="!item.read || undefined"
-            :data-tone="item.tone"
-            @click="openItem(item)"
+          <Button size="sm" @click="openUpdateNotes(item)">查看更新说明</Button>
+          <Button size="sm" variant="secondary" @click="downloadUpdate(item)"
+            >下载</Button
           >
-            <component :is="glyph(item)" :size="16" class="glyph" />
-            <span class="body">
-              <span class="title">{{ item.title }}</span>
-              <span v-if="item.detail" class="detail">{{ item.detail }}</span>
-            </span>
-            <span class="meta">
-              <span class="time">{{ time }}</span>
-              <span v-if="!item.read" class="unread" aria-hidden="true" />
-            </span>
-          </button>
-        </li>
-      </ul>
-      <div v-else class="empty">暂无通知</div>
-    </div>
-  </Teleport>
+        </div>
+      </li>
+    </ul>
+    <div v-else class="empty">暂无通知</div>
+  </Popover>
 </template>
 
 <style scoped>
-.notifications {
-  position: fixed;
-  z-index: var(--z-menu);
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: 340px;
-  padding: var(--space-1);
-  border: 1px solid var(--border-inverted);
-  border-radius: var(--radius-card);
-  background: rgb(var(--menu-fill));
-  box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
-}
-
-/* Focus only parks here after a header action; the panel is not a control. */
-.notifications:focus {
-  outline: none;
-}
-
 .head {
   display: flex;
   flex: none;
@@ -214,7 +204,7 @@ onBeforeUnmount(() => {
   flex: 1;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .head-action {
@@ -222,15 +212,15 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
 }
 
 .head-action:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .head-action:disabled {
@@ -264,21 +254,21 @@ onBeforeUnmount(() => {
 .row:hover,
 .row:focus-visible {
   outline: none;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .glyph {
   flex: none;
   margin-top: var(--space-0-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .row[data-tone='error'] .glyph {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .row[data-tone='warning'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .body {
@@ -298,18 +288,18 @@ onBeforeUnmount(() => {
 .title {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row[data-unread] .title {
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .detail {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .meta {
@@ -323,7 +313,7 @@ onBeforeUnmount(() => {
 .time {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   white-space: nowrap;
 }
 
@@ -331,14 +321,20 @@ onBeforeUnmount(() => {
   width: var(--space-1-5);
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
+}
+
+.row-actions {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-2-5) var(--space-2) calc(var(--space-2-5) * 2 + 16px);
 }
 
 .empty {
   padding: var(--space-6) var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: center;
 }
 </style>

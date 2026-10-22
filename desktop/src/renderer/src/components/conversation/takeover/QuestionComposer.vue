@@ -7,8 +7,10 @@
  * onboarding ask swaps "忽略" for "稍后再说" and adds "不再提醒".
  *
  * Keyboard: 1-9 pick an option (outside the text field), Enter continues or
- * submits, Shift+Enter breaks a line in the text field, Esc cancels.
+ * submits, Shift+Enter breaks a line in the text field, Esc folds the card
+ * (cancelling needs the explicit button).
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import type { ControlInteraction, ControlQuestion } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -150,8 +152,7 @@ function isComposing(event: KeyboardEvent): boolean {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
-    event.preventDefault()
-    cancel()
+    foldOnEscape(event, props.interaction.id)
     return
   }
   const target = event.target as HTMLElement | null
@@ -197,8 +198,8 @@ function onKeydown(event: KeyboardEvent) {
         </div>
         <div class="header-actions">
           <IconButton
+            shape="circle"
             :label="minimized ? '展开' : '收起'"
-            round
             class="small-icon"
             :disabled="busy"
             :aria-expanded="!minimized"
@@ -208,8 +209,8 @@ function onKeydown(event: KeyboardEvent) {
             <DsChevronDown v-else :size="14" />
           </IconButton>
           <IconButton
+            shape="circle"
             :label="isProfileOnboarding ? '稍后再说' : '忽略'"
-            round
             class="small-icon"
             :disabled="busy"
             @click="cancel"
@@ -304,8 +305,8 @@ function onKeydown(event: KeyboardEvent) {
         <footer class="footer">
           <div v-if="total > 1" class="pager">
             <IconButton
+              shape="circle"
               label="上一题"
-              round
               class="small-icon"
               :disabled="index === 0 || busy"
               @click="go(-1)"
@@ -314,8 +315,8 @@ function onKeydown(event: KeyboardEvent) {
             </IconButton>
             <span class="progress">{{ index + 1 }} / {{ total }}</span>
             <IconButton
+              shape="circle"
               label="下一题"
-              round
               class="small-icon"
               :disabled="isLast || !canContinue || busy"
               @click="go(1)"
@@ -338,7 +339,7 @@ function onKeydown(event: KeyboardEvent) {
               不再提醒
             </Button>
             <Button
-              variant="primary"
+              variant="secondary"
               data-action="submit"
               :disabled="primaryDisabled"
               @click="submitOrNext"
@@ -367,11 +368,11 @@ function onKeydown(event: KeyboardEvent) {
   max-width: var(--chat-content-width, 748px);
   max-height: min(60vh, 520px);
   padding: 0 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -404,7 +405,7 @@ function onKeydown(event: KeyboardEvent) {
 
 .eyebrow {
   margin-bottom: calc(var(--space-1) + 1px);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: 16px;
 }
@@ -413,7 +414,7 @@ function onKeydown(event: KeyboardEvent) {
   margin: 0;
   font-size: var(--fs-base);
   line-height: 22px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -429,7 +430,7 @@ function onKeydown(event: KeyboardEvent) {
 .pager .small-icon {
   width: 24px;
   height: 24px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body {
@@ -464,8 +465,8 @@ function onKeydown(event: KeyboardEvent) {
   color: inherit;
   text-align: left;
   transition:
-    background-color var(--duration-ds-fast) ease,
-    border-color var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease;
 }
 
 .option {
@@ -481,13 +482,13 @@ function onKeydown(event: KeyboardEvent) {
 .custom-row:hover,
 .custom-row:focus-within,
 .custom-row[data-active] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .option[data-selected],
 .custom-row:focus-within,
 .custom-row[data-active] {
-  border-color: var(--border-l2);
+  border-color: var(--stroke-2);
 }
 
 .option:focus-visible {
@@ -502,11 +503,11 @@ function onKeydown(event: KeyboardEvent) {
   width: 20px;
   height: 20px;
   margin-top: var(--space-0-5);
-  border-radius: var(--radius-sm);
-  background: rgb(var(--bg-overlay));
-  color: rgb(var(--label-secondary));
+  border-radius: var(--r-sm);
+  background: rgb(var(--surface-strong));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 18px;
 }
 
@@ -524,11 +525,11 @@ function onKeydown(event: KeyboardEvent) {
   grid-area: 1 / 1;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-l4);
-  border-radius: var(--radius-xs);
+  border: 1px solid var(--stroke-4);
+  border-radius: var(--r-xs);
   transition:
-    background-color var(--duration-ds-fast) ease,
-    border-color var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease;
 }
 
 .checkbox > svg {
@@ -536,12 +537,12 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .checkbox[data-checked] {
-  color: rgb(var(--label-inverted));
+  color: rgb(var(--text-inverted));
 }
 
 .checkbox[data-checked]::before {
-  border-color: rgb(var(--label-primary));
-  background: rgb(var(--label-primary));
+  border-color: rgb(var(--text-1));
+  background: rgb(var(--text-1));
 }
 
 .option-line {
@@ -556,14 +557,14 @@ function onKeydown(event: KeyboardEvent) {
 .option-label {
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .description {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 /* Auto-growing text field: the hidden mirror sizes the grid cell, the
@@ -599,21 +600,21 @@ function onKeydown(event: KeyboardEvent) {
   border: none;
   outline: none;
   background: transparent;
-  color: rgb(var(--label-primary));
-  caret-color: rgb(var(--accent-fill));
+  color: rgb(var(--text-1));
+  caret-color: rgb(var(--accent));
 }
 
 .field-input::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .field-block {
   flex: none;
   min-height: 64px;
   margin: var(--space-2) var(--space-6) 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-overlay));
+  background: rgb(var(--surface-strong));
 }
 
 .field-block > * {
@@ -621,7 +622,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .field-block:focus-within {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .footer {
@@ -643,10 +644,10 @@ function onKeydown(event: KeyboardEvent) {
 
 .progress {
   padding: 0 var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   word-spacing: -2px;
 }
@@ -659,7 +660,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .kbd {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: inherit;
   font-size: var(--fs-xxxs);
   line-height: 16px;

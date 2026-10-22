@@ -1,9 +1,10 @@
+import type { ViewScope } from '../../harness/host/scope'
 import { resolve } from 'node:path'
 import { loadLocalConfig, saveLocalConfig } from '../../config/local-config'
 
 export interface CoreDesktopPetServiceDeps {
   stateRoot?: string | null
-  assertMutation?: (area: string, action: string) => void
+  /** The mutation guard of the session the caller shows (KRN-01). */
 }
 
 export interface CoreDesktopPetPayload {
@@ -45,8 +46,10 @@ export class CoreDesktopPetService {
     }
   }
 
-  setEnabled(enabled: boolean): Promise<CoreDesktopPetPayload> {
-    this.deps.assertMutation?.('desktop pet', 'toggle')
+  setEnabled(
+    enabled: boolean,
+    _view: ViewScope,
+  ): Promise<CoreDesktopPetPayload> {
     return this.setEnabledInner(enabled)
   }
 

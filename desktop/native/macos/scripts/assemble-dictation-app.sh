@@ -46,7 +46,10 @@ if [[ -n "${EMPEROR_DEV_SIGN_IDENTITY:-}" ]]; then
     --entitlements "$native_dir/scripts/dictation-helper.entitlements" \
     --sign "$EMPEROR_DEV_SIGN_IDENTITY" "$app"
 else
-  codesign --force --sign - "$app"
+  # Ad hoc, with the hardened runtime (SEC-04) and its one entitlement.
+  codesign --force --options runtime \
+    --entitlements "$native_dir/scripts/dictation-helper.entitlements" \
+    --sign - "$app"
 fi
 plutil -lint "$app/Contents/Info.plist"
 codesign --verify --strict "$app"

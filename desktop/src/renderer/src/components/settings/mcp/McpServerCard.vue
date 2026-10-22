@@ -3,8 +3,9 @@
  * McpServerCard — one MCP server in 能力 › MCP (dsh McpSettingsTab card
  * on SettingsCard): status dot, name, transport badge, state · tool count,
  * enable Switch. Expanding shows the connection facts (DefinitionList: masked
- * URL or command line, header / env keys, last error), the discovered tools
- * and 删除.
+ * URL or command line, header / env keys, last error), the discovered tools,
+ * a stdio server's last stderr lines on request (最近输出, `mcp.serverLog`,
+ * KRN-04) and 删除.
  *
  * Props:
  * - server: McpServerView (mcpModel.buildMcpServerViews).
@@ -12,16 +13,20 @@
  * - open (v-model:open): expanded state.
  * Emits: toggle(enabled) from the Switch, remove from 删除.
  */
-import { computed } from 'vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import { computed, ref } from 'vue'
+import { getMcpServerLog } from '../../../api/mcp'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import { DsTrash } from '../../icons/ds'
-import { DefinitionList, SettingsCard, StatusBadge, Switch } from '../ui'
+import { DefinitionList, SettingsCard, Badge, Switch } from '../ui'
 import {
   mcpEmptyToolsText,
   mcpServerFacts,
   mcpServerSummary,
   mcpTransportLabel,
   type McpServerView,
+  mcpStateDot,
 } from './mcpModel'
 
 const props = withDefaults(
@@ -37,6 +42,26 @@ const summary = computed(() => mcpServerSummary(props.server))
 function onToggle(value: boolean) {
   emit('toggle', value)
 }
+
+/** null until asked; '' when the server wrote nothing. */
+const output = ref<string | null>(null)
+const outputRunning = ref(true)
+const outputLoading = ref(false)
+const outputError = ref('')
+
+async function loadOutput() {
+  outputLoading.value = true
+  outputError.value = ''
+  try {
+    const log = await getMcpServerLog(props.server.name)
+    outputRunning.value = log.text !== null
+    output.value = log.text ?? ''
+  } catch (error) {
+    outputError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    outputLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -49,15 +74,15 @@ function onToggle(value: boolean) {
     :data-state="server.state"
   >
     <template #leading>
-      <span
+      <Dot
         class="state-dot"
         :data-state="server.state"
-        role="img"
-        :aria-label="server.stateLabel"
+        :state="mcpStateDot(server.state)"
+        :label="server.stateLabel"
       />
     </template>
     <template #meta>
-      <StatusBadge mono>{{ mcpTransportLabel(server.transport) }}</StatusBadge>
+      <Badge mono>{{ mcpTransportLabel(server.transport) }}</Badge>
     </template>
     <template #description>
       <span class="summary" :data-tone="server.tone" :title="summary">
@@ -78,7 +103,7 @@ function onToggle(value: boolean) {
     <div class="tools">
       <div class="tools-head">
         <span>工具</span>
-        <span class="tools-count">{{ server.tools.length }}</span>
+        <Badge variant="count" :label="server.tools.length" />
       </div>
       <ul v-if="server.tools.length" class="tool-list">
         <li v-for="tool in server.tools" :key="tool.name" class="tool">
@@ -88,7 +113,29 @@ function onToggle(value: boolean) {
           </span>
         </li>
       </ul>
-      <p v-else class="tools-empty">{{ mcpEmptyToolsText(server) }}</p>
+      <EmptyState v-else variant="inline" :title="mcpEmptyToolsText(server)" />
+    </div>
+
+    <div v-if="server.transport === 'stdio'" class="server-output">
+      <div class="tools-head">
+        <span>最近输出</span>
+        <span class="output-hint">stderr · 最近 200 行</span>
+        <Button
+          size="sm"
+          class="output-load"
+          :loading="outputLoading"
+          @click="loadOutput"
+        >
+          {{ output === null ? '查看最近输出' : '刷新输出' }}
+        </Button>
+      </div>
+      <pre v-if="output" class="output-text">{{ output }}</pre>
+      <EmptyState
+        v-else-if="output !== null"
+        variant="inline"
+        :title="outputRunning ? '没有输出' : '没有输出（server 未在运行）'"
+      />
+      <p v-if="outputError" class="output-error">{{ outputError }}</p>
     </div>
 
     <template #footer>
@@ -107,76 +154,7 @@ function onToggle(value: boolean) {
 </template>
 
 <style scoped>
-.state-dot {
-  position: relative;
-  display: inline-block;
-  flex: none;
-  width: var(--space-2-5);
-  height: var(--space-2-5);
-  border-radius: var(--radius-pill);
-  color: rgb(var(--label-tertiary));
-}
-
 .state-dot::before,
-.state-dot::after {
-  content: '';
-  position: absolute;
-  border-radius: inherit;
-  background: currentColor;
-}
-
-.state-dot::before {
-  inset: 0;
-  opacity: 0.16;
-}
-
-.state-dot::after {
-  inset: 2px;
-}
-
-.state-dot[data-state='connected'] {
-  color: rgb(var(--state-ok));
-}
-
-.state-dot[data-state='connecting'] {
-  color: rgb(var(--state-warn));
-}
-
-.state-dot[data-state='connecting']::before {
-  animation: mcp-dot-pulse 1.2s var(--ease-in-out) infinite;
-}
-
-.state-dot[data-state='failed'] {
-  color: rgb(var(--state-error));
-}
-
-.state-dot[data-state='disabled'] {
-  color: rgb(var(--label-tertiary));
-}
-
-.state-dot[data-state='disabled']::before {
-  opacity: 0;
-}
-
-.state-dot[data-state='disabled']::after {
-  inset: 1px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-}
-
-@keyframes mcp-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.12;
-    transform: scale(0.8);
-  }
-
-  50% {
-    opacity: 0.32;
-    transform: scale(1.15);
-  }
-}
-
 .summary {
   display: block;
   overflow: hidden;
@@ -188,13 +166,14 @@ function onToggle(value: boolean) {
   color: rgb(var(--state-error-label));
 }
 
-.tools {
+.tools,
+.server-output {
   display: flex;
   flex-direction: column;
   gap: var(--space-1-5);
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .tools-head {
@@ -203,14 +182,8 @@ function onToggle(value: boolean) {
   gap: var(--space-1-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
-}
-
-.tools-count {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .tool-list {
@@ -236,8 +209,39 @@ function onToggle(value: boolean) {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
+}
+
+.output-hint {
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
+}
+
+.output-load {
+  margin-left: auto;
+}
+
+.output-text {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--space-2) var(--space-2-5);
+  overflow: auto;
+  border-radius: var(--radius-row);
+  background: rgb(var(--selector-fill));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--text-2));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output-error {
+  margin: 0;
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--state-error-label));
 }
 
 .tool-description {
@@ -247,14 +251,7 @@ function onToggle(value: boolean) {
   -webkit-line-clamp: 2;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
-}
-
-.tools-empty {
-  margin: 0;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
 }
 </style>

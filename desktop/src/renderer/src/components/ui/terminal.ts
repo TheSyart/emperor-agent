@@ -1,4 +1,4 @@
-import type { StateDotState } from './stateDot'
+import type { DotState } from './dot'
 
 /** Prompt label for a cwd: `~` for home, else the last path segment. */
 export function promptLabel(cwd: string, home: string | undefined): string {
@@ -13,8 +13,8 @@ export function terminalStatus(
   running: boolean,
   exitCode: number | undefined,
   signal: string | undefined,
-): { dot: StateDotState; label: string; pill?: string } {
-  if (running) return { dot: 'ongoing', label: '运行中' }
+): { dot: DotState; label: string; pill?: string } {
+  if (running) return { dot: 'running', label: '运行中' }
   if (signal !== undefined)
     return { dot: 'error', label: '失败', pill: `信号 ${signal}` }
   if (exitCode !== undefined && exitCode !== 0)

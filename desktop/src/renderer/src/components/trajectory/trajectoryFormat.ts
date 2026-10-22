@@ -98,10 +98,10 @@ export function assistantTimingRows(
     return `${(metrics.outputTokens / seconds).toFixed(1)} tok/s`
   }
   return [
-    { label: 'Total duration', value: total() },
-    { label: 'TTFT', value: ttft() },
-    { label: 'Generation', value: generation() },
-    { label: 'Throughput', value: throughput() },
+    { label: '总时长', value: total() },
+    { label: '首字延迟', value: ttft() },
+    { label: '生成', value: generation() },
+    { label: '吞吐', value: throughput() },
   ]
 }
 
@@ -113,36 +113,36 @@ export function usageRows(
   const rows: InspectorRow[] = []
   const input = trajectoryUsageInputTotal(usage)
   if (input !== undefined)
-    rows.push({ label: 'Input', value: formatTokens(input) })
+    rows.push({ label: '输入', value: formatTokens(input) })
   if (usage.cacheRead !== undefined)
     rows.push({
-      label: 'Cache read',
+      label: '缓存命中',
       value: formatTokens(usage.cacheRead),
       detail: true,
     })
   if (usage.cacheWrite !== undefined)
     rows.push({
-      label: 'Cache write',
+      label: '缓存写入',
       value: formatTokens(usage.cacheWrite),
       detail: true,
     })
   if (usage.input !== undefined)
     rows.push({
-      label: 'Uncached',
+      label: '未命中缓存',
       value: formatTokens(usage.input),
       detail: true,
     })
   if (usage.output !== undefined)
-    rows.push({ label: 'Output', value: formatTokens(usage.output) })
+    rows.push({ label: '输出', value: formatTokens(usage.output) })
   if (usage.reasoning !== undefined)
     rows.push({
-      label: 'Reasoning',
+      label: '推理',
       value: formatTokens(usage.reasoning),
       detail: true,
     })
   if (usage.output !== undefined && usage.reasoning !== undefined)
     rows.push({
-      label: 'Content',
+      label: '内容',
       value: formatTokens(Math.max(0, usage.output - usage.reasoning)),
       detail: true,
     })

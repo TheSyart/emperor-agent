@@ -174,6 +174,38 @@ describe('Trajectory conversation Definitions', () => {
     ])
   })
 
+  it('keeps a streaming tool call name when a later delta carries an empty one', () => {
+    const chunk = (seq: number, value: unknown) =>
+      at(seq, 'assistant/chunk', { turn: 1, step: 1, chunk: value })
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      chunk(3, { type: 'block-start', index: 0, blockType: 'tool-call' }),
+      chunk(4, {
+        type: 'tool-call-delta',
+        index: 0,
+        id: 'c1',
+        name: 'bash',
+        argumentsDelta: '{"command":',
+      }),
+      chunk(5, {
+        type: 'tool-call-delta',
+        index: 0,
+        id: '',
+        name: '',
+        argumentsDelta: '"ls"}',
+      }),
+    ])
+    expect(snapshot(value).partial?.blocks).toEqual([
+      {
+        kind: 'tool-call',
+        callId: 'c1',
+        name: 'bash',
+        argsRaw: '{"command":"ls"}',
+      },
+    ])
+  })
+
   it('classifies a cancellation-finalized prefix as an interrupted request result', () => {
     const current = snapshot(
       assembler([
@@ -442,7 +474,7 @@ describe('Trajectory conversation Definitions', () => {
       requests: current.requests,
     })
     expect(
-      layout[0]?.groups.find((group) => group.title === 'Step 2')?.cells,
+      layout[0]?.groups.find((group) => group.title === '第 2 步')?.cells,
     ).toMatchObject([
       { kind: 'user', previewMarkdown: 'steer here' },
       { kind: 'message', previewMarkdown: 'second' },
@@ -624,6 +656,31 @@ describe('Emperor-specific trajectory mapping', () => {
     ])
   })
 
+  it('records a working-directory change as a context record (KRN-11)', () => {
+    const current = snapshot(
+      assembler([
+        at(1, 'working-directory/change', {
+          from: '/repo',
+          to: '/home/git/worktrees/s1/feature',
+          reason: 'worktree-enter',
+        }),
+      ]),
+    )
+    expect(
+      contexts(current).map((node) => [
+        node.eventType,
+        node.label,
+        node.content[0]?.type === 'text' ? node.content[0].text : '',
+      ]),
+    ).toEqual([
+      [
+        'working-directory/change',
+        '工作目录',
+        '/home/git/worktrees/s1/feature\nworktree-enter · 原目录 /repo',
+      ],
+    ])
+  })
+
   it('records harness facts as located context records', () => {
     const current = snapshot(
       assembler([
@@ -700,16 +757,16 @@ describe('Emperor-specific trajectory mapping', () => {
         node.content[0]?.type === 'text' ? node.content[0].text : '',
       ]),
     ).toEqual([
-      [1, 'plan/mode', 'Plan mode', 'on'],
-      [3, 'goal/change', 'Goal', 'create · active\nship it'],
-      [4, 'instructions/baseline', 'Instructions', 'AGENTS.md'],
+      [1, 'plan/mode', '计划模式', '开'],
+      [3, 'goal/change', '目标', 'create · active\nship it'],
+      [4, 'instructions/baseline', '工作区说明', 'AGENTS.md'],
       [
         10,
         'hook/invoked',
         'Hook · PreToolUse',
-        'claude-code · bash\ndecision: pass · exit 0',
+        'claude-code · bash\n决定：pass · 退出码 0',
       ],
-      [12, 'approval/asked', 'Approval · bash', 'rejected\nnetwork'],
+      [12, 'approval/asked', '审批 · bash', 'rejected\nnetwork'],
     ])
     const layout = deriveTrajectoryLayout({
       nodes: current.eventNodes,
@@ -725,16 +782,16 @@ describe('Emperor-specific trajectory mapping', () => {
       ]),
     ).toEqual([
       [
-        'Message',
-        ['context:Plan mode', 'context:Goal', 'context:Instructions', 'user:'],
+        '消息',
+        ['context:计划模式', 'context:目标', 'context:工作区说明', 'user:'],
       ],
       [
-        'Step 1',
+        '第 1 步',
         [
           'message:Tool call only',
           'tool:bash',
           'context:Hook · PreToolUse',
-          'context:Approval · bash',
+          'context:审批 · bash',
         ],
       ],
     ])

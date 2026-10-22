@@ -1,6 +1,6 @@
 import { devNull } from 'node:os'
-import { mkdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { WorkspaceOperationError } from './common'
 
 export interface GitRuntime {
@@ -63,8 +63,106 @@ const ENV_ALLOWLIST = new Set([
   'LC_ALL',
 ])
 
+/**
+ * Repository-local configuration keys that make git run a program. Emperor's
+ * own git commands (turn snapshots, review, worktrees, delegation) never let
+ * a repository decide what runs on the user's machine: each key found in the
+ * effective config is overridden with a neutral value. System and global
+ * config are already off (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL).
+ */
+const EXECUTING_CONFIG =
+  '^(filter\\..+\\.(clean|smudge|process|required)' +
+  '|diff\\..+\\.(textconv|command)' +
+  '|merge\\..+\\.driver' +
+  '|core\\.(fsmonitor|hookspath|sshcommand|askpass|gitproxy|editor|pager|alternaterefscommand|attributesfile)' +
+  '|credential\\..*helper' +
+  '|gpg\\.(.+\\.)?program' +
+  '|(commit|tag|push)\\.gpgsign' +
+  '|sequence\\.editor' +
+  '|remote\\..+\\.(uploadpack|receivepack|proxy|vcs)' +
+  '|ssh\\.variant)$'
+
+/** The neutral value that disables one executing key. */
+export function neutralGitConfigValue(key: string): string {
+  const lower = key.toLowerCase()
+  if (/^filter\..+\.required$/.test(lower)) return 'false'
+  if (/\.gpgsign$/.test(lower)) return 'false'
+  if (lower === 'core.fsmonitor') return 'false'
+  if (lower === 'core.hookspath' || lower === 'core.attributesfile')
+    return devNull
+  if (lower === 'core.pager') return 'cat'
+  // An empty textconv makes git try to run "", so convert by identity.
+  if (/^diff\..+\.textconv$/.test(lower)) return 'cat'
+  if (/^remote\..+\.uploadpack$/.test(lower)) return 'git-upload-pack'
+  if (/^remote\..+\.receivepack$/.test(lower)) return 'git-receive-pack'
+  if (lower === 'ssh.variant') return 'ssh'
+  return ''
+}
+
+/** Keys from `git config --null --get-regexp` output (`key\nvalue\0`…). */
+export function parseConfigKeys(stdout: string): string[] {
+  const keys = new Set<string>()
+  for (const entry of stdout.split('\0')) {
+    const key = entry.split('\n', 1)[0]?.trim()
+    if (key) keys.add(key)
+  }
+  return [...keys]
+}
+
+function insideRepository(cwd: string): boolean {
+  let current = resolve(cwd)
+  for (;;) {
+    if (existsSync(join(current, '.git'))) return true
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
+const CONFIG_SCAN_TTL_MS = 1_500
+
 export class HardenedGitRunner {
+  private readonly configScans = new Map<
+    string,
+    { at: number; overrides: string[] }
+  >()
+
   constructor(private readonly options: HardenedGitRunnerOptions) {}
+
+  /** `-c key=neutral` pairs for every executing key the repository sets. */
+  private async neutralizeRepositoryConfig(
+    cwd: string,
+    runtime: GitRuntime,
+    env: Record<string, string>,
+  ): Promise<string[]> {
+    if (!insideRepository(cwd)) return []
+    const cached = this.configScans.get(cwd)
+    if (cached && Date.now() - cached.at < CONFIG_SCAN_TTL_MS)
+      return cached.overrides
+    const scan = await this.options.run({
+      executable: runtime.executable,
+      args: [
+        '--no-pager',
+        'config',
+        '--null',
+        '--get-regexp',
+        EXECUTING_CONFIG,
+      ],
+      cwd,
+      env,
+    })
+    // Exit 1 means no key matched; anything else is a broken config, which
+    // the real command will report on its own.
+    const overrides =
+      scan.exitCode === 0
+        ? parseConfigKeys(scan.stdout).flatMap((key) => [
+            '-c',
+            `${key}=${neutralGitConfigValue(key)}`,
+          ])
+        : []
+    this.configScans.set(cwd, { at: Date.now(), overrides })
+    return overrides
+  }
 
   async execute(
     cwd: string,
@@ -99,6 +197,25 @@ export class HardenedGitRunner {
     const env = Object.fromEntries(
       Object.entries(runtime.env).filter(([key]) => ENV_ALLOWLIST.has(key)),
     )
+    const baseEnv: Record<string, string> = {
+      ...env,
+      ...(privateHome
+        ? {
+            HOME: privateHome,
+            USERPROFILE: privateHome,
+            XDG_CONFIG_HOME: resolve(privateHome, '.config'),
+            XDG_CACHE_HOME: resolve(privateHome, '.cache'),
+          }
+        : {}),
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_TERMINAL_PROMPT: '0',
+    }
+    const repositoryOverrides = await this.neutralizeRepositoryConfig(
+      cwd,
+      runtime,
+      baseEnv,
+    )
     const result = await this.options.run({
       executable: runtime.executable,
       args: [
@@ -108,10 +225,13 @@ export class HardenedGitRunner {
         '-c',
         'core.fsmonitor=false',
         '-c',
+        'protocol.ext.allow=never',
+        '-c',
         'diff.external=',
         '-c',
         'diff.trustExitCode=false',
-        ...args,
+        ...repositoryOverrides,
+        ...withoutExternalDiff(args),
       ],
       cwd,
       env: {
@@ -147,6 +267,15 @@ export class HardenedGitRunner {
       )
     return result
   }
+}
+
+/** diff/log/show never run an attribute-selected external diff driver. */
+function withoutExternalDiff(args: string[]): string[] {
+  const command = gitSubcommand(args)
+  if (!['diff', 'log', 'show', 'whatchanged', 'format-patch'].includes(command))
+    return args
+  const at = args.indexOf(command)
+  return [...args.slice(0, at + 1), '--no-ext-diff', ...args.slice(at + 1)]
 }
 
 function isReadOnlyGitCommand(args: string[]): boolean {

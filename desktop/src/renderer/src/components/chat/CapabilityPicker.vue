@@ -3,7 +3,7 @@ import type {
   CapabilityPickerGroup,
   CapabilityPickerItem,
 } from '../../capabilities/capabilityPicker'
-import PluginLogo from '../settings/plugins/PluginLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 
 const props = defineProps<{
   groups: CapabilityPickerGroup[]
@@ -44,13 +44,14 @@ const emit = defineEmits<{
         @click="emit('select', item)"
       >
         <span class="composer-palette-item-icon">
-          <PluginLogo
+          <Avatar
+            kind="logo"
             v-if="item.logo"
-            :name="item.logo.name"
-            :logo="item.logo.url"
+            :label="item.logo.name"
+            :src="item.logo.url"
             :size="16"
           />
-          <component :is="item.icon" v-else :size="15" />
+          <component :is="item.icon" v-else :size="16" />
         </span>
         <strong>{{ item.label }}</strong>
         <span>{{ item.description }}</span>

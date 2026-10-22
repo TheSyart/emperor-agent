@@ -13,7 +13,8 @@
  */
 
 export type ExploreKind = 'skill' | 'mcp' | 'plugin'
-export type ExploreFilter = 'all' | ExploreKind
+/** The 能力 tab the 推荐 block is shown on (UI-S08). */
+export type RecommendationTab = 'plugins' | 'skills' | 'mcp' | 'tools'
 
 export type ExploreInstall =
   | { skillUrl: string }
@@ -35,22 +36,6 @@ export interface ExploreCatalog {
   version: 1
   entries: ExploreEntry[]
 }
-
-export const EXPLORE_KIND_LABELS: Record<ExploreKind, string> = {
-  skill: 'Skill',
-  mcp: 'MCP',
-  plugin: '插件',
-}
-
-export const EXPLORE_FILTERS: ReadonlyArray<{
-  id: ExploreFilter
-  label: string
-}> = [
-  { id: 'all', label: '全部' },
-  { id: 'skill', label: 'Skills' },
-  { id: 'mcp', label: 'MCP' },
-  { id: 'plugin', label: '插件' },
-]
 
 const KINDS = new Set<string>(['skill', 'mcp', 'plugin'])
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/
@@ -214,40 +199,31 @@ export function validExploreEntries(catalog: unknown): ExploreEntry[] {
   })
 }
 
-export function normalizeExploreFilter(value: unknown): ExploreFilter {
-  return EXPLORE_FILTERS.some((filter) => filter.id === value)
-    ? (value as ExploreFilter)
-    : 'all'
-}
+const RECOMMENDED_MAX = 6
+const RECOMMENDED_MIN = 3
 
-/** Entries of one kind (or all) matching name / publisher / text / tags. */
-export function filterExploreEntries(
+/**
+ * The 推荐 picks of a 能力 tab (UI-S08, 探索 folded in): Skills and MCP
+ * show their own kind, 插件 (the landing tab) the catalog's first picks of
+ * any kind, 工具 none. Fewer than three make no block.
+ */
+export function recommendedEntries(
   entries: readonly ExploreEntry[],
-  options: { query?: string; filter?: ExploreFilter } = {},
+  tab: RecommendationTab,
 ): ExploreEntry[] {
-  const needle = (options.query ?? '').trim().toLowerCase()
-  const filter = options.filter ?? 'all'
-  return entries.filter((entry) => {
-    if (filter !== 'all' && entry.kind !== filter) return false
-    if (!needle) return true
-    return [entry.name, entry.publisher, entry.description, ...entry.tags]
-      .join('\n')
-      .toLowerCase()
-      .includes(needle)
-  })
-}
-
-export function exploreKindCounts(
-  entries: readonly ExploreEntry[],
-): Record<ExploreFilter, number> {
-  const counts: Record<ExploreFilter, number> = {
-    all: entries.length,
-    skill: 0,
-    mcp: 0,
-    plugin: 0,
-  }
-  for (const entry of entries) counts[entry.kind] += 1
-  return counts
+  const kind: ExploreKind | 'any' | null =
+    tab === 'skills'
+      ? 'skill'
+      : tab === 'mcp'
+        ? 'mcp'
+        : tab === 'plugins'
+          ? 'any'
+          : null
+  if (kind === null) return []
+  const picks = entries
+    .filter((entry) => kind === 'any' || entry.kind === kind)
+    .slice(0, RECOMMENDED_MAX)
+  return picks.length >= RECOMMENDED_MIN ? picks : []
 }
 
 /** The Skill folder a GitHub tree link imports (its last path segment). */

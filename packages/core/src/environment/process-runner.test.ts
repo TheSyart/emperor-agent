@@ -8,7 +8,12 @@ import {
   NodeEnvironmentProcessRunner,
   NodeOwnedProcessRunner,
 } from './process-runner'
-import type { ProcessContainmentController } from './sandbox'
+import { ContainmentBackend } from '../sandbox/policy'
+import { processContainmentPolicy } from '../sandbox/presets'
+import {
+  OsSandboxController,
+  type ProcessContainmentController,
+} from './sandbox'
 
 describe('NodeEnvironmentProcessRunner', () => {
   it('spawns with shell disabled and captures bounded output', async () => {
@@ -146,27 +151,69 @@ describe('NodeEnvironmentProcessRunner', () => {
   })
 })
 
+const available = () => ({
+  platform: 'darwin' as const,
+  backend: 'macos-seatbelt' as const,
+  status: 'available' as const,
+  filesystem: 'workspace-write' as const,
+  network: 'policy-controlled' as const,
+  processTree: true,
+  reason: 'ready',
+})
+
+function policy(fallback: 'refuse' | 'ask-user' = 'refuse') {
+  return processContainmentPolicy({
+    workspace: { root: process.cwd(), access: 'write' },
+    stateRoot: null,
+    tempDir: process.cwd(),
+    network: 'deny',
+    fallback,
+  })
+}
+
+/** Passes argv through and reports it contained (no real sandbox). */
+function recordingSandbox(calls: string[][]): ProcessContainmentController {
+  return {
+    capability: available,
+    contain: async (executable, args, value) => {
+      calls.push([executable, ...args])
+      return {
+        executable,
+        args,
+        env: { TMPDIR: value.tempDir },
+        receipt: {
+          backend: 'seatbelt',
+          decision: 'contained',
+          policyHash: 'c'.repeat(64),
+          reason: '',
+        },
+      }
+    },
+  }
+}
+
+const managedAuthorization = (fingerprint: string) => ({
+  version: 1 as const,
+  toolName: 'manage_environment' as const,
+  operationFingerprint: fingerprint,
+  source: 'managed_environment_install' as const,
+  planId: 'env_plan_01',
+  recipeDigest: 'b'.repeat(64),
+  toolId: 'agent-reach',
+  toolVersion: '1.2.3',
+  emperorHomeDigest: 'c'.repeat(64),
+  sessionId: 'session-01',
+  authorizationId: 'env_plan_01',
+})
+
 describe('NodeOwnedProcessRunner', () => {
-  it('runs a managed installer only when authorization matches executable argv and cwd', async () => {
-    let sandboxPrepareCalls = 0
-    const sandbox: ProcessContainmentController = {
-      capability: () => ({
-        platform: 'darwin',
-        backend: 'macos-seatbelt',
-        status: 'available',
-        filesystem: 'workspace-write',
-        network: 'policy-controlled',
-        processTree: true,
-        reason: 'ready',
-      }),
-      prepare: () => {
-        sandboxPrepareCalls += 1
-        throw new Error(
-          'managed installation must not prepare workspace sandbox',
-        )
-      },
-    }
-    const runner = new NodeOwnedProcessRunner({ sandbox })
+  it('runs a managed installer contained, and only when its authorization matches executable argv and cwd (SEC-08)', async () => {
+    const calls: string[][] = []
+    const observed: Array<Record<string, unknown>> = []
+    const runner = new NodeOwnedProcessRunner({
+      sandbox: recordingSandbox(calls),
+      onSpawn: (options) => observed.push(options),
+    })
     const cwd = process.cwd()
     const args = ['-e', 'process.stdout.write("managed-ok")']
     const fingerprint = managedEnvironmentOperationFingerprint({
@@ -181,20 +228,9 @@ describe('NodeOwnedProcessRunner', () => {
       cwd,
       env: {},
       execution: {
-        kind: 'host',
-        authorization: {
-          version: 1,
-          toolName: 'manage_environment',
-          operationFingerprint: fingerprint,
-          source: 'managed_environment_install',
-          planId: 'env_plan_01',
-          recipeDigest: 'b'.repeat(64),
-          toolId: 'agent-reach',
-          toolVersion: '1.2.3',
-          emperorHomeDigest: 'c'.repeat(64),
-          sessionId: 'session-01',
-          authorizationId: 'env_plan_01',
-        },
+        kind: 'sandbox',
+        policy: policy(),
+        authorization: managedAuthorization(fingerprint),
       },
       owner: {
         kind: 'environment',
@@ -207,13 +243,11 @@ describe('NodeOwnedProcessRunner', () => {
       status: 'completed',
       exitCode: 0,
       stdout: 'managed-ok',
-      containment: {
-        decision: 'unsandboxed',
-        backend: 'none',
-        reason: 'authorized managed environment install',
-      },
+      containment: { decision: 'contained', backend: 'seatbelt' },
     })
-    expect(sandboxPrepareCalls).toBe(0)
+    expect(calls).toEqual([[process.execPath, ...args]])
+    // The policy's temp folder reaches the process.
+    expect((observed[0]!.env as Record<string, string>).TMPDIR).toBe(cwd)
 
     const denied = await runner.run({
       executable: process.execPath,
@@ -221,48 +255,23 @@ describe('NodeOwnedProcessRunner', () => {
       cwd,
       env: {},
       execution: {
-        kind: 'host',
-        authorization: {
-          version: 1,
-          toolName: 'manage_environment',
-          operationFingerprint: fingerprint,
-          source: 'managed_environment_install',
-          planId: 'env_plan_01',
-          recipeDigest: 'b'.repeat(64),
-          toolId: 'agent-reach',
-          toolVersion: '1.2.3',
-          emperorHomeDigest: 'c'.repeat(64),
-          sessionId: 'session-01',
-          authorizationId: 'env_plan_01',
-        },
+        kind: 'sandbox',
+        policy: policy(),
+        authorization: managedAuthorization(fingerprint),
       },
     })
     expect(denied).toMatchObject({
       status: 'containment_unavailable',
-      containment: { decision: 'denied' },
+      containment: { decision: 'refused' },
     })
+    expect(calls).toHaveLength(1)
   })
 
-  it('runs an authorized host process without preparing an OS sandbox', async () => {
-    let sandboxPrepareCalls = 0
+  it('runs an explicitly authorized host process without the sandbox and says so', async () => {
+    const calls: string[][] = []
     const observed: Array<Record<string, unknown>> = []
-    const sandbox: ProcessContainmentController = {
-      capability: () => ({
-        platform: 'darwin',
-        backend: 'macos-seatbelt',
-        status: 'available',
-        filesystem: 'workspace-write',
-        network: 'policy-controlled',
-        processTree: true,
-        reason: 'ready',
-      }),
-      prepare: () => {
-        sandboxPrepareCalls += 1
-        throw new Error('host execution must not prepare the sandbox')
-      },
-    }
     const runner = new NodeOwnedProcessRunner({
-      sandbox,
+      sandbox: recordingSandbox(calls),
       onSpawn: (options) => observed.push(options),
     })
 
@@ -289,14 +298,12 @@ describe('NodeOwnedProcessRunner', () => {
       exitCode: 0,
       stdout: 'host-ok',
       containment: {
-        decision: 'unsandboxed',
+        decision: 'user-allowed-unsandboxed',
         backend: 'none',
-        capabilityStatus: 'not_required',
-        filesystem: 'unrestricted',
-        network: 'unrestricted',
+        reason: 'authorized host execution',
       },
     })
-    expect(sandboxPrepareCalls).toBe(0)
+    expect(calls).toHaveLength(0)
     expect(observed).toHaveLength(1)
   })
 
@@ -328,40 +335,19 @@ describe('NodeOwnedProcessRunner', () => {
 
     expect(result).toMatchObject({
       status: 'containment_unavailable',
-      containment: { decision: 'denied', backend: 'none' },
+      containment: { decision: 'refused', backend: 'none' },
     })
     expect(spawned).toBe(false)
   })
 
-  it('fails closed before spawn when required containment is unavailable', async () => {
+  it('fails closed before spawn when the sandbox is unavailable — no silent fallback', async () => {
     let spawned = false
-    const sandbox: ProcessContainmentController = {
-      capability: () => ({
+    const sandbox = new OsSandboxController({
+      backend: new ContainmentBackend({
         platform: 'linux',
-        backend: 'linux-bwrap',
-        status: 'unavailable',
-        filesystem: 'workspace-write',
-        network: 'policy-controlled',
-        processTree: true,
-        reason: 'bwrap missing',
+        probe: () => ({ ok: false, detail: 'bwrap missing' }),
       }),
-      prepare: (_executable, _args, policy) => ({
-        executable: null,
-        args: [],
-        receipt: {
-          decision: policy.mode === 'required' ? 'denied' : 'unsandboxed',
-          backend:
-            policy.mode === 'required' ? 'linux-bwrap' : ('none' as const),
-          capabilityStatus: 'unavailable',
-          filesystem:
-            policy.mode === 'required' ? 'workspace-write' : 'unrestricted',
-          network: policy.mode === 'required' ? 'denied' : 'unrestricted',
-          processTree: policy.mode === 'required',
-          policyHash: 'a'.repeat(64),
-          reason: 'bwrap missing',
-        },
-      }),
-    }
+    })
     const runner = new NodeOwnedProcessRunner({
       sandbox,
       onSpawn: () => {
@@ -369,64 +355,31 @@ describe('NodeOwnedProcessRunner', () => {
       },
     })
 
-    const result = await runner.run({
-      executable: process.execPath,
-      args: ['-e', 'process.exit(0)'],
-      env: {},
-      execution: {
-        kind: 'sandbox',
-        policy: {
-          mode: 'required',
-          workspaceRoot: process.cwd(),
-          stateRoot: null,
-          tempRoot: process.cwd(),
-          readOnlyRoots: [],
-          network: 'deny',
-        },
-      },
-    })
-
-    expect(result).toMatchObject({
-      status: 'containment_unavailable',
-      exitCode: null,
-      containment: {
-        decision: 'denied',
-        backend: 'linux-bwrap',
-        capabilityStatus: 'unavailable',
-      },
+    for (const fallback of ['refuse', 'ask-user'] as const) {
+      const result = await runner.run({
+        executable: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+        env: {},
+        execution: { kind: 'sandbox', policy: policy(fallback) },
+      })
+      expect(result).toMatchObject({
+        status: 'containment_unavailable',
+        exitCode: null,
+        containment: { decision: 'refused', backend: 'none' },
+      })
+      expect(result.error).toContain('bwrap missing')
+    }
+    expect(sandbox.capability()).toMatchObject({
+      backend: 'linux-bwrap',
+      status: 'unavailable',
     })
     expect(spawned).toBe(false)
   })
 
   it('does not spawn when the containment receipt cannot be committed', async () => {
     let spawned = false
-    const sandbox: ProcessContainmentController = {
-      capability: () => ({
-        platform: 'darwin',
-        backend: 'macos-seatbelt',
-        status: 'available',
-        filesystem: 'workspace-write',
-        network: 'policy-controlled',
-        processTree: true,
-        reason: 'ready',
-      }),
-      prepare: (executable, args) => ({
-        executable,
-        args,
-        receipt: {
-          decision: 'sandboxed',
-          backend: 'macos-seatbelt',
-          capabilityStatus: 'available',
-          filesystem: 'workspace-write',
-          network: 'denied',
-          processTree: true,
-          policyHash: 'c'.repeat(64),
-          reason: '',
-        },
-      }),
-    }
     const runner = new NodeOwnedProcessRunner({
-      sandbox,
+      sandbox: recordingSandbox([]),
       onSpawn: () => {
         spawned = true
       },
@@ -437,17 +390,7 @@ describe('NodeOwnedProcessRunner', () => {
         executable: process.execPath,
         args: ['-e', 'process.exit(0)'],
         env: {},
-        execution: {
-          kind: 'sandbox',
-          policy: {
-            mode: 'required',
-            workspaceRoot: process.cwd(),
-            stateRoot: null,
-            tempRoot: process.cwd(),
-            readOnlyRoots: [],
-            network: 'deny',
-          },
-        },
+        execution: { kind: 'sandbox', policy: policy() },
         onContainment: () => {
           throw new Error('receipt store unavailable')
         },

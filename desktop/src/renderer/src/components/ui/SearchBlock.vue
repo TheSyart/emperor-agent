@@ -10,6 +10,7 @@
  * - truncated? / total?: backend cap → "显示 n / 共 total".
  * - maxLines (default 16).
  */
+import Badge from './Badge.vue'
 import { computed, ref } from 'vue'
 import type { SearchFileGroup } from './blockTypes'
 import { capRows, DEFAULT_BLOCK_MAX_LINES, headTailCap } from './headTailCap'
@@ -137,7 +138,7 @@ const { copied, copy } = useCopyFeedback(() =>
           @click="toggleFile(row.index)"
         >
           <span class="file-path" v-text="row.path" />
-          <span class="file-count">{{ row.count }}</span>
+          <Badge variant="count" :label="row.count" />
         </button>
         <div v-else-if="row.type === 'match'" class="line">
           <span class="line-no">{{ row.lineNumber }}: </span
@@ -152,7 +153,7 @@ const { copied, copy } = useCopyFeedback(() =>
 <style scoped>
 .ds-search {
   position: relative;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -174,7 +175,7 @@ const { copied, copy } = useCopyFeedback(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
   font: var(--font-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .copy {
@@ -182,7 +183,7 @@ const { copied, copy } = useCopyFeedback(() =>
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   cursor: pointer;
 }
@@ -201,10 +202,6 @@ const { copied, copy } = useCopyFeedback(() =>
 }
 
 .line-no,
-.file-count {
-  color: rgb(var(--label-tertiary));
-}
-
 .file {
   display: flex;
   align-items: baseline;
@@ -221,13 +218,9 @@ const { copied, copy } = useCopyFeedback(() =>
 
 .file-path {
   min-width: 0;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: pre;
-  color: rgb(var(--label-primary));
-}
-
-.file-count {
-  flex: none;
+  color: rgb(var(--text-1));
 }
 
 .expand {
@@ -236,19 +229,19 @@ const { copied, copy } = useCopyFeedback(() =>
   padding: 0 var(--space-3-5);
   border: none;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .expand:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .empty {
   padding: var(--space-3) var(--space-3-5);
   font: var(--font-code);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -1,0 +1,19 @@
+{"kind":"note","text":"An image goes up once through the Files API (POST /files, purpose user_data, expires_after; https://api-docs.deepseek.com/guides/files_api) and is referenced from /messages as an image source of type file with anthropic-beta files-api-2025-04-14 (https://api-docs.deepseek.com/guides/vision). The second request reuses the cached file id. Hand-written, not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/files"}
+{"kind":"response","status":200,"json":{"id":"file-api-emp0001aa","object":"file","bytes":67,"created_at":1760950000,"filename":"emperor-image.png","purpose":"user_data","expires_at":1761036400}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_img_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"一个红点。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_img_2","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":300,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"还是那个红点。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":7}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}

@@ -1,22 +1,42 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { existsSync } from 'node:fs'
 import { open, readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { ValidationError } from '../errors'
 import { PROVIDERS, findByName, normalizeApiBase } from '../llm/catalog'
+import { isSealedSecret, type SecretSealer } from '../security/secret-sealer'
 import { logger } from '../util/log'
 import {
   AtomicSnapshot,
   type PersistenceAdapter,
   type SnapshotCodec,
+  assertNotNewerSync,
 } from '../store/persistence'
 
 /** 单模型配置文件。磁盘只保存 schemaVersion=2；旧字段仅通过只读 adapter 暂时兼容。 */
 export const MODEL_CONFIG_FILE = 'model_config.json'
 export const MODEL_CONFIG_V1_BACKUP_FILE = 'model_config.v1-backup.json'
 export const MODEL_CONFIG_EXAMPLE_FILE = 'model_config.example.json'
+/** The copy of a file that still held plaintext keys, made before sealing them (SEC-06). */
+export const MODEL_CONFIG_PRE_SEAL_PREFIX = `${MODEL_CONFIG_FILE}.pre-seal-`
+
+/** What a model entry's sealed `apiKey` is bound to: it opens only there. */
+export function modelApiKeyContext(entryId: string): string {
+  return `${MODEL_CONFIG_FILE}#models/${entryId}/apiKey`
+}
 
 export type ModelProtocol = 'openai' | 'anthropic'
+
+/**
+ * How an entry's requests travel when its provider offers a choice (KRN-07).
+ * DeepSeek's official host defaults to the Anthropic Messages API;
+ * `chat-completions` keeps that entry on the OpenAI-compatible
+ * `/chat/completions` endpoint. In a hand-edited file,
+ * `"protocol": "chat-completions"` means the same and is read as protocol
+ * `openai` with this transport.
+ */
+export type ModelTransport = 'chat-completions'
 
 export interface ModelCapabilityOverrides {
   toolCall?: boolean
@@ -53,10 +73,77 @@ export interface ModelUsageCost {
   complete: boolean
 }
 
+/** Fields a user can lock against metadata refreshes (MOD-03). */
+export type ModelMetadataField =
+  | 'contextWindowTokens'
+  | 'maxTokens'
+  | 'pricing'
+  | 'capabilities'
+  | 'reasoningEffort'
+  | 'displayName'
+
+export const ALL_METADATA_FIELDS: readonly ModelMetadataField[] = [
+  'contextWindowTokens',
+  'maxTokens',
+  'pricing',
+  'capabilities',
+  'reasoningEffort',
+  'displayName',
+]
+
+export type ModelEntryKind =
+  'chat' | 'embedding' | 'rerank' | 'image' | 'audio' | 'other'
+
+export type ModelEntryReasoningControl =
+  'effort' | 'toggle' | 'budget' | 'always'
+
+export interface ModelEntryLimits {
+  maxInputTokens?: number
+  maxOutputTokens?: number
+}
+
+/** What discovery found out about the model (vendor API or catalog). */
+export interface ModelEntryDetected {
+  toolCall?: boolean
+  vision?: boolean
+  reasoning?: boolean
+  reasoningEfforts?: string[]
+  defaultReasoningEffort?: string
+  reasoningControl?: ModelEntryReasoningControl
+  acceptsTemperature?: boolean
+  modalities?: string[]
+  kind?: ModelEntryKind
+}
+
+export type ModelMetadataSource =
+  'vendor_api' | 'catalog' | 'family_rule' | 'fallback' | 'manual'
+
+export interface ModelEntryMetadata {
+  name?: string
+  source: ModelMetadataSource
+  catalogKey?: string
+  catalogVersion?: string
+  checkedAt?: string
+  userLocked?: ModelMetadataField[]
+  pricingSource?: 'catalog' | 'vendor_api' | 'manual'
+  lifecycle?: {
+    status?: 'active' | 'deprecated' | 'retired'
+    retiresAt?: string
+    replacement?: string
+  }
+}
+
+export interface ModelEntrySampling {
+  temperature?: number | null
+  topP?: number | null
+}
+
 export interface ModelEntryV2 {
   entryId: string
   provider: string
   protocol: ModelProtocol
+  /** Keeps a DeepSeek entry on chat-completions (KRN-07); absent: the provider's default. */
+  transport?: ModelTransport
   modelId: string
   displayName?: string
   apiBase: string
@@ -67,6 +154,22 @@ export interface ModelEntryV2 {
   reasoningEffort: string | null
   pricing?: ModelPricing
   legacy?: ModelEntryLegacyData
+  /** Entries on one connection share it; a key change updates them all. */
+  connectionId?: string
+  limits?: ModelEntryLimits
+  detected?: ModelEntryDetected
+  /** Where the entry's facts came from; old entries read as manual. */
+  metadata?: ModelEntryMetadata
+  sampling?: ModelEntrySampling
+}
+
+/** An entry in the file that failed validation (CORE-30): kept, reported. */
+export interface RejectedModelEntry {
+  index: number
+  entryId: string | null
+  modelId: string | null
+  reason: string
+  raw: Record<string, unknown>
 }
 
 export interface ModelConfigV2 {
@@ -99,6 +202,7 @@ export interface ModelEntry {
   entryId?: string
   provider: string
   protocol?: ModelProtocol
+  transport?: ModelTransport
   modelId?: string
   displayName?: string
   apiBase: string | null
@@ -109,6 +213,11 @@ export interface ModelEntry {
   maxTokens: number | null
   reasoningEffort: string | null
   legacy?: ModelEntryLegacyData
+  connectionId?: string
+  limits?: ModelEntryLimits
+  detected?: ModelEntryDetected
+  metadata?: ModelEntryMetadata
+  sampling?: ModelEntrySampling
   name: string
   id: string
   mainModelId: string
@@ -126,6 +235,18 @@ export interface ModelConfig {
   models: ModelEntry[]
   policy: ModelExecutionPolicy
   raw: ModelConfigV2 & Record<string, unknown>
+  /**
+   * Entries whose sealed key cannot be opened (the local key file is gone
+   * or was replaced): their `apiKey` reads as null and Settings asks for it
+   * again. The sealed value stays on disk until re-entered or cleared.
+   */
+  credentialsNeedingReentry: string[]
+  /**
+   * Entries in the file that failed validation. They stay on disk (an
+   * older or hand-edited file), out of `models`, until repaired (saved
+   * again with the same entryId) or discarded.
+   */
+  rejectedEntries: RejectedModelEntry[]
   /** @deprecated compatibility view; never serialized. */
   defaults: AgentDefaults
   /** @deprecated compatibility view; never serialized. */
@@ -146,15 +267,25 @@ export interface WizardModelSettings {
   reasoningEffort?: string | null
 }
 
-export type ModelEntryUpdate = Omit<Partial<ModelEntryV2>, 'pricing'> & {
+export type ModelEntryUpdate = Omit<
+  Partial<ModelEntryV2>,
+  'pricing' | 'transport'
+> & {
   apiKey?: string | null
   pricing?: ModelPricing | null
+  /** null returns the entry to its provider's default transport. */
+  transport?: ModelTransport | null
 }
 
 type RawRecord = Record<string, any>
 
 export interface ModelConfigPersistenceOptions {
   persistenceAdapter?: PersistenceAdapter
+  /**
+   * SEC-06: opens sealed `apiKey` values on load and seals keys on save.
+   * Absent: values stay as written, and a sealed one cannot be used.
+   */
+  sealer?: SecretSealer | null
 }
 
 const REMOVED_PROVIDERS = new Set([
@@ -320,8 +451,206 @@ function normalizePricing(value: unknown): ModelPricing | undefined {
   return result
 }
 
-function newEntryId(): string {
+export function newEntryId(): string {
   return `model-${randomUUID()}`
+}
+
+function newConnectionId(): string {
+  return `conn-${randomUUID()}`
+}
+
+function positiveIntegerOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return items.length ? [...new Set(items)] : undefined
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | undefined {
+  return typeof value === 'string' &&
+    (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined
+}
+
+function compact<T extends object>(value: T): T | undefined {
+  return Object.values(value).some((item) => item !== undefined)
+    ? (Object.fromEntries(
+        Object.entries(value).filter(([, item]) => item !== undefined),
+      ) as T)
+    : undefined
+}
+
+/*
+ * The MOD-03 fields are optional and never reject an entry: a malformed
+ * value is dropped, the rest of the entry stays usable.
+ */
+function normalizeLimits(value: unknown): ModelEntryLimits | undefined {
+  if (!isRecord(value)) return undefined
+  return compact({
+    maxInputTokens: positiveIntegerOrUndefined(value.maxInputTokens),
+    maxOutputTokens: positiveIntegerOrUndefined(value.maxOutputTokens),
+  })
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function normalizeDetected(value: unknown): ModelEntryDetected | undefined {
+  if (!isRecord(value)) return undefined
+  return compact<ModelEntryDetected>({
+    toolCall: booleanOrUndefined(value.toolCall),
+    vision: booleanOrUndefined(value.vision),
+    reasoning: booleanOrUndefined(value.reasoning),
+    reasoningEfforts: stringList(value.reasoningEfforts),
+    defaultReasoningEffort:
+      optionalString(value.defaultReasoningEffort) ?? undefined,
+    reasoningControl: oneOf(value.reasoningControl, [
+      'effort',
+      'toggle',
+      'budget',
+      'always',
+    ] as const),
+    acceptsTemperature: booleanOrUndefined(value.acceptsTemperature),
+    modalities: stringList(value.modalities),
+    kind: oneOf(value.kind, [
+      'chat',
+      'embedding',
+      'rerank',
+      'image',
+      'audio',
+      'other',
+    ] as const),
+  })
+}
+
+const METADATA_SOURCES = [
+  'vendor_api',
+  'catalog',
+  'family_rule',
+  'fallback',
+  'manual',
+] as const
+
+/** Old entries (no metadata) read as manual and locked everywhere. */
+export function effectiveMetadata(
+  entry: Pick<ModelEntryV2, 'metadata'>,
+): ModelEntryMetadata {
+  return entry.metadata
+    ? structuredClone(entry.metadata)
+    : { source: 'manual', userLocked: [...ALL_METADATA_FIELDS] }
+}
+
+function normalizeMetadata(value: unknown): ModelEntryMetadata | undefined {
+  if (!isRecord(value)) return undefined
+  const source = oneOf(value.source, METADATA_SOURCES) ?? 'manual'
+  const locked = Array.isArray(value.userLocked)
+    ? ALL_METADATA_FIELDS.filter((field) =>
+        (value.userLocked as unknown[]).includes(field),
+      )
+    : source === 'manual'
+      ? [...ALL_METADATA_FIELDS]
+      : undefined
+  const lifecycle = isRecord(value.lifecycle)
+    ? compact({
+        status: oneOf(value.lifecycle.status, [
+          'active',
+          'deprecated',
+          'retired',
+        ] as const),
+        retiresAt: optionalString(value.lifecycle.retiresAt) ?? undefined,
+        replacement: optionalString(value.lifecycle.replacement) ?? undefined,
+      })
+    : undefined
+  const result: ModelEntryMetadata = { source }
+  const name = optionalString(value.name)
+  if (name) result.name = name
+  for (const key of ['catalogKey', 'catalogVersion', 'checkedAt'] as const) {
+    const text = optionalString(value[key])
+    if (text) result[key] = text
+  }
+  if (locked) result.userLocked = locked
+  const pricingSource = oneOf(value.pricingSource, [
+    'catalog',
+    'vendor_api',
+    'manual',
+  ] as const)
+  if (pricingSource) result.pricingSource = pricingSource
+  if (lifecycle) result.lifecycle = lifecycle
+  return result
+}
+
+function samplingNumber(
+  value: unknown,
+  min: number,
+  max: number,
+): number | null | undefined {
+  if (value === null) return null
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max
+    ? value
+    : undefined
+}
+
+function normalizeSampling(value: unknown): ModelEntrySampling | undefined {
+  if (!isRecord(value)) return undefined
+  return compact<ModelEntrySampling>({
+    temperature: samplingNumber(value.temperature, 0, 2),
+    topP: samplingNumber(value.topP, 0, 1),
+  })
+}
+
+/** displayName, else the catalog/vendor name, else the model id. */
+export function effectiveDisplayName(
+  entry: Pick<ModelEntryV2, 'displayName' | 'metadata' | 'modelId'>,
+): string {
+  return entry.displayName || entry.metadata?.name || entry.modelId
+}
+
+/**
+ * The temperature a request carries: the entry's sampling setting (or the
+ * old `legacy.temperature`), never for a model known not to accept one.
+ */
+export function entryTemperature(
+  entry: Pick<ModelEntryV2, 'sampling' | 'legacy' | 'detected'>,
+): number | null {
+  if (entry.detected?.acceptsTemperature === false) return null
+  const sampled = entry.sampling?.temperature
+  if (typeof sampled === 'number') return sampled
+  return entry.legacy?.temperature ?? null
+}
+
+/** Same provider, protocol and normalized address: one endpoint. */
+function sameEndpoint(a: ModelEntryV2, b: ModelEntryV2): boolean {
+  return (
+    a.provider === b.provider &&
+    a.protocol === b.protocol &&
+    normalizeApiBase(a.protocol, a.apiBase) ===
+      normalizeApiBase(b.protocol, b.apiBase)
+  )
+}
+
+/**
+ * Entries on one connection: the same connectionId, or the same endpoint
+ * when either has none (files written before connection ids).
+ */
+export function sameConnection(a: ModelEntryV2, b: ModelEntryV2): boolean {
+  if (a.connectionId && b.connectionId) return a.connectionId === b.connectionId
+  return sameEndpoint(a, b)
 }
 
 function normalizeEntry(
@@ -335,9 +664,18 @@ function normalizeEntry(
   const provider = canonicalProviderName(submittedProvider)
   if (!provider || REMOVED_PROVIDERS.has(provider))
     throw new ValidationError(`provider 无效: ${submittedProvider ?? ''}`)
-  const protocol = optionalString(input.protocol)
+  let protocol = optionalString(input.protocol)
+  let transport = optionalString(input.transport)
+  // KRN-07: the documented shorthand for an OpenAI-protocol entry that
+  // stays on chat-completions.
+  if (protocol === 'chat-completions') {
+    protocol = 'openai'
+    transport = 'chat-completions'
+  }
   if (protocol !== 'openai' && protocol !== 'anthropic')
     throw new ValidationError(`protocol 无效: ${protocol ?? ''}`)
+  if (transport !== null && transport !== 'chat-completions')
+    throw new ValidationError(`transport 无效: ${transport}`)
   const protocols = findByName(provider)?.protocols ?? []
   if (!protocols.includes(protocol))
     throw new ValidationError(
@@ -375,10 +713,21 @@ function normalizeEntry(
     maxTokens: positiveInteger(input.maxTokens, 'maxTokens'),
     reasoningEffort: optionalString(input.reasoningEffort),
   }
+  if (transport) result.transport = transport
   if (displayName) result.displayName = displayName
   if (capabilityOverrides) result.capabilityOverrides = capabilityOverrides
   if (pricing) result.pricing = pricing
   if (legacy) result.legacy = legacy
+  const connectionId = optionalString(input.connectionId)
+  if (connectionId) result.connectionId = connectionId
+  const limits = normalizeLimits(input.limits)
+  if (limits) result.limits = limits
+  const detected = normalizeDetected(input.detected)
+  if (detected) result.detected = detected
+  const metadata = normalizeMetadata(input.metadata)
+  if (metadata) result.metadata = metadata
+  const sampling = normalizeSampling(input.sampling)
+  if (sampling) result.sampling = sampling
   return result
 }
 
@@ -437,17 +786,8 @@ function normalizeExecutionPolicy(
     if (entryId === activeModelId)
       throw new ValidationError('policy fallback 不能指向 active 模型')
   }
-  if (maxUsdPerAgentTurn !== null) {
-    const active = activeModelId ? byId.get(activeModelId) : null
-    if (!active?.pricing)
-      throw new ValidationError(
-        '启用 cost cap 前必须为 active 模型配置完整 pricing',
-      )
-    if (enabled && entryId && !byId.get(entryId)?.pricing)
-      throw new ValidationError(
-        '启用 cost cap 前必须为 fallback 模型配置完整 pricing',
-      )
-  }
+  // A cost cap is kept even when a referenced model has no prices: it just
+  // does not apply to that model (MOD-05).
   return {
     fallback: { enabled, entryId, triggerOn: [...triggerOn] },
     cost: { maxUsdPerAgentTurn },
@@ -485,6 +825,81 @@ function normalizeV2(raw: RawRecord): ModelConfigV2 {
   return result
 }
 
+interface LenientV2 {
+  config: ModelConfigV2
+  rejected: RejectedModelEntry[]
+  /** The file's models in order: normalized entries and rejected raw ones. */
+  diskModels: unknown[]
+}
+
+/**
+ * Read a v2 file entry by entry (CORE-30): a bad entry goes to `rejected`
+ * and stays in `diskModels` at its place; the others load normally. A
+ * policy that no longer validates (its fallback was rejected) is dropped.
+ */
+function normalizeV2Lenient(raw: RawRecord): LenientV2 {
+  if (raw.schemaVersion !== 2)
+    throw new ValidationError('model_config schemaVersion 必须为 2')
+  if (!Array.isArray(raw.models))
+    throw new ValidationError("model_config: 'models' must be an array")
+  const models: ModelEntryV2[] = []
+  const rejected: RejectedModelEntry[] = []
+  const diskModels: unknown[] = []
+  const ids = new Set<string>()
+  raw.models.forEach((item: unknown, index: number) => {
+    const record = isRecord(item) ? item : {}
+    try {
+      if (!isRecord(item))
+        throw new ValidationError(`第 ${index + 1} 个模型条目格式无效`)
+      const entry = normalizeEntry(item, { allowMissingEntryId: true })
+      if (ids.has(entry.entryId))
+        throw new ValidationError(`entryId 重复: ${entry.entryId}`)
+      ids.add(entry.entryId)
+      models.push(entry)
+      diskModels.push(entry)
+    } catch (error) {
+      rejected.push({
+        index,
+        entryId: optionalString(record.entryId),
+        modelId: optionalString(record.modelId),
+        reason: error instanceof Error ? error.message : String(error),
+        raw: structuredClone(record),
+      })
+      diskModels.push(item)
+    }
+  })
+  const activeModelId = optionalString(raw.activeModelId)
+  const config: ModelConfigV2 = {
+    schemaVersion: 2,
+    activeModelId: models.length ? activeModelId : null,
+    models,
+  }
+  if (raw.policy !== undefined) {
+    try {
+      config.policy = normalizeExecutionPolicy(
+        raw.policy,
+        models,
+        config.activeModelId,
+      )
+    } catch (error) {
+      logger.warn('model_config policy dropped; it no longer validates', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  return { config, rejected, diskModels }
+}
+
+/** The rejected entries in a stored file (raw), or none. */
+function storedRejected(stored: unknown): RejectedModelEntry[] {
+  if (!isRecord(stored) || stored.schemaVersion !== 2) return []
+  try {
+    return normalizeV2Lenient(stored).rejected
+  } catch {
+    return []
+  }
+}
+
 function providerNames(): string[] {
   return (PROVIDERS as readonly unknown[])
     .map((item) => (isRecord(item) ? optionalString(item.name) : null))
@@ -492,23 +907,38 @@ function providerNames(): string[] {
 }
 
 function compatibilityEntry(entry: ModelEntryV2): ModelEntry {
-  const name = entry.displayName || entry.modelId
+  const name = effectiveDisplayName(entry)
   return {
     ...structuredClone(entry),
     name,
     id: entry.modelId,
     mainModelId: entry.modelId,
     secondaryModelId: entry.modelId,
-    label: entry.displayName ?? '',
+    label: entry.displayName || entry.metadata?.name || '',
     extraHeaders: entry.legacy?.extraHeaders ?? null,
     extraBody: entry.legacy?.extraBody ?? null,
-    temperature: entry.legacy?.temperature ?? null,
-    supportsVision: entry.capabilityOverrides?.vision ?? false,
+    temperature: entryTemperature(entry),
+    supportsVision:
+      entry.capabilityOverrides?.vision ?? entry.detected?.vision ?? false,
   }
 }
 
-function runtimeConfig(raw: ModelConfigV2): ModelConfig {
+/** Tests: the runtime view of one entry, as routes and profiles read it. */
+export const compatibilityEntryForTest = compatibilityEntry
+
+function runtimeConfig(
+  raw: ModelConfigV2,
+  unreadable: ReadonlyMap<string, string> = new Map(),
+  rejected: readonly RejectedModelEntry[] = [],
+): ModelConfig {
   const clean = structuredClone(raw)
+  const needingReentry = new Set(unreadable.keys())
+  // A sealed value that was not opened is never a usable key.
+  for (const entry of clean.models)
+    if (isSealedSecret(entry.apiKey)) {
+      needingReentry.add(entry.entryId)
+      entry.apiKey = null
+    }
   const models = clean.models.map(compatibilityEntry)
   const active = clean.activeModelId
     ? models.find((entry) => entry.entryId === clean.activeModelId)
@@ -538,6 +968,10 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
       clean.activeModelId,
     ),
     raw: clean as ModelConfigV2 & Record<string, unknown>,
+    credentialsNeedingReentry: clean.models
+      .map((entry) => entry.entryId)
+      .filter((entryId) => needingReentry.has(entryId)),
+    rejectedEntries: structuredClone([...rejected]),
     defaults: {
       model: active?.entryId ?? '',
       provider: active?.provider ?? 'auto',
@@ -833,7 +1267,8 @@ export async function ensureExampleConfig(
 
 function validateDiskConfig(value: unknown): RawRecord {
   if (!isRecord(value)) throw new Error('model_config must be an object')
-  if (value.schemaVersion === 2) return normalizeV2(value)
+  // Per-entry problems are reported, not fatal (normalizeV2Lenient).
+  if (value.schemaVersion === 2) return normalizeV2Lenient(value) && value
   if (value.schemaVersion !== undefined)
     throw new Error(
       `unsupported model_config schemaVersion: ${value.schemaVersion}`,
@@ -863,6 +1298,7 @@ function validateDiskConfig(value: unknown): RawRecord {
 
 const MODEL_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<RawRecord> = {
   schemaVersion: 2,
+  versionKey: 'schemaVersion',
   encode(value) {
     return value
   },
@@ -915,6 +1351,17 @@ export async function loadModelConfig(
   rootOrFile: string,
   opts: { create?: boolean } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
+  // A load may rewrite the file (migration, normalization): it takes the
+  // same lock as every load-modify-save.
+  return withModelConfigLock(rootOrFile, () =>
+    loadModelConfigLocked(rootOrFile, opts),
+  )
+}
+
+async function loadModelConfigLocked(
+  rootOrFile: string,
+  opts: { create?: boolean } & ModelConfigPersistenceOptions,
+): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
   if (opts.create !== false && !existsSync(path))
     await writeModelConfigSnapshot(
@@ -945,44 +1392,206 @@ export async function loadModelConfig(
   if (loaded.schemaVersion !== 2) {
     await backupV1(path, source)
     const migrated = migrateV1(loaded)
-    await writeModelConfigSnapshot(path, migrated, opts.persistenceAdapter)
+    // The v1 backup above is this file's copy from before sealing.
+    await writeModelConfigSnapshot(
+      path,
+      sealKeysForDisk(migrated, new Map(), opts.sealer).raw,
+      opts.persistenceAdapter,
+    )
     return runtimeConfig(migrated)
   }
-  const normalized = normalizeV2(loaded)
+  const lenient = normalizeV2Lenient(loaded)
+  const normalized = lenient.config
+  const disk = { ...normalized, models: lenient.diskModels }
+  // A newer Emperor's file (REL-03) is read as v2 and never rewritten.
+  const newer =
+    loadedSnapshot.receipt.recoveryAction === 'newer_version_read_only'
   try {
-    if (JSON.stringify(JSON.parse(source)) !== JSON.stringify(normalized))
-      await writeModelConfigSnapshot(path, normalized, opts.persistenceAdapter)
+    // Keys are written back exactly as stored (sealed or not); plaintext
+    // is sealed by the next save (SEC-06). Rejected entries stay in place.
+    if (!newer && JSON.stringify(JSON.parse(source)) !== JSON.stringify(disk))
+      await writeModelConfigSnapshot(path, disk, opts.persistenceAdapter)
   } catch {
     // AtomicSnapshot 已负责隔离畸形文件；这里不重复恢复。
   }
-  return runtimeConfig(normalized)
+  const opened = openStoredKeys(normalized, opts.sealer)
+  return runtimeConfig(opened.config, opened.unreadable, lenient.rejected)
 }
 
 export async function saveModelConfig(
   rootOrFile: string,
   data: ModelConfigV2 | RawRecord,
-  opts: { validateComplete?: boolean } & ModelConfigPersistenceOptions = {},
+  opts: {
+    validateComplete?: boolean
+    /**
+     * Entries whose key the user cleared on purpose in this save. Only these
+     * drop a sealed key that cannot be opened; any other null keeps it.
+     */
+    clearedKeys?: readonly string[]
+    /** Rejected entries to drop from the file (entryId, or `#<index>`). */
+    discardRejected?: readonly string[]
+  } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
-  const merged = await preserveStoredApiKeys(path, data)
-  const config = parseModelConfig(merged)
+  assertNotNewerSync(path, 'schemaVersion', 2)
+  const stored = await readStoredConfig(path)
+  const merged = preserveStoredApiKeys(
+    stored?.value,
+    data,
+    opts.sealer,
+    opts.clearedKeys ?? [],
+  )
+  if (!isRecord(merged)) throw new ValidationError('model_config 必须是对象')
+  const normalized =
+    merged.schemaVersion === 2 ? normalizeV2(merged) : migrateV1(merged)
+  const opened = openStoredKeys(normalized, opts.sealer)
+  const config = runtimeConfig(opened.config, opened.unreadable)
   if (opts.validateComplete) validateCompleteModelEntries(config.raw)
-  await writeModelConfigSnapshot(path, config.raw, opts.persistenceAdapter)
-  return config
+  const disk = sealKeysForDisk(config.raw, opened.unreadable, opts.sealer)
+  // Rejected entries stay on disk until repaired (an entry saved with the
+  // same entryId) or discarded on purpose.
+  const validIds = new Set(config.raw.models.map((entry) => entry.entryId))
+  const discard = new Set(opts.discardRejected ?? [])
+  const kept = storedRejected(stored?.value).filter(
+    (item) =>
+      !(item.entryId && validIds.has(item.entryId)) &&
+      !discard.has(item.entryId ?? `#${item.index}`),
+  )
+  const diskRaw = kept.length
+    ? {
+        ...disk.raw,
+        models: [...disk.raw.models, ...kept.map((item) => item.raw)],
+      }
+    : disk.raw
+  if (disk.sealedPlaintext && stored && hasUnsealedKeys(stored.value))
+    await backupBeforeSealing(path, stored.source)
+  await writeModelConfigSnapshot(path, diskRaw, opts.persistenceAdapter)
+  return { ...config, rejectedEntries: structuredClone(kept) }
 }
 
-async function preserveStoredApiKeys(
+async function readStoredConfig(
   path: string,
-  data: ModelConfigV2 | RawRecord,
-): Promise<ModelConfigV2 | RawRecord> {
-  if (!isRecord(data) || data.schemaVersion !== 2 || !existsSync(path))
-    return data
-  let stored: unknown
+): Promise<{ source: string; value: unknown } | null> {
+  if (!existsSync(path)) return null
   try {
-    stored = JSON.parse(await readFile(path, 'utf8'))
+    const source = await readFile(path, 'utf8')
+    return { source, value: JSON.parse(source) as unknown }
   } catch {
-    return data
+    return null
   }
+}
+
+/** Open each sealed key; the ones that do not open are reported, not lost. */
+function openStoredKeys(
+  raw: ModelConfigV2,
+  sealer: SecretSealer | null | undefined,
+): { config: ModelConfigV2; unreadable: Map<string, string> } {
+  const unreadable = new Map<string, string>()
+  const models = raw.models.map((entry) => {
+    if (!isSealedSecret(entry.apiKey)) return entry
+    const opened = openKey(entry.apiKey, entry.entryId, sealer)
+    if (opened !== null) return { ...entry, apiKey: opened }
+    unreadable.set(entry.entryId, entry.apiKey)
+    return { ...entry, apiKey: null }
+  })
+  return { config: { ...raw, models }, unreadable }
+}
+
+function openKey(
+  sealed: string,
+  entryId: string,
+  sealer: SecretSealer | null | undefined,
+): string | null {
+  if (!sealer) return null
+  try {
+    return sealer.open(sealed, modelApiKeyContext(entryId))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The document to write: plaintext keys sealed (when the sealer can seal),
+ * unreadable sealed keys put back as they were.
+ */
+function sealKeysForDisk(
+  raw: ModelConfigV2,
+  unreadable: ReadonlyMap<string, string>,
+  sealer: SecretSealer | null | undefined,
+): { raw: ModelConfigV2; sealedPlaintext: boolean } {
+  let sealedPlaintext = false
+  let warned = false
+  const canSeal = Boolean(sealer?.available)
+  const models = raw.models.map((entry) => {
+    const kept = unreadable.get(entry.entryId)
+    if (entry.apiKey === null)
+      return kept === undefined ? entry : { ...entry, apiKey: kept }
+    if (isSealedSecret(entry.apiKey) || !sealer) return entry
+    if (canSeal)
+      try {
+        const sealed = sealer.seal(
+          entry.apiKey,
+          modelApiKeyContext(entry.entryId),
+        )
+        sealedPlaintext = true
+        return { ...entry, apiKey: sealed }
+      } catch {
+        // Reported below; the key is kept rather than lost.
+      }
+    if (!warned) {
+      warned = true
+      logger.warn(
+        'Model API keys stay unsealed: the local key is not available',
+      )
+    }
+    return entry
+  })
+  return { raw: { ...raw, models }, sealedPlaintext }
+}
+
+/** Whether a stored document holds any key not yet sealed. */
+function hasUnsealedKeys(stored: unknown): boolean {
+  if (!isRecord(stored)) return false
+  if (stored.schemaVersion !== 2) return true
+  return (Array.isArray(stored.models) ? stored.models : []).some(
+    (entry) =>
+      isRecord(entry) &&
+      typeof entry.apiKey === 'string' &&
+      entry.apiKey.trim() !== '' &&
+      !isSealedSecret(entry.apiKey) &&
+      !isMaskedSecret(entry.apiKey),
+  )
+}
+
+/** `model_config.json.pre-seal-<ts>`: the file as it was, plaintext keys and all. */
+async function backupBeforeSealing(
+  path: string,
+  source: string,
+): Promise<void> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = join(
+    dirname(path),
+    `${MODEL_CONFIG_PRE_SEAL_PREFIX}${stamp}`,
+  )
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(backupPath, 'wx', 0o600)
+    await handle.writeFile(source, 'utf8')
+    await handle.sync()
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+function preserveStoredApiKeys(
+  stored: unknown,
+  data: ModelConfigV2 | RawRecord,
+  sealer: SecretSealer | null | undefined,
+  clearedKeys: readonly string[],
+): ModelConfigV2 | RawRecord {
+  if (!isRecord(data) || data.schemaVersion !== 2) return data
   if (!isRecord(stored) || stored.schemaVersion !== 2) return data
   const previous = new Map<string, RawRecord>()
   for (const item of Array.isArray(stored.models) ? stored.models : []) {
@@ -998,12 +1607,21 @@ async function preserveStoredApiKeys(
     const submitted = Object.prototype.hasOwnProperty.call(item, 'apiKey')
       ? item.apiKey
       : undefined
+    const entryId = optionalString(item.entryId) ?? ''
     if (
       submitted === undefined ||
       (typeof submitted === 'string' &&
         (!submitted.trim() || isMaskedSecret(submitted)))
     )
       item.apiKey = old.apiKey ?? null
+    else if (
+      submitted === null &&
+      isSealedSecret(old.apiKey) &&
+      !clearedKeys.includes(entryId) &&
+      openKey(old.apiKey, entryId, sealer) === null
+    )
+      // It read as null because it cannot be opened: keep asking for it.
+      item.apiKey = old.apiKey
   }
   return next
 }
@@ -1073,6 +1691,8 @@ export function deleteModelEntryConfig(
     throw new ValidationError(
       `entry '${entryId}' not found in model_config.json`,
     )
+  if (raw.activeModelId === entryId)
+    throw new ValidationError('该模型正在使用，请先切换到其他模型再删除')
   if (raw.policy?.fallback.enabled && raw.policy.fallback.entryId === entryId)
     throw new ValidationError(
       '该模型仍被 policy fallback 引用，请先关闭或修改 fallback',
@@ -1112,45 +1732,70 @@ export function updateModelPolicyConfig(
 export async function saveModelPolicy(
   rootOrFile: string,
   policy: ModelExecutionPolicy,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
-  return saveModelConfig(
-    rootOrFile,
-    updateModelPolicyConfig(current.raw, policy),
-  )
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    return saveModelConfig(
+      rootOrFile,
+      updateModelPolicyConfig(current.raw, policy),
+      opts,
+    )
+  })
 }
 
 export async function saveModelEntry(
   rootOrFile: string,
   update: ModelEntryUpdate,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
-  return saveModelConfig(
-    rootOrFile,
-    upsertModelEntryConfig(current.raw, update),
-  )
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    const cleared =
+      update.entryId &&
+      Object.prototype.hasOwnProperty.call(update, 'apiKey') &&
+      update.apiKey === null
+        ? [update.entryId]
+        : []
+    return saveModelConfig(
+      rootOrFile,
+      upsertModelEntryConfig(current.raw, update),
+      {
+        ...opts,
+        clearedKeys: cleared,
+      },
+    )
+  })
 }
 
 export async function deleteModelEntry(
   rootOrFile: string,
   entryId: string,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
-  return saveModelConfig(
-    rootOrFile,
-    deleteModelEntryConfig(current.raw, entryId),
-  )
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    return saveModelConfig(
+      rootOrFile,
+      deleteModelEntryConfig(current.raw, entryId),
+      opts,
+    )
+  })
 }
 
 export async function activateModelEntry(
   rootOrFile: string,
   entryId: string,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
-  return saveModelConfig(
-    rootOrFile,
-    activateModelEntryConfig(current.raw, entryId),
-  )
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    return saveModelConfig(
+      rootOrFile,
+      activateModelEntryConfig(current.raw, entryId),
+      opts,
+    )
+  })
 }
 
 /** @deprecated onboarding Task 2 会改为 saveModelEntry。 */
@@ -1186,20 +1831,238 @@ export async function markEntryVision(
   rootOrFile: string,
   entryId: string,
   value = true,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const config = await loadModelConfig(rootOrFile)
-  const found = findEntry(config, entryId)
-  if (!found)
-    throw new ValidationError(
-      `entry '${entryId}' not found in model_config.json`,
+  return withModelConfigLock(rootOrFile, async () => {
+    const config = await loadModelConfig(rootOrFile, opts)
+    const found = findEntry(config, entryId)
+    if (!found)
+      throw new ValidationError(
+        `entry '${entryId}' not found in model_config.json`,
+      )
+    return saveModelEntry(
+      rootOrFile,
+      {
+        entryId: found.entryId,
+        capabilityOverrides: {
+          ...found.capabilityOverrides,
+          vision: Boolean(value),
+        },
+      },
+      opts,
     )
-  return saveModelEntry(rootOrFile, {
-    entryId: found.entryId,
-    capabilityOverrides: {
-      ...found.capabilityOverrides,
-      vision: Boolean(value),
-    },
   })
+}
+
+/* ── Writes are serialized per file (MOD-03) ────────────────────────────── */
+
+const lockChains = new Map<string, Promise<void>>()
+const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>()
+
+/**
+ * Run `task` holding the model_config file's in-process lock. Every
+ * load-modify-save goes through it, so two saves started at once both
+ * land. Re-entrant: code already holding the lock runs directly.
+ */
+export async function withModelConfigLock<T>(
+  rootOrFile: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const path = configPath(rootOrFile)
+  const held = heldLocks.getStore()
+  if (held?.has(path)) return task()
+  const previous = lockChains.get(path) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((done) => (release = done))
+  const chain = previous.then(() => current)
+  lockChains.set(path, chain)
+  await previous
+  try {
+    return await heldLocks.run(new Set([...(held ?? []), path]), task)
+  } finally {
+    release()
+    if (lockChains.get(path) === chain) lockChains.delete(path)
+  }
+}
+
+/** One connection's settings shared by the entries saved with it. */
+export interface ModelConnectionSettings {
+  provider: string
+  protocol: ModelProtocol
+  apiBase: string
+  /** Omitted, empty or masked: keep the connection's stored key. */
+  apiKey?: string | null
+}
+
+/** One model in a batch save; the connection fields come from the batch. */
+export type ModelEntryDraft = Omit<
+  ModelEntryUpdate,
+  'provider' | 'protocol' | 'apiBase' | 'apiKey' | 'connectionId'
+> & { modelId: string }
+
+/**
+ * Save several entries of one connection with a single write (MOD-03).
+ * Every entry is validated before anything is written; one bad entry
+ * fails the batch with its position. An entryId that names an existing
+ * entry updates it; one that names a rejected entry repairs it.
+ */
+export async function saveModelEntries(
+  rootOrFile: string,
+  input: {
+    connection: ModelConnectionSettings
+    entries: readonly ModelEntryDraft[]
+    activateEntryId?: string | null
+  },
+  opts: ModelConfigPersistenceOptions = {},
+): Promise<{ config: ModelConfig; savedEntryIds: string[] }> {
+  if (!input.entries.length) throw new ValidationError('至少要保存一个模型')
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    const models = current.raw.models.slice()
+    const probe = normalizeEntry({
+      ...input.connection,
+      entryId: 'probe',
+      modelId: input.entries[0]!.modelId || 'probe',
+      contextWindowTokens: 1,
+      maxTokens: 1,
+    })
+    const peers = models.filter((entry) => sameEndpoint(entry, probe))
+    const connectionId =
+      peers.find((entry) => entry.connectionId)?.connectionId ??
+      newConnectionId()
+    const submittedKey = input.connection.apiKey
+    const keepStoredKey =
+      submittedKey === undefined ||
+      submittedKey === null ||
+      (typeof submittedKey === 'string' &&
+        (!submittedKey.trim() || isMaskedSecret(submittedKey)))
+    const storedKey = peers.find((entry) => entry.apiKey)?.apiKey ?? null
+    const savedEntryIds: string[] = []
+    input.entries.forEach((draft, index) => {
+      const entryId = optionalString(draft.entryId) ?? newEntryId()
+      const existingIndex = models.findIndex(
+        (entry) => entry.entryId === entryId,
+      )
+      const existing = existingIndex >= 0 ? models[existingIndex] : undefined
+      let normalized: ModelEntryV2
+      try {
+        normalized = normalizeEntry({
+          ...(existing ?? {}),
+          ...stripUndefined(draft as RawRecord),
+          entryId,
+          provider: input.connection.provider,
+          protocol: input.connection.protocol,
+          apiBase: input.connection.apiBase,
+          apiKey: keepStoredKey
+            ? (existing?.apiKey ?? storedKey)
+            : submittedKey,
+          connectionId,
+        })
+      } catch (error) {
+        throw new ValidationError(
+          `第 ${index + 1} 个模型（${draft.modelId || '未命名'}）：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+      if (existing) models[existingIndex] = normalized
+      else models.push(normalized)
+      savedEntryIds.push(entryId)
+    })
+    const activateEntryId = optionalString(input.activateEntryId)
+    if (
+      activateEntryId &&
+      !models.some((entry) => entry.entryId === activateEntryId)
+    )
+      throw new ValidationError(`entry '${activateEntryId}' not found`)
+    const next = normalizeV2({
+      schemaVersion: 2,
+      activeModelId:
+        activateEntryId ?? current.raw.activeModelId ?? savedEntryIds[0]!,
+      models,
+      ...(current.raw.policy ? { policy: current.raw.policy } : {}),
+    })
+    const config = await saveModelConfig(rootOrFile, next, opts)
+    return { config, savedEntryIds }
+  })
+}
+
+/**
+ * Change the key and/or address of every entry on one connection with a
+ * single write (MOD-03). The connection is named by connectionId, or by
+ * an entry on it. Returns how many entries changed.
+ */
+export async function updateModelConnection(
+  rootOrFile: string,
+  input: {
+    connectionId?: string | null
+    entryId?: string | null
+    apiKey?: string | null
+    apiBase?: string | null
+  },
+  opts: ModelConfigPersistenceOptions = {},
+): Promise<{ config: ModelConfig; updated: number }> {
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    const connectionId = optionalString(input.connectionId)
+    const entryId = optionalString(input.entryId)
+    const anchor = entryId
+      ? current.raw.models.find((entry) => entry.entryId === entryId)
+      : current.raw.models.find((entry) => entry.connectionId === connectionId)
+    if (!anchor) throw new ValidationError('找不到这个连接的模型')
+    const members = current.raw.models.filter((entry) =>
+      sameConnection(entry, anchor),
+    )
+    const key = optionalString(input.apiKey)
+    const setKey = key !== null && !isMaskedSecret(key)
+    const apiBase = optionalString(input.apiBase)
+    if (!setKey && !apiBase) return { config: current, updated: 0 }
+    const unified = anchor.connectionId ?? newConnectionId()
+    const memberIds = new Set(members.map((entry) => entry.entryId))
+    const models = current.raw.models.map((entry) =>
+      memberIds.has(entry.entryId)
+        ? normalizeEntry({
+            ...entry,
+            connectionId: unified,
+            ...(setKey ? { apiKey: key } : {}),
+            ...(apiBase ? { apiBase } : {}),
+          })
+        : entry,
+    )
+    const config = await saveModelConfig(
+      rootOrFile,
+      normalizeV2({ ...current.raw, models }),
+      opts,
+    )
+    return { config, updated: members.length }
+  })
+}
+
+/** Drop a rejected entry from the file (by entryId, or `#<index>`). */
+export async function discardRejectedModelEntry(
+  rootOrFile: string,
+  key: string,
+  opts: ModelConfigPersistenceOptions = {},
+): Promise<ModelConfig> {
+  return withModelConfigLock(rootOrFile, async () => {
+    const current = await loadModelConfig(rootOrFile, opts)
+    if (
+      !current.rejectedEntries.some(
+        (item) => (item.entryId ?? `#${item.index}`) === key,
+      )
+    )
+      throw new ValidationError('这个条目已经不在文件里了')
+    return saveModelConfig(rootOrFile, current.raw, {
+      ...opts,
+      discardRejected: [key],
+    })
+  })
+}
+
+function stripUndefined(value: RawRecord): RawRecord {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  )
 }
 
 function reportModelConfigRecovery(info: {

@@ -5,18 +5,31 @@
  *
  * Props: text; preview? (tighter padding for Summary sections).
  */
-import { toRef } from 'vue'
+import {
+  handleMarkdownClick,
+  handleMarkdownKeydown,
+} from '../../../composables/useMarkdownLinks'
+import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
+import { inject, toRef } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
 
 const props = withDefaults(defineProps<{ text: string; preview?: boolean }>(), {
   preview: false,
 })
 const { rendered } = useMarkdown(toRef(() => props.text))
+const app = inject(APP_CONTEXT_KEY, null)
+const linkOptions = { notify: (message: string) => app?.showToast(message) }
 </script>
 
 <template>
   <!-- sanitized by useMarkdown (DOMPurify) -->
-  <div class="traj-md" :data-preview="preview || undefined" v-html="rendered" />
+  <div
+    class="traj-md"
+    :data-preview="preview || undefined"
+    v-html="rendered"
+    @click="handleMarkdownClick($event, 'trajectory-markdown', linkOptions)"
+    @keydown="handleMarkdownKeydown($event, linkOptions)"
+  />
 </template>
 
 <style scoped>
@@ -24,7 +37,7 @@ const { rendered } = useMarkdown(toRef(() => props.text))
   box-sizing: border-box;
   padding: var(--space-3-5);
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xs);
 }
 
@@ -50,17 +63,17 @@ const { rendered } = useMarkdown(toRef(() => props.text))
 
 .traj-md :deep(h1) {
   margin: var(--space-3) 0 var(--space-1-5);
-  font: 600 16px / 22px var(--font-sans);
+  font: var(--weight-semibold) 16px / 22px var(--font-sans);
 }
 
 .traj-md :deep(h2) {
   margin: var(--space-3) 0 var(--space-1-5);
-  font: 600 15px / 22px var(--font-sans);
+  font: var(--weight-semibold) 15px / 22px var(--font-sans);
 }
 
 .traj-md :deep(:is(h3, h4, h5, h6)) {
   margin: var(--space-2-5) 0 var(--space-1);
-  font: 600 14px / 20px var(--font-sans);
+  font: var(--weight-semibold) 14px / 20px var(--font-sans);
 }
 
 .traj-md :deep(:not(pre) > code) {
@@ -82,8 +95,8 @@ const { rendered } = useMarkdown(toRef(() => props.text))
 .traj-md :deep(blockquote) {
   margin: var(--space-2) 0;
   padding-left: var(--space-2);
-  border-left: 2px solid rgb(var(--label-caption));
-  color: rgb(var(--label-secondary));
+  border-left: 2px solid rgb(var(--text-3));
+  color: rgb(var(--text-2));
 }
 
 .traj-md :deep(table) {
@@ -93,10 +106,10 @@ const { rendered } = useMarkdown(toRef(() => props.text))
 
 .traj-md :deep(:is(th, td)) {
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
 }
 
 .traj-md :deep(a) {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

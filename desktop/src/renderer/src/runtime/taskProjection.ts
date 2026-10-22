@@ -12,6 +12,10 @@ export type TaskRuntimeEvent = Extract<
       | 'workflow_started'
       | 'workflow_progress'
       | 'workflow_finished'
+      | 'delegation_created'
+      | 'delegation_run_changed'
+      | 'delegation_receipt'
+      | 'delegation_interaction'
   }
 >
 
@@ -37,6 +41,10 @@ const TASK_EVENTS = new Set<string>([
   'workflow_started',
   'workflow_progress',
   'workflow_finished',
+  'delegation_created',
+  'delegation_run_changed',
+  'delegation_receipt',
+  'delegation_interaction',
 ])
 
 const TERMINAL_TASK_STATUSES = new Set<string>([
@@ -46,6 +54,7 @@ const TERMINAL_TASK_STATUSES = new Set<string>([
   'killed',
   'cancelled',
   'interrupted',
+  'outcome_unknown',
 ])
 
 export function createTaskProjectionState(): TaskProjectionState {

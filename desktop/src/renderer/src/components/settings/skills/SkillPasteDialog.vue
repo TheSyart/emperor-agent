@@ -24,7 +24,7 @@ import {
   CodeEditor,
   Field,
   Select,
-  StatusBadge,
+  Badge,
   TextField,
   type SelectOption,
 } from '../ui'
@@ -187,14 +187,14 @@ async function submit(overwrite = false) {
     <div class="paste-dialog">
       <Field label="SKILL.md">
         <template #badge>
-          <StatusBadge
+          <Badge
             v-if="badge"
             :tone="badge.tone"
-            dot
+            variant="dot-label"
             data-testid="skill-paste-validation"
           >
             {{ badge.label }}
-          </StatusBadge>
+          </Badge>
         </template>
         <CodeEditor
           v-model="content"
@@ -249,7 +249,7 @@ async function submit(overwrite = false) {
     </div>
 
     <template #footer>
-      <Button variant="outline" @click="open = false">取消</Button>
+      <Button variant="secondary" @click="open = false">取消</Button>
       <Button
         variant="primary"
         data-testid="skill-paste-submit"
@@ -296,7 +296,7 @@ async function submit(overwrite = false) {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid rgb(var(--state-warn) / 0.35);
+  border: 1px solid rgb(var(--warn) / 0.35);
   border-radius: var(--radius-row);
   background: rgb(var(--state-warn-soft));
 }

@@ -23,12 +23,7 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
       '# Seed User\n\n',
       'utf8',
     )
-    let refreshes = 0
-    const service = new CoreConfigService(root, {
-      refreshRuntimeContext: () => {
-        refreshes += 1
-      },
-    })
+    const service = new CoreConfigService(root, {})
 
     expect(service.getUserConfig()).toEqual({
       path: 'memory/profile/USER.local.md',
@@ -48,7 +43,6 @@ describe('CoreConfigService (MIG-IPC-007)', () => {
     expect(
       readFileSync(join(root, 'memory', 'profile', 'USER.local.md'), 'utf8'),
     ).toBe('# Seed User\n\n## Stable Preferences\n\n- 新的偏好\n')
-    expect(refreshes).toBe(1)
   })
 
   it('applies structured USER.local.md section edits through MemoryPatch and preserves unrelated sections', () => {

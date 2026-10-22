@@ -1,33 +1,48 @@
 <script setup lang="ts">
 /**
- * ToolCallRow — dsh ToolRow: one 24px line `[icon] 标题 · 摘要`; the icon
- * crossfades to a chevron on hover; running plays the glare sweep; error /
- * interrupted swap the icon for a StateDot and an error row's summary is
- * the failure's first line in the danger color. The expanded body is the
- * registry's tool view (collapsed by default) with a hover-revealed
- * Inspect pill that jumps to the trajectory.
+ * ToolCallRow — one 28px line `[icon] 标题 · 摘要` (UI-S03): icon 14 text-3,
+ * title 13 text-2, summary 13 text-3; the icon crossfades to a chevron on
+ * hover; running plays the glare sweep; error / interrupted swap the icon
+ * for a Dot and an error row's summary is the failure's first line in the
+ * danger color. The expanded body (indented 22px like a thinking body) is
+ * the registry's tool view with a hover-revealed Inspect pill that jumps to
+ * the trajectory — only while 显示轨迹 is on (UI-S09). A `preparing` row
+ * (DSH-23) is the call the model is still writing: the arguments parsed so
+ * far and 「准备中」, nothing to expand.
  *
- * Props: data (tool node data), nodeKey. Emits via chat context:
+ * Props: data (tool node data), agent?, preparing?. Emits via chat context:
  * inspect(callId).
  */
 import { computed } from 'vue'
+import { useUiPreferences } from '../../../composables/useUiPreferences'
+import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
-import { errorSummary, toolRowState } from '../tools/toolModel'
+import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
 
-const props = defineProps<{ data: ToolChatData }>()
+const props = withDefaults(
+  defineProps<{ data: ToolChatData; agent?: AgentView; preparing?: boolean }>(),
+  { agent: undefined, preparing: false },
+)
 const { actions } = useChatContext()
+const { preferences } = useUiPreferences()
 
 /** Bodies that only render result material (nothing to show while running). */
 const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
-const view = computed(() => toolView(props.data.name))
-const state = computed(() => toolRowState(props.data))
+const view = computed(() => toolView(props.data.name, props.data, props.agent))
+const state = computed(() =>
+  props.preparing ? 'preparing' : toolRowState(props.data),
+)
+const backend = computed(
+  () => props.data.externalAgent?.backend ?? argsOf(props.data).backend,
+)
 const title = computed(() => view.value.title(props.data))
 const failure = computed(() => errorSummary(props.data))
 const summary = computed(() => failure.value ?? view.value.summary(props.data))
@@ -38,7 +53,15 @@ const suffixTone = computed(() =>
   suffix.value === null ? null : (view.value.suffixTone?.(props.data) ?? null),
 )
 const expandable = computed(
-  () => !(props.data.status === 'running' && RESULT_ONLY.has(view.value.body)),
+  () =>
+    !props.preparing &&
+    !(props.data.status === 'running' && RESULT_ONLY.has(view.value.body)),
+)
+/** The trajectory holds the full arguments only when it is shown (UI-S09). */
+const truncatedNote = computed(() =>
+  preferences.value.showTrajectory
+    ? '参数过长，已截断显示；在轨迹中查看完整内容'
+    : '参数过长，已截断显示',
 )
 const open = useExpansion(
   () => `tool:${props.data.callId}`,
@@ -47,6 +70,8 @@ const open = useExpansion(
 const body = computed(() => TOOL_BODIES[view.value.body])
 const stateLabel = computed(() => {
   switch (state.value) {
+    case 'preparing':
+      return '准备中'
     case 'running':
       return '运行中'
     case 'error':
@@ -65,18 +90,38 @@ const stateLabel = computed(() => {
     :data-state="state"
     :data-tool="data.name"
     :data-call-id="data.callId"
+    :data-preparing="preparing || undefined"
   >
-    <span v-if="stateLabel" class="sr-only">{{ stateLabel }}</span>
+    <span v-if="stateLabel && !preparing" class="sr-only">{{
+      stateLabel
+    }}</span>
     <DisclosureRow
       v-model:open="open"
       :title="title"
       :expandable="expandable"
-      :running="state === 'running'"
+      :running="state === 'running' || state === 'preparing'"
       :tone="failure !== null ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="state === 'error'" state="error" />
-        <StateDot v-else-if="state === 'stopped'" state="warn" />
+        <Avatar
+          kind="sprite"
+          v-if="!data.externalAgent && (data.subagent?.subagentId || agent?.id)"
+          :id="data.subagent?.subagentId || agent!.id"
+          :size="20"
+        />
+        <Dot v-else-if="state === 'error'" state="error" />
+        <Dot v-else-if="state === 'stopped'" state="warn" />
+        <Avatar
+          kind="logo"
+          v-else-if="
+            (data.name === 'subagent' || data.name === 'subagent_fork') &&
+            (backend === 'codex' || backend === 'claude-code')
+          "
+          :icon-id="backend"
+          :label="backend === 'codex' ? 'Codex' : 'Claude Code'"
+          :size="16"
+          :data-agent-logo="backend"
+        />
         <component :is="view.icon" v-else :size="14" />
       </template>
       <template v-if="summary" #summary>
@@ -94,18 +139,22 @@ const stateLabel = computed(() => {
           >
         </span>
       </template>
+      <template v-if="preparing" #trailing>
+        <span class="preparing ds-shimmer" data-tone="neutral">准备中</span>
+      </template>
       <div class="body-wrap">
         <div v-if="data.argsTruncated" class="truncated-note">
-          参数过长，已截断显示；完整内容可在 Trajectory 中查看。
+          {{ truncatedNote }}
         </div>
         <component :is="body" :data="data" />
         <button
+          v-if="preferences.showTrajectory"
           type="button"
           class="inspect"
           @click="actions.inspect(data.callId)"
         >
           <DsInspect :size="12" />
-          Inspect
+          查看
         </button>
       </div>
     </DisclosureRow>
@@ -117,14 +166,6 @@ const stateLabel = computed(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.tool-row :deep(.title) {
-  color: rgb(var(--label-secondary));
-}
-
-.tool-row :deep(.body) {
-  padding-left: 0;
 }
 
 .summary-line {
@@ -140,9 +181,9 @@ const stateLabel = computed(() => {
 }
 
 .summary-text[data-path] {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-decoration: underline;
-  text-decoration-color: rgb(var(--label-caption));
+  text-decoration-color: rgb(var(--text-3));
   text-underline-offset: 3px;
 }
 
@@ -153,7 +194,7 @@ const stateLabel = computed(() => {
 
 .summary-suffix[data-tone='warn'] {
   color: rgb(var(--warn));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .summary-suffix[data-tone='accent'] {
@@ -164,15 +205,18 @@ const stateLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: var(--space-1) 0 var(--space-0-5) var(--space-1);
+  padding: var(--space-1) 0 var(--space-0-5);
   min-width: 0;
 }
 
 .truncated-note {
   margin-bottom: var(--space-1);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--warn));
+  font: var(--type-caption) var(--font-sans);
+  color: rgb(var(--text-3));
+}
+
+.preparing {
+  font: var(--type-caption) var(--font-sans);
 }
 
 .inspect {
@@ -182,15 +226,15 @@ const stateLabel = computed(() => {
   gap: var(--space-1);
   margin: var(--space-1) 0 var(--space-0-5);
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxxs);
   line-height: 16px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .tool-row:hover .inspect,
@@ -199,8 +243,8 @@ const stateLabel = computed(() => {
 }
 
 .inspect:hover {
-  background: var(--interactive-bg-hover-solid);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover-solid);
+  color: rgb(var(--text-1));
 }
 
 .sr-only {

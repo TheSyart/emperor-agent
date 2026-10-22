@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { THEMES, DEFAULT_THEME, isTheme, applyTheme } from './tokens'
+import LEGACY_KEYS from './legacy-keys.json'
+import RETIRED from './retired-tokens.json'
+
+/**
+ * DS-01: three token layers.
+ *   L1 primitives.css      theme-agnostic raw values
+ *   L2 semantic.*.css      what colours mean (dark default, light)
+ *   L3 components.css      tokens owned by one component family
+ * DS-02 retired the pre-0.2 names (retired-tokens.json lists each with its
+ * replacement) and deleted the alias layer.
+ */
 
 function fakeDoc() {
   return { documentElement: { dataset: {} as Record<string, string> } }
@@ -10,11 +22,29 @@ function readThemeFile(name: string): string {
   return readFileSync(new URL(`./${name}`, import.meta.url), 'utf-8')
 }
 
-function tokenKeys(css: string): string[] {
-  return [...css.matchAll(/(--[\w-]+)(?=\s*:)/g)].map((m) => m[1])
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '')
 }
 
-describe('theme tokens', () => {
+function declarations(css: string): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of stripComments(css).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g))
+    out.set(m[1]!, m[2]!.replace(/\s+/g, ' ').trim())
+  return out
+}
+
+function references(value: string): string[] {
+  return [...value.matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]!)
+}
+
+const LAYER_FILES = [
+  'primitives.css',
+  'semantic.dark.css',
+  'semantic.light.css',
+  'components.css',
+]
+
+describe('theme registry', () => {
   it('defaults to dark and lists both themes', () => {
     expect(DEFAULT_THEME).toBe('dark')
     expect(THEMES).toEqual(['dark', 'light'])
@@ -40,247 +70,212 @@ describe('theme tokens', () => {
     expect(applied).toBe('dark')
     expect(doc.documentElement.dataset.theme).toBe('dark')
   })
+})
 
-  it('dark.css and light.css define identical token key sets', () => {
-    const dark = tokenKeys(readThemeFile('dark.css'))
-    const light = tokenKeys(readThemeFile('light.css'))
-    expect(dark.length).toBeGreaterThan(0)
-    expect([...dark].sort()).toEqual([...light].sort())
+describe('token layers (DS-01)', () => {
+  const primitives = declarations(readThemeFile('primitives.css'))
+  const dark = declarations(readThemeFile('semantic.dark.css'))
+  const light = declarations(readThemeFile('semantic.light.css'))
+  const components = declarations(readThemeFile('components.css'))
+  const renames: Record<string, string> = Object.assign(
+    {},
+    ...Object.values(RETIRED.renames),
+  )
+  const retired = new Set([
+    ...Object.keys(renames),
+    ...Object.keys(RETIRED.removed),
+  ])
+
+  it('dark and light semantic tokens have the same key set', () => {
+    expect(dark.size).toBeGreaterThan(40)
+    expect([...dark.keys()].sort()).toEqual([...light.keys()].sort())
   })
 
-  it.each(['dark.css', 'light.css'])(
-    '%s has no stray comment terminators (sheet must parse as one rule)',
-    (f) => {
-      // A `*/` inside prose (e.g. "border-l*/…") closes the header early and
-      // silently drops the whole token table in the browser.
-      const stripped = readThemeFile(f)
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .trim()
-      expect(stripped.startsWith(':root')).toBe(true)
-      expect(stripped.match(/\{/g)).toHaveLength(1)
-      expect(stripped.endsWith('}')).toBe(true)
+  it.each(LAYER_FILES)(
+    '%s parses as whole rules (no stray comment terminators)',
+    (file) => {
+      // A `*/` inside prose closes a comment early and silently drops rules.
+      const css = stripComments(readThemeFile(file))
+      const opens = css.match(/\{/g)?.length ?? 0
+      const closes = css.match(/\}/g)?.length ?? 0
+      expect(opens).toBeGreaterThan(0)
+      expect(opens).toBe(closes)
+      expect(css).not.toContain('*/')
     },
   )
 
-  it('styles.css no longer carries :root token blocks', () => {
-    const entry = readThemeFile('../styles.css')
-    expect(entry).not.toContain(':root')
+  it('styles.css carries no :root token blocks', () => {
+    expect(readThemeFile('../styles.css')).not.toContain(':root')
   })
 
-  const REQUIRED_KEYS = [
-    '--radius-xs',
-    '--radius-md',
-    '--radius-lg',
-    '--radius-xl',
-    '--shadow-color',
-    '--shadow-sm',
-    '--shadow-md',
-    '--shadow-lg',
-    '--font-size-2xs',
-    '--font-size-xs',
-    '--font-size-sm',
-    '--font-size-md',
-    '--font-size-lg',
-    '--space-1',
-    '--space-2',
-    '--space-3',
-    '--space-4',
-    '--space-5',
-    '--space-6',
-    '--tone-cyan',
-    '--tone-violet',
-    '--tone-blue',
-    /* grok 式文本层级(unitless alpha,驱动 fg/二级/三级文字) */
-    '--text-primary',
-    '--text-secondary',
-    '--text-tertiary',
-  ]
+  it('accounts for every pre-0.2 token name: still defined, or retired', () => {
+    const defined = new Set([
+      ...primitives.keys(),
+      ...dark.keys(),
+      ...components.keys(),
+    ])
+    const missing = (LEGACY_KEYS as string[]).filter(
+      (key) => !defined.has(key) && !retired.has(key),
+    )
+    expect(missing).toEqual([])
+    const resurrected = [...retired].filter((key) => defined.has(key))
+    expect(resurrected).toEqual([])
+  })
 
-  it.each(['dark.css', 'light.css'])(
-    '%s defines the full token ladder',
-    (f) => {
-      const keys = tokenKeys(readThemeFile(f))
-      for (const required of REQUIRED_KEYS) {
-        expect(keys).toContain(required)
+  it('defines every token name in exactly one layer', () => {
+    const owners = new Map<string, string[]>()
+    for (const [file, table] of [
+      ['primitives', primitives],
+      ['semantic', dark],
+      ['components', components],
+    ] as const)
+      for (const key of table.keys())
+        owners.set(key, [...(owners.get(key) ?? []), file])
+    const duplicated = [...owners].filter(([, files]) => files.length > 1)
+    expect(duplicated).toEqual([])
+  })
+
+  it('keeps primitives raw and theme-agnostic', () => {
+    const css = stripComments(readThemeFile('primitives.css'))
+    expect(css).not.toContain('data-theme')
+    for (const [key, value] of primitives)
+      for (const ref of references(value))
+        expect(primitives.has(ref), `${key} → ${ref}`).toBe(true)
+  })
+
+  it('lets semantic tokens reference only primitives or other semantic tokens', () => {
+    for (const table of [dark, light])
+      for (const [key, value] of table)
+        for (const ref of references(value))
+          expect(primitives.has(ref) || dark.has(ref), `${key} → ${ref}`).toBe(
+            true,
+          )
+  })
+
+  it('lets component tokens reference only semantic or other component tokens and scales', () => {
+    const colourPrimitive = /^--(?:nb|ink|paper|gold)-/
+    for (const [key, value] of components)
+      for (const ref of references(value)) {
+        expect(colourPrimitive.test(ref), `${key} → ${ref}`).toBe(false)
+        expect(
+          dark.has(ref) || components.has(ref) || primitives.has(ref),
+          `${key} → ${ref}`,
+        ).toBe(true)
       }
-    },
-  )
-
-  const DSH_KEYS = [
-    /* dsh neutral-bluish scale */
-    ...[
-      '00',
-      '50',
-      '60',
-      '75',
-      '100',
-      '150',
-      '200',
-      '300',
-      '400',
-      '500',
-      '600',
-      '700',
-      '750',
-      '800',
-      '850',
-      '875',
-      '900',
-      '950',
-      '1000',
-    ].map((step) => `--nb-${step}`),
-    /* surfaces */
-    '--bg-base',
-    '--bg-layer-1',
-    '--bg-layer-2',
-    '--bg-layer-3',
-    '--sidebar-fill',
-    '--menu-fill',
-    '--selector-fill',
-    '--tip-fill',
-    '--code-block-bg',
-    '--code-banner-bg',
-    '--inline-code-bg',
-    '--tooltip-bg',
-    '--toast-bg',
-    /* translucent overlays */
-    '--border-l1',
-    '--border-l2',
-    '--border-l3',
-    '--border-l4',
-    '--interactive-bg-hover',
-    '--interactive-bg-active',
-    '--mask-1',
-    /* labels */
-    '--label-primary',
-    '--label-secondary',
-    '--label-tertiary',
-    '--label-caption',
-    '--label-dimmed',
-    /* gold accent family */
-    '--accent-fill',
-    '--accent-hover',
-    '--accent-strong',
-    '--accent-soft',
-    '--bubble-user',
-    '--focus-ring',
-    /* states */
-    '--approval',
-    '--approval-strong',
-    '--approval-soft',
-    '--ok-soft',
-    '--warn-soft',
-    '--danger-soft',
-    /* semantic state family (settings StatusBadge / diagnostics) */
-    ...['ok', 'warn', 'error'].flatMap((tone) => [
-      `--state-${tone}`,
-      `--state-${tone}-soft`,
-      `--state-${tone}-label`,
-    ]),
-    /* code highlight */
-    '--code-keyword',
-    '--code-string',
-    '--code-function',
-    '--code-comment',
-    /* shadows / radii / type */
-    '--shadow-lv1',
-    '--shadow-lv2',
-    '--shadow-lv3',
-    '--radius-row',
-    '--radius-cell',
-    '--radius-card',
-    '--radius-takeover',
-    '--radius-composer',
-    '--radius-modal',
-    '--font-sans',
-    '--font-mono',
-    '--font-xs',
-    '--font-s',
-    '--font-base',
-    '--font-md',
-    '--font-code',
-    '--ease-in-out',
-    '--duration-ds',
-  ]
-
-  it.each(['dark.css', 'light.css'])('%s defines the dsh token set', (f) => {
-    const keys = tokenKeys(readThemeFile(f))
-    for (const required of DSH_KEYS) expect(keys).toContain(required)
   })
 
-  it.each(['dark.css', 'light.css'])(
-    '%s stores solid colors as RGB triplets or var() aliases',
-    (f) => {
-      const css = readThemeFile(f)
-      const colorKeys = [
-        '--nb-950',
-        '--accent-fill',
-        '--accent-soft',
-        '--bubble-user',
-        '--approval',
-        '--code-keyword',
-        '--bg',
-        '--bg-elevated',
-        '--bg-inset',
-        '--fg',
-        '--border',
-        '--border-strong',
-        '--accent',
-        '--accent-fg',
-        '--brand',
-        '--danger',
-        '--warn',
-        '--ok',
-        '--shadow-color',
-        '--tone-cyan',
-        '--tone-violet',
-        '--tone-blue',
-        '--bg-base',
-        '--label-primary',
-        '--state-ok',
-        '--state-ok-soft',
-        '--state-ok-label',
-        '--state-warn',
-        '--state-warn-soft',
-        '--state-warn-label',
-        '--state-error',
-        '--state-error-soft',
-        '--state-error-label',
-      ]
-      for (const key of colorKeys) {
-        const re = new RegExp(
-          `${key}:\\s*(?:\\d+ \\d+ \\d+|var\\(--[\\w-]+\\))\\s*;`,
-        )
-        expect(css, `${key} must be an RGB triplet or alias`).toMatch(re)
-      }
-    },
-  )
-
-  it('keeps legacy keys as aliases of the dsh tokens', () => {
-    for (const f of ['dark.css', 'light.css']) {
-      const css = readThemeFile(f)
-      expect(css).toContain('--bg: var(--bg-base);')
-      expect(css).toContain('--fg: var(--label-primary);')
-      expect(css).toContain('--accent: var(--accent-fill);')
-      expect(css).toContain('--shadow-lg: var(--shadow-lv3);')
-      expect(css).toContain('--radius-lg: var(--radius-card);')
+  it('renames retired names only onto semantic tokens, component tokens or scales', () => {
+    const colourPrimitive = /^--(?:ink|paper|gold)-/
+    for (const [key, next] of Object.entries(renames)) {
+      expect(colourPrimitive.test(next), `${key} → ${next}`).toBe(false)
+      expect(
+        dark.has(next) || components.has(next) || primitives.has(next),
+        `${key} → ${next}`,
+      ).toBe(true)
     }
   })
 
-  it('applies the dsh palette with Emperor gold in place of dsh blue', () => {
-    const dark = readThemeFile('dark.css')
-    const light = readThemeFile('light.css')
-    expect(dark).toContain('--bg-base: var(--nb-950);')
-    expect(dark).toContain('--nb-950: 21 21 23;')
-    expect(dark).toContain('--brand: 203 158 72;')
-    expect(dark).toContain('--accent-fill: 214 172 92;')
-    expect(light).toContain('--bg-base: var(--nb-00);')
-    expect(light).toContain('--label-secondary: var(--nb-700);')
-    expect(light).toContain('--brand: 155 111 35;')
-    expect(light).toContain('--accent-fill: 170 122 38;')
-    // No dsh deepseek blue survives in either table.
-    for (const css of [dark, light]) {
-      expect(css).not.toMatch(/65 118 230|103 158 254|86 134 254/)
+  it('stores solid semantic colours as RGB triplets or var() references', () => {
+    const translucent =
+      /^--(?:surface-hover|surface-active|stroke-[1-4]|stroke-inverted|scrim|elev-)/
+    for (const [key, value] of dark) {
+      if (translucent.test(key)) continue
+      expect(value, key).toMatch(/^(?:\d+ \d+ \d+|var\(--[\w-]+\))$/)
     }
+  })
+
+  it('keeps the target palette and scales in primitives', () => {
+    expect(primitives.get('--ink-50')).toBe('20 20 19')
+    expect(primitives.get('--gold-500')).toBe('212 170 94')
+    expect(primitives.get('--paper-50')).toBe('246 245 242')
+    expect(primitives.get('--r-md')).toBe('12px')
+    expect(primitives.get('--type-body')).toBe('15px / 26px')
+    expect(primitives.get('--motion-base')).toBe('200ms')
+  })
+})
+
+describe('readability of the semantic palette (DS-01 tests 4 and 8)', () => {
+  const primitives = declarations(readThemeFile('primitives.css'))
+  const themes = {
+    dark: declarations(readThemeFile('semantic.dark.css')),
+    light: declarations(readThemeFile('semantic.light.css')),
+  }
+
+  function rgb(theme: 'dark' | 'light', key: string): [number, number, number] {
+    let value = themes[theme].get(key) ?? primitives.get(key) ?? ''
+    for (let i = 0; i < 6 && value.startsWith('var('); i++) {
+      const ref = value.slice(4, -1)
+      value = themes[theme].get(ref) ?? primitives.get(ref) ?? ''
+    }
+    const m = value.match(/^(\d+) (\d+) (\d+)$/)
+    if (!m) throw new Error(`${theme} ${key} is not a solid colour: ${value}`)
+    return [Number(m[1]), Number(m[2]), Number(m[3])]
+  }
+
+  function luminance([r, g, b]: [number, number, number]): number {
+    const channel = (c: number) => {
+      const v = c / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  }
+
+  function contrast(theme: 'dark' | 'light', fg: string, bg: string): number {
+    const [a, b] = [luminance(rgb(theme, fg)), luminance(rgb(theme, bg))]
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+  }
+
+  it.each(['dark', 'light'] as const)(
+    'keeps %s text readable on panels and raised fills',
+    (theme) => {
+      for (const surface of ['--surface-base', '--surface-raised'])
+        for (const text of ['--text-1', '--text-2']) {
+          expect(
+            contrast(theme, text, surface),
+            `${text} on ${surface}`,
+          ).toBeGreaterThanOrEqual(4.5)
+        }
+      expect(
+        contrast(theme, '--text-3', '--surface-base'),
+      ).toBeGreaterThanOrEqual(4.5)
+      // Recorded exception: metadata on raised fills may sit at 4.3:1.
+      expect(
+        contrast(theme, '--text-3', '--surface-raised'),
+      ).toBeGreaterThanOrEqual(4.3)
+      expect(
+        contrast(theme, '--text-link', '--surface-base'),
+      ).toBeGreaterThanOrEqual(4.5)
+    },
+  )
+
+  it('gives the light theme four distinct surfaces (canvas, panel, raised, selected)', () => {
+    const values = [
+      '--surface-canvas',
+      '--surface-base',
+      '--surface-raised',
+      '--surface-selected',
+    ].map((key) => rgb('light', key).join(' '))
+    expect(new Set(values).size).toBe(4)
+  })
+})
+
+describe('colour primitives stay out of component CSS (DS-01 test 6)', () => {
+  const root = new URL('..', import.meta.url).pathname
+  function files(dir: string): string[] {
+    return readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) return files(path)
+      return /\.(css|vue)$/.test(name) ? [path] : []
+    })
+  }
+
+  it('never uses the target ink / paper / gold primitives outside theme/', () => {
+    const offenders = files(root)
+      .filter((path) => !relative(root, path).startsWith('theme/'))
+      .filter((path) =>
+        /var\(--(?:ink|paper|gold)-\d+/.test(readFileSync(path, 'utf8')),
+      )
+      .map((path) => relative(root, path))
+    expect(offenders).toEqual([])
   })
 })

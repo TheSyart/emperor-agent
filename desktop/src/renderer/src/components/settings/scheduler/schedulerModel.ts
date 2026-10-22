@@ -73,6 +73,7 @@ export function schedulerRunStatusLabel(status?: string | null): string {
   if (status === 'skipped') return '已跳过'
   if (status === 'cancelled') return '已取消'
   if (status === 'interrupted') return '已中断'
+  if (status === 'blocked') return '需要审批，已拒绝'
   if (status === 'running') return '运行中'
   return status || '-'
 }
@@ -83,7 +84,12 @@ export type SchedulerTone = 'ok' | 'warn' | 'error' | 'neutral' | 'accent'
 export function schedulerRunStatusTone(status?: string | null): SchedulerTone {
   if (status === 'ok') return 'ok'
   if (status === 'error') return 'error'
-  if (status === 'interrupted' || status === 'cancelled') return 'warn'
+  if (
+    status === 'interrupted' ||
+    status === 'cancelled' ||
+    status === 'blocked'
+  )
+    return 'warn'
   if (status === 'running') return 'accent'
   return 'neutral'
 }
@@ -202,18 +208,32 @@ export type SchedulerScheduleInput =
   | { kind: 'every'; everyMs: number }
   | { kind: 'cron'; expr: string; tz: string }
 
+/**
+ * What stops the schedule from being saved, or null (KRN-10, UI-27): a
+ * 「指定时间」 needs a date and time, later than now.
+ */
+export function scheduleProblem(
+  draft: Pick<SchedulerJobDraft, 'scheduleKind' | 'atLocal'>,
+  now: number = Date.now(),
+): string | null {
+  if (draft.scheduleKind !== 'at') return null
+  const atMs = draft.atLocal ? new Date(draft.atLocal).getTime() : Number.NaN
+  if (!Number.isFinite(atMs)) return '请选择日期和时间'
+  if (atMs <= now) return '指定时间必须晚于现在'
+  return null
+}
+
 export function buildSchedule(
   draft: Pick<
     SchedulerJobDraft,
     'scheduleKind' | 'atLocal' | 'everyMinutes' | 'cronExpr' | 'cronTz'
   >,
-  now: number = Date.now(),
 ): SchedulerScheduleInput {
   if (draft.scheduleKind === 'at') {
-    return {
-      kind: 'at',
-      atMs: draft.atLocal ? new Date(draft.atLocal).getTime() : now + HOUR_MS,
-    }
+    const atMs = draft.atLocal ? new Date(draft.atLocal).getTime() : Number.NaN
+    // No silent 「1 小时后」 (UI-27): the form asks for a date first.
+    if (!Number.isFinite(atMs)) throw new Error('请选择日期和时间')
+    return { kind: 'at', atMs }
   }
   if (draft.scheduleKind === 'cron') {
     return {
@@ -229,10 +249,10 @@ export function buildSchedule(
 }
 
 /** `scheduler.createJob` input (always a main-agent turn). */
-export function createJobInput(draft: SchedulerJobDraft, now = Date.now()) {
+export function createJobInput(draft: SchedulerJobDraft) {
   return {
     name: draft.name.trim() || DEFAULT_JOB_NAME,
-    schedule: buildSchedule(draft, now),
+    schedule: buildSchedule(draft),
     payload: {
       kind: 'agent_turn' as const,
       message: draft.message.trim(),
@@ -267,14 +287,10 @@ export function editablePayload(job: SchedulerJob, draft: SchedulerJobDraft) {
 }
 
 /** `scheduler.updateJob` patch for an editable job. */
-export function updateJobInput(
-  job: SchedulerJob,
-  draft: SchedulerJobDraft,
-  now = Date.now(),
-) {
+export function updateJobInput(job: SchedulerJob, draft: SchedulerJobDraft) {
   return {
     name: draft.name.trim() || job.name,
-    schedule: buildSchedule(draft, now),
+    schedule: buildSchedule(draft),
     payload: editablePayload(job, draft),
     deleteAfterRun: draft.deleteAfterRun,
     misfirePolicy: draft.misfirePolicy,

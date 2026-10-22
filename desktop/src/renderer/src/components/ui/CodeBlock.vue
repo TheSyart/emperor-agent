@@ -54,7 +54,7 @@ const { copied, copy } = useCopyFeedback(() => trimmed.value)
 <style scoped>
 .ds-code {
   position: relative;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -63,7 +63,7 @@ const { copied, copy } = useCopyFeedback(() => trimmed.value)
   position: sticky;
   top: 0;
   z-index: var(--z-raised);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
   border-top-left-radius: var(--radius-card);
   border-top-right-radius: var(--radius-card);
 }
@@ -88,7 +88,7 @@ const { copied, copy } = useCopyFeedback(() => trimmed.value)
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .copy {
@@ -96,13 +96,13 @@ const { copied, copy } = useCopyFeedback(() => trimmed.value)
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
   cursor: pointer;
 }
 
 .copy:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 pre {

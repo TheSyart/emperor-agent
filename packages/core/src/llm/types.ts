@@ -121,6 +121,9 @@ export interface ImageAttachmentRef {
   mediaType: string
   /** Stored byte length. */
   bytes: number
+  /** Pixel size when known; prices the image in tokens (KRN-05). */
+  width?: number
+  height?: number
 }
 
 /** A durable raster image reference (user content only in practice). */

@@ -49,6 +49,10 @@ export const DEFAULT_BLOCKED_AFTER_CONSECUTIVE_ROUNDS = 3
 export interface GoalServiceOptions {
   /** Round cap used when a create request omits its own (dsh default 256). */
   defaultMaxGoalRounds?: number
+  /** Host-owned current artifact proof, never an executor self-report. */
+  verifyCompletion?: (agent: Agent, ref: GoalRef) => Promise<void>
+  completionCurrent?: (agent: Agent, ref: GoalRef) => boolean
+  requiresCompletionVerification?: (agent: Agent, ref: GoalRef) => boolean
   /** Minimum admitted rounds before the model may self-report `blocked` (dsh-tool-goal default 3). */
   blockedAfterConsecutiveRounds?: number
 }
@@ -144,7 +148,9 @@ export class GoalService {
   private readonly caches = new WeakMap<Session, GoalCache>()
   private readonly listeners = new Set<GoalChangeListener>()
 
-  constructor(options: GoalServiceOptions = {}) {
+  private readonly completionProofs = new WeakMap<Agent, GoalRef>()
+
+  constructor(private readonly options: GoalServiceOptions = {}) {
     this.defaultMaxGoalRounds = resolveMaxGoalRounds(
       options.defaultMaxGoalRounds ?? DEFAULT_MAX_GOAL_ROUNDS,
     )
@@ -413,8 +419,30 @@ export class GoalService {
     )
   }
 
+  async verifyCompletion(agent: Agent, ref: GoalRef): Promise<void> {
+    this.completionProofs.delete(agent)
+    this.expectCurrent(this.prepare(agent), ref)
+    await this.options.verifyCompletion?.(agent, ref)
+    this.expectCurrent(this.prepare(agent), ref)
+    this.completionProofs.set(agent, { id: ref.id, revision: ref.revision })
+  }
+
   /** Mark a current non-complete goal complete and disarm it. */
   complete(agent: Agent, ref: GoalRef): GoalView {
+    this.expectCurrent(this.prepare(agent), ref)
+    const proof = this.completionProofs.get(agent)
+    this.completionProofs.delete(agent)
+    if (
+      this.options.verifyCompletion &&
+      (this.options.requiresCompletionVerification?.(agent, ref) ?? true) &&
+      (proof?.id !== ref.id ||
+        proof.revision !== ref.revision ||
+        this.options.completionCurrent?.(agent, ref) === false)
+    )
+      throw new GoalError(
+        'required external delegation verification is missing; verify current artifacts before completing',
+        'GOAL_REQUIRED_DELEGATIONS',
+      )
     return this.transition(
       agent,
       ref,

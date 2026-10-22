@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * SettingsModal — dsh settings panel (800 × min(800, 100vh−48), r24,
- * layer-2, lv3) over a blurred mask. Open state and the active section are
+ * SettingsModal — the settings panel (UI-S07: 880 × min(720, 100vh − 80),
+ * r-xl, lv3) over a blurred mask: the nav on the canvas color, the page on
+ * the base panel. Open state and the active section are
  * the route query (`?settings=<section>`, see useSettingsRoute), so the
  * conversation underneath keeps its session and scroll.
  *
  * Mounted once in App.vue as `<SettingsModal />` (no props). Close paths:
  * the header close button, a mask click and Escape. Escape goes through the
  * shared modal stack (ui/modalStack.ts), so a dialog opened on top of the
- * panel (ui/Modal) closes first and alone. Focus moves to the panel on open
- * and returns to the previously focused element on close.
+ * panel (ui/Modal) closes first and alone. Focus (ui/useFocusTrap) moves to
+ * the panel on open, Tab stays inside it, the app behind is inert, and
+ * closing returns focus to the previously focused element.
  *
- * Layout: 188px nav rail + content column. The content column is a 54px
- * header (section title, the section's header actions, close) over the
- * options area (padding 0 24 24, content ≤ 720px, scrolls vertically).
+ * Layout: 200px nav (four groups, SettingsNav; 子智能体 carries a dot while
+ * Claude Code or Codex has a new version, AGT-13) + content column. The
+ * content column is a 54px header (16/600 section title, the section's
+ * header actions, close) over the options area (padding 0 24 24, content ≤
+ * 720px, scrolls vertically).
  * 定时任务 / 插件 / Skills / MCP are full pages now (/scheduler,
  * /capabilities/:tab); a `?settings=` link to one of them is redirected there by
  * the router guard before the modal would open.
@@ -25,6 +29,12 @@
  * the section (its 管理 button goes away), it moves to that button; left by
  * that button, it returns to the panel. A deep link leaves it alone.
  *
+ * Unsaved edits (ui/useDirtyGuard): editors inside register with the
+ * guard this shell provides. Any navigation that would change the open
+ * section or sub page — close (button, mask, Escape), another nav cell, the
+ * breadcrumb, a link — asks 「放弃未保存的修改？」 first and stays put on
+ * 继续编辑 (a router guard, so every path is covered).
+ *
  * Section bodies are async chunks (`<Name>Section.vue`), each owning its
  * layout: they build on components/settings/ui (SettingsSection & co.) and
  * publish header actions through useSettingsHeader — the shell never styles
@@ -35,36 +45,76 @@ import {
   computed,
   defineAsyncComponent,
   nextTick,
+  onBeforeUnmount,
   ref,
   watch,
   type Component,
 } from 'vue'
+import { useRouter, type LocationQuery } from 'vue-router'
 import { DsChevronRight, DsClose } from '../icons/ds'
+import IconButton from '../ui/IconButton.vue'
 import { useModalLayer } from '../ui/modalStack'
+import { provideDirtyGuard } from '../ui/useDirtyGuard'
+import { useFocusTrap } from '../ui/useFocusTrap'
 import SettingsHeaderBar from './SettingsHeaderBar.vue'
 import SettingsNav from './SettingsNav.vue'
 import { provideSettingsHeader } from './settingsHeader'
 import {
   SETTINGS_SECTIONS,
+  modalSettingsSection,
+  settingsAlias,
   type SettingsModalSection,
 } from './settingsSections'
-import { useSettingsRoute } from './useSettingsRoute'
+import { settingsPageKey, useSettingsRoute } from './useSettingsRoute'
 
 const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   general: defineAsyncComponent(() => import('./GeneralSection.vue')),
   model: defineAsyncComponent(() => import('./ModelSection.vue')),
-  hooks: defineAsyncComponent(() => import('./HooksSection.vue')),
+  executors: defineAsyncComponent(() => import('./ExecutorsSection.vue')),
+  memory: defineAsyncComponent(() => import('./MemorySection.vue')),
   computer: defineAsyncComponent(() => import('./ComputerUseSection.vue')),
   browser: defineAsyncComponent(() => import('./BrowserSettingsSection.vue')),
   voice: defineAsyncComponent(() => import('./VoiceSettingsSection.vue')),
-  memory: defineAsyncComponent(() => import('./MemorySection.vue')),
   tokens: defineAsyncComponent(() => import('./TokensSection.vue')),
-  pet: defineAsyncComponent(() => import('./PetSection.vue')),
-  diagnostics: defineAsyncComponent(() => import('./DiagnosticsSection.vue')),
+  advanced: defineAsyncComponent(() => import('./AdvancedSection.vue')),
+}
+
+/** What the modal shows for a query: '' closed, else section/page. */
+function settingsView(query: LocationQuery): string {
+  if (query.settings == null) return ''
+  const page =
+    settingsPageKey(query.page) ?? settingsAlias(query.settings)?.page ?? ''
+  return `${modalSettingsSection(query.settings)}/${page}`
 }
 
 const settings = useSettingsRoute()
 const { open, section } = settings
+// The dot on 子智能体: a new Claude Code or Codex version, or a failed
+// upgrade (AGT-13). Read when the settings open; 子智能体 asks npm itself.
+// Loaded, not imported: it is shared with that section's chunk.
+const executorsMarked = ref(false)
+let markFollowed = false
+watch(
+  open,
+  (isOpen) => {
+    if (!isOpen) return
+    void import('./executors/executorUpgrades').then((module) => {
+      const upgrades = module.useExecutorUpgrades()
+      if (!markFollowed) {
+        markFollowed = true
+        watch(
+          upgrades.attention,
+          (marked) => {
+            executorsMarked.value = marked
+          },
+          { immediate: true },
+        )
+      }
+      return upgrades.load()
+    })
+  },
+  { immediate: true },
+)
 const header = provideSettingsHeader({
   page: () => settings.page.value,
   go: (page) => void settings.openPage(page),
@@ -72,10 +122,10 @@ const header = provideSettingsHeader({
 
 const titleId = 'settings-modal-title'
 const sectionTitleId = 'settings-section-title'
+const overlay = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const options = ref<HTMLElement | null>(null)
 const crumb = ref<HTMLButtonElement | null>(null)
-let restoreFocus: HTMLElement | null = null
 
 const body = computed(() => SECTION_BODIES[section.value])
 const sectionLabel = computed(
@@ -95,7 +145,19 @@ function select(target: SettingsModalSection) {
   void settings.selectSection(target)
 }
 
+const guard = provideDirtyGuard()
+const removeGuard = useRouter().beforeEach((to, from) =>
+  !guard.dirty.value || settingsView(to.query) === settingsView(from.query)
+    ? true
+    : guard.confirmDiscard(),
+)
+onBeforeUnmount(removeGuard)
+
 useModalLayer(open, close)
+useFocusTrap(panel, open, {
+  initialFocus: () => panel.value,
+  layer: () => overlay.value,
+})
 
 watch(
   () => header.page.value,
@@ -114,30 +176,11 @@ watch(
     })
   },
 )
-
-watch(
-  open,
-  (value, previous) => {
-    if (typeof document === 'undefined') return
-    if (value) {
-      if (!previous) {
-        const active = document.activeElement
-        restoreFocus = active instanceof HTMLElement ? active : null
-      }
-      void nextTick(() => panel.value?.focus({ preventScroll: true }))
-    } else {
-      const target = restoreFocus
-      restoreFocus = null
-      if (target?.isConnected) target.focus({ preventScroll: true })
-    }
-  },
-  { immediate: true },
-)
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="settings-overlay" role="presentation">
+    <div v-if="open" ref="overlay" class="settings-overlay" role="presentation">
       <div class="settings-mask" aria-hidden="true" @click="close" />
       <div
         ref="panel"
@@ -149,7 +192,12 @@ watch(
         data-testid="settings-modal"
       >
         <div class="settings-layout">
-          <SettingsNav :active="section" :title-id="titleId" @select="select" />
+          <SettingsNav
+            :active="section"
+            :title-id="titleId"
+            :marks="{ executors: executorsMarked }"
+            @select="select"
+          />
           <div class="settings-content">
             <div class="settings-header">
               <h2 :id="sectionTitleId" class="section-title">
@@ -178,15 +226,14 @@ watch(
               </h2>
               <div class="header-actions">
                 <SettingsHeaderBar :actions="header.actions.value" />
-                <button
-                  type="button"
+                <IconButton
                   class="settings-close"
-                  aria-label="关闭设置"
-                  title="关闭"
+                  label="关闭设置"
+                  tooltip="关闭"
                   @click="close"
                 >
                   <DsClose :size="14" />
-                </button>
+                </IconButton>
               </div>
             </div>
             <div
@@ -219,21 +266,21 @@ watch(
 .settings-mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
 .settings-panel {
   container: settings-panel / inline-size;
   position: relative;
-  width: 800px;
-  height: min(800px, calc(100vh - 48px));
+  width: 880px;
+  height: min(720px, calc(100vh - 80px));
   max-width: calc(100vw - 48px);
   overflow: hidden;
-  border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  border-radius: var(--r-xl);
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   outline: none;
 }
 
@@ -249,6 +296,7 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: rgb(var(--surface-base));
 }
 
 /* dsh .Header: h54, pad (20,14,8,10); title inset to the 24px content edge. */
@@ -270,8 +318,8 @@ watch(
   overflow: hidden;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -290,13 +338,13 @@ watch(
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   cursor: pointer;
 }
 
 .section-crumb:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .section-crumb:focus-visible {
@@ -306,7 +354,7 @@ watch(
 
 .section-crumb-separator {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .section-page {
@@ -323,31 +371,6 @@ watch(
   margin-left: auto;
 }
 
-/* dsh .close: 28×28 round, 14px glyph. */
-.settings-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-primary));
-  cursor: pointer;
-}
-
-.settings-close:hover {
-  background: var(--interactive-bg-hover);
-}
-
-.settings-close:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 2px;
-}
-
 /* dsh .options: pad (0,24,24), scrolls. The right padding widens past 24px
    once the column exceeds 720 + 48px, capping the content at 720px while
    the scrollbar stays at the panel edge. */
@@ -361,7 +384,7 @@ watch(
   overflow-y: auto;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 @container settings-panel (max-width: 639px) {

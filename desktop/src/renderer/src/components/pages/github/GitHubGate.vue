@@ -12,7 +12,7 @@
 import { useRouter } from 'vue-router'
 import type { PullRequestBrowserStatus } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import { useSettingsRoute } from '../../settings/useSettingsRoute'
 import PullRequestUnavailable from '../pulls/PullRequestUnavailable.vue'
 import { GITHUB_PLUGIN_LOCATION } from './githubModel'
@@ -39,8 +39,9 @@ function openPlugin(): void {
     title="GitHub 插件已停用"
     description="启用后，可以在这里查看 Issue 和 CI 运行记录。"
     data-github-disabled
+    framed
   >
-    <Button size="sm" variant="outline" @click="openPlugin">
+    <Button size="sm" variant="secondary" @click="openPlugin">
       打开 GitHub 插件
     </Button>
   </EmptyState>
@@ -50,7 +51,7 @@ function openPlugin(): void {
     :busy="busy"
     :subject="subject"
     @retry="emit('retry')"
-    @diagnose="openSettings('diagnostics')"
+    @diagnose="openSettings('advanced', 'diagnostics')"
   />
   <p v-else-if="!status" class="hint" role="status">正在检查 GitHub CLI…</p>
   <slot v-else />
@@ -62,6 +63,6 @@ function openPlugin(): void {
   padding-top: var(--space-1);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

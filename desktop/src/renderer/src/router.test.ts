@@ -1,5 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import {
+  reloadUiPreferences,
+  setUiPreference,
+} from './composables/useUiPreferences'
 
 async function makeRouter() {
   const { installRouteGuards, routeRecords } = await import('./router')
@@ -18,6 +22,8 @@ async function resolve(path: string) {
 }
 
 describe('renderer routes', () => {
+  afterEach(() => reloadUiPreferences())
+
   beforeAll(async () => {
     // Cold Vite/SFC transforms are setup work. Keep loading the real views,
     // but finish that work before the short navigation assertions start.
@@ -39,6 +45,8 @@ describe('renderer routes', () => {
     expect(chat.name).toBe('chat')
     expect(chat.params.sessionId).toBe('s_123')
 
+    // UI-S09: the trajectory opens once 设置 › 常规 › 开发者 › 显示轨迹 is on.
+    setUiPreference('showTrajectory', true)
     const trajectory = await resolve('/chat/s_123/trajectory')
     expect(trajectory.name).toBe('trajectory')
     expect(trajectory.params.sessionId).toBe('s_123')
@@ -46,6 +54,14 @@ describe('renderer routes', () => {
     expect((await resolve('/chat')).name).toBe('chat')
     expect((await resolve('/')).path).toBe('/chat')
   }, 10_000)
+
+  it('UI-S09 · 3: a trajectory link while 显示轨迹 is off lands on the chat, without call', async () => {
+    const route = await resolve('/chat/s1/trajectory?call=c1&foo=1')
+    expect(route.name).toBe('chat')
+    expect(route.path).toBe('/chat/s1')
+    expect(route.query).toEqual({ foo: '1' })
+    expect((await resolve('/chat/s1/trajectory')).path).toBe('/chat/s1')
+  })
 
   it('serves the full pages', async () => {
     expect((await resolve('/scheduler')).name).toBe('scheduler')
@@ -73,7 +89,13 @@ describe('renderer routes', () => {
     })
     expect((await resolve('/github/ci')).name).toBe('github-ci')
     expect((await resolve('/github')).name).toBe('github-issues')
-    expect((await resolve('/explore')).name).toBe('explore')
+  })
+
+  it('sends /explore to the recommendations on 能力 (UI-S08 3)', async () => {
+    const route = await resolve('/explore')
+    expect(route.name).toBe('capabilities')
+    expect(route.path).toBe('/capabilities')
+    expect(route.hash).toBe('#recommended')
   })
 
   it('tells conversation routes (workspace column) from pages', async () => {
@@ -86,7 +108,6 @@ describe('renderer routes', () => {
       'pulls',
       'github-issues',
       'github-ci',
-      'explore',
       undefined,
     ])
       expect(isConversationRoute(name)).toBe(false)
@@ -139,31 +160,47 @@ describe('renderer routes', () => {
   )
 
   it.each([
-    ['/settings', 'general'],
-    ['/settings/model', 'model'],
-    ['/settings/appearance', 'general'],
-    ['/settings/archived', 'general'],
-    ['/settings/hooks', 'hooks'],
-    ['/model', 'model'],
+    ['/settings', 'general', undefined],
+    ['/settings/model', 'model', undefined],
+    ['/settings/appearance', 'general', undefined],
+    ['/settings/archived', 'general', 'archived'],
+    // Hooks and 诊断 are sub pages of 高级; 桌宠 is a switch in 常规 (UI-S07).
+    ['/settings/hooks', 'advanced', 'hooks'],
+    ['/settings/diagnostics', 'advanced', 'diagnostics'],
+    ['/model', 'model', undefined],
     // 配置 (USER.local.md) is edited in 记忆 › 用户档案 now.
-    ['/configs', 'memory'],
-    ['/settings/configs', 'memory'],
-    ['/pet', 'pet'],
-    ['/memory', 'memory'],
-    ['/tokens', 'tokens'],
+    ['/configs', 'memory', undefined],
+    ['/settings/configs', 'memory', undefined],
+    ['/pet', 'general', undefined],
+    ['/memory', 'memory', undefined],
+    ['/tokens', 'tokens', undefined],
   ])(
     'redirects legacy page %s into the settings modal (%s)',
-    async (path, section) => {
+    async (path, section, page) => {
       const route = await resolve(path)
       expect(route.path).toBe('/chat')
       expect(route.query.settings).toBe(section)
+      expect(route.query.page).toBe(page)
     },
   )
 
   it('keeps the settings modal for sections that stayed there', async () => {
-    const route = await resolve('/chat/s1?settings=hooks')
+    const route = await resolve('/chat/s1?settings=model&foo=1')
     expect(route.path).toBe('/chat/s1')
-    expect(route.query.settings).toBe('hooks')
+    expect(route.query).toEqual({ settings: 'model', foo: '1' })
+  })
+
+  it.each([
+    ['/chat/s1?settings=hooks', { settings: 'advanced', page: 'hooks' }],
+    [
+      '/chat/s1?settings=diagnostics&foo=1',
+      { settings: 'advanced', page: 'diagnostics', foo: '1' },
+    ],
+    ['/chat/s1?settings=pet&page=detail', { settings: 'general' }],
+  ])('opens the folded section %s where it lives now', async (path, query) => {
+    const route = await resolve(path)
+    expect(route.path).toBe('/chat/s1')
+    expect(route.query).toEqual(query)
   })
 
   it('redirects the retired team route and unknown paths to chat', async () => {
@@ -184,4 +221,14 @@ describe('renderer routes', () => {
     })
     expect(sessionLocation('')).toEqual({ name: 'chat' })
   })
+})
+it('keeps the external child route rooted without rewriting its identity', async () => {
+  const route = await resolve('/chat/78abd5498fc6469f/agents/dlg-retained')
+  expect(route.name).toBe('external-agent')
+  expect(route.params).toEqual({
+    sessionId: '78abd5498fc6469f',
+    delegationId: 'dlg-retained',
+  })
+  const { isConversationRoute } = await import('./router')
+  expect(isConversationRoute(route.name)).toBe(true)
 })

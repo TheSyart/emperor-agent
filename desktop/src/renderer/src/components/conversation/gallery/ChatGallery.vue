@@ -3,8 +3,10 @@
  * ChatGallery — dev-only `?chat-gallery` page: ChatTimeline over an
  * in-memory fixture store (no Electron). Query params:
  * - scenario: showcase | notices | workflow | interactions | streaming |
- *   streaming-reasoning | long | links | turn-files | kernel (default
- *   showcase)
+ *   streaming-reasoning | long | links | turn-files | task-files |
+ *   task-files-running | subagent-results | preparing | long-process |
+ *   typography | subagents | subagents-done | subagent-rows | kernel
+ *   (default showcase)
  * - bare: hide the scenario bar (screenshots)
  * - interval: live replay interval in ms (streaming scenarios)
  * `open-subagent` navigates into fixture child sessions (with a back link);
@@ -12,6 +14,7 @@
  */
 import { computed, onBeforeUnmount, provide, ref } from 'vue'
 import ChatTimeline from '../ChatTimeline.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import { LINK_STATUS_KEY } from '../parts/linkStatus'
 import { createFixtureStore } from './fixtureStore'
 import { kernelScenario } from './kernelScenario'
@@ -31,6 +34,8 @@ function buildScenario(id: string): Scenario {
 const scenario = buildScenario(scenarioId)
 const fixture = createFixtureStore(scenario.sessions, {
   ...(scenarioId === 'long' ? { pageMessages: 12 } : {}),
+  // All 500 turns in one window: the scroll check runs over the full list.
+  ...(scenarioId === 'long-process' ? { pageMessages: 2000 } : {}),
 })
 const stack = ref<string[]>([scenario.sessions[0]?.id ?? scenarioId])
 const current = computed(() => stack.value.at(-1) ?? scenarioId)
@@ -99,9 +104,9 @@ provide(LINK_STATUS_KEY, {
       >
     </header>
     <div v-if="stack.length > 1" class="crumbs">
-      <button type="button" class="back" @click="stack = stack.slice(0, -1)">
+      <LinkButton class="back" @click="stack = stack.slice(0, -1)">
         ← 返回父会话
-      </button>
+      </LinkButton>
       <span class="crumb">{{ current }}</span>
     </div>
     <main class="conversation">
@@ -125,8 +130,8 @@ provide(LINK_STATUS_KEY, {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
@@ -137,21 +142,21 @@ provide(LINK_STATUS_KEY, {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font-size: var(--fs-xs);
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .link {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: none;
 }
 
 .link[data-active] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .crumbs {
@@ -161,16 +166,7 @@ provide(LINK_STATUS_KEY, {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
-}
-
-.back {
-  padding: 0;
-  border: none;
-  background: none;
-  color: rgb(var(--accent-strong));
-  font: inherit;
-  cursor: pointer;
+  color: rgb(var(--text-3));
 }
 
 .conversation {

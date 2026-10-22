@@ -1,3 +1,6 @@
+import { createRoutingChildProvider } from '../delegation/workflow-provider'
+import { DelegationInteractionBridge } from '../delegation/interactions'
+import { ExecutorConsentBridge } from '../delegation/consent'
 /**
  * `HarnessHost`: the single composition root of Emperor's agent kernel.
  *
@@ -8,8 +11,16 @@
  * UI through the projector, and answers pending interactions for CoreApi.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
+import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { AttachmentStore, type AttachmentRef } from '../../attachments/store'
 import type { MessageReference } from './message-references'
 import {
@@ -18,53 +29,60 @@ import {
   type ModelConfig,
 } from '../../config/model-config'
 import { createLlmClient } from '../../llm'
+import { assertRequestInvariant } from '../agent/invariant'
+import type { LlmCallConfig } from '../../llm/call-config'
 import type { LlmClient } from '../../llm/client'
 import {
   createUserMessage,
   messageText,
   type UserMessage,
 } from '../../llm/message'
-import { routeFromEntry } from '../../llm/route'
-import type { ContentBlock } from '../../llm/types'
+import { routeFromEntry, type RouteSpec } from '../../llm/route'
+import { imageDimensions } from '../../attachments/image-dimensions'
+import type { ContentBlock, TokenUsage } from '../../llm/types'
+import { entryPrices, ledgerUsage, usageCostUsd } from '../../model/usage-cost'
 import {
   historyPage,
   type HistoryPageOptions,
   type SessionHistoryPage,
 } from '../../session-log/history'
 import type { Session } from '../../session-log/session'
-import { SessionLogStore } from '../../session-log/store'
-import type { SessionEvent } from '../../session-log/types'
+import {
+  LOG_FILE,
+  SessionLogStore,
+  type SessionLogState,
+} from '../../session-log/store'
+import type {
+  SessionEvent,
+  WorkingDirectoryChangeReason,
+} from '../../session-log/types'
 import type { SessionEntry } from '../../sessions/store'
+import { MCPClient } from '../../mcp/client'
+import { ProjectMcpInstances } from '../../mcp/project-instances'
 import type { FileSkillsLoader } from '../../skills/file-loader'
 import { logger } from '../../util/log'
 import { WatchlistService } from '../../watchlist/service'
-import { Agent, type AgentDeps } from '../agent/agent'
+import { Agent, type AgentDeps, type MessageOutcome } from '../agent/agent'
+import { isUserTyped, type HoldReason, type QueueChange } from '../agent/inbox'
 import { createMiddleware, type AgentMiddleware } from '../agent/middleware'
 import { retryMiddleware } from '../agent/retry'
 import {
-  costCapMiddleware,
+  currentModel,
   fallbackConfigMiddleware,
   fallbackErrorMiddleware,
   type ModelPolicySource,
 } from '../agent/model-policy'
 import { PermissionPresetService } from '../approval/presets'
-import {
-  ApprovalService,
-  approvalRepair,
-  type ApprovalPolicy,
-} from '../approval/service'
+import { ApprovalService, type ApprovalPolicy } from '../approval/service'
 import { CompactionEngine } from '../compaction/engine'
 import { ToolResultPruner } from '../compaction/pruner'
-import {
-  createGoalTools,
-  GoalService,
-  installGoal,
-  type InstalledGoal,
-} from '../goal'
+import { GoalService, installGoal, type InstalledGoal } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
+import { containedPluginHookRunner } from '../hooks/contained'
+import { PluginHookHealth } from '../hooks/plugin-health'
+import type { UnsandboxedRequest } from '../../sandbox/consent'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
 import { ComputerUseConfigStore } from '../computer-use/config'
-import { computerUseRepair } from '../computer-use/events'
 import {
   browserStateDir,
   computerUseStateDir,
@@ -82,15 +100,22 @@ import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
 import { SessionProjector, type UiEvent } from '../projection/projector'
-import {
-  createAskUserQuestionTool,
-  UserQuestionService,
-  questionRepair,
-} from '../questions'
+import { createAskUserQuestionTool, UserQuestionService } from '../questions'
+import { UserQuestionDismissed } from '../questions/service'
 import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
-import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
+import {
+  canonicalPath,
+  SandboxPolicyService,
+  type SandboxMode,
+} from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
 import { installSubagents } from '../subagent/tools'
+import { createDelegationTools } from '../delegation/tools'
+import type { DelegationService } from '../delegation/service'
+import { DelegationError, type DelegationOwner } from '../delegation/types'
+import type { DelegationParentContext } from '../delegation/policy'
+import { discoverInstructionFiles } from '../prompt/agent-instructions'
+import { workspaceMutationDomain } from '../../workspace/mutation-coordinator'
 import {
   createSpawnChildProvider,
   installWorkflow,
@@ -122,20 +147,30 @@ import {
 } from '../tools/builtin/mcp-config'
 import { createSchedulerTool } from '../tools/builtin/scheduler'
 import { createTodoTool } from '../tools/builtin/todo'
+import type { WebSearchBackend } from '../tools/builtin/web-search'
 import {
-  createWebSearchTool,
-  installWebSearchPromptSection,
-  type WebSearchBackend,
-} from '../tools/builtin/web-search'
-import { ToolRegistry } from '../tools/registry'
+  ToolRegistry,
+  type WorkspaceAccessLeaseProvider,
+} from '../tools/registry'
+import type { ToolCategory } from '../tools/definition'
+import type {
+  ClaudeCodeHooksDescription,
+  PluginHookScope,
+  PluginHookSet,
+} from '../hooks/claude-code'
 import { createRepeatReminder } from '../tools/repeat-reminder'
 import type { ToolServices } from '../tools/services'
-import { createSpillMiddleware } from '../tools/spill'
+import { createSpillMiddleware, spillSessionDir } from '../tools/spill'
 import { PendingInteractions, type UiAnswers } from './interactions'
 import { installLinkGuidancePromptSection } from './link-guidance'
 import { McpToolBridge } from './mcp-tools'
 import { createSchedulerExecutor } from './scheduler'
-import { currentTurnSource } from './turn-source'
+import { currentTurnInfo, currentTurnSource } from './turn-source'
+import { recordedDescendants, TaskTree, type TaskBudget } from './task-tree'
+import {
+  normalizeTaskBudgetSettings,
+  type TaskBudgetSettings,
+} from '../../config/local-config'
 import {
   createKeptServices,
   type KeptServices,
@@ -147,7 +182,23 @@ import {
   type SessionLineage,
   type SubagentChildView,
 } from './session-views'
+import { REPAIR_CONTRIBUTORS } from './repair-contributors'
+import {
+  DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
+  InvalidSessionError,
+  realTimers,
+  scopeOfEntry,
+  SessionRequiredError,
+  type BackgroundTurnOptions,
+  type BackgroundTurnOutcome,
+  type HostTimers,
+  type InteractionPolicy,
+  type SessionScope,
+  type TurnResult,
+} from './scope'
+import type { ToolSchema } from '../../llm/types'
 import { generateSessionTitle } from './title'
+import { WebTools } from './web-tools'
 
 export type HostEventSink = (
   event: Record<string, unknown>,
@@ -156,25 +207,98 @@ export type HostEventSink = (
 /** Observer of every raw log event of every attached (root or child) agent. */
 export type RawSessionTap = (sessionId: string, event: SessionEvent) => void
 
+/**
+ * What CoreApi plugs into the kernel (KRN-13), registered once through
+ * {@link HarnessHost.extend} instead of reaching into the tool registry,
+ * the hook runner or the Skill loaders.
+ */
+/** How long closing waits for stopped agents to end their turns (UI-S15). */
+const TASK_CLOSE_IDLE_MS = 2_000
+/** How long closing waits for open tasks to be recorded (UI-S15). */
+const TASK_CLOSE_RECORD_MS = 5_000
+
+export interface HostExtensions {
+  /**
+   * Records the files each task changes (watches tool writes, root turns,
+   * and when nothing of a task can go on; UI-S15).
+   */
+  readonly turnFiles?: {
+    install(port: {
+      tools: ToolRegistry
+      rawTap(listener: RawSessionTap): () => void
+      onTaskQuiet(listener: (rootSessionId: string) => void): () => void
+      onSessionOpened(listener: (session: Session) => void): () => void
+    }): () => void
+    /** Emperor is quitting: record every open task now. */
+    closeAll?(): Promise<void>
+  }
+  /** One workspace writer at a time: a lease for each file-writing tool call. */
+  readonly workspaceAccess?: WorkspaceAccessLeaseProvider
+  /** What `@plugin` references learn about a plugin (the plugin service). */
+  readonly pluginReferences?: PluginReferenceResolver
+  /** Which plugins' global copies a project replaces with its own. */
+  readonly pluginOverrides?: (projectRoot: string) => ReadonlySet<string>
+  /** The Skill folders of the plugins enabled for a project (null: Chat). */
+  readonly pluginSkills?: (projectRoot: string | null) => readonly string[]
+  /** Where a Build session's managed worktree is (KRN-11). */
+  readonly worktrees?: (sessionId: string, projectRoot: string) => string
+  /** The model entry local subagents use; undefined follows the conversation (AGT-10). */
+  readonly localSubagentModel?: () => string | undefined
+  /** Where a writing external task works when the model does not say (AGT-10). */
+  readonly defaultWorkspace?: () => 'isolated-worktree' | 'shared-exclusive'
+}
+
+/** Plugin hook sets, applied by the plugin activation controller. */
+export interface PluginHooksPort {
+  setPluginHooks(sets: readonly PluginHookSet[]): void
+  setPluginHookScope(scope: PluginHookScope | null): void
+}
+
+/** The user's and project's hook configuration, for 能力 › Hooks. */
+export interface HookConfigPort {
+  describe(): ClaudeCodeHooksDescription
+  reload(): void
+}
+
 export interface HarnessHostOptions extends KeptServicesOptions {
   eventSink?: HostEventSink | null
-  /** Web search backend; `web_search` is only offered when one is configured. */
+  /**
+   * A host's own web search backend: `web_search` is offered with it
+   * whatever the provider. Without one, `web_search` exists only on
+   * DeepSeek's official API (its Search API).
+   */
   webSearch?: WebSearchBackend | null
+  /** Test hook: the transport for DeepSeek's Search API (default `fetch`). */
+  webSearchFetch?: typeof fetch
   /** Permission preset new sessions start with (default `workspace-write`). */
   defaultPreset?: string
   initializeMcp?: boolean
+  /**
+   * Start the scheduler at the end of `create` (default true). CoreApi
+   * starts it itself once plugins are synced, so a run caught up on at
+   * launch already has the plugins' Hooks (KRN-10).
+   */
+  startScheduler?: boolean
   /** Watch Skill folders and emit `skill_catalog_changed` (default true). */
   watchSkills?: boolean
   /** Test hook: replace the sandbox backend. */
   sandboxBackend?: SandboxBackend
   /** Test hook: replace the LLM client. */
   llm?: LlmClient
+  /**
+   * Check every model request against its session log (KRN-13): on in
+   * development builds and the packaged smoke, off in production. Default:
+   * `EMPEROR_ASSERT_INVARIANT=1`.
+   */
+  assertRequestInvariant?: boolean
   /** Desktop host port for GUI control; absent → no computer-use tools. */
   computerUsePort?: ComputerUseHostPort | null
   /** Computer-use master switch and per-driver switches. */
   computerUseSettings?: () => ComputerUseSettings
   /** The master switch changed (the desktop clears its pointer when off). */
   computerUseEnabledChanged?: (enabled: boolean) => void
+  /** Timers for deferred work (background turn limits, MCP idle stop); tests replace them. */
+  timers?: HostTimers
 }
 
 export interface SubmitInput {
@@ -192,20 +316,38 @@ export interface SubmitInput {
   uiHidden?: boolean | null
   delivery?: 'queue' | 'interject' | null
   signal?: AbortSignal | null
+  /**
+   * A message no turn took (the turn before it failed or was stopped) waits
+   * in the queue for the user (`keep`, the default), or is discarded when
+   * its submitter cannot come back to it (`withdraw`: ACP, hidden prompts).
+   */
+  unconsumed?: 'keep' | 'withdraw' | null
 }
+
+export type { TurnResult } from './scope'
 
 export interface SubmitResult {
   sessionId: string
   messageId: string
   turnId: string | null
   content: string
-  delivery: 'completed' | 'interjected'
+  /**
+   * `completed`: a turn consumed the message (`result` says how it ended);
+   * `interjected`: it entered the running turn's next step; `queued`: no
+   * turn took it, it waits in the queue for the user (发送 / 丢弃);
+   * `discarded`: it left the queue without running.
+   */
+  delivery: 'completed' | 'interjected' | 'queued' | 'discarded'
+  /** Null for an interjection (it resolves before its step). */
+  result: TurnResult | null
 }
 
 export interface QueuedPrompt {
   prompt_id: string
   content: string
-  state: 'queued'
+  /** `failed-previous`: held until the user sends it again (see `reason`). */
+  state: 'queued' | 'failed-previous'
+  reason?: HoldReason
   target: 'next-turn' | 'next-step'
 }
 
@@ -226,26 +368,70 @@ export class HarnessHost {
   readonly questions = new UserQuestionService()
   readonly compaction: CompactionEngine
   readonly jobs = new JobRegistry()
-  readonly goals = new GoalService()
+  readonly goals = new GoalService({
+    requiresCompletionVerification: (agent, ref) =>
+      (this.delegations?.requiredForGoal(ref, this.rootOf(agent).id).length ??
+        0) > 0,
+    completionCurrent: (agent, ref) =>
+      this.delegations?.goalCompletionCurrent(ref, this.rootOf(agent).id) ??
+      true,
+    verifyCompletion: async (agent, ref) => {
+      await this.delegations?.verifyGoalCompletion(ref, this.rootOf(agent).id)
+    },
+  })
   readonly goalInstall: InstalledGoal
   readonly subagents: SubagentManager
+  delegations: DelegationService | null = null
+  delegationQuestionTimeoutMs = () => 15 * 60 * 1000
+  readonly delegationInteractions: DelegationInteractionBridge
+  /** First-dispatch consent cards for external executors (AGT-05). */
+  readonly delegationConsent: ExecutorConsentBridge
   /** Dynamic workflows (`workflow` / `ralph` tools) over in-process subagents. */
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
   readonly hooks: ClaudeCodeHooks
+  /** Each plugin hook's last failure, for the plugin's detail page (SEC-07). */
+  readonly pluginHookHealth = new PluginHookHealth()
   readonly pending = new PendingInteractions()
   readonly attachments: AttachmentStore
   readonly watchlist: WatchlistService
   readonly mcpTools: McpToolBridge
+  /** `web_fetch` / `web_search` and their switches (设置 › 高级 › 网络工具). */
+  readonly webTools: WebTools
+  /** Project-scoped MCP servers: one instance per project root (KRN-01). */
+  readonly projectMcp: ProjectMcpInstances
   /** GUI control kernel; null on hosts without a computer-use port. */
   computerUse: InstalledComputerUse | null = null
   private computerUseConfig: ComputerUseConfigStore | null = null
   /** What `@plugin` gestures learn about a plugin (set by CoreApi's plugin service). */
   private pluginReferences: PluginReferenceResolver | null = null
   private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
-  readonly defaultPreset: string
-  activeSessionId: string | null = null
+  /** The preset a session without a log starts in (设置 › 常规 › 会话). */
+  private defaultPresetId: string
+  private readonly timers: HostTimers
+  /** Background turns per root session, for their interaction policy (KRN-01). */
+  private readonly backgroundTurns = new Map<string, BackgroundTurnState[]>()
+  /** Plugin ids whose global copy a project replaces with its own (set by CoreApi). */
+  private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
+    () => new Set()
   private readonly agents = new Map<string, Agent>()
+  /** Uninstalls of the extensions CoreApi registered (turn file records). */
+  private readonly extensionTeardown: Array<() => void> = []
+  private localSubagentModel: () => string | undefined = () => undefined
+  private defaultWorkspace: () => 'isolated-worktree' | 'shared-exclusive' =
+    () => 'isolated-worktree'
+  private worktreeResolver: (sessionId: string, projectRoot: string) => string =
+    (_sessionId, projectRoot) => projectRoot
+  /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
+  private readonly taskTrees = new Map<string, TaskTree>()
+  /** Told when a root's task can no longer go on (UI-S15). */
+  private readonly taskQuietListeners = new Set<(rootId: string) => void>()
+  /** Roots whose task is looked at again once the current work has run. */
+  private readonly taskQuietChecks = new Set<string>()
+  /** Records the tasks still open when the host closes (UI-S15). */
+  private closeOpenTasks: (() => Promise<void>) | undefined
+  /** 设置 › 高级 › 任务预算 (the cost cap is the model policy's). */
+  private taskBudgetSettings: TaskBudgetSettings
   private readonly projectors = new Map<string, SessionProjector>()
   private readonly unsubscribes = new Map<string, () => void>()
   /** Queued user prompt ids last announced per root session (prompt_queued/dequeued). */
@@ -261,7 +447,14 @@ export class HarnessHost {
   private constructor(kept: KeptServices, options: HarnessHostOptions) {
     this.kept = kept
     this.eventSink = options.eventSink ?? null
-    this.defaultPreset = options.defaultPreset ?? DEFAULT_PRESET
+    this.defaultPresetId =
+      options.defaultPreset ??
+      kept.localConfig?.sessions?.defaultPermission ??
+      DEFAULT_PRESET
+    this.timers = options.timers ?? realTimers
+    this.taskBudgetSettings = normalizeTaskBudgetSettings(
+      kept.localConfig?.taskBudget,
+    )
     this.attachments = new AttachmentStore(kept.paths.stateRoot)
     this.llm =
       options.llm ??
@@ -280,13 +473,21 @@ export class HarnessHost {
           this.attachments.get(ref.attachmentId) !== null,
       })
     if (options.llm === undefined) this.applyModelConfig(kept.modelConfig)
+    if (
+      options.assertRequestInvariant ??
+      process.env.EMPEROR_ASSERT_INVARIANT === '1'
+    )
+      this.llm.observeRequests((request) =>
+        assertRequestInvariant(request, (id) => this.sessionLog(id)),
+      )
     this.watchlist = new WatchlistService(kept.paths.stateRoot, {
       llm: this.llm,
       tokenTracker: kept.tokenTracker,
     })
     this.sessions = new SessionLogStore({
       root: kept.paths.sessionsRoot,
-      repairContributors: [approvalRepair, questionRepair, computerUseRepair],
+      repairContributors: [...REPAIR_CONTRIBUTORS],
+      onLogState: (state) => this.emitHost(sessionLogStateEvent(state)),
     })
     this.sandbox = new SandboxPolicyService({
       defaultMode: 'workspace-write',
@@ -294,25 +495,138 @@ export class HarnessHost {
     })
     this.sandboxBackend =
       options.sandboxBackend ??
-      new LocalSandbox({ protectedStateRoot: kept.paths.stateRoot })
+      new LocalSandbox({
+        protectedStateRoot: kept.paths.stateRoot,
+        backend: kept.containment,
+      })
     this.presets = new PermissionPresetService(this.sandbox, this.approval)
     this.compaction = new CompactionEngine(this.llm, new ToolResultPruner())
     this.subagents = new SubagentManager({
       sessions: this.sessions,
-      createAgent: (session, agentOptions) =>
-        this.attachAgent(new Agent(session, this.agentDeps(), agentOptions)),
+      createAgent: (session, agentOptions) => {
+        const child = this.attachAgent(
+          new Agent(session, this.agentDeps(), agentOptions),
+        )
+        this.taskTreeOf(child).adopt({
+          sessionId: child.id,
+          agent: child,
+          detach: () => this.detachAgent(child.id),
+        })
+        return child
+      },
       lookupAgent: (id) => this.agents.get(id),
       sandbox: this.sandbox,
       approval: this.approval,
+      // One budget per root task: total, pool, result wakes (KRN-03).
+      budget: {
+        reserve: (parent) => this.taskTreeOf(parent).reserve(parent),
+        admission: (parent) => this.taskTreeOf(parent).gate,
+        waiting: (parent, delta) =>
+          this.taskTreeOf(parent).waiting(parent, delta),
+        takeWake: (parent) => this.taskTreeOf(parent).takeWake(parent),
+      },
+      // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10).
+      childCallConfig: () => this.childCallConfig(),
     })
     this.workflows = new WorkflowEngine([
-      createSpawnChildProvider({ manager: this.subagents, llm: this.llm }),
+      createRoutingChildProvider({
+        internal: createSpawnChildProvider({
+          manager: this.subagents,
+          llm: this.llm,
+        }),
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        readOnly: (agent) => {
+          const parent = this.delegationParent(
+            this.delegationOwner(agent, 'workflow'),
+          )
+          return parent.policy.mode === 'read-only' || !!parent.planMode
+        },
+      }),
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
+      // A plugin's hooks run in the process containment (SEC-08) with the
+      // safe and declared variables and a 30 s timeout (SEC-07).
+      pluginHookRunner: containedPluginHookRunner({
+        runtime: kept.processRuntime,
+        stateRoot: kept.paths.stateRoot,
+        health: this.pluginHookHealth,
+      }),
     })
-    this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
+    this.projectMcp = new ProjectMcpInstances({
+      // The one place a project instance's client is made. Its servers are
+      // plugins': contained, refused when no sandbox can run (SEC-08).
+      createClient: (projectRoot) =>
+        new MCPClient(kept.paths.stateRoot, {
+          sealer: kept.secretSealer,
+          processRuntime: kept.processRuntime,
+          workspaceRoot: projectRoot,
+          userServers: false,
+        }),
+      environment: async (projectRoot) => {
+        try {
+          return await kept.executionEnvironmentService.create({ projectRoot })
+        } catch (error: unknown) {
+          logger.warn('project MCP environment probe failed', {
+            error: String(error),
+          })
+          return null
+        }
+      },
+      reservedToolNames: () => this.mcpTools.reservedNames(),
+      onChanged: () => this.mcpTools.sync(),
+      timers: this.timers,
+    })
+    this.mcpTools = new McpToolBridge(
+      {
+        global: () => kept.mcpClient.getTools(),
+        projects: () => this.projectMcp.projects(),
+        project: (projectRoot) => this.projectMcp.tools(projectRoot),
+        hiddenInProject: (projectRoot) =>
+          this.projectPluginOverrides(projectRoot),
+      },
+      this.tools,
+      (agent) => this.projectRootOfAgent(agent),
+    )
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
+    // Each server's tools join as it becomes ready (KRN-04).
+    kept.mcpClient.onToolsChanged(() => this.mcpTools.sync())
+    this.delegationInteractions = new DelegationInteractionBridge({
+      pending: this.pending,
+      root: (id) => {
+        try {
+          return this.agentFor(id)
+        } catch {
+          return undefined
+        }
+      },
+      available: (owner) =>
+        this.eventSink !== null && owner.source !== 'scheduler',
+      timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
+    this.delegationConsent = new ExecutorConsentBridge({
+      pending: this.pending,
+      root: (id) => {
+        try {
+          return this.agentFor(id)
+        } catch {
+          return undefined
+        }
+      },
+      available: (owner) =>
+        this.eventSink !== null && owner.source !== 'scheduler',
+      timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
+    this.webTools = new WebTools({
+      settings: kept.localConfig.webTools,
+      fetchClient: options.webFetchClient ?? null,
+      searchBackend: options.webSearch ?? null,
+      ...(options.webSearchFetch
+        ? { searchFetch: options.webSearchFetch }
+        : {}),
+      routeOf: (agent) => this.routeOf(agent),
+    })
     this.goalInstall = this.compose(options)
   }
 
@@ -321,10 +635,6 @@ export class HarnessHost {
     const ref: { host?: HarnessHost } = {}
     const kept = await createKeptServices(options, {
       emit: (event) => ref.host?.emitHost(event),
-      activeSessionId: () => ref.host?.activeSessionId ?? null,
-      activeWorkspaceRoot: () =>
-        ref.host?.activeWorkspaceRoot() ?? resolve(options.root),
-      refreshRuntimeContext: () => {},
     })
     const host = new HarnessHost(kept, options)
     ref.host = host
@@ -337,8 +647,28 @@ export class HarnessHost {
   private compose(options: HarnessHostOptions): InstalledGoal {
     const { tools, prompt, middleware } = this
     this.tools.setApprovalHandler((request) => this.approval.request(request))
-    this.approval.setAnswerer(this.pending.approvalAnswerer)
-    this.questions.setAnswerer(this.pending.questionAnswerer)
+    // A background turn nobody watches gets its approvals and questions
+    // rejected at once instead of waiting on a card (KRN-01).
+    this.approval.setAnswerer((request) => {
+      const background = this.autoRejecting(request.agent)
+      if (background === undefined)
+        return this.pending.approvalAnswerer(request)
+      background.rejected.push(request.toolName)
+      return Promise.resolve('rejected')
+    })
+    this.questions.setAnswerer((request) => {
+      const background = this.autoRejecting(request.agent)
+      if (background === undefined)
+        return this.pending.questionAnswerer(request)
+      const plan = request.intent?.kind === 'plan-review'
+      background.rejected.push(plan ? 'plan review' : 'ask_user_question')
+      if (plan) background.planRejected = true
+      return Promise.reject(
+        new UserQuestionDismissed(
+          'nobody can answer during a background turn; it was rejected',
+        ),
+      )
+    })
     this.planMode.setReviewer(
       async ({ agent, callId, plan, title, signal }) => {
         const outcome = await this.questions.ask({
@@ -390,9 +720,20 @@ export class HarnessHost {
     )
     prompt.variable(
       'cwd',
-      ({ agent }) => agent?.session.header.cwd ?? this.chatWorkspace(),
+      ({ agent }) => agent?.session.cwd ?? this.chatWorkspace(),
     )
     prompt.section({ name: 'persona', order: 0, text: this.personaText() })
+    // The model and working directory change per session and on a model
+    // switch: they live in the runtime context, never in the system prompt
+    // prefix (provider prefix cache, replayed reasoning signatures).
+    prompt.context({
+      name: 'session:environment',
+      order: 100,
+      text: ({ agent }) =>
+        agent === undefined
+          ? ''
+          : `Current model: ${this.modelLabel(agent)}. Working directory: ${JSON.stringify(agent.session.cwd ?? this.chatWorkspace())}.${this.worktreeNote(agent)}`,
+    })
     installLinkGuidancePromptSection(prompt)
     this.sandbox.install(prompt)
     this.approval.install(prompt)
@@ -406,7 +747,8 @@ export class HarnessHost {
       spillRoot: join(this.kept.paths.stateRoot, 'spill'),
       shellEnv: () => process.env,
       resolveBinary: (name) => (name === 'rg' ? this.ripgrepPath : undefined),
-      // The same directories Seatbelt keeps Shell out of (LocalSandbox).
+      // The table Seatbelt keeps Shell out of (LocalSandbox): Emperor's
+      // private state and config files, and the user's credential files.
       protectedStateRoot: this.kept.paths.stateRoot,
     }
     const fs = createFsTools(services)
@@ -425,10 +767,7 @@ export class HarnessHost {
     tools.register(createTodoTool())
     tools.register(createAskUserQuestionTool(this.questions))
     tools.register(this.planMode.tool())
-    if (options.webSearch) {
-      tools.register(createWebSearchTool(options.webSearch))
-      installWebSearchPromptSection(prompt)
-    }
+    this.webTools.install(tools, prompt)
     const skills = {
       loaderFor: (agent: Agent | undefined) => this.skillsLoaderFor(agent),
     }
@@ -453,6 +792,9 @@ export class HarnessHost {
         memory: this.kept.sharedMemory,
         projects: this.kept.projectStore,
         sessionEntry: (agent) => this.entryFor(agent),
+        permissionMode: (agent) =>
+          this.sandbox.resolve({ session: agent.session }).mode,
+        approval: this.approval,
       }),
     )
     tools.register(
@@ -471,6 +813,7 @@ export class HarnessHost {
     tools.register(
       createMcpConfigTool({
         stateRoot: this.kept.paths.stateRoot,
+        sealer: this.kept.secretSealer,
         sandbox: this.sandbox,
         approval: this.approval,
         reload: () => this.reloadMcp(),
@@ -480,14 +823,123 @@ export class HarnessHost {
     installMcpConfigPromptSection(prompt, {
       configPath: mcpConfigDisplayPath(this.kept.paths.stateRoot),
     })
-    installSubagents(this.subagents, tools, prompt)
+    installSubagents(
+      this.subagents,
+      tools,
+      prompt,
+      createDelegationTools({
+        internalManager: this.subagents,
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        canControl: (agent, owner) => this.canControlDelegation(agent, owner),
+        // collect_agent({abandon}) ends a run only with the user's approval.
+        approve: ({ agent, callId, reason, signal }) =>
+          this.approval.request({
+            agent,
+            toolName: 'collect_agent',
+            callId,
+            reason,
+            signal,
+          }),
+        // Outside Git a task defaults to a review in place (AGT-06).
+        parentInGit: (agent) =>
+          existsSync(
+            join(
+              workspaceMutationDomain(
+                this.sandbox.resolve({ session: agent.session }).workspaceRoot,
+              ),
+              '.git',
+            ),
+          ),
+        // 设置 › 子智能体 › 改代码的位置 (AGT-10).
+        defaultWorkspace: () => this.defaultWorkspace(),
+        // Plan mode explores read-only: external children default to review.
+        parentReadOnly: (agent) =>
+          this.sandbox.resolve({ session: agent.session }).mode ===
+            'read-only' || this.planMode.get(this.rootOf(agent).session).active,
+        briefContext: (agent) => {
+          const cwd = this.sandbox.resolve({
+              session: agent.session,
+            }).workspaceRoot,
+            root = workspaceMutationDomain(cwd)
+          const instructions = discoverInstructionFiles(cwd, {
+            globalDir: this.kept.paths.stateRoot,
+          }).filter((file) => {
+            if (
+              file.absolutePath === join(this.kept.paths.stateRoot, 'AGENTS.md')
+            )
+              return false
+            const path = relative(root, realpathSync(file.absolutePath))
+            if (
+              isAbsolute(path) ||
+              path === '..' ||
+              path.startsWith('..' + sep)
+            )
+              throw new DelegationError(
+                'PERMISSION_DENIED',
+                'workspace instruction resolves outside source root',
+              )
+            if (
+              statSync(file.absolutePath).size > Buffer.byteLength(file.content)
+            )
+              throw new DelegationError(
+                'BRIEF_LIMIT',
+                'workspace instruction exceeds complete brief budget',
+              )
+            return true
+          })
+          const goal = this.goals.get(this.rootOf(agent))
+          return {
+            instructions,
+            ...(goal && goal.phase !== 'complete'
+              ? { goal: goal.objective }
+              : {}),
+          }
+        },
+      }),
+    )
+    prompt.context({
+      name: 'external-executors',
+      order: 121,
+      // Nothing when no external executor is enabled (AGT-05).
+      text: () => this.delegations?.executorContext() ?? '',
+    })
     installWorkflow(tools, prompt, {
       engine: this.workflows,
       runs: this.workflowRuns,
+      jobs: this.jobs,
     })
-    const goal = installGoal({ prompt, middleware, tools }, this.goals)
-    void createGoalTools
-    // Middleware (order matters): instructions, memory, skills, compaction, hooks.
+    // A goal starts no new round while work it waits for still runs:
+    // external delegations, subagents, background jobs (DSH-6).
+    const goal = installGoal({ prompt, middleware, tools }, this.goals, {
+      driverOptions: {
+        hasOutstandingDelegations: (id) =>
+          (this.delegations?.hasOutstanding(id) ?? false) ||
+          this.taskTreeBusy(id),
+      },
+    })
+    this.jobs.onJobDone((_snapshot, owner) => {
+      if (owner === undefined) return
+      goal.driver.delegationSettled(this.rootOf(owner).id)
+      this.noteTaskSettled(this.rootOf(owner).id)
+    })
+    // A goal that stops (done, paused, blocked) lets its task end.
+    this.goals.onChange(({ agent }) => {
+      this.noteTaskSettled(this.rootOf(agent).id)
+    })
+    // A step of a project session holds the project's MCP instance (started
+    // on first use) until its agent goes idle, before its tools are listed
+    // (KRN-01). Then middleware (order matters): instructions, memory,
+    // skills, compaction, hooks.
+    middleware.preAssemble.push(async (input) => {
+      await this.askUnsandboxedServers(input.agent, input.signal)
+      const projectRoot = this.projectRootOfAgent(input.agent)
+      if (projectRoot !== null)
+        await untilAborted(
+          this.projectMcp.acquire(projectRoot, input.agent.id),
+          input.signal,
+        )
+    })
     middleware.preStep.push(
       agentInstructionsMiddleware({
         globalDir: this.kept.paths.stateRoot,
@@ -513,14 +965,21 @@ export class HarnessHost {
     )
     this.compaction.install(middleware)
     middleware.requestError.push(retryMiddleware())
-    // Saved model execution policy: fallback after retries give up, per-turn cost cap.
+    // Saved model execution policy: fallback after retries give up.
     const modelPolicy: ModelPolicySource = {
       policy: () => this.kept.modelConfig.policy,
-      pricing: (routeId) => findEntry(this.kept.modelConfig, routeId)?.pricing,
     }
     middleware.requestError.push(fallbackErrorMiddleware(modelPolicy, this.llm))
     middleware.requestConfig.push(fallbackConfigMiddleware(this.llm))
-    middleware.preStep.unshift(costCapMiddleware(modelPolicy))
+    // Task budget (KRN-03): every request's usage, failed attempts too, is
+    // charged to its root task; a spent budget ends the turn before its
+    // next step (the policy's cost cap, now over the whole task).
+    middleware.requestEnd.push(({ agent, provider, usage, attempt }) => {
+      this.taskTreeOf(agent).charge({ routeId: provider, usage }, attempt)
+    })
+    middleware.budget.push(({ agent, step }) =>
+      this.taskTreeOf(agent).check(agent, step),
+    )
     const reminder = createRepeatReminder()
     middleware.preStep.push(reminder.preStep)
     tools.postExecute.push(reminder)
@@ -544,15 +1003,92 @@ export class HarnessHost {
       },
       settled: (child) => {
         this.hooks.subagentStopped(child)
+        this.projectMcp.release(child.id)
+        goal.driver.delegationSettled(this.rootOf(child).id)
       },
+      // Its jobs stop now; once idle it leaves the host's tables (CORE-17/19).
+      disposed: (child) => this.taskTreeOf(child).disposeChild(child.id),
     })
     return goal
   }
 
   /** Master switch: persist, (un)register the GUI tools, tell the desktop. */
   /** Answer `@plugin` gestures from the plugin service (CoreApi). */
-  setPluginReferenceResolver(resolver: PluginReferenceResolver | null): void {
-    this.pluginReferences = resolver
+  /**
+   * Register CoreApi's extensions of the kernel, once (KRN-13). Each one is
+   * optional; a second call adds or replaces the ones it names.
+   */
+  extend(extensions: HostExtensions): void {
+    if (extensions.turnFiles)
+      this.extensionTeardown.push(
+        extensions.turnFiles.install({
+          tools: this.tools,
+          rawTap: (listener) => this.rawTap(listener),
+          onTaskQuiet: (listener) => this.onTaskQuiet(listener),
+          onSessionOpened: (listener) => this.sessions.onOpened(listener),
+        }),
+      )
+    if (extensions.turnFiles?.closeAll) {
+      const files = extensions.turnFiles
+      this.closeOpenTasks = () => files.closeAll?.() ?? Promise.resolve()
+    }
+    if (extensions.workspaceAccess)
+      this.tools.setWorkspaceAccessLeaseProvider(extensions.workspaceAccess)
+    if (extensions.pluginReferences)
+      this.pluginReferences = extensions.pluginReferences
+    if (extensions.pluginOverrides)
+      this.projectPluginOverrides = extensions.pluginOverrides
+    if (extensions.pluginSkills)
+      this.kept.skillLoaders.setPluginSkillsResolver(extensions.pluginSkills)
+    if (extensions.worktrees) this.worktreeResolver = extensions.worktrees
+    if (extensions.localSubagentModel)
+      this.localSubagentModel = extensions.localSubagentModel
+    if (extensions.defaultWorkspace)
+      this.defaultWorkspace = extensions.defaultWorkspace
+  }
+
+  /**
+   * The request config of a local subagent: the model chosen in 设置 ›
+   * 子智能体 while it is still configured, else the conversation's (AGT-10).
+   */
+  private childCallConfig(): (() => LlmCallConfig) | undefined {
+    const id = this.localSubagentModel()
+    if (id === undefined) return undefined
+    if (!this.llm.listRoutes().some((route) => route.id === id))
+      return undefined
+    const config = this.llm.defaultCallConfig(id)
+    return () => config
+  }
+
+  /** The user writes to a live local subagent from its page (AGT-10). */
+  messageSubagent(childId: string, text: string): string {
+    return this.subagents.userFollowup(childId, text)
+  }
+
+  /** Plugin hook sets (the plugin activation controller's port). */
+  get pluginHooks(): PluginHooksPort {
+    return {
+      setPluginHooks: (sets) => this.hooks.setPluginHooks(sets),
+      setPluginHookScope: (scope) => this.hooks.setPluginHookScope(scope),
+    }
+  }
+
+  /** The hook configuration (能力 › Hooks). */
+  get hookConfig(): HookConfigPort {
+    return {
+      describe: () => this.hooks.describe(),
+      reload: () => this.hooks.reload(),
+    }
+  }
+
+  /** A built-in tool's group on 能力 › 工具, if it has one. */
+  toolCategory(name: string): ToolCategory | undefined {
+    return this.tools.get(name)?.category
+  }
+
+  /** How many tools the kernel registered (health check). */
+  toolCount(): number {
+    return this.tools.schemas().length
   }
 
   setComputerUseEnabled(enabled: boolean): void {
@@ -617,6 +1153,17 @@ export class HarnessHost {
       tools: this.tools,
       prompt: this.prompt,
       pending: this.pending,
+      grantAnswerer: (request) => {
+        const root = this.agents.get(request.session.id)
+        const background =
+          root === undefined ? undefined : this.autoRejecting(root)
+        if (background === undefined) return this.pending.grantAnswerer(request)
+        background.rejected.push(request.toolName ?? 'computer use')
+        return Promise.resolve({
+          decision: 'denied',
+          backgroundAllowed: false,
+        })
+      },
       stateDir,
       profilesDir: browserStateDir(this.kept.paths.stateRoot),
       attachments: this.attachments,
@@ -652,8 +1199,11 @@ export class HarnessHost {
         queueMicrotask(() => this.releaseComputerUseIfTaskEnded(sessionId))
     })
     this.subagents.observe({
-      settled: (child) =>
-        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(child.id)),
+      settled: (child) => {
+        // By root: a disposed child may already have left the tables.
+        const rootId = this.rootOf(child).id
+        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(rootId))
+      },
     })
   }
 
@@ -691,23 +1241,39 @@ export class HarnessHost {
   }
 
   private async start(options: HarnessHostOptions): Promise<void> {
-    this.kept.schedulerService.onJob = createSchedulerExecutor({
-      submitTurn: async (request) => {
-        const sessionId =
-          request.sessionId ??
-          this.activeSessionId ??
-          this.ensureDefaultSession().id
-        const result = await this.submit({
-          sessionId,
-          content: request.content,
-          displayContent: request.displayContent,
-          clientMessageId: request.clientMessageId,
-          source: 'scheduler',
-          scheduler: request.scheduler,
-          signal: request.signal,
+    // Process groups a crashed run left behind go first (KRN-13): only one
+    // whose live start identity matches its receipt is killed.
+    try {
+      const reconciled = await this.kept.processRuntime.reconcileOrphans()
+      if (reconciled.length)
+        logger.info('reconciled leftover processes', {
+          count: reconciled.length,
         })
-        return result.content
-      },
+    } catch (error: unknown) {
+      logger.warn('leftover process reconcile failed', {
+        error: String(error),
+      })
+    }
+    this.kept.schedulerService.onJob = createSchedulerExecutor({
+      // A scheduled turn runs in its own session, never moves the session in
+      // view, rejects approvals nobody can answer and stops after 30 minutes.
+      runTurn: async (request) =>
+        await this.runBackgroundTurn(
+          this.scopeFor(
+            request.sessionId ?? this.defaultBackgroundSession().id,
+          ),
+          request.content,
+          {
+            source: 'scheduler',
+            displayContent: request.displayContent,
+            clientMessageId: request.clientMessageId,
+            scheduler: request.scheduler,
+            signal: request.signal,
+            timeoutMs: DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
+            interactionPolicy: 'auto-reject',
+          },
+        ),
+      timeoutMs: DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
       hasPendingInteraction: (sessionId) =>
         sessionId === null ? false : this.pending.hasPending(sessionId),
       watchlistCheck: async (signal) => await this.watchlist.check(signal),
@@ -728,22 +1294,37 @@ export class HarnessHost {
       })
     }
     if (options.initializeMcp !== false) {
-      try {
-        environment ??= await this.kept.executionEnvironmentService.create({
-          projectRoot: this.chatWorkspace(),
-        })
-        await this.kept.mcpClient.initialize(environment)
-        this.mcpTools.sync()
-      } catch (error: unknown) {
-        logger.warn('MCP initialization failed', { error: String(error) })
-      }
+      // In the background (KRN-04): the window never waits for a server, and
+      // each one's tools are registered as it becomes ready.
+      const probed = environment
+      void (async () => {
+        try {
+          const ready =
+            probed ??
+            (await this.kept.executionEnvironmentService.create({
+              projectRoot: this.chatWorkspace(),
+            }))
+          await this.kept.mcpClient.initialize(ready)
+          this.mcpTools.sync()
+        } catch (error: unknown) {
+          logger.warn('MCP initialization failed', { error: String(error) })
+        }
+      })()
     }
+    if (options.startScheduler !== false) await this.startScheduler()
+    if (options.watchSkills !== false) await this.startSkillWatcher()
+  }
+
+  /**
+   * Start the scheduler; a failure is logged and kept in its status
+   * (`startError`, shown in 诊断 and on the 定时任务 page), never thrown.
+   */
+  async startScheduler(): Promise<void> {
     try {
-      this.kept.schedulerService.start()
+      await this.kept.schedulerService.start()
     } catch (error: unknown) {
       logger.warn('scheduler failed to start', { error: String(error) })
     }
-    if (options.watchSkills !== false) await this.startSkillWatcher()
   }
 
   /** Watch user, known project, and Plugin Skill folders for catalog changes. */
@@ -786,10 +1367,30 @@ export class HarnessHost {
   private personaText(): string {
     const path = join(this.kept.templatesDir, 'agent', 'persona.md')
     if (existsSync(path)) return readFileSync(path, 'utf8').trim()
-    return 'You are Emperor Agent, a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.'
+    return 'You are Emperor Agent, a coding agent. The runtime context names the model you run on and your working directory.'
   }
 
-  private modelLabel(): string {
+  /** The route an agent's next request goes to; no agent: the active route. */
+  private routeOf(agent: Agent | undefined): RouteSpec | undefined {
+    try {
+      return agent === undefined
+        ? this.llm.activeRoute()
+        : this.llm.route(agent.proposedCallConfig().provider)
+    } catch {
+      // No model configured yet.
+      return undefined
+    }
+  }
+
+  /** The model an agent is on (its own route, or this turn's fallback). */
+  private modelLabel(agent?: Agent): string {
+    if (agent !== undefined) {
+      try {
+        return currentModel(agent, this.llm)
+      } catch {
+        // no route configured yet
+      }
+    }
     const route = this.llm.activeRoute()
     return route === undefined ? 'configured' : route.modelId
   }
@@ -818,14 +1419,62 @@ export class HarnessHost {
   async refreshModelConfig(): Promise<void> {
     const config = await loadModelConfig(this.kept.paths.stateRoot, {
       create: true,
+      sealer: this.kept.secretSealer,
     })
     this.kept.modelConfig = config
     this.applyModelConfig(config)
   }
 
+  /**
+   * SEC-08: a user's MCP server that is waiting to run outside an
+   * unavailable sandbox is asked about once, on the ordinary approval card
+   * of the next step of a conversation the user is in (never a background
+   * turn, a subagent, or a session whose approvals are off). The answer is
+   * remembered per server and command; an allowed server starts in that
+   * step. A dismissed card asks again next time.
+   */
+  private async askUnsandboxedServers(
+    agent: Agent,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const consent = this.kept.unsandboxedConsent
+    if (consent.pending().length === 0) return
+    if (
+      this.rootOf(agent) !== agent ||
+      !agent.session.hasOpenTurn() ||
+      this.autoRejecting(agent) !== undefined ||
+      this.approval.effectivePolicy(agent.session) === 'never'
+    )
+      return
+    let allowed = false
+    for (const request of consent.pending()) {
+      if (signal.aborted) return
+      const outcome = await this.approval.request({
+        agent,
+        toolName: 'mcp_server',
+        reason: unsandboxedServerQuestion(request),
+        signal,
+      })
+      if (outcome === 'allowed-once') {
+        consent.resolve(request, 'allowed')
+        allowed = true
+      } else if (outcome === 'rejected') consent.resolve(request, 'denied')
+    }
+    if (!allowed) return
+    try {
+      await untilAborted(this.reloadMcp(), signal)
+    } catch (error: unknown) {
+      if (signal.aborted) throw error
+      logger.warn('MCP reload after an unsandboxed consent failed', {
+        error: String(error),
+      })
+    }
+  }
+
+  /** Reload the global servers (mcp_config.json and user-wide plugins). */
   async reloadMcp(): Promise<void> {
     const environment = await this.kept.executionEnvironmentService.create({
-      projectRoot: this.activeWorkspaceRoot(),
+      projectRoot: this.chatWorkspace(),
     })
     this.ripgrepPath = environment.toolPaths.ripgrep
     await this.kept.mcpClient.reload(environment)
@@ -844,10 +1493,77 @@ export class HarnessHost {
     return dir
   }
 
+  /**
+   * Where a Build session works: its managed worktree once it entered one
+   * (KRN-11, the resolver CoreApi passes from its worktree bindings), else
+   * its project root; a Chat session works in the chat workspace.
+   */
   workspaceRootFor(entry: SessionEntry | null | undefined): string {
     if (entry?.mode === 'build' && entry.project_path)
-      return resolve(entry.project_path)
+      return this.worktreeResolver(entry.id, resolve(entry.project_path))
     return this.chatWorkspace()
+  }
+
+  /** CoreApi's worktree bindings: a session's worktree, or the root it is given. */
+  /**
+   * Move a session's tools to where it works now (KRN-11): after it entered
+   * or left a managed worktree. A live agent gets a
+   * `working-directory/change`; one not open yet starts there.
+   */
+  moveWorkingDirectory(
+    sessionId: string,
+    reason: WorkingDirectoryChangeReason,
+  ): void {
+    const agent = this.agents.get(sessionId)
+    if (agent === undefined) return
+    this.syncWorkingDirectory(agent, reason)
+  }
+
+  private syncWorkingDirectory(
+    agent: Agent,
+    reason: WorkingDirectoryChangeReason,
+  ): void {
+    const entry = this.kept.sessionStore.get(agent.session.id)
+    if (entry?.mode !== 'build' || !entry.project_path) return
+    const current = agent.session.cwd
+    const target = canonicalPath(this.workspaceRootFor(entry))
+    if (current !== undefined && canonicalPath(current) === target) return
+    agent.session.append('working-directory/change', {
+      from: current === undefined ? target : canonicalPath(current),
+      to: target,
+      reason,
+    })
+  }
+
+  /**
+   * A reopened session follows its worktree binding: only sessions that are
+   * in a worktree or have been in one (a plain Build session keeps the
+   * directory it was created with).
+   */
+  private resyncWorkingDirectory(agent: Agent): void {
+    const entry = this.kept.sessionStore.get(agent.session.id)
+    if (entry?.mode !== 'build' || !entry.project_path) return
+    const bound =
+      canonicalPath(this.workspaceRootFor(entry)) !==
+      canonicalPath(resolve(entry.project_path))
+    if (
+      bound ||
+      agent.session.events.some(
+        (event) => event.type === 'working-directory/change',
+      )
+    )
+      this.syncWorkingDirectory(agent, 'worktree-resync')
+  }
+
+  /** Runtime-context line for a session in a managed worktree (KRN-11). */
+  private worktreeNote(agent: Agent): string {
+    const entry = this.entryFor(agent)
+    const cwd = agent.session.cwd
+    if (entry?.mode !== 'build' || !entry.project_path || cwd === undefined)
+      return ''
+    const projectRoot = canonicalPath(resolve(entry.project_path))
+    if (canonicalPath(cwd) === projectRoot) return ''
+    return ` This is a managed git worktree of the project at ${JSON.stringify(projectRoot)}: work and run commands here; the original checkout is outside the writable workspace.`
   }
 
   /** A conversation's workspace (project root, or the chat workspace). */
@@ -855,15 +1571,129 @@ export class HarnessHost {
     return this.workspaceRootFor(this.kept.sessionStore.get(sessionId))
   }
 
-  activeWorkspaceRoot(): string {
-    return this.workspaceRootFor(
-      this.activeSessionId === null
-        ? null
-        : this.kept.sessionStore.get(this.activeSessionId),
-    )
+  /** One session's scope (KRN-01): its project and where its tools work. */
+  scopeFor(
+    sessionId: string | null | undefined,
+    operation = 'scope',
+  ): SessionScope {
+    const id = String(sessionId ?? '').trim()
+    if (!id) throw new SessionRequiredError(operation)
+    const entry = this.kept.sessionStore.get(id)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${id}`, id)
+    return {
+      ...scopeOfEntry(entry, this.chatWorkspace()),
+      workspaceRoot: this.workspaceRootFor(entry),
+    }
+  }
+
+  /** The project an agent works in: its root session's (null for Chat). */
+  projectRootOfAgent(agent: Agent | undefined): string | null {
+    return agent === undefined
+      ? null
+      : this.projectRootFor(this.entryFor(agent))
+  }
+
+  /** Which plugins' global copies a project replaces (the plugin activation controller). */
+  /**
+   * The tools a session of `scope` sees, for views without an agent: the
+   * built-in tools and the global MCP tools, plus its project's MCP tools.
+   */
+  toolSchemasFor(scope: SessionScope | null): ToolSchema[] {
+    const mcp = new Set(this.mcpTools.names())
+    return [
+      ...this.tools.schemas().filter((schema) => !mcp.has(schema.name)),
+      ...this.mcpTools.schemasFor(scope?.projectRoot ?? null),
+    ].sort((left, right) => left.name.localeCompare(right.name))
   }
 
   /** The root (session-level) agent of an owner chain. */
+  delegationOwner(agent: Agent, callId: string): DelegationOwner {
+    const root = this.rootOf(agent),
+      goal = this.goals.get(root)
+    let messageId: string | undefined
+    for (let i = root.session.events.length - 1; i >= 0; i--) {
+      const e = root.session.events[i]!
+      if (
+        e.type === 'user/message' &&
+        (e.data.source.kind === 'user' ||
+          (e.data.source.kind === 'context' &&
+            e.data.source.producer === 'scheduler'))
+      ) {
+        messageId = e.data.id
+        break
+      }
+    }
+    const activeGoal = goal && goal.phase !== 'complete' ? goal : undefined
+    return {
+      rootSessionId: root.id,
+      parentAgentId: agent.id,
+      taskScopeId: activeGoal
+        ? 'goal:' + activeGoal.id
+        : 'message:' + (messageId ?? root.id),
+      ...(activeGoal
+        ? { goalRef: { id: activeGoal.id, revision: activeGoal.revision } }
+        : {}),
+      requiredForGoal: Boolean(activeGoal),
+      parentCallId: callId,
+      depth: agent.depth + 1,
+      source:
+        currentTurnSource(root.session.events) === 'scheduler'
+          ? 'scheduler'
+          : 'model',
+    }
+  }
+  /** Whether a delegation's root task has spent its cost cap (AGT-07). */
+  delegationTaskSpent(owner: DelegationOwner): boolean {
+    return this.taskTree(owner.rootSessionId).spent()
+  }
+
+  /** Charge a settled external run's API cost to its root task (AGT-07). */
+  chargeDelegation(owner: DelegationOwner, usd: number): void {
+    this.taskTree(owner.rootSessionId).chargeUsd(usd)
+  }
+
+  delegationParent(owner: DelegationOwner): DelegationParentContext {
+    const parent =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    if (!parent || this.rootOf(parent).id !== owner.rootSessionId)
+      throw new DelegationError(
+        'PARENT_NOT_FOUND',
+        'delegation parent is not active',
+      )
+    let policy = this.sandbox.resolve({ session: parent.session })
+    let planMode = false
+    const rank = {
+      'read-only': 0,
+      'workspace-write': 1,
+      'danger-full-access': 2,
+    }
+    for (
+      let ancestor: Agent | undefined = parent;
+      ancestor;
+      ancestor = ancestor.owner
+    ) {
+      const ancestorPolicy = this.sandbox.resolve({ session: ancestor.session })
+      if (rank[ancestorPolicy.mode] < rank[policy.mode])
+        policy = { ...policy, mode: ancestorPolicy.mode }
+      planMode ||= this.planMode.get(ancestor.session).active
+    }
+    return { cwd: policy.workspaceRoot, policy, planMode }
+  }
+  canControlDelegation(agent: Agent, owner: DelegationOwner): boolean {
+    if (this.rootOf(agent).id !== owner.rootSessionId) return false
+    if (agent.id === owner.rootSessionId || agent.id === owner.parentAgentId)
+      return true
+    let target =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    while (target) {
+      if (target.id === agent.id) return true
+      target = target.owner
+    }
+    return false
+  }
   rootOf(agent: Agent): Agent {
     let current = agent
     while (current.owner !== undefined) current = current.owner
@@ -876,31 +1706,21 @@ export class HarnessHost {
     return current === undefined ? null : this.kept.sessionStore.get(current.id)
   }
 
-  activeSession(): SessionEntry | null {
-    return this.activeSessionId === null
-      ? null
-      : this.kept.sessionStore.get(this.activeSessionId)
+  /**
+   * Where a background turn without a session runs (a scheduler job created
+   * before jobs named their session): the most recent session, or a new one.
+   */
+  defaultBackgroundSession(): SessionEntry {
+    return (
+      this.kept.sessionStore.list()[0] ??
+      this.kept.sessionStore.create('新会话', { mode: 'chat' })
+    )
   }
 
-  activateSession(sessionId: string): SessionEntry {
-    const entry = this.kept.sessionStore.get(sessionId)
-    if (entry === null) throw new Error(`unknown session ${sessionId}`)
-    this.activeSessionId = sessionId
-    return entry
-  }
-
-  ensureDefaultSession(): SessionEntry {
-    const active = this.activeSession()
-    if (active !== null) return active
-    const existing = this.kept.sessionStore.list()[0]
-    const entry =
-      existing ?? this.kept.sessionStore.create('新会话', { mode: 'chat' })
-    this.activeSessionId = entry.id
-    return entry
-  }
-
-  /** Project root whose Skills a session sees (Build sessions only). */
-  projectRootFor(entry: SessionEntry | null | undefined): string | null {
+  /** Project root whose Skills a session (or a draft's session to be) sees: Build only. */
+  projectRootFor(
+    entry: Pick<SessionEntry, 'mode' | 'project_path'> | null | undefined,
+  ): string | null {
     return entry?.mode === 'build' && entry.project_path
       ? resolve(entry.project_path)
       : null
@@ -930,14 +1750,21 @@ export class HarnessHost {
     const existing = this.agents.get(sessionId)
     if (existing !== undefined) return existing
     const entry = this.kept.sessionStore.get(sessionId)
-    if (entry === null) throw new Error(`unknown session ${sessionId}`)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${sessionId}`, sessionId)
     const cwd = this.workspaceRootFor(entry)
     let session =
       this.sessions.get(sessionId) ?? this.sessions.tryOpen(sessionId)
     const fresh = session === undefined
     if (session === undefined)
       session = this.sessions.create({ id: sessionId, cwd })
-    const agent = this.attachAgent(new Agent(session, this.agentDeps()))
+    const tree = this.taskTree(sessionId)
+    const agent = this.attachAgent(
+      new Agent(session, this.agentDeps(), { admission: tree.gate }),
+    )
+    tree.setRoot(agent)
+    // Its worktree binding may have changed while the session was closed.
+    if (!fresh) this.resyncWorkingDirectory(agent)
     if (fresh) this.presets.pin(session, this.defaultPreset)
     this.goalInstall.driver.attach(agent)
     this.hooks.sessionStarted(agent, fresh ? 'startup' : 'resume')
@@ -961,6 +1788,19 @@ export class HarnessHost {
         new Set(this.queuedPrompts(sessionId).map((p) => p.prompt_id)),
       )
     const unsubscribe = agent.session.subscribe((_session, event) => {
+      if (event.type === 'sandbox/mode' || event.type === 'plan/mode') {
+        const root = this.rootOf(agent)
+        if (this.delegations?.parentPermissionsRevoked(root.id)) {
+          this.goals.disarm(root)
+          this.delegationInteractions.cancelRoot(root.id)
+          this.delegationConsent.cancelRoot(root.id)
+          void this.delegations.stopRoot(root.id).catch((error) =>
+            logger.warn('external permission revocation needs recovery', {
+              error: String(error),
+            }),
+          )
+        }
+      }
       // The splice is logged before the inbox applies it: diff afterwards.
       if (agent.owner === undefined && event.type === 'agent/inbox/spliced')
         queueMicrotask(() => {
@@ -976,7 +1816,13 @@ export class HarnessHost {
       this.publishRaw(sessionId, event)
     })
     const unobserve = agent.observe({
+      queue: (_agent, change) => {
+        if (agent.owner === undefined) this.announceQueueItem(sessionId, change)
+      },
       status: (_agent, status) => {
+        if (status === 'idle') this.projectMcp.release(sessionId)
+        // The root or one of its subagents stopped: the task may be over.
+        if (status === 'idle') this.noteTaskSettled(this.rootOf(agent).id)
         if (status === 'idle' && agent.owner === undefined) {
           try {
             const last = agent.session.lastOf('assistant/message')
@@ -998,6 +1844,156 @@ export class HarnessHost {
       unobserve()
     })
     return agent
+  }
+
+  /** Forget a disposed child: its subscription, projector and table entry. */
+  private detachAgent(sessionId: string): void {
+    this.unsubscribes.get(sessionId)?.()
+    this.unsubscribes.delete(sessionId)
+    this.projectors.delete(sessionId)
+    this.agents.delete(sessionId)
+    this.projectMcp.release(sessionId)
+  }
+
+  /** A root session's task tree (made on first use). */
+  private taskTree(rootId: string): TaskTree {
+    let tree = this.taskTrees.get(rootId)
+    if (tree === undefined) {
+      tree = new TaskTree(rootId, {
+        budget: () => this.taskBudget(),
+        pricing: (routeId) =>
+          findEntry(this.kept.modelConfig, routeId)?.pricing,
+        background: (root) => {
+          const turn = currentTurnInfo(root.session.events)
+          return turn.source === 'scheduler' || turn.goalRound
+        },
+        disposeJobs: (agentId) => this.jobs.disposeOwner(agentId),
+        disposeChildren: (id) => this.subagents.disposeChildrenOf(id),
+        // Nothing runs on its own past the cost cap: the goal waits for the user.
+        exhausted: () => {
+          const root = this.agents.get(rootId)
+          if (root !== undefined) this.goals.disarm(root)
+        },
+      })
+      this.taskTrees.set(rootId, tree)
+    }
+    return tree
+  }
+
+  /** The task tree an agent (root or child) belongs to. */
+  private taskTreeOf(agent: Agent): TaskTree {
+    return this.taskTree(this.rootOf(agent).id)
+  }
+
+  /**
+   * Listen for roots whose task can no longer go on (UI-S15): the root is
+   * idle, and no subagent, background job or external run of its tree
+   * runs, and no goal round is due. Returns an unsubscribe.
+   */
+  onTaskQuiet(listener: (rootId: string) => void): () => void {
+    this.taskQuietListeners.add(listener)
+    return () => {
+      this.taskQuietListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Something of a root's task stopped (the root or a subagent went idle, a
+   * job or an external run settled, a goal changed): once the work this
+   * set off has run — a result may wake the root right away — look whether
+   * the task can still go on, and tell the listeners when it cannot.
+   */
+  noteTaskSettled(rootId: string): void {
+    if (this.closed || this.taskQuietListeners.size === 0) return
+    if (this.taskQuietChecks.has(rootId)) return
+    this.taskQuietChecks.add(rootId)
+    setTimeout(() => {
+      this.taskQuietChecks.delete(rootId)
+      if (!this.taskQuiet(rootId)) return
+      for (const listener of [...this.taskQuietListeners]) {
+        try {
+          listener(rootId)
+        } catch (error: unknown) {
+          logger.warn('a task-quiet listener failed', {
+            session: rootId,
+            error: String(error),
+          })
+        }
+      }
+    }, 0)
+  }
+
+  /**
+   * Quitting (UI-S15): once the stopped agents have ended their turns,
+   * record every task still open, as if it had gone quiet. Bounded: what is
+   * not done in time is recorded when the session is next opened.
+   */
+  private async recordOpenTasks(stopping: readonly Agent[]): Promise<void> {
+    const close = this.closeOpenTasks
+    if (close === undefined) return
+    const within = (work: Promise<unknown>, ms: number) =>
+      Promise.race([
+        work.catch(() => undefined),
+        new Promise<void>((done) => setTimeout(done, ms).unref?.()),
+      ])
+    await within(
+      Promise.all(stopping.map((agent) => agent.whenIdle())),
+      TASK_CLOSE_IDLE_MS,
+    )
+    await within(close(), TASK_CLOSE_RECORD_MS)
+  }
+
+  /** Nothing of a root's task runs, and nothing can wake the root. */
+  private taskQuiet(rootId: string): boolean {
+    const root = this.agents.get(rootId)
+    if (root === undefined || root.owner !== undefined) return false
+    if (root.status !== 'idle') return false
+    if (this.taskTreeBusy(rootId)) return false
+    if (this.delegations?.hasOutstanding(rootId) === true) return false
+    const goal = this.goals.get(root)
+    return !(goal?.phase === 'active' && goal.activation === 'armed')
+  }
+
+  /** Whether a root's subagents, or any background job of its tree, still run. */
+  private taskTreeBusy(rootId: string): boolean {
+    const tree = this.taskTrees.get(rootId)
+    return (
+      tree !== undefined &&
+      (tree.childrenActive() || this.jobs.hasActive(tree.agentIds()))
+    )
+  }
+
+  /** One task's budget now: the settings and the model policy's cost cap. */
+  private taskBudget(): TaskBudget {
+    const cap = this.kept.modelConfig.policy?.cost.maxUsdPerAgentTurn
+    return {
+      ...this.taskBudgetSettings,
+      ...(cap === null || cap === undefined ? {} : { maxCostUsd: cap }),
+    }
+  }
+
+  /** 设置 › 高级 › 任务预算 as the host applies it. */
+  get taskBudgetSettingsNow(): TaskBudgetSettings {
+    return { ...this.taskBudgetSettings }
+  }
+
+  /** Apply new budget settings to every task from its next decision on. */
+  setTaskBudget(settings: TaskBudgetSettings): void {
+    this.taskBudgetSettings = normalizeTaskBudgetSettings(settings)
+    // A larger pool may start agents that wait for a slot.
+    for (const tree of this.taskTrees.values()) tree.wake()
+  }
+
+  /** Tell the queue UI a user message changed state (host-only `queue_item_state`). */
+  private announceQueueItem(sessionId: string, change: QueueChange): void {
+    if (!isUserTyped(change.message)) return
+    this.emitHost({
+      event: 'queue_item_state',
+      session_id: sessionId,
+      prompt_id: change.message.id,
+      state: change.state,
+      ...('reason' in change ? { reason: change.reason } : {}),
+    })
   }
 
   /** Emit prompt_queued / prompt_dequeued for inbox changes since the last call. */
@@ -1083,21 +2079,47 @@ export class HarnessHost {
     }
   }
 
+  /**
+   * One token-ledger row per model call that reported usage: conversation
+   * steps and compaction summaries, with disjoint counts, the entry's
+   * provider and the cost from its (or the catalog's) price (CORE-18).
+   */
   private trackUsage(agent: Agent, event: SessionEvent): void {
-    if (event.type !== 'assistant/message' || event.data.usage === undefined)
-      return
-    const usage = event.data.usage
+    let call:
+      | { usage: TokenUsage; routeId: string; model: string; type: string }
+      | undefined
+    if (event.type === 'assistant/message' && event.data.usage !== undefined)
+      call = {
+        usage: event.data.usage,
+        routeId: event.data.message.source.provider,
+        model: event.data.message.source.model,
+        type: agent.owner === undefined ? 'main_agent' : 'subagent',
+      }
+    else if (
+      event.type === 'compaction/summary' &&
+      event.data.usage !== undefined
+    )
+      call = {
+        usage: event.data.usage,
+        routeId: event.data.provider,
+        model: event.data.model,
+        type: 'compaction',
+      }
+    if (call === undefined) return
     try {
+      const entry = findEntry(this.kept.modelConfig, call.routeId)
+      const counts = ledgerUsage(call.usage)
       this.kept.tokenTracker.record(
-        event.data.message.source.model,
+        call.model,
+        { ...counts },
         {
-          prompt_tokens: usage.inputTokens + (usage.cacheReadTokens ?? 0),
-          completion_tokens: usage.outputTokens,
-          prompt_cache_hit_tokens: usage.cacheReadTokens ?? 0,
-        },
-        {
-          usageType: agent.owner === undefined ? 'main_agent' : 'subagent',
-          modelEntryId: event.data.message.source.provider,
+          provider: entry?.provider ?? null,
+          usageType: call.type,
+          modelEntryId: call.routeId,
+          costUsd:
+            entry === undefined
+              ? null
+              : usageCostUsd(counts, entryPrices(entry)),
         },
       )
     } catch {
@@ -1106,6 +2128,15 @@ export class HarnessHost {
   }
 
   // ── turns ───────────────────────────────────────────────────────────
+
+  /** Pixel size of a stored image, for token pricing (KRN-05); empty when unreadable. */
+  private imageSize(ref: AttachmentRef): { width?: number; height?: number } {
+    try {
+      return imageDimensions(this.attachments.readBytes(ref)) ?? {}
+    } catch {
+      return {}
+    }
+  }
 
   private userContent(input: SubmitInput): ContentBlock[] {
     const blocks: ContentBlock[] = []
@@ -1120,6 +2151,7 @@ export class HarnessHost {
             attachmentId: ref.id,
             mediaType: ref.mime,
             bytes: ref.size,
+            ...this.imageSize(ref),
           },
         })
       } else if (ref.has_text) {
@@ -1146,9 +2178,160 @@ export class HarnessHost {
    * Deliver one user prompt. Resolves when the turn that consumed it ended
    * (or immediately for an interjection into a running turn).
    */
+  delegationNoticeParent(
+    owner: import('../delegation/types').DelegationOwner,
+  ): Agent | undefined {
+    const root = this.kept.sessionStore.get(owner.rootSessionId)
+    if (!root || root.archived_at || this.closed) return undefined
+    // A parent subagent that has ended (or a restart) hands the result to
+    // the root instead of dropping it (AGT-09).
+    return owner.parentAgentId === owner.rootSessionId
+      ? this.agentFor(owner.rootSessionId)
+      : (this.agents.get(owner.parentAgentId) ??
+          this.agentFor(owner.rootSessionId))
+  }
+  private resumeDelegationNotices(input: SubmitInput): void {
+    if (input.scheduler || (input.source && input.source !== 'user')) return
+    void this.delegations?.resumeRootNotices(input.sessionId).catch((error) =>
+      logger.warn('external result notification remains pending', {
+        error: String(error),
+      }),
+    )
+  }
+  /**
+   * Deliver one user prompt to its session. Resolves when the turn that
+   * consumed it ended (or immediately for an interjection into a running
+   * turn). The session the user is looking at does not change (KRN-01).
+   */
   async submit(input: SubmitInput): Promise<SubmitResult> {
+    return await this.deliver(input)
+  }
+
+  /**
+   * Run one turn in the background (scheduler, ACP, onboarding): in
+   * the session `scope` names, never the one in view, with a typed result.
+   * `auto-reject` answers its approvals and questions with a rejection at
+   * once (the result is `blocked`); `timeoutMs` aborts it (`aborted` by
+   * `timeout`, or `blocked` on `interaction-timeout` when it was waiting on
+   * the user).
+   */
+  async runBackgroundTurn(
+    scope: SessionScope,
+    content: string,
+    options: BackgroundTurnOptions,
+  ): Promise<BackgroundTurnOutcome> {
+    const sessionId = this.scopeFor(
+      scope.sessionId,
+      'runBackgroundTurn',
+    ).sessionId
+    const policy: InteractionPolicy = options.interactionPolicy ?? 'wait'
+    let state: BackgroundTurnState | undefined
+    let root: Agent | undefined
+    let timer: unknown = null
+    let timedOut: 'idle' | 'waiting' | null = null
+    const emit = options.emit ?? null
+    const untap =
+      emit === null
+        ? null
+        : this.tap(async (event) => {
+            if (event.session_id === sessionId) await emit(event)
+          })
+    try {
+      const submitted = await this.deliver(
+        {
+          sessionId,
+          content,
+          displayContent: options.displayContent ?? null,
+          clientMessageId: options.clientMessageId ?? null,
+          source: options.source,
+          scheduler: options.scheduler ?? null,
+          uiHidden: options.uiHidden ?? null,
+          signal: options.signal ?? null,
+          unconsumed: options.unconsumed ?? null,
+          delivery: 'queue',
+        },
+        (messageId, agent) => {
+          root = agent
+          state = { messageId, policy, rejected: [], planRejected: false }
+          const states = this.backgroundTurns.get(agent.id) ?? []
+          states.push(state)
+          this.backgroundTurns.set(agent.id, states)
+          const limit = options.timeoutMs ?? null
+          if (limit !== null && limit > 0)
+            timer = this.timers.setTimeout(() => {
+              timedOut = this.pending.hasPending(sessionId) ? 'waiting' : 'idle'
+              agent.cancelMessage(messageId)
+            }, limit)
+        },
+      )
+      let result: TurnResult = submitted.result ?? {
+        kind: 'aborted',
+        by: 'system',
+        turnId: submitted.turnId,
+      }
+      if (timedOut !== null && result.kind === 'aborted')
+        result =
+          timedOut === 'waiting' && result.turnId !== null
+            ? {
+                kind: 'blocked',
+                reason: 'interaction-timeout',
+                turnId: result.turnId,
+              }
+            : { ...result, by: 'timeout' }
+      else if (
+        state !== undefined &&
+        state.rejected.length > 0 &&
+        result.kind === 'completed'
+      )
+        result = {
+          kind: 'blocked',
+          reason: state.planRejected ? 'plan-mode' : 'interaction-rejected',
+          turnId: result.turnId,
+          detail: [...new Set(state.rejected)].join('、'),
+        }
+      return {
+        sessionId,
+        messageId: submitted.messageId,
+        turnId: submitted.turnId,
+        content: submitted.content,
+        delivery: submitted.delivery,
+        result,
+      }
+    } finally {
+      if (timer !== null) this.timers.clearTimeout(timer)
+      if (root !== undefined && state !== undefined) {
+        const states = (this.backgroundTurns.get(root.id) ?? []).filter(
+          (item) => item !== state,
+        )
+        if (states.length > 0) this.backgroundTurns.set(root.id, states)
+        else this.backgroundTurns.delete(root.id)
+      }
+      untap?.()
+    }
+  }
+
+  /**
+   * The auto-rejecting background turn an agent's interaction belongs to:
+   * its root session's current turn is the one that took a background
+   * message with policy `auto-reject`.
+   */
+  private autoRejecting(agent: Agent): BackgroundTurnState | undefined {
+    const root = this.rootOf(agent)
+    const states = this.backgroundTurns.get(root.id)
+    if (states === undefined || !root.session.hasOpenTurn()) return undefined
+    const current = root.position.turn
+    return states.find(
+      (state) =>
+        state.policy === 'auto-reject' &&
+        turnOfMessage(root.session.events, state.messageId) === current,
+    )
+  }
+
+  private async deliver(
+    input: SubmitInput,
+    beforeSend?: (messageId: string, agent: Agent) => void,
+  ): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
-    this.activeSessionId = input.sessionId
     const message: UserMessage = createUserMessage({
       content: this.userContent(input),
       source: { kind: 'user' },
@@ -1176,33 +2359,47 @@ export class HarnessHost {
       ...(input.scheduler ? { scheduler: input.scheduler } : {}),
       ...(input.uiHidden ? { uiHidden: true } : {}),
     })
+    // The user (or a scheduler) asks: a new task, a fresh budget (KRN-03).
+    this.taskTree(agent.id).beginTask()
     if (input.delivery === 'interject' && agent.status === 'running') {
       agent.steer(message)
+      this.resumeDelegationNotices(input)
       return {
         sessionId: agent.id,
         messageId: message.id,
         turnId: null,
         content: '',
         delivery: 'interjected',
+        result: null,
       }
     }
+    // The submitter's cancel reaches only this message: discarded while it
+    // waits, or only the turn that took it (CORE-23).
     const onAbort = (): void => {
-      agent.cancel({ kind: 'user' }, { keepInbox: true })
+      agent.cancelMessage(message.id)
     }
+    const outcome = agent.outcome(message.id)
+    beforeSend?.(message.id, agent)
     input.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       agent.followup(message)
-      await agent.whenIdle()
+      if (input.signal?.aborted) onAbort()
+      this.resumeDelegationNotices(input)
+      const settled = await outcome
+      const withdrawn =
+        settled.kind === 'not-consumed' &&
+        input.unconsumed === 'withdraw' &&
+        agent.inbox.discard(message.id, 'cancelled')
+      // Resolve once that turn has fully ended (the driver is idle or on to
+      // the next queued turn), as callers did when submit awaited idleness.
+      if (settled.kind !== 'discarded')
+        await agent.whenTurnSettled(
+          settled.kind === 'consumed' ? settled.turn : undefined,
+        )
+      const result = submitResultFor(agent, message.id, settled)
+      return withdrawn ? { ...result, delivery: 'discarded' } : result
     } finally {
       input.signal?.removeEventListener('abort', onAbort)
-    }
-    const outcome = turnOutcomeFor(agent.session.events, message.id)
-    return {
-      sessionId: agent.id,
-      messageId: message.id,
-      turnId: outcome.turn === undefined ? null : `${agent.id}:${outcome.turn}`,
-      content: outcome.text,
-      delivery: 'completed',
     }
   }
 
@@ -1215,14 +2412,51 @@ export class HarnessHost {
     return this.kept.sessionStore.setGeneratedTitle(sessionId, title)
   }
 
+  /**
+   * The user pressed stop: an active goal is paused (durably, so it shows
+   * 「已暂停」 and `/goal resume` brings it back) and the turn and its
+   * subagents are cancelled (AGT-09). `stopRoot` also fences an external
+   * start still in flight and holds late results; with no external
+   * delegation it does nothing.
+   */
   stop(sessionId: string): boolean {
+    this.delegationInteractions.cancelRoot(sessionId)
+    this.delegationConsent.cancelRoot(sessionId)
+    const externalActive =
+      this.delegations
+        ?.list()
+        .some(
+          (state) =>
+            state.record?.owner.rootSessionId === sessionId &&
+            state.record.availability === 'active',
+        ) ?? false
+    void this.delegations?.stopRoot(sessionId).catch((error) =>
+      logger.warn('external delegation stop requires recovery', {
+        error: String(error),
+      }),
+    )
     const agent = this.agents.get(sessionId)
-    if (agent === undefined) return false
+    if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
+    this.pauseGoalForStop(agent)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
-    return running
+    return running || externalActive
+  }
+
+  /** Pause an active goal; anything else (or a failed pause) is disarmed. */
+  private pauseGoalForStop(agent: Agent): void {
+    const goal = this.goals.get(agent)
+    if (goal?.phase === 'active') {
+      try {
+        this.goals.pause(agent, { id: goal.id, revision: goal.revision })
+        return
+      } catch (error: unknown) {
+        logger.warn('stop could not pause the goal', { error: String(error) })
+      }
+    }
+    this.goals.disarm(agent)
   }
 
   isBusy(sessionId: string | null): boolean {
@@ -1238,36 +2472,64 @@ export class HarnessHost {
       .map((agent) => agent.id)
   }
 
+  /**
+   * The user's queue: waiting and held user prompts. A prompt a step has
+   * reserved (state `sending`) is left out; it either enters (its
+   * user_message follows) or comes back (queue_item_state).
+   */
   queuedPrompts(sessionId: string): QueuedPrompt[] {
     const agent = this.agents.get(sessionId)
     if (agent === undefined) return []
-    const user = (message: UserMessage): boolean =>
-      message.source.kind === 'user'
+    const listed = (
+      messages: readonly UserMessage[],
+      target: QueuedPrompt['target'],
+    ): QueuedPrompt[] =>
+      messages.flatMap((message) => {
+        if (!isUserTyped(message)) return []
+        const state = agent.inbox.stateOf(message.id)
+        if (state === undefined || state === 'sending') return []
+        const reason = agent.inbox.holdReason(message.id)
+        return [
+          {
+            prompt_id: message.id,
+            content: messageText(message),
+            state,
+            ...(reason === undefined ? {} : { reason }),
+            target,
+          },
+        ]
+      })
     return [
-      ...agent.inbox.nextStep.filter(user).map((message) => ({
-        prompt_id: message.id,
-        content: messageText(message),
-        state: 'queued' as const,
-        target: 'next-step' as const,
-      })),
-      ...agent.inbox.nextTurn.filter(user).map((message) => ({
-        prompt_id: message.id,
-        content: messageText(message),
-        state: 'queued' as const,
-        target: 'next-turn' as const,
-      })),
+      ...listed(agent.inbox.nextStep, 'next-step'),
+      ...listed(agent.inbox.nextTurn, 'next-turn'),
     ]
   }
 
+  /**
+   * Queue actions: `cancel` discards a waiting or held prompt (丢弃),
+   * `interject` moves it into the running turn's next step, `send` runs a
+   * held prompt (发送). A prompt a step already reserved cannot change.
+   */
   manageQueuedPrompt(
     sessionId: string,
     promptId: string,
-    action: 'cancel' | 'interject',
-  ): boolean {
+    action: 'cancel' | 'interject' | 'send',
+  ): { ok: true } | { ok: false; reason: QueueActionRefusal } {
     const agent = this.agents.get(sessionId)
-    if (agent === undefined) return false
-    if (action === 'cancel') return agent.inbox.remove(promptId)
-    return agent.inbox.promote(promptId)
+    const state = agent?.inbox.stateOf(promptId)
+    if (agent === undefined || state === undefined)
+      return { ok: false, reason: 'prompt_not_queued' }
+    if (state === 'sending')
+      return { ok: false, reason: 'prompt_already_started' }
+    // Sending a held prompt again is the user asking anew (KRN-03).
+    if (action !== 'cancel') this.taskTree(sessionId).beginTask()
+    const applied =
+      action === 'cancel'
+        ? agent.inbox.discard(promptId, 'user')
+        : action === 'send'
+          ? agent.sendQueued(promptId)
+          : agent.interjectQueued(promptId)
+    return applied ? { ok: true } : { ok: false, reason: 'prompt_not_queued' }
   }
 
   async compactNow(
@@ -1281,6 +2543,16 @@ export class HarnessHost {
   }
 
   // ── control ─────────────────────────────────────────────────────────
+
+  get defaultPreset(): string {
+    return this.defaultPresetId
+  }
+
+  /** Sessions opened from now on (and drafts) start in `preset`. */
+  setDefaultPreset(preset: string): void {
+    this.presets.spec(preset)
+    this.defaultPresetId = preset
+  }
 
   controlPayload(sessionId: string | null): Record<string, unknown> {
     if (sessionId === null || !this.kept.sessionStore.get(sessionId)) {
@@ -1353,6 +2625,14 @@ export class HarnessHost {
     const agent = this.agentFor(sessionId)
     this.presets.set(agent, preset)
     return this.controlPayload(sessionId)
+  }
+
+  /**
+   * A new session starts in `preset` (a draft's choice, FIX-13): logged as a
+   * creation-time fact like the default, with no notice to the model.
+   */
+  pinPermissionPreset(sessionId: string, preset: string): void {
+    this.presets.pin(this.agentFor(sessionId).session, preset)
   }
 
   setSandboxMode(sessionId: string, mode: SandboxMode): void {
@@ -1500,28 +2780,101 @@ export class HarnessHost {
   }
 
   /** Remove a session's log, agent, and children. */
-  deleteSession(sessionId: string): void {
+  /**
+   * Stop a session and drop it from the kernel, keeping its log on disk
+   * (closed and flushed): a soft-deleted session can come back (FIX-01).
+   */
+  unloadSession(sessionId: string): void {
     this.stop(sessionId)
+    this.projectMcp.release(sessionId)
     this.agents.get(sessionId)?.dispose()
     this.agents.delete(sessionId)
     this.unsubscribes.get(sessionId)?.()
     this.unsubscribes.delete(sessionId)
     this.projectors.delete(sessionId)
     this.announcedQueue.delete(sessionId)
-    void this.jobs.disposeOwner(sessionId)
+    const tree = this.taskTrees.get(sessionId)
+    this.taskTrees.delete(sessionId)
+    // Its subagents (stop disposed them), their jobs and its own.
+    void (
+      tree?.disposeAll('session unloaded') ?? this.jobs.disposeOwner(sessionId)
+    )
     void this.computerUse?.service.onSessionDeleted(sessionId)
+    this.sessions.close(sessionId)
+  }
+
+  /** The host's per-session tables, for tests (KRN-03). */
+  attachedForTest(): {
+    agents: string[]
+    projectors: string[]
+    unsubscribes: string[]
+  } {
+    return {
+      agents: [...this.agents.keys()],
+      projectors: [...this.projectors.keys()],
+      unsubscribes: [...this.unsubscribes.keys()],
+    }
+  }
+
+  /** A root session's task tree, for tests (KRN-03). */
+  taskTreeForTest(rootId: string): TaskTree | undefined {
+    return this.taskTrees.get(rootId)
+  }
+
+  /** unloadSession, then remove the session's log directory and its tree's. */
+  deleteSession(sessionId: string): void {
+    this.unloadSession(sessionId)
+    this.forgetSessionTree(
+      sessionId,
+      join(this.sessions.root, sessionId, LOG_FILE),
+    )
     this.sessions.delete(sessionId)
+  }
+
+  /**
+   * Remove what a deleted root session leaves outside its own directory
+   * (KRN-03): the session of every subagent it (or they) recorded, and the
+   * spill of all of them. `rootLog` is the root's log file — in the trash
+   * when a deleted session is purged.
+   */
+  forgetSessionTree(rootId: string, rootLog: string): string[] {
+    const descendants = recordedDescendants(
+      this.sessions.readEventsAt(rootId, rootLog),
+      (id) => {
+        try {
+          return this.sessions.readSnapshot(id).events
+        } catch {
+          return []
+        }
+      },
+    )
+    const spillRoot = join(this.kept.paths.stateRoot, 'spill')
+    for (const id of [rootId, ...descendants])
+      rmSync(spillSessionDir(spillRoot, id), { recursive: true, force: true })
+    for (const id of descendants) this.sessions.delete(id)
+    return descendants
   }
 
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    for (const teardown of this.extensionTeardown.splice(0)) teardown()
+    this.delegationInteractions.cancelRoot()
+    this.delegationConsent.cancelRoot()
+    await this.delegations?.shutdown().catch((error) =>
+      logger.warn('external delegation shutdown requires recovery', {
+        error: String(error),
+      }),
+    )
     await this.computerUse?.dispose().catch(() => {})
-    for (const agent of this.agents.values()) agent.dispose()
+    const stopping = [...this.agents.values()]
+    for (const agent of stopping) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()
     await this.jobs.dispose()
     await this.hooks.dispose()
+    await this.recordOpenTasks(stopping)
     this.sessions.closeAll()
+    await this.projectMcp.close()
     this.mcpTools.dispose()
     try {
       await this.kept.schedulerService.stop?.('host closing')
@@ -1535,29 +2888,184 @@ export class HarnessHost {
   }
 }
 
-/** The turn that consumed a message, and that turn's final assistant text. */
-function turnOutcomeFor(
+/** The renderer wire form of a store health report. */
+export function sessionLogStateEvent(
+  state: SessionLogState,
+): Record<string, unknown> {
+  const base = { event: 'session_log_state', session_id: state.sessionId }
+  switch (state.state) {
+    case 'repaired':
+      return {
+        ...base,
+        state: state.state,
+        kind: state.kind,
+        dropped_bytes: state.droppedBytes,
+        ...(state.line === undefined ? {} : { line: state.line }),
+        backup_path: state.backupPath,
+      }
+    case 'unrecoverable':
+      return { ...base, state: state.state, reason: state.reason }
+    case 'write_paused':
+      return {
+        ...base,
+        state: state.state,
+        error: state.error,
+        pending_events: state.pendingEvents,
+      }
+    case 'write_resumed':
+      return { ...base, state: state.state }
+  }
+}
+
+export type QueueActionRefusal = 'prompt_not_queued' | 'prompt_already_started'
+
+/** One turn's final assistant text, and whether a cost cap stopped it (logs before KRN-03). */
+function turnFacts(
   events: readonly SessionEvent[],
-  messageId: string,
-): { turn?: number; text: string } {
-  let turn: number | undefined
-  let found = false
+  turn: number,
+): { text: string; costCapped: boolean } {
+  let inside = false
   let text = ''
+  let costCapped = false
   for (const event of events) {
     if (event.type === 'turn/start') {
-      if (found) break
-      turn = event.data.turn
-      text = ''
-    } else if (event.type === 'user/message' && event.data.id === messageId) {
-      found = true
-    } else if (found && event.type === 'assistant/message') {
+      if (inside) break
+      inside = event.data.turn === turn
+    } else if (!inside) {
+      continue
+    } else if (event.type === 'assistant/message') {
       const next = messageText(event.data.message).trim()
       if (next) text = next
-    } else if (found && event.type === 'turn/end') {
+    } else if (event.type === 'llm/cost-cap') {
+      costCapped = true
+    } else if (event.type === 'turn/end') {
       break
     }
   }
-  return found
-    ? { ...(turn === undefined ? {} : { turn }), text }
-    : { text: '' }
+  return { text, costCapped }
+}
+
+/** The submit result for one message's outcome. */
+function submitResultFor(
+  agent: Agent,
+  messageId: string,
+  outcome: MessageOutcome,
+): SubmitResult {
+  const base = { sessionId: agent.id, messageId }
+  if (outcome.kind === 'not-consumed')
+    return {
+      ...base,
+      turnId: null,
+      content: '',
+      delivery: 'queued',
+      result: { kind: 'not-consumed', reason: outcome.reason },
+    }
+  if (outcome.kind === 'discarded')
+    return {
+      ...base,
+      turnId: null,
+      content: '',
+      delivery: 'discarded',
+      result: {
+        kind: 'aborted',
+        by:
+          outcome.reason === 'user' || outcome.reason === 'cancelled'
+            ? 'user'
+            : 'system',
+        turnId: null,
+      },
+    }
+  const turnId = `${agent.id}:${outcome.turn}`
+  const { text, costCapped } = turnFacts(agent.session.events, outcome.turn)
+  const reason = outcome.reason
+  let result: TurnResult
+  switch (reason.kind) {
+    case 'error':
+      result = {
+        kind: 'error',
+        code: reason.error.code ?? 'UNKNOWN',
+        message: reason.error.message,
+        turnId,
+      }
+      break
+    case 'aborted':
+      result = {
+        kind: 'aborted',
+        by: reason.reason?.kind === 'user' ? 'user' : 'system',
+        turnId,
+      }
+      break
+    case 'interrupted':
+      result = { kind: 'aborted', by: 'system', turnId }
+      break
+    case 'blocked':
+      result = {
+        kind: 'blocked',
+        reason: costCapped ? 'cost-cap' : 'prompt-rejected',
+        turnId,
+      }
+      break
+    case 'budget':
+      result = {
+        kind: 'blocked',
+        reason: reason.limit === 'cost' ? 'cost-cap' : 'step-limit',
+        turnId,
+      }
+      break
+    default:
+      result = { kind: 'completed', content: text, turnId }
+  }
+  return { ...base, turnId, content: text, delivery: 'completed', result }
+}
+
+/** A background turn's interaction policy and what it rejected. */
+interface BackgroundTurnState {
+  readonly messageId: string
+  readonly policy: InteractionPolicy
+  readonly rejected: string[]
+  planRejected: boolean
+}
+
+/** The turn that took a message (its `user/message`), if one did. */
+function turnOfMessage(
+  events: readonly SessionEvent[],
+  messageId: string,
+): number | undefined {
+  let turn: number | undefined
+  for (const event of events) {
+    if (event.type === 'turn/start') turn = event.data.turn
+    else if (event.type === 'user/message' && event.data.id === messageId)
+      return turn
+  }
+  return undefined
+}
+
+/** `work`, or the signal's reason as soon as it aborts. */
+/** The approval card text for running one MCP server outside the sandbox. */
+function unsandboxedServerQuestion(request: UnsandboxedRequest): string {
+  const command = [request.command, ...request.args].join(' ').slice(0, 240)
+  return (
+    `MCP 服务器「${request.name}」无法在进程沙箱中启动（${request.reason}）。` +
+    `允许它在沙箱外运行吗？它将能读写你的文件。命令：${command}。` +
+    '选择会按这个服务器记住，修改它的命令后会重新询问。'
+  )
+}
+
+async function untilAborted<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) throw signal.reason
+  let onAbort: (() => void) | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
 }

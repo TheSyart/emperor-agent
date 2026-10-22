@@ -36,6 +36,13 @@ export interface PublicHttpRequest {
   signal: AbortSignal
   headers?: Record<string, string>
   redirectMode?: 'follow_validated' | 'manual_cross_origin'
+  /**
+   * A body over `maxBytes`: `reject` (default) fails with
+   * `response_too_large`; `truncate` keeps the first `maxBytes`, stops
+   * reading and marks the response `truncated` (a declared larger
+   * Content-Length is read up to the cap instead of refused).
+   */
+  overflow?: 'reject' | 'truncate'
 }
 
 export interface PublicHttpTransportRequest {
@@ -62,6 +69,8 @@ export interface PublicHttpResponse {
   status: number
   headers: Record<string, string | string[] | undefined>
   body: Uint8Array
+  /** The body was cut at `maxBytes` (only with `overflow: 'truncate'`). */
+  truncated?: boolean
 }
 
 export interface PublicHttpRedirectResponse {
@@ -211,7 +220,11 @@ export class PublicHttpClient {
         response.close()
         throw error
       }
-      if (declaredLength !== null && declaredLength > maxBytes) {
+      if (
+        declaredLength !== null &&
+        declaredLength > maxBytes &&
+        request.overflow !== 'truncate'
+      ) {
         response.close()
         throw new PublicHttpError('response_too_large')
       }
@@ -225,12 +238,22 @@ export class PublicHttpClient {
     if (isPublicHttpRedirectResponse(response)) return response
     const chunks: Buffer[] = []
     let bytes = 0
+    let truncated = false
     try {
       for await (const chunk of response.body) {
         throwIfCancelled(request.signal)
         const buffer = Buffer.from(chunk)
+        if (bytes + buffer.byteLength > maxBytes) {
+          if (request.overflow !== 'truncate')
+            throw new PublicHttpError('response_too_large')
+          // Only dropped bytes count: a chunk that fills the cap exactly
+          // keeps reading to see the end of the body.
+          chunks.push(buffer.subarray(0, maxBytes - bytes))
+          bytes = maxBytes
+          truncated = true
+          break
+        }
         bytes += buffer.byteLength
-        if (bytes > maxBytes) throw new PublicHttpError('response_too_large')
         chunks.push(buffer)
       }
       return {
@@ -238,6 +261,7 @@ export class PublicHttpClient {
         status: response.statusCode,
         headers: response.headers,
         body: Buffer.concat(chunks, bytes),
+        ...(request.overflow === 'truncate' ? { truncated } : {}),
       }
     } finally {
       response.close()

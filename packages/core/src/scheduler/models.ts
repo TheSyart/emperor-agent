@@ -31,6 +31,8 @@ export enum SchedulerStatus {
   SKIPPED = 'skipped',
   CANCELLED = 'cancelled',
   INTERRUPTED = 'interrupted',
+  /** The turn needed an approval or answer nobody gave (KRN-01). */
+  BLOCKED = 'blocked',
 }
 
 export interface SchedulerSchedulePayload {
@@ -64,6 +66,8 @@ export interface SchedulerRunRecordPayload {
   status: string
   durationMs: number
   error: string | null
+  /** The turn's error code (`AUTH`, `RATE_LIMIT`, …) when it failed. */
+  errorCode?: string | null
   [key: string]: unknown
 }
 
@@ -469,6 +473,7 @@ export class SchedulerRunRecord {
   status: string
   duration_ms: number
   error: string | null
+  error_code: string | null
   constructor(opts: {
     run_id?: string | null
     task_id?: string | null
@@ -481,6 +486,7 @@ export class SchedulerRunRecord {
     status: string
     duration_ms?: number
     error?: string | null
+    error_code?: string | null
   }) {
     if (opts.run_id && !RUN_ID_RE.test(opts.run_id))
       throw new Error('scheduler run record id is invalid')
@@ -523,6 +529,7 @@ export class SchedulerRunRecord {
       : SchedulerStatus.SKIPPED
     this.duration_ms = Math.max(0, Math.trunc(opts.duration_ms ?? 0))
     this.error = strOrNull(opts.error)
+    this.error_code = strOrNull(opts.error_code)
   }
   static fromDict(raw: Record<string, any>): SchedulerRunRecord {
     return new SchedulerRunRecord({
@@ -543,6 +550,7 @@ export class SchedulerRunRecord {
       status: String(raw.status || SchedulerStatus.SKIPPED),
       duration_ms: Number(raw.duration_ms ?? raw.durationMs ?? 0),
       error: raw.error,
+      error_code: raw.error_code ?? raw.errorCode ?? null,
     })
   }
   toDict(): SchedulerRunRecordPayload {
@@ -558,6 +566,7 @@ export class SchedulerRunRecord {
       status: this.status,
       durationMs: this.duration_ms,
       error: this.error,
+      ...(this.error_code === null ? {} : { errorCode: this.error_code }),
     }
   }
 }
@@ -634,6 +643,7 @@ export class SchedulerJobState {
     status: string
     durationMs?: number
     error?: string | null
+    errorCode?: string | null
   }): void {
     const status = Object.values(SchedulerStatus).includes(
       opts.status as SchedulerStatus,
@@ -656,6 +666,7 @@ export class SchedulerJobState {
         status,
         duration_ms: opts.durationMs ?? 0,
         error: opts.error,
+        error_code: opts.errorCode ?? null,
       }),
     )
     this.run_history = this.run_history.slice(-MAX_RUN_HISTORY)

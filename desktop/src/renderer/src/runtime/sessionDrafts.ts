@@ -51,6 +51,34 @@ export function createDraftSession(
   }
 }
 
+/**
+ * What Core needs to create a draft's session (`draftSession`): its mode,
+ * project and own settings (FIX-13). A goal takes the preset, never plan
+ * mode (`plan` false); unset settings stay the defaults.
+ */
+export function draftSessionOf(
+  draft: SessionInfo | null | undefined,
+  plan = true,
+) {
+  return {
+    mode: draft?.mode === 'build' ? ('build' as const) : ('chat' as const),
+    project: {
+      project_id: draft?.project_id ?? null,
+      project_path: draft?.project_path ?? null,
+      project_name: draft?.project_name ?? null,
+    },
+    ...(plan && draft?.plan ? { plan: true } : {}),
+    ...(draft?.preset ? { preset: draft.preset } : {}),
+  }
+}
+
+/**
+ * Drafts promoted in this window: draft id → its session id (FIX-13).
+ * Written here only; read through `isDraftPromotion` (useComposerDrafts.ts,
+ * in the chat chunk).
+ */
+export const draftPromotions = new Map<string, string>()
+
 export function applySessionCreated(
   sessions: SessionInfo[],
   event: Extract<WsEvent, { event: 'session_created' }>,
@@ -69,6 +97,7 @@ export function promoteDraftSession(
   const index = sessions.findIndex(
     (session) => session.id === draftId || session.id === incoming.id,
   )
+  if (isDraftSessionId(draftId)) draftPromotions.set(draftId, incoming.id)
   if (index < 0) return [incoming, ...sessions]
   const next = sessions.slice()
   next[index] = { ...sessions[index], ...incoming, draft: undefined }

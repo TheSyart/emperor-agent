@@ -5,12 +5,14 @@
  * a footer with an adjustment comment field plus the decision actions:
  * 继续规划 (sends the comment, enabled once it is non-empty) and 批准并执行.
  * Enter in the comment field sends it (Shift+Enter breaks a line); Esc
- * cancels the interaction.
+ * folds the card (忽略 still dismisses the plan).
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import IconButton from '../../ui/IconButton.vue'
 import MarkdownBlock from '../../chat/MarkdownBlock.vue'
 import { DsClose } from '../../icons/ds'
@@ -79,12 +81,17 @@ function onCommentKeydown(event: KeyboardEvent) {
       class="card"
       tabindex="-1"
       :aria-label="title || '计划待确认'"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span class="strip-label">计划待确认</span>
-        <IconButton label="忽略" round class="strip-close" @click="cancel">
+        <IconButton
+          shape="circle"
+          label="忽略"
+          class="strip-close"
+          @click="cancel"
+        >
           <DsClose :size="14" />
         </IconButton>
       </div>
@@ -107,7 +114,7 @@ function onCommentKeydown(event: KeyboardEvent) {
         />
         <div class="actions">
           <Button
-            variant="outline"
+            variant="secondary"
             data-action="comment"
             :disabled="!canComment"
             @click="keepPlanning"
@@ -115,7 +122,7 @@ function onCommentKeydown(event: KeyboardEvent) {
             继续规划
           </Button>
           <Button
-            variant="primary"
+            variant="secondary"
             data-action="approve"
             :disabled="busy"
             @click="approve"
@@ -143,11 +150,11 @@ function onCommentKeydown(event: KeyboardEvent) {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
   max-height: min(60vh, 520px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -158,18 +165,10 @@ function onCommentKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   gap: var(--space-2);
   padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .strip-label {
@@ -195,7 +194,7 @@ function onCommentKeydown(event: KeyboardEvent) {
 
 .empty {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .footer {
@@ -213,11 +212,11 @@ function onCommentKeydown(event: KeyboardEvent) {
   min-height: 36px;
   max-height: 120px;
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-primary));
-  caret-color: rgb(var(--accent-fill));
+  color: rgb(var(--text-1));
+  caret-color: rgb(var(--accent));
   font: inherit;
   font-size: var(--fs-s);
   line-height: 22px;
@@ -227,11 +226,11 @@ function onCommentKeydown(event: KeyboardEvent) {
 }
 
 .comment::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .comment:focus {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .actions {

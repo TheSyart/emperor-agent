@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -60,7 +60,7 @@ function groupTitles(dialog: Locator) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`computer use main page (${theme})`, async ({ page }) => {
+  test(`computer use main page (${theme}) @baseline`, async ({ page }) => {
     const dialog = await openComputer(page, { theme })
     await expect(dialog.locator('#computer-use-enabled')).toHaveAttribute(
       'aria-checked',
@@ -78,14 +78,17 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-permission="all"]')).toContainText(
       '已允许',
     )
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     await expect(dialog).toContainText('已保存 14 张，共 9.0 MB')
-    // No app lists and no emergency stop (2026-10-01).
+    // No app lists and no emergency stop (2026-10-01). The page body only:
+    // the nav has its own 高级 section (KRN-08).
+    const body = dialog.locator('.settings-options')
     for (const gone of ['高级', '紧急停止', '立即停止', '不让 Emperor 操作'])
-      await expect(dialog).not.toContainText(gone)
+      await expect(body).not.toContainText(gone)
     await expect(dialog.locator('input, textarea')).toHaveCount(0)
     await noHorizontalOverflow(page)
     await shot(page, `computer-${theme}`)
+    await expectBaseline(page, 'settings', `computer-use-${theme}`)
 
     // One driver off: spec 00 §6.9 wording.
     await dialog.locator('#computer-use-driver-desktop').click()

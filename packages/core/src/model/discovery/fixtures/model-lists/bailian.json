@@ -1,0 +1,79 @@
+{
+  "vendor": "bailian",
+  "source": "Shape: model-center docs/vendor-apis/bailian.md and lib/services/model-sync.ts (recorded from a real workspace catalog on 2026-09-19): success, output.{total,page_no,page_size,models[]}, model_info, capabilities, features, inference_metadata. Prices are CNY and are not read.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://llm-ws01.cn-beijing.maas.aliyuncs.com/api/v1/models?page_no=1&page_size=20"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "success": true,
+          "request_id": "req-1",
+          "output": {
+            "total": 3,
+            "page_no": 1,
+            "page_size": 20,
+            "models": [
+              {
+                "model": "qwen3.8-max",
+                "name": "通义千问3.8-Max",
+                "provider": "qwen",
+                "capabilities": ["TG", "Reasoning", "VU"],
+                "features": ["function-calling", "structured-outputs", "cache"],
+                "inference_metadata": {
+                  "request_modality": ["Text", "Image"],
+                  "response_modality": ["Text"]
+                },
+                "model_info": {
+                  "context_window": 1000000,
+                  "max_input_tokens": 991808,
+                  "max_output_tokens": 131072
+                },
+                "prices": [
+                  {
+                    "range_name": "Default",
+                    "prices": [
+                      {
+                        "type": "input_token",
+                        "price": "6",
+                        "price_unit": "每百万tokens",
+                        "time_band": "standard"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "model": "text-embedding-v4",
+                "name": "通用文本向量-v4",
+                "provider": "qwen",
+                "capabilities": ["TR"],
+                "features": [],
+                "inference_metadata": {
+                  "request_modality": ["Text"],
+                  "response_modality": ["Vector"]
+                },
+                "model_info": { "context_window": 8192 }
+              },
+              {
+                "model": "qwen3-asr-flash",
+                "name": "通义千问3-ASR-Flash",
+                "provider": "qwen",
+                "capabilities": ["ASR"],
+                "features": [],
+                "inference_metadata": {
+                  "request_modality": ["Audio"],
+                  "response_modality": ["Text"]
+                },
+                "model_info": null
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

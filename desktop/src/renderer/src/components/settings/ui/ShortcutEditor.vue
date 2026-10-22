@@ -96,7 +96,7 @@ function save(): void {
       }}</kbd>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="busy"
         :data-testid="idFor('edit')"
         @click="start"
@@ -151,9 +151,9 @@ function save(): void {
 
 .shortcut-current {
   padding: var(--space-0-5) var(--space-1-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
@@ -164,7 +164,7 @@ function save(): void {
   padding: var(--space-0-5) var(--space-1-5);
   border: 1px solid rgb(var(--accent));
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
@@ -173,7 +173,7 @@ function save(): void {
 }
 
 .shortcut-capture[aria-invalid='true'] {
-  border-color: rgb(var(--state-error));
+  border-color: rgb(var(--error));
 }
 
 .shortcut-conflict {

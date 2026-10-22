@@ -18,7 +18,7 @@ import Modal from '../../ui/Modal.vue'
 import {
   DefinitionList,
   EmptyState,
-  StatusBadge,
+  Badge,
   Switch,
   type DefinitionItem,
 } from '../../settings/ui'
@@ -33,6 +33,7 @@ import {
   runHistory,
   runKey,
   scheduleLabelZh,
+  scheduleProblem,
   schedulerJobStatus,
   schedulerMisfirePolicyLabel,
   schedulerRunStatusLabel,
@@ -95,8 +96,21 @@ const status = computed(() =>
 )
 const history = computed(() => runHistory(props.job))
 const title = computed(() => props.job?.name ?? '新建定时任务')
+/**
+ * 「指定时间」 needs a date later than now (KRN-10). An edit that leaves an
+ * existing time alone is not checked: a past one-time job can still be
+ * renamed.
+ */
+const scheduleError = computed(() => {
+  const seeded = props.job ? draftFromJob(props.job) : null
+  if (seeded && seeded.atLocal === current.value.atLocal) return null
+  return scheduleProblem(current.value)
+})
 const canSubmit = computed(
-  () => !props.busy && Boolean(current.value.message.trim()),
+  () =>
+    !props.busy &&
+    Boolean(current.value.message.trim()) &&
+    !scheduleError.value,
 )
 
 /** Two columns of facts: what the job is / when it runs. */
@@ -140,9 +154,11 @@ function submit() {
     >
       <div v-if="job && status" class="meta">
         <div class="badges">
-          <StatusBadge :tone="status.tone" dot>{{ status.label }}</StatusBadge>
-          <StatusBadge v-if="job.protected">受保护</StatusBadge>
-          <StatusBadge v-if="job.deleteAfterRun">一次性</StatusBadge>
+          <Badge :tone="status.tone" variant="dot-label">{{
+            status.label
+          }}</Badge>
+          <Badge v-if="job.protected">受保护</Badge>
+          <Badge v-if="job.deleteAfterRun">一次性</Badge>
         </div>
         <span class="toggle">
           <span aria-hidden="true">启用</span>
@@ -173,6 +189,7 @@ function submit() {
         v-model="current"
         :mode="creating ? 'create' : 'edit'"
         :disabled="busy"
+        :schedule-error="scheduleError"
       />
       <p v-else class="note">
         受保护的系统任务：可以暂停、恢复或立即运行，不能编辑或删除。
@@ -186,22 +203,24 @@ function submit() {
         <ul v-if="history.length" class="runs">
           <li v-for="run in history" :key="runKey(run)" class="run">
             <div class="run-top">
-              <StatusBadge :tone="schedulerRunStatusTone(run.status)">
+              <Badge :tone="schedulerRunStatusTone(run.status)">
                 {{ schedulerRunStatusLabel(run.status) }}
-              </StatusBadge>
+              </Badge>
               <span class="run-time">实际 {{ formatMs(run.runAtMs) }}</span>
             </div>
             <p class="run-detail">{{ runDetail(run) }}</p>
             <p v-if="run.error" class="run-error">{{ run.error }}</p>
           </li>
         </ul>
-        <EmptyState v-else title="暂无运行记录" variant="plain" compact />
+        <EmptyState v-else title="暂无运行记录" variant="inline" />
       </section>
     </div>
 
     <template #footer>
       <template v-if="creating">
-        <Button size="sm" variant="outline" @click="open = false">取消</Button>
+        <Button size="sm" variant="secondary" @click="open = false"
+          >取消</Button
+        >
         <Button
           size="sm"
           variant="primary"
@@ -214,7 +233,7 @@ function submit() {
       </template>
       <template v-else-if="confirmDelete">
         <span class="confirm">删除定时任务「{{ job?.name }}」？</span>
-        <Button size="sm" variant="outline" @click="confirmDelete = false">
+        <Button size="sm" variant="secondary" @click="confirmDelete = false">
           取消
         </Button>
         <Button
@@ -241,7 +260,7 @@ function submit() {
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           data-action="run-job"
           @click="emit('run')"
@@ -294,7 +313,7 @@ function submit() {
   flex: none;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -305,7 +324,7 @@ function submit() {
   gap: var(--space-1-5) var(--space-4);
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 
@@ -323,7 +342,7 @@ function submit() {
 
 .note {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -334,7 +353,7 @@ function submit() {
   gap: var(--space-1-5);
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .history-head {
@@ -345,14 +364,14 @@ function submit() {
 }
 
 .history-title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .history-count {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -372,7 +391,7 @@ function submit() {
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .run:last-child {
@@ -389,7 +408,7 @@ function submit() {
 .run-time,
 .run-detail {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;

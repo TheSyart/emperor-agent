@@ -10,6 +10,88 @@
 
 export type IsolatedArg = string | number | boolean | null
 
+/**
+ * The value of `inert` the input guard puts on frames it fences (SEC-10), so
+ * that lifting the fence never touches what the page made inert itself.
+ */
+export const INPUT_FENCE = 'emperor-input-fence'
+
+/**
+ * Shared by the input guard functions (SEC-10, MAIN-8): text or keys sent
+ * while the focus is inside a cross-origin (out-of-process) frame hang or
+ * crash Electron's main thread (E-B3), so before every insert the driver
+ * asks where keys would go. `anchor` is the field being typed into, or null.
+ *
+ * - `focusInForeignFrame()`: the deepest focused element, followed through
+ *   open shadow roots, the anchor's own shadow roots (closed ones too: from
+ *   inside they can be reached) and frames whose document the page can read.
+ *   True when that is a frame whose document it cannot read.
+ * - `fence()` makes every such frame inert (unfocusable) until `release()`,
+ *   so a page cannot move the focus there between the check and the input.
+ */
+const INPUT_GUARD = `
+  const FENCE = '${INPUT_FENCE}'
+  const FRAME_TAGS = ['iframe', 'frame', 'object', 'embed', 'fencedframe', 'portal']
+  const isFrame = (el) => !!el && FRAME_TAGS.includes(String(el.localName || '').toLowerCase())
+  const frameDocument = (el) => {
+    try { return el.contentDocument || null } catch (error) { return null }
+  }
+  const known = new Map()
+  for (let node = anchor; node && typeof node.getRootNode === 'function'; ) {
+    const root = node.getRootNode()
+    if (!root || !root.host) break
+    known.set(root.host, root)
+    node = root.host
+  }
+  const shadowOf = (el) => el.shadowRoot || known.get(el) || null
+  const focusInForeignFrame = () => {
+    let scope = document
+    for (let depth = 0; depth < 64; depth += 1) {
+      const active = scope.activeElement
+      if (!active) return false
+      const shadow = shadowOf(active)
+      if (shadow && shadow.activeElement) { scope = shadow; continue }
+      if (!isFrame(active)) return false
+      const inner = frameDocument(active)
+      if (!inner) return true
+      scope = inner
+    }
+    return true
+  }
+  const eachForeignFrame = (visit) => {
+    const roots = [document]
+    for (let index = 0; index < roots.length && index < 512; index += 1) {
+      for (const el of roots[index].querySelectorAll('*')) {
+        if (el.shadowRoot) roots.push(el.shadowRoot)
+        if (!isFrame(el)) continue
+        const inner = frameDocument(el)
+        if (inner) roots.push(inner)
+        else visit(el)
+      }
+    }
+  }
+  const fence = () => {
+    let count = 0
+    eachForeignFrame((el) => {
+      if (el.hasAttribute('inert')) return
+      el.setAttribute('inert', FENCE)
+      count += 1
+    })
+    // Style now, so the frames take the inertness before the input does.
+    if (count > 0) document.documentElement.getBoundingClientRect()
+    return count
+  }
+  const release = () => {
+    let count = 0
+    eachForeignFrame((el) => {
+      if (el.getAttribute('inert') !== FENCE) return
+      el.removeAttribute('inert')
+      count += 1
+    })
+    return count
+  }
+`
+
 interface IsolatedFunction {
   /** Runs with `this` bound to an element (else to the global object). */
   readonly onElement: boolean
@@ -81,12 +163,51 @@ export const ISOLATED_FUNCTIONS = Object.freeze({
       }
     }`,
   },
-  activeIsFrame: {
+  /**
+   * Input guard, with a field: focus it (and select its text), let the
+   * page's focus handlers run, then say where keys would go and fence
+   * cross-origin frames, all in this one call.
+   */
+  focusForInput: {
+    onElement: true,
+    source: `function (selectAll) {
+      const anchor = this
+      ${INPUT_GUARD}
+      const el = this
+      el.focus({ preventScroll: false })
+      if (selectAll) {
+        if (typeof el.select === 'function') el.select()
+        else if (el.isContentEditable) {
+          const range = document.createRange()
+          range.selectNodeContents(el)
+          const selection = window.getSelection()
+          selection.removeAllRanges()
+          selection.addRange(range)
+        }
+      }
+      if (focusInForeignFrame()) return { focused: false, frame: true }
+      fence()
+      return { focused: el.getRootNode().activeElement === el, frame: false }
+    }`,
+  },
+  /** Input guard, before each insert or key: where would keys go now? */
+  inputFocus: {
     onElement: false,
     source: `function () {
-      const active = document.activeElement
-      const tag = active && active.tagName ? active.tagName.toLowerCase() : ''
-      return tag === 'iframe' || tag === 'frame'
+      const anchor = null
+      ${INPUT_GUARD}
+      if (focusInForeignFrame()) return { frame: true }
+      fence()
+      return { frame: false }
+    }`,
+  },
+  /** Input guard, when typing is done: lift the fence (only ours). */
+  releaseInputFence: {
+    onElement: false,
+    source: `function () {
+      const anchor = null
+      ${INPUT_GUARD}
+      return release()
     }`,
   },
   focusAndSelectAll: {

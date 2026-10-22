@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { userText } from '../../llm/message'
-import type { SessionEvent } from '../../session-log/types'
-import { createTestHarness } from '../testing'
+import { contextMessage, userText, type Message } from '../../llm/message'
+import type { ContentBlock } from '../../llm/types'
+import type { AgentCancelCause, SessionEvent } from '../../session-log/types'
+import { createTestHarness, replyChunks } from '../testing'
 import { defineTool } from '../tools/definition'
 
 function types(
@@ -52,6 +53,50 @@ function echoTool(
       return `echo:${args.value}`
     },
   })
+}
+
+/** A tool whose result the session log cannot hold, so committing it throws. */
+function brokenTool() {
+  return defineTool({
+    name: 'broken',
+    description: 'Return content that is not JSON.',
+    input: z.object({}),
+    execute: () =>
+      Promise.resolve([
+        { type: 'text', text: 'big', size: 10n } as unknown as ContentBlock,
+      ]),
+  })
+}
+
+/**
+ * What strict providers enforce: every assistant tool call is answered by a
+ * tool result before the next assistant message, and every tool result
+ * answers a call of the assistant message right before it.
+ */
+function assertStrictToolPairing(messages: readonly Message[]): void {
+  let open = new Set<string>()
+  let answerable = new Set<string>()
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      if (open.size > 0)
+        throw new Error(`unanswered tool calls: ${[...open].join(', ')}`)
+      open = new Set(
+        message.content.flatMap((block) =>
+          block.type === 'tool-call' ? [block.id] : [],
+        ),
+      )
+      answerable = new Set(open)
+      continue
+    }
+    for (const block of message.content) {
+      if (block.type !== 'tool-result') continue
+      if (!answerable.has(block.toolCallId))
+        throw new Error(`orphan tool result: ${block.toolCallId}`)
+      open.delete(block.toolCallId)
+    }
+  }
+  if (open.size > 0)
+    throw new Error(`unanswered tool calls: ${[...open].join(', ')}`)
 }
 
 describe('Agent loop', () => {
@@ -234,6 +279,37 @@ describe('Agent loop', () => {
       reason: { kind: 'user' },
     })
   })
+
+  it.each<AgentCancelCause>([
+    { kind: 'user' },
+    { kind: 'hook', reason: 'policy stopped this turn' },
+  ])(
+    'records only the $kind cancel fields, not what a transport added to the abort reason',
+    async (cause) => {
+      const expected = { ...cause }
+      const h = createTestHarness({ replies: [{ hang: true }] })
+      const agent = h.agent()
+      agent.followup(userText('go'))
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      // Node's fetch assigns an enumerable `stack` onto the abort reason it receives.
+      h.adapter.requests[0]!.signal!.addEventListener(
+        'abort',
+        () => {
+          Object.assign(cause, {
+            stack: 'Error\n    at node:internal/deps/undici/undici',
+            extra: { nested: true },
+          })
+        },
+        { once: true },
+      )
+      agent.cancel(cause)
+      await agent.whenIdle()
+      expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+        kind: 'aborted',
+        reason: expected,
+      })
+    },
+  )
 
   it('gives never-started calls ABORTED_BEFORE_DISPATCH results on cancel', async () => {
     const h = createTestHarness({
@@ -450,6 +526,36 @@ describe('Agent loop', () => {
     })
   })
 
+  it('stops a turn whose tool ignores the signal and has no timeout', async () => {
+    const h = createTestHarness({
+      replies: [{ tools: [{ id: 'a', name: 'stubborn' }] }],
+    })
+    h.tools.register(
+      defineTool({
+        name: 'stubborn',
+        description: 'never returns and ignores cancellation',
+        input: z.object({}),
+        execute: () => new Promise(() => {}),
+      }),
+    )
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    agent.cancel({ kind: 'user' })
+    const outcome = await Promise.race([
+      agent.whenIdle().then(() => 'idle'),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ])
+    expect(outcome).toBe('idle')
+    expect(agent.session.lastOf('tool/result')?.data.error?.code).toBe(
+      'ABORTED',
+    )
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'aborted',
+      reason: { kind: 'user' },
+    })
+  })
+
   it('enforces tool timeouts', async () => {
     const h = createTestHarness({
       replies: [{ tools: [{ id: 'a', name: 'sleepy' }] }, { text: 'ok' }],
@@ -471,13 +577,91 @@ describe('Agent loop', () => {
     )
   })
 
+  it('a failed step answers every tool call it left open before step/end', async () => {
+    const h = createTestHarness({
+      replies: [
+        {
+          tools: [
+            { id: 'a', name: 'broken' },
+            { id: 'b', name: 'echo', args: { value: 'b' } },
+          ],
+        },
+      ],
+    })
+    h.tools.register(brokenTool())
+    h.tools.register(echoTool())
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await agent.whenIdle()
+    const events = agent.session.events
+    // `a` started (its result could not be logged); `b` never started.
+    expect(types(events).slice(-6)).toEqual([
+      'assistant/message',
+      'tool/call',
+      'tool/result',
+      'tool/result',
+      'step/end',
+      'turn/end',
+    ])
+    const results = events.filter(
+      (e): e is SessionEvent<'tool/result'> => e.type === 'tool/result',
+    )
+    expect(results.map((r) => r.data.message.source.callId)).toEqual(['a', 'b'])
+    expect(results.map((r) => r.data.error?.code)).toEqual([
+      'TOOL_OUTCOME_UNKNOWN',
+      'TOOL_NOT_STARTED',
+    ])
+    expect(results[0]!.sourceEventSeqs).toEqual([
+      events.find((e) => e.type === 'tool/call')!.seq,
+    ])
+    expect(results.every((r) => r.data.turn === 1 && r.data.step === 1)).toBe(
+      true,
+    )
+    expect(agent.session.lastOf('turn/end')?.data.reason).toMatchObject({
+      kind: 'error',
+    })
+    expect(agent.session.hasOpenTurn()).toBe(false)
+  })
+
+  it('history after a failed step passes a provider that checks strict call/result pairing', async () => {
+    const seen: string[] = []
+    const h = createTestHarness({
+      replies: [
+        {
+          tools: [
+            { id: 'a', name: 'broken' },
+            { id: 'b', name: 'echo', args: { value: 'b' } },
+          ],
+        },
+        (request) => {
+          assertStrictToolPairing(request.messages)
+          seen.push('checked')
+          return replyChunks({ text: 'recovered' })
+        },
+      ],
+    })
+    h.tools.register(brokenTool())
+    h.tools.register(echoTool())
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await agent.whenIdle()
+    agent.followup(userText('again'))
+    await agent.whenIdle()
+    expect(seen).toEqual(['checked'])
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'completed',
+    })
+  })
+
   it('resumes from the persisted log: header reason, turn numbering, and inbox', async () => {
     const root = mkdtempSync(join(tmpdir(), 'agent-resume-'))
     const h = createTestHarness({ root, replies: [{ text: 'one' }] })
     const agent = h.agent('s')
     agent.followup(userText('first'))
     await agent.whenIdle()
-    agent.inject(userText('pending'))
+    // Harness context rejoins the next step; a restored user prompt would
+    // wait for the user instead (KRN-02, inbox.test.ts #7).
+    agent.inject(contextMessage('test', 'pending'))
     agent.dispose()
     h.sessions.close('s')
     const h2 = createTestHarness({ root, replies: [{ text: 'two' }] })

@@ -2,25 +2,25 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-09-30<br>
-> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/harness/delegation/tools.ts`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
 - 侧栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
-- 侧栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
+- 「能力」页顶部的「推荐」列出应用内置的一小组精选 Skills 和 MCP server，见[推荐](#推荐)；
 - 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 
 ## Tools
 
-| 分类             | 工具                                                                                                                             |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理             |
-| 网络             | `web_search`                                                                                                                     |
-| 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`             |
-| 子代理与工作流   | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`（子代理内另有 `report`）；编排 `workflow`、`ralph` |
-| 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                             |
-| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个                                                                            |
+| 分类             | 工具                                                                                                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理                                                 |
+| 网络             | `web_fetch`；`web_search`（模型使用 DeepSeek 官方 API 时）                                                                                                           |
+| 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`                                                 |
+| 子智能体与工作流 | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`、`inspect_agent`、`collect_agent`（子智能体内另有 `report`）；编排 `workflow`、`ralph` |
+| 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                                                                 |
+| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个（名字清洗规则见下文「MCP 工具」）                                                                              |
 
 能力页的“工具”标签只列 Emperor 内建的工具，按上表的五类分组，每组标题带数量；每行是工具名和一句说明，展开后查看完整说明、参数和 JSON schema，可以按名称和说明搜索。MCP server 的工具在“MCP”标签里按 server 列出，插件带来的工具（包括电脑操作的工具）在插件详情里；页首有这两处的链接。
 
@@ -28,14 +28,18 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 
 - **文件**：`write` 与 `edit` 受当前权限预设的写入范围约束，超出范围时可以为单次调用请求批准。`read` 不受写入沙箱限制。
 - **搜索**：`grep` 优先使用受管执行环境中的 ripgrep，找不到时使用内置的纯 JS 实现；`glob` 与 `grep` 的超大结果会把完整结果保存到本地。
-- **命令**：`bash` 在 macOS / Linux 的系统沙箱中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。没有沙箱后端的平台只有 `danger-full-access` 才能运行 `bash`。
-- **子代理**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子代理继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子代理最多嵌套 3 层，不能请求提权。
-- **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子代理（在对话的工具卡片下流式显示）；`ralph` 以同一目标反复启动全新子代理，每轮只传递一份有界的结构化交接，默认最多 64 轮。两者都在前台运行，调用返回时整个运行已结束；运行期间环境信息卡的「后台任务」行显示运行数量，展开后可以查看运行记录或单独停止它（会先确认）；停止当前 turn 也会同时取消运行。
+- **命令**：`bash` 在 macOS 的系统沙箱（Seatbelt）中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。工具说明要求模型先写一句命令用途（`description`）再写命令，界面因此能在命令生成时就显示它要做什么；删除或移动文件前，模型会被要求先核对解析后的绝对路径，变量写成 `${VAR:?}`，避免空变量把路径变成上级目录。
+- **子智能体**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子智能体继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子智能体最多嵌套 3 层，不能请求提权。在「设置 › 子智能体」打开 Claude Code 或 Codex 后，`subagent` 多一个 `backend` 参数（`internal`、`claude-code`、`codex`），第一次交给它们时先弹确认卡；它们不能继承当前对话（不能 fork），用 `send_message` 继续（`delivery: steer` 可以给正在运行的 Codex 插话，Claude Code 不支持），用 `inspect_agent` 查看、用 `collect_agent` 收取结果。`collect_agent` 的 `apply` 请求把成果应用到项目、`abandon` 请求把卡住的任务标记为已结束，两者都先弹审批卡由你决定。你也可以在子智能体的页面直接给它发消息。详见[子智能体](automation-collaboration.md#子智能体)。
+- **任务预算**：「设置 › 高级 › 任务预算」限制一个任务（你发出的一条消息和它引出的全部工作）能用多少：每轮最多步数（对话 400 步，定时任务与目标每轮 120 步），同时运行的子智能体（8 个，多出的排队等空位），每个任务最多启动的子智能体（64 个，再启动会被拒绝），子智能体结果最多唤醒对话几次（32 次，之后结果留到下一步再读）。达到步数上限时本轮停止，对话里显示「已达到单轮步数上限」，Agent 也会知道为什么停下，可以让它继续。设置保存在 `~/.emperor/settings.json` 的 `taskBudget`；费用上限在「设置 › 模型」。
+- **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子智能体（在对话的工具卡片下流式显示）；`ralph` 以同一目标反复启动全新子智能体，每轮只传递一份有界的结构化交接，默认最多 64 轮。默认在前台运行，调用返回时整个运行已结束；`workflow` 也可以后台运行（`run_in_background`），调用立即返回任务编号，运行结束后以通知告诉模型，结果用 `job_output` 读取。脚本在一个受限的独立进程里运行：读不到你的项目文件和 Emperor 数据、不能联网、最多用 512 MB 内存，超过 30 分钟会停止；运行期间环境信息卡的「后台任务」行显示运行数量，展开后可以查看运行记录或单独停止它（会先确认）；停止当前 turn 也会同时取消运行。
 - **记忆**：`memory_edit` 修改用户档案、全局长期记忆或当前项目的私有记忆，不需要审批。
 - **扩展管理**：`skill_manage` 管理 Skills，`mcp_config` 管理 MCP server，见下文。查看、校验和重新连接不需要审批；修改 Skill 文件或 MCP 配置的动作跟随当前权限预设，除 `danger-full-access` 外每次写入都会先请求你批准。
-- **Scheduler**：`scheduler` 让 Agent 创建和管理定时任务，不需要审批。
+- **定时任务**：`scheduler` 让 Agent 创建和管理定时任务，不需要审批。定时任务运行时只能查看任务列表，不能新建、修改、恢复、立即运行、暂停或删除任务。
 - **大结果**：超过 50,000 字节的纯文本结果会完整保存到 `stateRoot/spill/`，模型只看到首尾预览和文件路径。
-- **网页**：默认没有网页抓取工具。`web_search` 只在宿主配置了搜索后端时才会出现，桌面版当前没有配置，所以“工具”标签里暂时没有“网络”一组。需要联网时可以使用 MCP server、会联网的 Skill，或在权限允许时用 `bash` 调用命令行工具。
+- **网页读取**：`web_fetch` 默认开启。它读取一个公开网页（`http` / `https`），把 HTML 转成 Markdown，返回标题、跳转后的最终地址和正文。请求不带 Cookie 和登录状态；地址或任何一次跳转指向本机、内网、链路本地或保留地址时直接拒绝，不会发出请求。单页最多读取 10 MB，超出部分不读并在结果里说明；HTML 最多转换前 256 KB（只算去掉脚本、样式后的标记），给模型的结果每次约 45 KB，较长的页面分段返回，结果会写明下一段的 `offset`。纯文本和 JSON 原样返回，图片、PDF 等二进制内容不读。网页的标题和正文都按不可信的外部内容交给模型（`[external_content]` 包裹，`trust: untrusted_external`），模型不应执行其中的指令。
+- **网页搜索**：`web_search` 只在当前模型使用 DeepSeek 官方 API（`https://api.deepseek.com`，且配置了 API Key）时出现，通过 DeepSeek Search API 搜索，使用该模型的 API Key，按 DeepSeek 的价格按次计费；换成其他供应商或经网关访问 DeepSeek 时，这个工具和相关说明都不会出现。搜索结果（摘要、标题、片段）同样按不可信的外部内容处理。
+- **开关**：「设置 › 高级 › 网络工具」里可以分别关闭“网页读取”和“网页搜索”；关闭后，对应工具不再出现在 Agent 的工具列表和能力页“工具”标签里，Agent 也调用不到它。当前模型不提供搜索时，“网页搜索”开关置灰并说明原因。开关保存在 `~/.emperor/settings.json` 的 `webTools`。
+- **离开本机的内容**：`web_fetch` 会把 Agent 选择的网址发给对应网站，`web_search` 会把搜索词发给 DeepSeek。和 `bash` 里的 `curl` 一样，被网页内容误导的模型可能把信息写进网址带出去；不需要联网时可以关掉这两个开关。
 
 工具卡显示的是执行投影；真实状态以 session log 为准。
 
@@ -65,7 +69,7 @@ Skills 文件夹中直接放置的 `<name>.md` 文件，只要 frontmatter 同�
 | 3      | Plugin | 已启用并激活的 Plugin 内的 Skills                            | 只读     |
 | 4      | 内置   | 应用内置的 `runtimeRoot/skills`（目前是 `skill-creator`）    | 只读     |
 
-同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在“设置 → 诊断”的“配置”分组中核对 `skills.<name>` 行。
+同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在「设置 › 高级 › 诊断」的「配置」分组中核对 `skills.<name>` 行。
 
 ### 名称与校验规则
 
@@ -127,7 +131,7 @@ Emperor 识别三种包格式，按以下顺序判断：
 
 文件夹或压缩包里只能有一个插件包；子目录里的清单算作包内容。清单无法解析、名称不合规、路径越出包目录、含符号链接、超过大小上限、同名 Skill 或 MCP server 重复时，检查会失败并说明原因，不会留下任何内容。
 
-每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（写入当前项目的 `.emperor/settings.json`）或本地项目（写入当前项目的 `.emperor/settings.local.json`，不随仓库提交）。确认后才会安装。
+每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（只在当前项目启用）或本地项目（只在当前项目启用，优先于「项目」范围的同一插件）。确认后才会安装。
 
 本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。
 
@@ -138,13 +142,15 @@ Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为
 已安装的 Plugin 可以启用、停用或卸载。已激活 Plugin 的成员这样接入：
 
 - **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。
-- **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，在沙箱中只能读自己的插件目录、写自己的数据目录（`stateRoot/plugins/data/<插件名>`），读不到 Emperor Home 里的其他内容。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
-- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。
+- **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，与 Shell 用同一套进程沙箱：能读系统与工具链（node、python、uv 等）、当前 workspace 和自己的插件目录，能写 workspace、自己的数据目录（`stateRoot/plugins/data/<插件名>`）和自己的缓存目录，读不到 Emperor Home 里的其他内容和你的凭据文件。沙箱不可用时插件的 server 不启动，详情里写明原因。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
+- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。插件的 Hook 在进程沙箱里运行：workspace 只读，能写自己的数据目录和 `stateRoot/plugins/tmp/<插件名>`（它的 `TMPDIR`），读不到 Emperor 的设置文件和你的凭据；沙箱不可用时不运行（按 Hook 失败处理，工具调用照常继续）。它只拿到少数系统环境变量（`PATH`、`HOME`、`USER`、`SHELL`、`LANG`、`LC_ALL`、`TERM`、`PWD`、`TMPDIR` 等）、`PLUGIN_ROOT`、`PLUGIN_DATA`、`CLAUDE_PROJECT_DIR`，以及插件清单 `env` 里声明的变量（取自 Emperor 的环境）；`OPENAI_API_KEY` 这类没有声明的变量看不到。单个插件 Hook 默认 30 秒超时，Hook 自己写的超时最多算 120 秒；超时被终止，按 Hook 失败处理。插件 Hook 失败时（退出码不是 0 或 2、超时、没能启动），插件详情里这个 Hook 显示「失败」、原因和「需要的环境变量」：清单 `env` 没声明、但命令或包里脚本用到的变量，以及声明了但 Emperor 的环境里没有的变量；下一次运行成功后恢复「可用」。详情的「信息」里「可读环境变量」列出清单声明的变量。你自己 `hooks.json` 里的 Hook 不受这些限制，照旧拿到完整的环境变量、默认 10 分钟超时。写插件 Hook 的要求见[扩展 Emperor › 插件 Hook 的运行环境](../development/extending-emperor.md#插件-hook-的运行环境)。
 - **应用连接**：自带 GitHub 插件的「GitHub（本机 gh）」和 Computer Use 插件的三个驱动按上文显示真实状态；其他插件的应用连接暂不支持，详情里列出。
 
 停用或卸载后，这个 Plugin 的 MCP server 立即断开，Hook 不再运行。Plugin 的 MCP server 和 Hook 不写入你的 `mcp_config.json` 或 `hooks.json`，也不在「能力 › MCP」里显示；项目范围的 Plugin 跟随当前会话所在的项目。
 
-用户范围的启用意图保存在 `stateRoot/settings.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
+用户范围的启用意图保存在 `stateRoot/settings.json`，项目与本地项目范围的保存在 `stateRoot/projects/<项目 ID>/plugins.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
+
+项目的启用意图不写进项目目录，也不从项目目录读取：Agent 能改项目里的文件，克隆来的仓库也可能带着这些文件。仓库 `.emperor/settings.json` 里的 `enabledPlugins` 只是「建议」：其中列出、已按项目范围安装、而你还没有为这个项目选过的插件，会在能力页「插件」标签顶部显示「该项目建议启用 X」，写明它带来的 Skill、MCP server、Hook。选「启用」才会在这个项目里启用，选「忽略」保持停用，两种选择都记在 Emperor 里，之后仓库文件怎么改都不会再改变它；以后也可以在插件详情里随时开关。`.emperor/settings.local.json` 不再读取。从 0.1 升级后第一次启动时，你在已打开过的项目里启用或停用的项目插件会原样搬到 Emperor 里，继续生效；之后才打开的仓库只会显示建议。
 
 旧的 Skill 安装接口和环境配方安装接口已下线；需要外部 CLI 依赖时，在权限允许的情况下用普通命令安装，并单独验证结果。
 
@@ -183,13 +189,27 @@ Emperor 只读取自己的 MCP 配置文件 `stateRoot/mcp_config.json`（默认
 - `${ENV_NAME}`：从执行环境展开环境变量，适合放置 API Key。
 - `tool_overrides` 和 `defaults`：补充只读、独占等工具属性，以及 `call_timeout_ms` 请求超时。
 
+### stdio server 的进程沙箱
+
+stdio server 与 Agent 的 Shell 共用同一套进程沙箱（macOS 上是 Seatbelt）：
+
+- 能读：系统目录、`PATH` 里的目录和 node / python / uv 等工具的安装目录、你的 `~/.npmrc` 与 uv / pip 配置（镜像设置照常生效）、当前 workspace、命令参数里写的绝对路径（目录可读写；文件则开放它所在的项目目录供读取）和 server 的工作目录；
+- 能写：当前 workspace、参数里的目录、工作目录，以及这个 server 自己的缓存目录 `stateRoot/mcp/cache/<名称>`——它同时是 `npm_config_cache`、`UV_CACHE_DIR` 和 `TMPDIR`，所以 `npx -y …`、`uvx …` 类 server 能正常下载和启动；
+- 读写不到：Emperor Home 里的其他内容（会话、设置文件、凭据库）、`~/.ssh` 等凭据文件，以及上面没列出的你自己的文件。
+
+第一次启动一个 `npx` / `uvx` server 要把包下载进它自己的新缓存，可能超过连接时限而显示失败；下载会在后台继续，稍后重新连接即可。
+
+沙箱不可用时（例如系统的 `sandbox-exec` 无法运行），你自己的 server 不会悄悄在沙箱外启动：卡片显示「等待确认」，下一次对话开始一步之前会弹出审批卡，写明 server、原因和命令。选「允许本次」后它在沙箱外运行，选择按 server 记住；修改它的命令后会重新询问。插件带来的 server 在这种情况下一律不启动。每次启动的结果记录在「设置 › 高级 › 诊断」「运行时」分组的「进程隔离回执」一行。
+
 ### 管理已有 server
 
-每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；删除会从配置中移除它并断开连接。
+每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；本地（stdio）server 还有「查看最近输出」，显示它最近 200 行 stderr（密钥、token 与认证头已脱敏），启动失败时保留那次启动的输出，常能直接看出缺了什么依赖或参数；删除会从配置中移除它并断开连接。
 
 需要批量调整或设置 `tool_overrides` 时，展开页面底部“高级”中的“原始配置”，直接编辑 `mcp_config.json`。
 
-每次写入后，Core 按 server 做 diff：未变化且健康的连接保留，变化的连接重建。传输失败后按 1、4、16 秒最多重试三次；认证失败不会无限重试，修正配置并再次保存才会重新连接。取消当前 turn 会取消仍在等待的 MCP 请求。
+每次写入后，Core 按 server 做 diff：未变化且健康的连接保留，变化的连接重建。server 在后台并行连接（同时最多 4 个），启动 Emperor 时窗口不等它们：哪个先连上，它的工具就先可用；一个 server 15 秒内没有完成握手或没有列出工具，就单独标为失败，不影响其他 server。连续几次修改配置时，Core 一次只重载一遍，最后生效的是最后一次保存的配置。
+
+运行中的 server 断开后会自动重启，间隔约 1、4、16、60、60 秒（各有 ±20% 的随机浮动）；连续失败 6 次后停在「失败」，不再自动重启；修正后保存配置，或把它停用再启用，就会重新连接。稳定运行满 60 秒后重启次数清零。只有 server 返回 HTTP 401 / 403 时才算认证失败，认证失败不会自动重试，修正配置并再次保存才会重新连接；单次调用的协议错误（例如迟到的响应）只影响那一次调用，不会把 server 标为不健康。stdio server 的输出不再有累计上限，单条消息最大 16 MiB，超过的那条会被丢弃并报错，server 继续运行。取消当前 turn 会取消仍在等待的 MCP 请求。
 
 ### 让 Agent 管理 MCP
 
@@ -204,18 +224,18 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 ### MCP 工具
 
-每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具不经过文件沙箱，也不需要审批；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
+每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。名字里字母、数字、`-`、`_` 以外的字符换成 `_`（`my.server` 的 `search.files` 是 `mcp_my_server_search_files`），最长 64 个字符，超长时截短并加一段哈希；两个 server 清洗后同名时，本来就合法的那个保留原名，另一个加哈希。MCP 工具调用本身不经过文件沙箱，也不需要审批（stdio server 进程在上文的进程沙箱里运行）；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
 
-## 探索
+## 推荐
 
-侧栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
+「能力」页每个标签的顶部有「推荐」：随应用发布的一小组精选条目，「插件」标签列出前几个，「Skills」「MCP」标签只列这一类，「工具」标签不显示。原来的「探索」页并入了这里，旧的 `/explore` 链接会打开「能力」并滚到「推荐」。每张卡只有图标、名称、一行说明和「安装」：
 
 - Skills：来自 [anthropics/skills](https://github.com/anthropics/skills) 的若干 Skill；
 - MCP：[modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) 中的几个本地 server，以及一个无需 API 密钥的远程 server。标签会注明需要 Node.js 或 uv 等本机依赖。
 
 目录随应用版本更新，不从网络实时拉取；当前还没有精选 Plugin。已安装的 Skill 或 MCP server 显示「已安装」。
 
-「安装」不会直接写入任何东西，而是打开与能力页相同的确认对话框：Skill 进入 URL 导入对话框并选择保存位置，MCP 进入添加对话框，先预览将要新增、覆盖或跳过的 server，确认「导入」后才写入。「主页」在系统浏览器中打开条目的来源页面，安装前可以先查看。
+「安装」不会直接写入任何东西，而是打开与能力页相同的确认对话框：Skill 进入 URL 导入对话框（链接即条目的来源页面）并选择保存位置，MCP 进入添加对话框，先预览将要新增、覆盖或跳过的 server，确认「导入」后才写入。
 
 ## 安全边界
 
@@ -223,6 +243,8 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - `stdio` server 会启动本地进程，应像审查命令一样审查它的来源和参数。
 - MCP 工具的副作用不受 Emperor 权限预设约束，只配置你信任的 server。
 - 远程 MCP、Skill 脚本和 Plugin 内容都按不可信输入处理。导入 Skill 或安装 Plugin 前确认来源可信。
+- `mcp_config.json` 里 `headers` 与 `env` 中名字含 key、token、secret、authorization 或 password（不分大小写）的值保存时加密（`el1:…`，与模型 Key 同一把本地密钥），连接时解开；只引用环境变量的值（如 `Bearer ${API_TOKEN}`）保持原样。第一次加密前的原文件保留为 `mcp_config.json.pre-seal-<时间>`。本地密钥丢失时这些值无法解开，对应 server 会报认证失败，重新填写即可。
+- Agent 的文件、搜索和 Shell 工具读不到 `mcp_config.json`；它只能通过 `mcp_config` 工具查看名称、地址与字段名，看不到字段值。
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
-排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 诊断”。
+排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态、最近错误和最近输出，再检查配置 JSON、执行环境和「设置 › 高级 › 诊断」。

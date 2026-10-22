@@ -1,0 +1,9 @@
+{"kind":"note","text":"Usage with a prefix-cache hit: message_start carries input_tokens (uncached), cache_read_input_tokens and cache_creation_input_tokens; message_delta carries the final output_tokens. Field names follow Anthropic Messages usage; DeepSeek's Anthropic guide does not document usage fields (https://api-docs.deepseek.com/guides/anthropic_api), so the live split is a human-needed check. Hand-written, not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_usage_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":800,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"命中缓存。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":50}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}

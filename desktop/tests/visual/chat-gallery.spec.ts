@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -10,15 +11,25 @@ test.beforeAll(() => {
   mkdirSync(screenshotDir, { recursive: true })
 })
 
+// UI-S03: a finished turn's steps fold into one process line. Tests that
+// look at the step rows themselves open with 处理过程 = 始终展开.
+const EXPANDED = { processDisplay: 'expanded' }
+
 async function open(
   page: Page,
   scenario: string,
   theme: 'light' | 'dark',
   size: { width: number; height: number } = { width: 1000, height: 1400 },
+  prefs: Record<string, unknown> | null = null,
 ): Promise<void> {
-  await page.addInitScript((value) => {
-    localStorage.setItem('emperor.theme', value)
-  }, theme)
+  await page.addInitScript(
+    ({ theme: value, prefs: stored }) => {
+      localStorage.setItem('emperor.theme', value)
+      if (stored)
+        localStorage.setItem('emperor.ui.prefs.v1', JSON.stringify(stored))
+    },
+    { theme, prefs },
+  )
   await page.setViewportSize(size)
   await page.goto(`/?chat-gallery&bare&scenario=${scenario}`)
   await expect(page.getByTestId('chat-gallery')).toBeVisible()
@@ -49,16 +60,17 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`full turn (${theme})`, async ({ page }) => {
+  test(`full turn (${theme}) @baseline`, async ({ page }) => {
     await open(page, 'showcase', theme, { width: 1000, height: 2200 })
     await toTop(page)
     await expect(page.locator('.user-bubble')).toBeVisible()
     await expect(page.locator('[data-turn-tail]')).toBeAttached()
     await shot(page, `chat-full-${theme}`)
+    await expectBaseline(page, 'conversation', `full-turn-${theme}`)
   })
 
   test(`tools expanded (${theme})`, async ({ page }) => {
-    await open(page, 'showcase', theme, { width: 1000, height: 2400 })
+    await open(page, 'showcase', theme, { width: 1000, height: 2400 }, EXPANDED)
     await toTop(page)
     for (const id of ['call_grep', 'call_edit', 'call_test', 'call_lint'])
       await expand(page, id)
@@ -69,10 +81,9 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-test('tools expanded: read, write, todo, glob, web, subagent', async ({
-  page,
-}) => {
-  await open(page, 'showcase', 'light', { width: 1000, height: 2600 })
+// The subagent is a row of its own (UI-S14), opened on its own page.
+test('tools expanded: read, write, todo, glob, web', async ({ page }) => {
+  await open(page, 'showcase', 'light', { width: 1000, height: 2600 }, EXPANDED)
   await toTop(page)
   for (const id of [
     'call_read',
@@ -80,7 +91,6 @@ test('tools expanded: read, write, todo, glob, web, subagent', async ({
     'call_todo',
     'call_glob',
     'call_web',
-    'call_sub',
   ])
     await expand(page, id)
   await toTop(page)
@@ -88,15 +98,25 @@ test('tools expanded: read, write, todo, glob, web, subagent', async ({
 })
 
 test('reasoning streaming (dark)', async ({ page }) => {
-  await open(page, 'streaming-reasoning', 'dark', { width: 1000, height: 700 })
+  await open(
+    page,
+    'streaming-reasoning',
+    'dark',
+    { width: 1000, height: 700 },
+    EXPANDED,
+  )
   await expect(page.locator('.reasoning[data-state="running"]')).toBeVisible()
-  await expect(page.locator('.turn-status')).toBeVisible()
+  // The live process line is the status line (UI-S03).
+  await expect(
+    page.locator('[data-process-group][data-live] [data-process-header]'),
+  ).toContainText('正在思考')
+  await expect(page.locator('.turn-status')).toBeHidden()
   await page.waitForTimeout(1500)
   await shot(page, 'chat-reasoning-streaming-dark')
 })
 
 test('streaming reply with running tool (light)', async ({ page }) => {
-  await open(page, 'streaming', 'light', { width: 1000, height: 800 })
+  await open(page, 'streaming', 'light', { width: 1000, height: 800 }, EXPANDED)
   await expect(
     page.locator('.tool-row[data-call-id="live_read"][data-state="running"]'),
   ).toBeVisible({ timeout: 15_000 })
@@ -107,7 +127,7 @@ for (const theme of ['light', 'dark'] as const)
   test(`retry / error / max-tokens / compaction rows (${theme})`, async ({
     page,
   }) => {
-    await open(page, 'notices', theme, { width: 1000, height: 1300 })
+    await open(page, 'notices', theme, { width: 1000, height: 1300 }, EXPANDED)
     await expect(
       page.locator('[data-chat-flow-kind="turnError"]'),
     ).toBeVisible()
@@ -118,24 +138,116 @@ for (const theme of ['light', 'dark'] as const)
   })
 
 test('workflow panel (light)', async ({ page }) => {
-  await open(page, 'workflow', 'light', { width: 1000, height: 900 })
+  await open(page, 'workflow', 'light', { width: 1000, height: 900 }, EXPANDED)
   await expect(page.locator('[data-workflow-run]').first()).toBeVisible()
   await page.locator('[data-workflow-run] .run-header').nth(1).click()
   await shot(page, 'chat-workflow-light')
 })
 
 test('subagent row and child session (kernel log)', async ({ page }) => {
-  await open(page, 'kernel', 'light', { width: 1000, height: 900 })
-  await expect(page.locator('[data-subagent-line]')).toBeVisible()
+  await open(page, 'kernel', 'light', { width: 1000, height: 900 }, EXPANDED)
+  // UI-S14: one row — face, name, source, status, the report's opening.
+  const row = page.locator('[data-subagent-row]')
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('[data-agent-summary]')).toHaveText('child found x')
   await shot(page, 'chat-subagent-light')
-  await page.locator('[data-subagent-line] .open-link').click()
+  // The row opens the child.
+  await page.locator('[data-agent-entry]').first().click()
   await expect(page.locator('.crumbs')).toBeVisible()
   await expect(page.getByText('child found x').first()).toBeVisible()
   await shot(page, 'chat-subagent-child-light')
 })
 
+// UI-S14: one row per subagent; the ones a step sent out form a group,
+// open while any runs and folded once all have ended.
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent group while running (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(page, 'subagents', theme, { width: 1000, height: 1000 })
+    const head = page.locator('[data-subagent-group-head]')
+    await expect(head).toContainText('派出 11 个子智能体')
+    await expect(head).toContainText('8 运行中 · 2 失败 · 1 结果待确认')
+    await expect(head).toHaveAttribute('aria-expanded', 'true')
+    const rows = page.locator('[data-subagent-group] [data-subagent-row]')
+    await expect(rows).toHaveCount(11)
+    await expect(rows.locator('[data-agent-logo="codex"]')).toHaveCount(2)
+    await expect(rows.locator('[data-agent-logo="claude-code"]')).toHaveCount(1)
+    await expect(
+      page.locator('[data-subagent-row][data-state="failed"]').first(),
+    ).toContainText('失败 · 用时 14 秒')
+    await toTop(page)
+    await shot(page, `chat-subagents-running-${theme}`)
+    await expectBaseline(page, 'conversation', `subagent-group-${theme}`)
+  })
+
+  test(`subagent group after all have ended (${theme})`, async ({ page }) => {
+    await open(page, 'subagents-done', theme, { width: 1000, height: 900 })
+    const head = page.locator('[data-subagent-group-head]')
+    await expect(head).toContainText('11 个子智能体')
+    await expect(head).not.toContainText('派出')
+    await expect(head).toContainText('9 完成 · 2 失败 · 用时 6 分 12 秒')
+    await expect(head).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.locator('[data-subagent-row]')).toHaveCount(0)
+    await toTop(page)
+    await shot(page, `chat-subagents-done-${theme}`)
+    await head.click()
+    await expect(page.locator('[data-subagent-row]')).toHaveCount(11)
+    // In a group the report's opening is the row's tooltip (the design).
+    await expect(
+      page.locator('[data-subagent-row] [data-agent-summary]'),
+    ).toHaveCount(0)
+    await expect(page.locator('[data-subagent-row]').first()).toHaveAttribute(
+      'title',
+      /已写完/,
+    )
+    await page.waitForTimeout(300)
+    await toTop(page)
+    await shot(page, `chat-subagents-done-open-${theme}`)
+  })
+
+  test(`single subagent rows (${theme})`, async ({ page }) => {
+    await open(page, 'subagent-rows', theme, { width: 1000, height: 1300 })
+    const rows = page.locator('[data-subagent-row]')
+    await expect(rows).toHaveCount(5)
+    await expect(rows.nth(0)).toContainText('已完成 · 用时 1 分')
+    await expect(rows.nth(0).locator('[data-agent-summary]')).toContainText(
+      '报告已交回',
+    )
+    await expect(rows.nth(1)).toContainText('失败 · 用时 14 秒')
+    await expect(rows.nth(1).locator('[data-agent-summary]')).toHaveText(
+      '模型 gpt-6.1-sol 被这个 ChatGPT 账号拒绝（400）',
+    )
+    await expect(rows.nth(2)).toContainText('Claude Code')
+    await expect(rows.nth(2).locator('[data-agent-summary]')).toHaveText(
+      '没有参数校验；PI 精度只有两位，建议用 Math.PI。',
+    )
+    await expect(rows.nth(3).locator('[data-agent-status]')).toHaveText(
+      '等待回答',
+    )
+    // Running in the background reads 运行中, as in the design.
+    await expect(rows.nth(4).locator('[data-agent-status]')).toHaveText(
+      /^运行中 · \d+ 秒$/,
+    )
+    await expect(rows.nth(4).locator('[data-agent-summary]')).toHaveCount(0)
+    await toTop(page)
+    // Hover: ↗ and 任务详情 show on the row under the pointer.
+    await rows.nth(2).hover()
+    await page.screenshot({
+      path: resolve(screenshotDir, `chat-subagent-rows-${theme}.png`),
+      animations: 'disabled',
+    })
+  })
+}
+
 test('interactions: question, MCP, plan (light)', async ({ page }) => {
-  await open(page, 'interactions', 'light', { width: 1000, height: 1600 })
+  await open(
+    page,
+    'interactions',
+    'light',
+    { width: 1000, height: 1600 },
+    EXPANDED,
+  )
   await toTop(page)
   await expand(page, 'call_ask')
   await expand(page, 'call_mcp')
@@ -157,7 +269,7 @@ test('long history loads older pages at the top', async ({ page }) => {
   await shot(page, 'chat-long-light')
 })
 
-// RF-04: document links in a reply — type icons, language badges, file
+// RF-04: document links in a reply — individual SVG type icons, file
 // names for path labels, a missing file struck through (fixture statuses).
 for (const theme of ['light', 'dark'] as const) {
   test(`document links (${theme})`, async ({ page }) => {
@@ -170,20 +282,32 @@ for (const theme of ['light', 'dark'] as const) {
         return {
           content: style.content,
           mask: style.maskImage || style.webkitMaskImage,
+          image: style.backgroundImage,
         }
       })
-    // A path label shows only the file name, with the language badge.
+    // A path label shows only the file name, with its hand-drawn SVG.
     await expect(link('src/pages/Login.vue')).toHaveText('Login.vue')
-    expect((await before('src/pages/Login.vue')).content).toContain('VUE')
+    await expect(link('src/pages/Login.vue')).toHaveAttribute(
+      'data-md-custom-icon',
+      'vue',
+    )
+    expect((await before('src/pages/Login.vue')).image).toContain(
+      'data:image/svg+xml',
+    )
     await expect(link('src/api/login.ts#L42')).toHaveText('login.ts:42')
-    expect((await before('src/api/login.ts#L42')).content).toContain('TS')
+    await expect(link('src/api/login.ts#L42')).toHaveAttribute(
+      'data-md-custom-icon',
+      'typescript',
+    )
+    expect((await before('src/api/login.ts#L42')).image).toContain(
+      'data:image/svg+xml',
+    )
     // Icons: a document, a folder, the web.
-    for (const href of [
-      'docs/login-layout.md',
-      'src/components/',
-      'https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries',
-    ])
+    for (const href of ['docs/login-layout.md', 'src/components/'])
       expect((await before(href)).mask, href).toContain('data:image/svg+xml')
+    await expect(
+      link('https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries'),
+    ).toHaveAttribute('data-site-letter', 'D')
     await expect(link('src/components/')).toHaveText('components')
     await expect(link('src/components/')).toHaveAttribute(
       'data-md-icon',
@@ -201,21 +325,68 @@ for (const theme of ['light', 'dark'] as const) {
         (element) => getComputedStyle(element).textDecorationLine,
       ),
     ).toBe('line-through')
-    // Links keep the body line height (no bordered chip).
+    // Links keep the body line height (no bordered chip): 15/26 (UI-S03).
     const [lineHeight, border] = await link('package.json').evaluate(
       (element) => {
         const style = getComputedStyle(element)
         return [style.lineHeight, style.borderTopWidth]
       },
     )
-    expect(lineHeight).toBe('28px')
+    expect(lineHeight).toBe('26px')
     expect(border).toBe('0px')
     await shot(page, `chat-document-links-${theme}`)
   })
 }
 
-// RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded turns,
-// expanding the list and the undo confirmation.
+// RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded tasks
+// (UI-S15: one task each), expanding the list and the undo confirmation.
+for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1000, 500]) {
+    test(`turn files summary layout (${theme}, ${width})`, async ({ page }) => {
+      await open(page, 'turn-files', theme, { width, height: 1100 })
+      await toTop(page)
+      const card = page.locator('[data-turn-files="1"]')
+      await expect(card.locator('.file')).toHaveCount(3)
+      const title = (await card.locator('.headline').boundingBox())!
+      const totals = (await card.locator('.totals').boundingBox())!
+      expect(totals.y).toBeGreaterThanOrEqual(title.y + title.height)
+      const badge = (await card.locator('.icon-badge').boundingBox())!
+      expect(badge.width).toBeGreaterThanOrEqual(40)
+      expect(badge.height).toBeGreaterThanOrEqual(40)
+      await expect(card.getByRole('button', { name: '查看变更' })).toBeVisible()
+      const path = card.locator('.path').last()
+      expect(await path.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe(
+        'normal',
+      )
+      if (width === 500)
+        expect((await path.boundingBox())!.height).toBeGreaterThan(22)
+      expect(
+        await card.evaluate((el) => el.scrollWidth <= el.clientWidth),
+      ).toBe(true)
+      await card.screenshot({
+        path: resolve(
+          screenshotDir,
+          `turn-files-summary-${theme}-${width}.png`,
+        ),
+        animations: 'disabled',
+      })
+      const more = card.getByRole('button', { name: '再显示 4 个文件' })
+      await more.focus()
+      await page.keyboard.press('Enter')
+      await expect(card.locator('.file')).toHaveCount(7)
+      await expect(
+        card.getByRole('button', { name: '收起文件列表' }),
+      ).toBeVisible()
+      await card
+        .getByRole('img', { name: '按这次任务开始与结束时的项目对比' })
+        .focus()
+      await expect(page.getByRole('tooltip')).toContainText(
+        '按这次任务开始与结束时的项目对比',
+      )
+    })
+  }
+}
+
 for (const theme of ['light', 'dark'] as const) {
   test(`turn files card (${theme})`, async ({ page }) => {
     await open(page, 'turn-files', theme, { width: 1000, height: 1300 })
@@ -224,16 +395,17 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(cards).toHaveCount(3)
     const first = page.locator('[data-turn-files="1"]')
     await expect(first.locator('.headline')).toHaveText('已编辑 7 个文件')
-    await expect(first.locator('.file')).toHaveCount(5)
-    await first.getByRole('button', { name: '展开其余 2 个' }).click()
+    await expect(first.locator('.file')).toHaveCount(3)
+    await first.getByRole('button', { name: '再显示 4 个文件' }).click()
     await expect(first.locator('.file')).toHaveCount(7)
     await expect(page.locator('[data-turn-files="2"] .reverted')).toHaveText(
       '已撤销，跳过 1 个',
     )
     await expect(page.locator('[data-turn-files="3"]')).toHaveText(
-      '本轮改动未记录：项目快照超过 5 秒',
+      '这次任务的改动未记录：项目快照超过 5 秒',
     )
-    // The card sits after the turn's footer, before the next prompt.
+    await expect(first.locator('.scope')).toHaveText('这次任务')
+    // UI-S13: the card sits before the turn's footer, the turn's last row.
     const order = await page
       .locator('[data-chat-flow-kind]')
       .evaluateAll((rows) =>
@@ -242,18 +414,209 @@ for (const theme of ['light', 'dark'] as const) {
     expect(order.slice(0, 5)).toEqual([
       'user',
       'assistant',
-      'turnTail',
       'turnFiles',
+      'turnTail',
       'user',
     ])
     await shot(page, `chat-turn-files-${theme}`)
     await first.locator('[data-action="undo"]').click()
-    const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+    const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('[data-turn-revert-concurrent]')).toBeVisible()
     await expect(dialog.locator('[data-action="confirm"]')).toHaveText(
       '撤销 7 个文件',
     )
     await shot(page, `chat-turn-files-undo-${theme}`)
+  })
+}
+
+// UI-S15: a task whose subagents woke Emperor again. While they run there
+// is no files card; once the woken turn ends, one card sums the task after
+// that turn, before its footer, and the woken turn's folded line says why
+// it went on.
+for (const theme of ['light', 'dark'] as const) {
+  test(`task files card after a woken turn (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(page, 'task-files-running', theme, { width: 1000, height: 900 })
+    await toTop(page)
+    await expect(page.locator('[data-process-group]')).toHaveCount(1)
+    await expect(page.locator('[data-turn-files]')).toHaveCount(0)
+    await expect(page.locator('[data-process-continued]')).toHaveCount(0)
+    await shot(page, `task-running-${theme}`)
+
+    await open(page, 'task-files', theme, { width: 1000, height: 1300 })
+    await toTop(page)
+    const cards = page.locator('[data-turn-files]')
+    await expect(cards).toHaveCount(1)
+    const card = page.locator('[data-turn-files="2"]')
+    await expect(card).toHaveAttribute('data-task-first-turn', '1')
+    await expect(card.locator('.headline')).toHaveText('已编辑 5 个文件')
+    await expect(card.locator('.scope')).toHaveText('这次任务')
+    await expect(card.locator('.head .add')).toHaveText('+1400')
+    const tags = page.locator('[data-process-continued]')
+    await expect(tags).toHaveCount(1)
+    await expect(tags).toHaveText('子智能体完成后继续')
+    await expect(
+      page
+        .locator('[data-process-group]')
+        .nth(1)
+        .locator('[data-process-continued]'),
+    ).toHaveCount(1)
+    // The card after the woken turn's answer, the footer last; the three
+    // writers are a group of their own after the first process line (UI-S14).
+    const order = await page
+      .locator('[data-chat-flow-kind]')
+      .evaluateAll((rows) =>
+        rows.map((row) => row.getAttribute('data-chat-flow-kind')),
+      )
+    expect(order).toEqual([
+      'user',
+      'process',
+      'agents',
+      'assistant',
+      'turnTail',
+      'process',
+      'assistant',
+      'turnFiles',
+      'turnTail',
+    ])
+    // The tag sits on the folded line, after the chevron.
+    const header = page.locator('[data-process-header]').nth(1)
+    const summary = (await header.locator('.summary').boundingBox())!
+    const tag = (await tags.boundingBox())!
+    expect(tag.x).toBeGreaterThan(summary.x + summary.width)
+    expect(
+      Math.abs(tag.y + tag.height / 2 - (summary.y + summary.height / 2)),
+    ).toBeLessThan(3)
+    await shot(page, `task-done-${theme}`)
+    await expectBaseline(page, 'conversation', `task-files-${theme}`)
+    await card.screenshot({
+      path: resolve(screenshotDir, `task-card-${theme}.png`),
+      animations: 'disabled',
+    })
+    await header.screenshot({
+      path: resolve(screenshotDir, `task-continued-${theme}.png`),
+      animations: 'disabled',
+    })
+    await card.locator('[data-action="undo"]').click()
+    const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('[data-action="confirm"]')).toHaveText(
+      '撤销 5 个文件',
+    )
+    await shot(page, `task-undo-${theme}`)
+  })
+}
+
+// AGT-06: subagent result cards — the same shape as the turn files card,
+// one gold action, conflicts named, an applied result with 撤销, and the
+// 14-day cleanup prompt.
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent result cards (${theme})`, async ({ page }) => {
+    await open(page, 'subagent-results', theme, { width: 1000, height: 1600 })
+    await toTop(page)
+    const cards = page.locator('[data-delegation-result]')
+    await expect(cards).toHaveCount(4)
+    const ready = cards.nth(0)
+    await expect(ready.locator('.headline')).toHaveText('Codex 改了 6 个文件')
+    await expect(ready.locator('.head .add')).toHaveText('+120')
+    await expect(ready.locator('.head .del')).toHaveText('−8')
+    await expect(ready.locator('.file')).toHaveCount(3)
+    await expect(ready.locator('[data-variant="primary"]')).toHaveCount(1)
+    await expect(ready.locator('[data-action="apply"]')).toHaveText(
+      '应用到项目',
+    )
+    const badge = (await ready.locator('.icon-badge').boundingBox())!
+    expect(badge.width).toBeGreaterThanOrEqual(40)
+    expect(await ready.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+      true,
+    )
+    await ready.screenshot({
+      path: resolve(screenshotDir, `subagent-result-ready-${theme}.png`),
+      animations: 'disabled',
+    })
+    const conflicted = cards.nth(1)
+    await expect(conflicted.locator('[data-result-conflict]')).toContainText(
+      '1 个文件与项目里的改动冲突',
+    )
+    await expect(conflicted.locator('.file').first()).toContainText('冲突')
+    await conflicted.screenshot({
+      path: resolve(screenshotDir, `subagent-result-conflict-${theme}.png`),
+      animations: 'disabled',
+    })
+    const applied = cards.nth(2)
+    await expect(applied.locator('.status')).toHaveText('已应用到项目')
+    await expect(applied.locator('[data-action="undo"]')).toBeVisible()
+    await expect(cards.nth(3).locator('[data-result-cleanup]')).toContainText(
+      '已保留 15 天',
+    )
+    await shot(page, `chat-subagent-results-${theme}`)
+  })
+}
+
+test('subagent result card at a narrow width keeps its actions inside', async ({
+  page,
+}) => {
+  await open(page, 'subagent-results', 'light', { width: 520, height: 1600 })
+  await toTop(page)
+  const ready = page.locator('[data-delegation-result]').first()
+  expect(await ready.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+    true,
+  )
+  const card = (await ready.boundingBox())!
+  const apply = (await ready.locator('[data-action="apply"]').boundingBox())!
+  expect(apply.x + apply.width).toBeLessThanOrEqual(card.x + card.width)
+  await ready.screenshot({
+    path: resolve(screenshotDir, 'subagent-result-ready-narrow.png'),
+    animations: 'disabled',
+  })
+})
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent result diff dialog (${theme})`, async ({ page }) => {
+    // Only the one Core call the dialog makes.
+    await page.addInitScript(() => {
+      ;(window as unknown as { emperor: unknown }).emperor = {
+        invokeCore: async (operation: string, input: { path: string }) => {
+          if (operation !== 'delegations.diff')
+            throw new Error('not in this fixture')
+          return {
+            path: input.path,
+            truncated: false,
+            diff: [
+              `diff --git a/${input.path} b/${input.path}`,
+              `--- a/${input.path}`,
+              `+++ b/${input.path}`,
+              '@@ -1,6 +1,9 @@',
+              ' <template>',
+              '-  <form class="login">',
+              '+  <form class="login" :class="{ compact }">',
+              '+    <LoginHero v-if="!compact" />',
+              '     <EmailField v-model="email" />',
+              '     <PasswordField v-model="password" />',
+              '+    <RememberMe v-model="remember" />',
+              '   </form>',
+              ' </template>',
+              '',
+            ].join('\n'),
+          }
+        },
+      }
+    })
+    await open(page, 'subagent-results', theme, { width: 1100, height: 900 })
+    await toTop(page)
+    await page
+      .locator('[data-delegation-result]')
+      .first()
+      .locator('[data-action="diff"]')
+      .click()
+    const dialog = page.getByRole('dialog', { name: 'Codex 的改动' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.ds-diff .line--add').first()).toBeVisible()
+    await expect(dialog.locator('[aria-selected="true"]')).toContainText(
+      'LoginForm.vue',
+    )
+    await shot(page, `chat-subagent-result-diff-${theme}`)
   })
 }

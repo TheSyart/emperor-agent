@@ -49,6 +49,35 @@ describe('BlockAssembler', () => {
     expect(assembler.message().role).toBe('assistant')
   })
 
+  it('keeps a tool call identity when a later delta carries an empty id or name', () => {
+    const assembler = new BlockAssembler()
+    assembler.push({ type: 'block-start', index: 0, blockType: 'tool-call' })
+    assembler.push({
+      type: 'tool-call-delta',
+      index: 0,
+      id: 'call-7',
+      name: 'grep',
+      argumentsDelta: '{"pattern":',
+    })
+    assembler.push({
+      type: 'tool-call-delta',
+      index: 0,
+      id: '',
+      name: '',
+      argumentsDelta: '"x"}',
+    })
+    // Interrupted streams and adapters without block-end use the partial.
+    assembler.push({ type: 'finish', reason: { kind: 'tool-calls' } })
+    expect(assembler.blocks()).toEqual([
+      {
+        type: 'tool-call',
+        id: 'call-7',
+        name: 'grep',
+        arguments: '{"pattern":"x"}',
+      },
+    ])
+  })
+
   it('records the completed block from block-end', () => {
     const assembler = new BlockAssembler()
     assembler.push({ type: 'block-start', index: 0, blockType: 'text' })

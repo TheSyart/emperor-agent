@@ -15,10 +15,18 @@
  * Escape goes through the shared modal stack (modalStack.ts): only the
  * topmost open layer reacts, so a Modal opened from inside the settings
  * modal closes by itself. A non-closable top Modal swallows Escape.
+ *
+ * Focus (useFocusTrap): opening moves focus to the first control in the
+ * dialog (`data-autofocus` wins; the close button only when nothing else
+ * can take it), Tab stays inside, the page behind is inert, and closing
+ * returns focus to the element that opened it.
  */
+import { ref } from 'vue'
 import { DsClose } from '../icons/ds'
+import IconButton from './IconButton.vue'
 import { useModalLayer } from './modalStack'
 import { provideSurface } from './surface'
+import { useFocusTrap } from './useFocusTrap'
 
 const props = withDefaults(
   defineProps<{
@@ -38,6 +46,8 @@ const props = withDefaults(
 )
 
 const open = defineModel<boolean>('open', { default: false })
+const overlay = ref<HTMLElement | null>(null)
+const dialog = ref<HTMLElement | null>(null)
 
 function close() {
   open.value = false
@@ -46,6 +56,7 @@ function close() {
 useModalLayer(open, () => {
   if (props.closable) close()
 })
+useFocusTrap(dialog, open, { layer: () => overlay.value })
 
 // A dialog opened from a settings card is its own surface.
 provideSurface(() => 'panel')
@@ -53,28 +64,31 @@ provideSurface(() => 'panel')
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="ds-modal">
+    <div v-if="open" ref="overlay" class="ds-modal">
       <div class="mask" @click="closeOnMask ? close() : undefined" />
       <div
+        ref="dialog"
         class="dialog ds-fade-in"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
+        tabindex="-1"
         :style="{ width: `min(${width}px, 100%)` }"
       >
         <div class="header">
           <slot name="header">
             <h2 class="title">{{ title }}</h2>
           </slot>
-          <button
+          <IconButton
             v-if="closable"
-            type="button"
             class="close"
-            aria-label="关闭"
+            label="关闭"
+            :tooltip="false"
+            data-dismiss
             @click="close"
           >
             <DsClose :size="16" />
-          </button>
+          </IconButton>
         </div>
         <p v-if="description" class="description">{{ description }}</p>
         <div v-if="$slots.default" class="body"><slot /></div>
@@ -98,20 +112,21 @@ provideSurface(() => 'panel')
 .mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
 .dialog {
   position: relative;
+  outline: none;
   display: flex;
   flex-direction: column;
   max-height: 100%;
   padding-bottom: var(--space-6);
   overflow: hidden;
-  border: 1px solid var(--border-inverted);
+  border: 1px solid var(--stroke-inverted);
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -128,32 +143,15 @@ provideSurface(() => 'panel')
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
-}
-
-.close {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: var(--space-7);
-  height: var(--space-7);
-  border: none;
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: rgb(var(--label-secondary));
-  cursor: pointer;
-}
-
-.close:hover {
-  background: var(--interactive-bg-hover);
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .description {
   margin: 0;
   padding: 0 var(--space-6);
   font: var(--font-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .body {

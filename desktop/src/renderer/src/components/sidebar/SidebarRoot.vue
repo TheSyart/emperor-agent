@@ -1,17 +1,22 @@
 <script setup lang="ts">
 /**
- * Sidebar column. Top to bottom: SidebarTopRow (collapse, ← →),
- * SidebarBrandRow (BrandMark + Emperor, search toggle, bell),
- * SidebarNav (新对话 + the full pages), the search capsule while
- * searching, then the session list — 置顶 (pinned, pin order), 项目
- * (projects → sessions), 对话 (chats grouped by day) — and SidebarFooter
- * (设置 / 明暗切换).
- * Collapsed, the column renders the 56px SidebarRail instead. Geometry is
- * owned by AppFrame; this fills the column it is given. The persisted
- * layout (sorts, orders, pins) lives in useSidebarState.
+ * Sidebar column (UI-S11: Emperor's own layout, redesigned). Top to bottom:
+ * SidebarTopRow (collapse, ← →), SidebarBrandRow (BrandMark + Emperor,
+ * search toggle, bell), SidebarNav (the 新对话 primary row + the full
+ * pages), the search box while searching, then the session list — 置顶
+ * (pinned, pin order), 项目 (projects → sessions), 对话 (chats grouped by
+ * day) — and SidebarFooter (设置 / 明暗切换). Search finds titles at once and
+ * contents after a pause (useContentSearch); ↑ / ↓ on a focused row move to
+ * the next one and open it. Collapsed, the column renders the 56px
+ * SidebarRail instead. Geometry is owned by AppFrame; this fills the column
+ * it is given. The persisted layout (sorts, orders, pins) lives in
+ * useSidebarState.
  */
+import { elementOf } from '../ui/elementOf'
+import IconButton from '../ui/IconButton.vue'
+import SearchField from '../ui/SearchField.vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
@@ -24,7 +29,7 @@ import {
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { ProjectInfo, SessionInfo } from '../../types'
-import { DsClose, DsFolderClose, DsMore, DsPlus, DsSearch } from '../icons/ds'
+import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
@@ -36,15 +41,18 @@ import SidebarRail from './SidebarRail.vue'
 import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 import SidebarTopRow from './SidebarTopRow.vue'
+import { useContentSearch } from './useContentSearch'
 import { useSidebarState } from './useSidebarState'
-import { useSubagentCounts } from './subagentCounts'
+import { useAgentTree } from './agentTree'
+import { fetchSessionLineage } from '../../api/sessions'
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const router = useRouter()
+const route = useRoute()
 const ctx = useAppContext()
-const subagents = useSubagentCounts()
+const subagents = useAgentTree()
 const {
   sessions,
   projects,
@@ -56,6 +64,7 @@ const {
   create,
   resolveProject,
   remove,
+  restoreDeleted,
   rename,
   archive,
   isDraftSessionId,
@@ -69,7 +78,7 @@ const { state: sidebarState, grouped } = layout
 
 const searchQuery = ref('')
 const searchOpen = ref(false)
-const searchInput = ref<HTMLInputElement | null>(null)
+const searchInput = ref<InstanceType<typeof SearchField> | null>(null)
 const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
@@ -89,16 +98,104 @@ const chatDayGroups = computed(() =>
 )
 const searching = computed(() => searchQuery.value.trim().length > 0)
 const searchVisible = computed(() => searchOpen.value || searching.value)
-const searchResults = computed(() =>
-  searchSidebarSessions(sessions.value, searchQuery.value),
+const content = useContentSearch(searchQuery)
+const searchResults = computed(() => {
+  const titles = searchSidebarSessions(sessions.value, searchQuery.value)
+  const seen = new Set(titles.map((result) => result.id))
+  return [
+    ...titles.map((result) => ({ ...result, group: 'title' as const })),
+    ...content.hits.value
+      .filter((hit) => !seen.has(hit.sessionId))
+      .map((hit) => ({
+        id: hit.sessionId,
+        title: hit.title || '新会话',
+        subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
+        mode: 'chat' as const,
+        group: 'content' as const,
+      })),
+  ]
+})
+const layoutLoaded = ref(false)
+const visibleRootIds = computed(() =>
+  sessions.value
+    .filter((session) => !session.archived_at && !session.draft)
+    .map((session) => session.id),
 )
-const runningSessionIds = computed(() =>
-  Object.entries(ctx.sessionRuntimeStates)
-    .filter(([, state]) => state.running)
-    .map(([id]) => id),
+watch(visibleRootIds, (ids) => subagents.sync(ids), { immediate: true })
+const selectedAgent = computed(() => {
+  const id =
+    route.name === 'external-agent'
+      ? route.params.delegationId
+      : route.params.sessionId
+  if (typeof id !== 'string') return undefined
+  for (const tree of Object.values(subagents.trees)) {
+    const agent = tree.byId[id]
+    if (
+      agent &&
+      (route.name !== 'external-agent' ||
+        agent.rootSessionId === route.params.sessionId)
+    )
+      return agent
+  }
+  return undefined
+})
+const lineageRoot = ref('')
+let selectionGeneration = 0
+watch(
+  () =>
+    [
+      route.name,
+      route.params.sessionId,
+      selectedAgent.value?.rootSessionId,
+      sessions.value.length,
+    ] as const,
+  async ([name, id, indexedRoot]) => {
+    const generation = ++selectionGeneration
+    lineageRoot.value = ''
+    if (
+      name === 'external-agent' ||
+      typeof id !== 'string' ||
+      indexedRoot ||
+      sessions.value.some((session) => session.id === id) ||
+      isDraftSessionId(id)
+    )
+      return
+    try {
+      const lineage = await fetchSessionLineage(id)
+      if (generation === selectionGeneration && lineage.chain.length > 1)
+        lineageRoot.value = lineage.chain[0]!.sessionId
+    } catch {
+      /* A missing child must not select an unrelated root. */
+    }
+  },
+  { immediate: true },
 )
-
-watch(runningSessionIds, (ids) => subagents.sync(ids), { immediate: true })
+const selectedRootId = computed(() => {
+  if (route.name === 'external-agent')
+    return String(route.params.sessionId ?? '')
+  if (selectedAgent.value) return selectedAgent.value.rootSessionId
+  if (lineageRoot.value) return lineageRoot.value
+  const id = route.params.sessionId
+  return typeof id === 'string' ? id : activeId.value
+})
+// Opening a child reveals only its owning main row/project group.
+watch(
+  () => (layoutLoaded.value ? selectedRootId.value : ''),
+  (root) => {
+    if (!root) return
+    if (grouped.value.pinned.some((session) => session.id === root))
+      pinnedCollapsed.value = false
+    const project = grouped.value.projects.find((item) =>
+      item.sessions.some((session) => session.id === root),
+    )
+    if (project) {
+      projectsCollapsed.value = false
+      if (layout.isProjectCollapsed(project.id))
+        layout.toggleProject(project.id)
+    } else chatsCollapsed.value = false
+  },
+  { immediate: true },
+)
 
 function indicator(session: SessionInfo) {
   return sessionRuntimeIndicator(
@@ -137,16 +234,13 @@ async function newProjectSession(project: SidebarProjectGroup) {
   openSession(session.id)
 }
 
-async function pickBuildProject(kind: 'empty' | 'existing') {
+async function pickBuildProject() {
   if (creatingBuild.value) return
   creatingBuild.value = true
   try {
-    const picked = await selectDirectory()
-    const fallbackLabel =
-      kind === 'empty'
-        ? '输入已创建的空白项目文件夹路径'
-        : '输入要绑定的项目文件夹路径'
-    const path = (picked || window.prompt(fallbackLabel) || '').trim()
+    // Cancelling the folder picker does nothing (Electron has no
+    // window.prompt; the old typed-path fallback threw into a toast).
+    const path = ((await selectDirectory()) ?? '').trim()
     if (!path) return
     const project = await resolveProject(path)
     const session = await create({
@@ -156,7 +250,7 @@ async function pickBuildProject(kind: 'empty' | 'existing') {
     })
     openSession(session.id)
   } catch (err) {
-    ctx.showToast(err instanceof Error ? err.message : String(err))
+    ctx.showError(err)
   } finally {
     creatingBuild.value = false
   }
@@ -173,32 +267,61 @@ function firstOtherSession(id: string): SessionInfo | undefined {
   )
 }
 
+/** How long 「撤销」 stays offered after a delete (FIX-01). */
+const UNDO_DELETE_MS = 10_000
+
 async function doDelete(id: string) {
   if (!isDraftSessionId(id) && !canDeletePersistedSession.value) {
     ctx.showToast('至少保留一个持久化会话')
     return
   }
+  const draft = isDraftSessionId(id)
+  const title = sessions.value.find((s) => s.id === id)?.title || '会话'
   const wasActive = activeId.value === id
+  const wasPinned = layout.state.value.pinned_session_ids.includes(id)
   const next = firstOtherSession(id)
   const removed = await remove(id)
   if (!removed) {
-    ctx.showToast(sessionActionError.value || '删除会话失败')
+    ctx.showError(sessionActionError.value || '未知错误', '删除失败')
+    return
+  }
+  layout.forgetPinned(id)
+  if (wasActive && next) openSession(next.id)
+  if (draft) return
+  // Deleted sessions wait in 最近删除 (30 days); undo puts this one back.
+  ctx.showToast(`已删除「${title}」`, {
+    durationMs: UNDO_DELETE_MS,
+    action: {
+      label: '撤销',
+      run: async () => {
+        const restored = await restoreDeleted(id)
+        if (!restored) {
+          ctx.showError(sessionActionError.value || '未知错误', '撤销删除失败')
+          return
+        }
+        if (wasPinned) layout.togglePin(id)
+        if (wasActive) openSession(id)
+      },
+    },
+  })
+}
+
+async function doArchive(id: string) {
+  const wasActive = activeId.value === id
+  const next = firstOtherSession(id)
+  // A failed archive leaves the pin and the page alone and says why.
+  if (!(await archive(id, true))) {
+    ctx.showError(sessionActionError.value || '未知错误', '归档失败')
     return
   }
   layout.forgetPinned(id)
   if (wasActive && next) openSession(next.id)
 }
 
-async function doArchive(id: string) {
-  const wasActive = activeId.value === id
-  const next = firstOtherSession(id)
-  await archive(id, true)
-  layout.forgetPinned(id)
-  if (wasActive && next) openSession(next.id)
-}
-
 async function doRename(id: string, title: string) {
-  await rename(id, title)
+  // The row keeps its old title (it changes only on success).
+  if (!(await rename(id, title)))
+    ctx.showError(sessionActionError.value || '未知错误', '重命名失败')
 }
 
 function focusSearch() {
@@ -252,6 +375,23 @@ function commitSearch() {
   if (result) openSearchResult(result.id)
 }
 
+/** ↑ / ↓ on a focused row: focus the next row in the list and open it. */
+function moveRow(event: KeyboardEvent, delta: -1 | 1) {
+  const row = event.target as HTMLElement | null
+  if (!row?.classList.contains('session-row')) return
+  const rows = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+      '.session-row',
+    ),
+  ]
+  const next = rows[rows.indexOf(row) + delta]
+  event.preventDefault()
+  if (!next) return
+  next.focus()
+  const id = next.dataset.sessionId
+  if (id) openSession(id)
+}
+
 watch(searchQuery, () => {
   searchIndex.value = 0
 })
@@ -261,6 +401,7 @@ onMounted(async () => {
     layout.load(),
     sessions.value.length ? Promise.resolve() : load(),
   ])
+  layoutLoaded.value = true
 })
 
 defineExpose({ focusSearch })
@@ -279,101 +420,103 @@ defineExpose({ focusSearch })
     aria-label="会话侧栏"
     :style="{ width: `${width}px` }"
   >
-    <SidebarTopRow @toggle="emit('toggle')" />
-    <SidebarBrandRow :search-active="searchVisible" @search="toggleSearch" />
+    <SidebarTopRow data-sidebar-block="top" @toggle="emit('toggle')" />
+    <SidebarBrandRow
+      data-sidebar-block="brand"
+      :search-active="searchVisible"
+      @search="toggleSearch"
+    />
     <SidebarNav
       :project-menu-open="newProjectMenuOpen"
       @new-chat="newChat"
       @new-project="openNewProjectMenu"
     />
 
-    <label
+    <SearchField
       v-if="searchVisible"
+      ref="searchInput"
+      v-model="searchQuery"
       class="search"
-      :data-active="searching || undefined"
-    >
-      <DsSearch :size="14" class="search-icon" />
-      <input
-        ref="searchInput"
-        v-model="searchQuery"
-        type="search"
-        placeholder="搜索对话"
-        aria-label="搜索对话"
-        @keydown.down.prevent="moveSearch(1)"
-        @keydown.up.prevent="moveSearch(-1)"
-        @keydown.enter.prevent="commitSearch"
-        @keydown.esc.prevent="escapeSearch"
-        @blur="onSearchBlur"
-      />
-      <button
-        v-if="searching"
-        type="button"
-        class="search-clear"
-        aria-label="清除搜索"
-        @mousedown.prevent
-        @click="clearSearch"
-      >
-        <DsClose :size="12" />
-      </button>
-    </label>
+      placeholder="搜索会话标题和内容"
+      aria-label="搜索对话"
+      @clear="clearSearch"
+      @keydown.down.prevent="moveSearch(1)"
+      @keydown.up.prevent="moveSearch(-1)"
+      @keydown.enter.prevent="commitSearch"
+      @keydown.esc.prevent="escapeSearch"
+      @blur="onSearchBlur"
+    />
 
-    <div class="region">
+    <div class="region" data-sidebar-block="sections">
       <div v-if="loading && !sessions.length" class="empty">加载中…</div>
 
       <SidebarSearchResults
         v-else-if="searching"
         :results="searchResults"
+        :pending="content.pending.value"
         :selected-index="searchIndex"
         @hover="searchIndex = $event"
         @open="openSearchResult"
       />
 
-      <div v-else class="list">
-        <section v-if="grouped.pinned.length" class="section" aria-label="置顶">
+      <div
+        v-else
+        class="list"
+        @keydown.down="moveRow($event, 1)"
+        @keydown.up="moveRow($event, -1)"
+      >
+        <section
+          v-if="grouped.pinned.length"
+          class="section"
+          aria-label="置顶"
+          data-sidebar-section="pinned"
+        >
           <SidebarSectionHeader
             v-model:collapsed="pinnedCollapsed"
             label="置顶"
           />
           <template v-if="!pinnedCollapsed">
-            <SessionRow
-              v-for="session in grouped.pinned"
-              :key="session.id"
-              pinned
-              manual
-              :session="session"
-              :active="session.id === activeId"
-              :indicator="indicator(session)"
-              :pending-label="pendingLabel(session)"
-              :subagents="subagents.counts[session.id] || 0"
-              :can-delete="canDelete(session)"
-              @open="openSession(session.id)"
-              @rename="doRename(session.id, $event)"
-              @pin="layout.togglePin(session.id)"
-              @archive="doArchive(session.id)"
-              @delete="doDelete(session.id)"
-              @move="layout.movePinned(session.id, $event)"
-            />
+            <template v-for="session in grouped.pinned" :key="session.id">
+              <SessionRow
+                pinned
+                manual
+                :session="session"
+                :active="session.id === selectedRootId"
+                :indicator="indicator(session)"
+                :pending-label="pendingLabel(session)"
+                :subagents="subagents.counts[session.id] || 0"
+                :can-delete="canDelete(session)"
+                @open="openSession(session.id)"
+                @rename="doRename(session.id, $event)"
+                @pin="layout.togglePin(session.id)"
+                @archive="doArchive(session.id)"
+                @delete="doDelete(session.id)"
+                @move="layout.movePinned(session.id, $event)"
+              />
+            </template>
           </template>
         </section>
 
         <section
           v-if="sidebarState.section_order.includes('projects')"
           class="section"
+          data-sidebar-section="projects"
         >
           <SidebarSectionHeader
             v-model:collapsed="projectsCollapsed"
             label="项目"
           >
-            <button
-              ref="projectMenuAnchor"
-              type="button"
+            <IconButton
+              :ref="(c) => (projectMenuAnchor = elementOf(c))"
               class="head-button"
-              aria-label="项目操作"
+              label="项目操作"
+              size="xs"
+              :active="projectMenuOpen"
               :aria-expanded="projectMenuOpen"
               @click="projectMenuOpen = !projectMenuOpen"
             >
               <DsPlus :size="16" />
-            </button>
+            </IconButton>
           </SidebarSectionHeader>
           <template v-if="!projectsCollapsed">
             <template v-for="project in grouped.projects" :key="project.id">
@@ -384,24 +527,26 @@ defineExpose({ focusSearch })
                 @new-session="newProjectSession(project)"
               />
               <template v-if="!layout.isProjectCollapsed(project.id)">
-                <SessionRow
-                  v-for="session in project.sessions"
-                  :key="session.id"
-                  nested
-                  :session="session"
-                  :active="session.id === activeId"
-                  :indicator="indicator(session)"
-                  :pending-label="pendingLabel(session)"
-                  :subagents="subagents.counts[session.id] || 0"
-                  :can-delete="canDelete(session)"
-                  :manual="sidebarState.project_sort === 'manual'"
-                  @open="openSession(session.id)"
-                  @rename="doRename(session.id, $event)"
-                  @pin="layout.togglePin(session.id)"
-                  @archive="doArchive(session.id)"
-                  @delete="doDelete(session.id)"
-                  @move="layout.moveProjectSession(project, session.id, $event)"
-                />
+                <template v-for="session in project.sessions" :key="session.id">
+                  <SessionRow
+                    nested
+                    :session="session"
+                    :active="session.id === selectedRootId"
+                    :indicator="indicator(session)"
+                    :pending-label="pendingLabel(session)"
+                    :subagents="subagents.counts[session.id] || 0"
+                    :can-delete="canDelete(session)"
+                    :manual="sidebarState.project_sort === 'manual'"
+                    @open="openSession(session.id)"
+                    @rename="doRename(session.id, $event)"
+                    @pin="layout.togglePin(session.id)"
+                    @archive="doArchive(session.id)"
+                    @delete="doDelete(session.id)"
+                    @move="
+                      layout.moveProjectSession(project, session.id, $event)
+                    "
+                  />
+                </template>
                 <div v-if="!project.sessions.length" class="empty nested">
                   暂无会话
                 </div>
@@ -416,39 +561,41 @@ defineExpose({ focusSearch })
         <section
           v-if="sidebarState.section_order.includes('chats')"
           class="section"
+          data-sidebar-section="chats"
         >
           <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
-            <button
-              ref="chatMenuAnchor"
-              type="button"
+            <IconButton
+              :ref="(c) => (chatMenuAnchor = elementOf(c))"
               class="head-button"
-              aria-label="对话排序"
+              label="对话排序"
+              size="xs"
+              :active="chatMenuOpen"
               :aria-expanded="chatMenuOpen"
               @click="chatMenuOpen = !chatMenuOpen"
             >
               <DsMore :size="16" />
-            </button>
+            </IconButton>
           </SidebarSectionHeader>
           <template v-if="!chatsCollapsed">
             <template v-for="group in chatDayGroups" :key="group.key">
               <div v-if="group.label" class="day-label">{{ group.label }}</div>
-              <SessionRow
-                v-for="session in group.sessions"
-                :key="session.id"
-                :session="session"
-                :active="session.id === activeId"
-                :indicator="indicator(session)"
-                :pending-label="pendingLabel(session)"
-                :subagents="subagents.counts[session.id] || 0"
-                :can-delete="canDelete(session)"
-                :manual="sidebarState.chat_sort === 'manual'"
-                @open="openSession(session.id)"
-                @rename="doRename(session.id, $event)"
-                @pin="layout.togglePin(session.id)"
-                @archive="doArchive(session.id)"
-                @delete="doDelete(session.id)"
-                @move="layout.moveChat(session.id, $event)"
-              />
+              <template v-for="session in group.sessions" :key="session.id">
+                <SessionRow
+                  :session="session"
+                  :active="session.id === selectedRootId"
+                  :indicator="indicator(session)"
+                  :pending-label="pendingLabel(session)"
+                  :subagents="subagents.counts[session.id] || 0"
+                  :can-delete="canDelete(session)"
+                  :manual="sidebarState.chat_sort === 'manual'"
+                  @open="openSession(session.id)"
+                  @rename="doRename(session.id, $event)"
+                  @pin="layout.togglePin(session.id)"
+                  @archive="doArchive(session.id)"
+                  @delete="doDelete(session.id)"
+                  @move="layout.moveChat(session.id, $event)"
+                />
+              </template>
             </template>
             <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
           </template>
@@ -456,7 +603,7 @@ defineExpose({ focusSearch })
       </div>
     </div>
 
-    <SidebarFooter />
+    <SidebarFooter data-sidebar-block="footer" />
 
     <Menu
       v-model:open="newProjectMenuOpen"
@@ -477,10 +624,7 @@ defineExpose({ focusSearch })
         </MenuItem>
         <MenuItem variant="separator" />
       </template>
-      <MenuItem
-        :disabled="creatingBuild"
-        @select="pickBuildProject('existing')"
-      >
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         选择项目文件夹…
       </MenuItem>
     </Menu>
@@ -491,13 +635,10 @@ defineExpose({ focusSearch })
       :width="200"
       label="项目操作"
     >
-      <MenuItem :disabled="creatingBuild" @select="pickBuildProject('empty')">
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         新建空白项目
       </MenuItem>
-      <MenuItem
-        :disabled="creatingBuild"
-        @select="pickBuildProject('existing')"
-      >
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         使用现有文件夹
       </MenuItem>
       <MenuItem variant="separator" />
@@ -560,9 +701,9 @@ defineExpose({ focusSearch })
   min-width: 0;
   padding: var(--space-1-5) var(--space-3);
   background: rgb(var(--sidebar-fill));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .head-button {
@@ -576,78 +717,20 @@ defineExpose({ focusSearch })
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
 .head-button:hover,
 .head-button[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .search {
-  display: flex;
   flex: none;
-  align-items: center;
-  gap: var(--space-1-5);
-  box-sizing: border-box;
-  height: 30px;
+  width: auto;
   margin: 0 var(--space-0-5) var(--space-2);
-  padding: 0 var(--space-1) 0 var(--space-2-5);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-cell);
-  color: rgb(var(--label-caption));
-  cursor: text;
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
-}
-
-.search:focus-within,
-.search[data-active] {
-  border-color: var(--border-l3);
-  color: rgb(var(--label-secondary));
-}
-
-.search input {
-  flex: 1;
-  width: 0;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.search input:focus {
-  box-shadow: none;
-}
-
-.search input::placeholder {
-  color: rgb(var(--label-caption));
-}
-
-.search input::-webkit-search-cancel-button {
-  display: none;
-}
-
-.search-clear {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: var(--space-5);
-  height: var(--space-5);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.search-clear:hover {
-  background: var(--interactive-bg-hover);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .region {
@@ -674,14 +757,14 @@ defineExpose({ focusSearch })
   padding: var(--space-2) var(--space-2) var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .empty {
   padding: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .empty.nested {

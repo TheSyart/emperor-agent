@@ -8,6 +8,7 @@
  */
 import { computed } from 'vue'
 import type { PullRequestListItem } from '../../../api/pullRequests'
+import Dot from '../../ui/Dot.vue'
 import { pullStateIcon } from './pullIcons'
 
 const props = defineProps<{
@@ -47,12 +48,18 @@ const checksLabel = computed(() => {
   >
     <span class="glyph" :data-draft="item.isDraft || undefined">
       <component :is="icon" :size="16" aria-hidden="true" />
-      <span
+      <Dot
         v-if="item.checks"
         class="checks-dot"
         :data-checks="item.checks"
-        role="img"
-        :aria-label="checksLabel"
+        :state="
+          item.checks === 'success'
+            ? 'ok'
+            : item.checks === 'failure'
+              ? 'error'
+              : 'warn'
+        "
+        :label="checksLabel"
       />
     </span>
     <span class="main">
@@ -89,18 +96,18 @@ const checksLabel = computed(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .pr-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .pr-row[data-selected] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .pr-row:focus-visible {
@@ -119,7 +126,7 @@ const checksLabel = computed(() => {
 }
 
 .glyph[data-draft] {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .checks-dot {
@@ -129,19 +136,7 @@ const checksLabel = computed(() => {
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  box-shadow: 0 0 0 2px rgb(var(--bg-base));
-}
-
-.checks-dot[data-checks='success'] {
-  background: rgb(var(--state-ok));
-}
-
-.checks-dot[data-checks='failure'] {
-  background: rgb(var(--danger));
-}
-
-.checks-dot[data-checks='pending'] {
-  background: rgb(var(--warn));
+  box-shadow: 0 0 0 2px rgb(var(--surface-base));
 }
 
 .main {
@@ -165,14 +160,14 @@ const checksLabel = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .age {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -180,7 +175,7 @@ const checksLabel = computed(() => {
 
 .meta {
   gap: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -204,7 +199,7 @@ const checksLabel = computed(() => {
 
 .sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .stats {

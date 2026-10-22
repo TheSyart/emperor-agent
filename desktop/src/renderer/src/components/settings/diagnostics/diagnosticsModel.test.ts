@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticsPayload } from '../../../types'
 import {
+  OPENABLE_DIAGNOSTIC_PATHS,
   diagnosticCardDescription,
   diagnosticReportText,
   diagnosticRows,
@@ -420,7 +421,7 @@ describe('diagnostics settings model', () => {
       },
     )
     expect(rows.find((row) => row.id === 'subagent-supervisor')).toMatchObject({
-      label: '子代理',
+      label: '子智能体',
       value: '2 active · 2/6 capacity',
       detail: 'per-session limit 3 · session_1: 2',
       tone: 'ok',
@@ -716,6 +717,33 @@ describe('diagnostics settings model', () => {
     ).toContain('legacy-state-migration')
   })
 
+  it('opens 运行时 with the app facts that left 常规 (UI-S07)', () => {
+    const [runtime] = diagnosticSections(
+      { runtime: { events: 3 } },
+      { app: { service: '在线', model: 'deepseek-flash', projects: 2 } },
+    )
+    expect(
+      runtime?.rows.slice(0, 3).map((row) => [row.label, row.value]),
+    ).toEqual([
+      ['服务状态', '在线'],
+      ['当前模型', 'deepseek-flash'],
+      ['已绑定项目', '2 个'],
+    ])
+    expect(runtime?.rows[0]?.tone).toBe('ok')
+    const [offline] = diagnosticSections(
+      {},
+      { app: { service: '服务不可用', model: '', projects: 0 } },
+    )
+    expect(offline?.rows[0]?.tone).toBe('error')
+    expect(offline?.rows[1]?.value).toBe('未配置')
+    // Without app facts the card is what Core returned.
+    expect(
+      diagnosticSections({ runtime: { events: 3 } })[0]?.rows.map(
+        (row) => row.id,
+      ),
+    ).not.toContain('app-service')
+  })
+
   it('puts the runtime root first in 存储路径, one row when it holds the resources', () => {
     const paths = (payload: Record<string, unknown>) =>
       diagnosticSections(payload as never).find(
@@ -753,6 +781,35 @@ describe('diagnostics settings model', () => {
         (row) => row.id,
       ),
     ).not.toContain('runtime-root')
+  })
+
+  it('shows a scheduler that did not start, and jobs it set aside (KRN-10 1, 2)', () => {
+    const row = (scheduler: Record<string, unknown>) =>
+      diagnosticRows({ scheduler } as never)
+        .flatMap((group) => group.rows)
+        .find((item) => item.id === 'scheduler-store')
+    expect(
+      row({
+        jobsFile: '/data/scheduler/jobs.json',
+        startError: '另一个 Emperor 进程（pid 4242）正在运行定时任务',
+      }),
+    ).toMatchObject({
+      value: '未启动',
+      tone: 'error',
+      detail: expect.stringContaining('pid 4242'),
+    })
+    expect(
+      row({
+        jobsFile: '/data/scheduler/jobs.json',
+        rejectedFile: '/data/scheduler/jobs.rejected.json',
+        rejectedJobs: [{ id: 'job-bad', name: '坏任务', error: 'x' }],
+      }),
+    ).toMatchObject({
+      value: '1 个任务无法读取',
+      tone: 'warn',
+      detail: expect.stringContaining('坏任务'),
+      path: '/data/scheduler/jobs.rejected.json',
+    })
   })
 
   it('summarises section health and lists issues, errors first', () => {
@@ -907,5 +964,243 @@ describe('computer use diagnostics row', () => {
       tone: 'warn',
       detail: '没有可用驱动 · 0 个目标',
     })
+  })
+})
+
+describe('process containment receipts row (SEC-08)', () => {
+  const row = (processRuntime: Record<string, unknown>) =>
+    diagnosticSections({ processRuntime } as never)
+      .find((section) => section.id === 'runtime')!
+      .rows.find((item) => item.id === 'process-containment')
+
+  it('shows the recent receipts: who ran, contained or not, and the policy', () => {
+    expect(row({ ownership: true })).toBeUndefined()
+    expect(
+      row({
+        containment: {
+          backend: 'seatbelt',
+          available: true,
+          recent: [
+            {
+              owner: 'mcp',
+              id: 'notes',
+              decision: 'user-allowed-unsandboxed',
+              backend: 'none',
+              policyHash: '0123456789ab',
+              status: 'running',
+              at: '2026-10-19T06:00:00.000Z',
+            },
+            {
+              owner: 'hook',
+              id: 'kit',
+              decision: 'refused',
+              backend: 'none',
+              policyHash: 'ba9876543210',
+              status: 'refused',
+              reason: '进程沙箱不可用：mock',
+              at: '2026-10-19T05:59:00.000Z',
+            },
+            {
+              owner: 'mcp',
+              id: 'files',
+              decision: 'contained',
+              backend: 'seatbelt',
+              policyHash: 'aaaaaaaaaaaa',
+              status: 'completed',
+              at: '2026-10-19T05:58:00.000Z',
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      label: '进程隔离回执',
+      value: '3 条 · 1 隔离 · 1 拒绝 · 1 经同意未隔离',
+      tone: 'warn',
+      detail:
+        'MCP notes 经同意未隔离 (none · 0123456789ab) · Hook kit 已拒绝 (none · ba9876543210)：进程沙箱不可用：mock · MCP files 已隔离 (seatbelt · aaaaaaaaaaaa)',
+    })
+    expect(
+      row({
+        containment: {
+          backend: 'seatbelt',
+          available: true,
+          recent: [
+            {
+              owner: 'environment',
+              id: 'managed_plan_x',
+              decision: 'contained',
+              backend: 'seatbelt',
+              policyHash: 'cccccccccccc',
+              status: 'completed',
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      value: '1 条 · 1 隔离',
+      tone: 'ok',
+      detail: '环境安装 managed_plan_x 已隔离 (seatbelt · cccccccccccc)',
+    })
+    expect(
+      row({
+        containment: { backend: 'seatbelt', available: true, recent: [] },
+      }),
+    ).toMatchObject({ value: '暂无', tone: 'muted' })
+  })
+})
+
+describe('the log folder in 存储路径 (REL-01)', () => {
+  it('shows where main.log and core.log are, and offers to open it', () => {
+    const sections = diagnosticSections(
+      {
+        root: '/Users/me/app',
+        paths: {
+          runtimeRoot: '/Users/me/app',
+          stateRoot: '/Users/me/.emperor',
+          logsRoot: '/Users/me/Library/Logs/Emperor Agent',
+        },
+      } as DiagnosticsPayload,
+      { app: { service: '在线', model: '', projects: 0 } },
+    )
+    const row = sections
+      .find((section) => section.id === 'paths')
+      ?.rows.find((item) => item.id === 'logs-path')
+    expect(row).toMatchObject({
+      label: '日志',
+      value: '~/Library/Logs/Emperor Agent',
+      path: '/Users/me/Library/Logs/Emperor Agent',
+      tone: 'ok',
+    })
+    expect(row?.detail).toContain('main.log')
+    expect(OPENABLE_DIAGNOSTIC_PATHS.has('logs-path')).toBe(true)
+  })
+
+  it('leaves the row out when the host keeps no log folder', () => {
+    const sections = diagnosticSections(
+      {
+        root: '/r',
+        paths: { runtimeRoot: '/r', stateRoot: '/s' },
+      } as DiagnosticsPayload,
+      { app: { service: '在线', model: '', projects: 0 } },
+    )
+    expect(
+      sections
+        .find((section) => section.id === 'paths')
+        ?.rows.some((item) => item.id === 'logs-path'),
+    ).toBe(false)
+  })
+})
+
+describe('update rows (REL-02)', () => {
+  const updates = (patch: Record<string, unknown> = {}) => ({
+    enabled: true,
+    automatic: true,
+    disabledReason: null,
+    channel: 'stable',
+    lastCheckedAt: null,
+    lastError: null,
+    available: null,
+    electron: {
+      current: '42.2.0',
+      latest: null,
+      behind: null,
+      outdated: false,
+    },
+    feedOverride: null,
+    ...patch,
+  })
+  const desktop = (value: Record<string, unknown> | null) =>
+    diagnosticSections({ updates: value } as never).find(
+      (section) => section.id === 'desktop',
+    )!
+  const row = (value: Record<string, unknown> | null, id: string) =>
+    desktop(value).rows.find((item) => item.id === id)
+
+  it('reminds when Electron is more than 2 majors behind the newest release', () => {
+    const outdated = updates({
+      electron: {
+        current: '42.2.0',
+        latest: '45.0.1',
+        behind: 3,
+        outdated: true,
+      },
+    })
+    expect(row(outdated, 'electron')).toMatchObject({
+      label: 'Electron 版本',
+      value: '42.2.0',
+      tone: 'warn',
+      detail: expect.stringContaining('落后 3 个主版本'),
+    })
+    const summary = diagnosticSummary(
+      diagnosticSections({ updates: outdated } as never),
+      [],
+    )
+    expect(summary.issues.map((issue) => issue.id)).toContain('electron')
+    expect(
+      row(
+        updates({
+          electron: {
+            current: '42.2.0',
+            latest: '44.0.0',
+            behind: 2,
+            outdated: false,
+          },
+        }),
+        'electron',
+      ),
+    ).toMatchObject({ tone: 'ok', detail: '最新发布的 Emperor 内置 44.0.0' })
+    expect(row(updates(), 'electron')).toMatchObject({
+      tone: 'ok',
+      detail: '检查更新后才能和最新发布的 Emperor 比较',
+    })
+  })
+
+  it('shows the switch and a test feed in effect', () => {
+    expect(row(updates({ enabled: false }), 'update-check')).toMatchObject({
+      label: '检查更新',
+      value: '已关闭',
+      tone: 'muted',
+    })
+    expect(
+      row(
+        updates({ automatic: false, disabledReason: 'development' }),
+        'update-check',
+      ),
+    ).toMatchObject({ value: '开发版不检查' })
+    expect(
+      row(
+        updates({
+          lastError: {
+            code: 'update_network_failed',
+            message: '连接 GitHub 失败：timeout',
+          },
+        }),
+        'update-check',
+      ),
+    ).toMatchObject({
+      value: '已开启',
+      tone: 'muted',
+      detail: expect.stringContaining('稍后自动重试'),
+    })
+    const feed = row(
+      updates({ feedOverride: 'http://127.0.0.1:8765/releases' }),
+      'update-feed',
+    )
+    expect(feed).toMatchObject({
+      label: '测试更新源',
+      value: '已生效',
+      tone: 'warn',
+    })
+    expect(feed?.detail).toContain('http://127.0.0.1:8765/releases')
+    expect(feed?.detail).toContain('EMPEROR_UPDATE_FEED_URL')
+    expect(row(updates(), 'update-feed')).toBeUndefined()
+  })
+
+  it('an older Core without the block shows nothing about updates', () => {
+    const section = desktop(null)
+    expect(section.rows.some((item) => item.id.startsWith('update'))).toBe(
+      false,
+    )
+    expect(section.rows.some((item) => item.id === 'electron')).toBe(false)
   })
 })

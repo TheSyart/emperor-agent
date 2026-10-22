@@ -7,14 +7,20 @@
  * workflow run's record (phases, logs, agents, outcome). 「加载更多」 while
  * the record has more entries; 「刷新」 reloads from the start while the
  * task is still live. Job output opens scrolled to its latest lines.
+ * 「停止」 (UI-S05: only here, never on the card's lines) cancels a running
+ * job or workflow run; a workflow asks first, since its subagents stop too.
  *
- * Props: taskId, label, kind ('job' | 'workflow'), live.
- * Emits: close.
+ * Props: taskId, label, kind ('job' | 'workflow'), live, stoppable,
+ * confirmStop.
+ * Emits: close, stopped (after `tasks.cancel`, so the card reloads).
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { core } from '../../../api/http'
+import { onCoreEvent } from '../../../api/backend'
+import { mergeExternalTranscript } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
+import { confirm } from '../../ui/confirm'
 import {
   transcriptText,
   type TaskTranscriptEntry,
@@ -25,11 +31,14 @@ const PAGE_SIZE = 200
 const props = defineProps<{
   taskId: string
   label: string
-  kind: 'job' | 'workflow'
+  kind: 'job' | 'workflow' | 'external-agent'
+  sessionId?: string
   live: boolean
+  stoppable?: boolean
+  confirmStop?: boolean
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; stopped: [] }>()
 
 const entries = shallowRef<TaskTranscriptEntry[]>([])
 const eof = ref(true)
@@ -37,6 +46,33 @@ const loading = ref(false)
 const error = ref('')
 const output = ref<HTMLElement | null>(null)
 let generation = 0
+let consumed = 0,
+  alive = true,
+  followPending = false,
+  following = false
+let followTimer: ReturnType<typeof setTimeout> | undefined
+function follow() {
+  following = true
+  followPending = true
+  if (followTimer || !alive) return
+  followTimer = setTimeout(() => {
+    followTimer = undefined
+    if (!alive || loading.value) return
+    followPending = false
+    void load(false)
+  }, 80)
+}
+const unsubscribe = onCoreEvent((input) => {
+  if (props.kind !== 'external-agent' || !input || typeof input !== 'object')
+    return
+  const event = input as Record<string, unknown>
+  if (
+    event.run_id === props.taskId &&
+    (!props.sessionId || event.session_id === props.sessionId) &&
+    String(event.event).startsWith('delegation_')
+  )
+    follow()
+})
 
 async function load(reset: boolean): Promise<void> {
   const current = ++generation
@@ -44,13 +80,24 @@ async function load(reset: boolean): Promise<void> {
   error.value = ''
   try {
     const page = await core('tasks.transcript', props.taskId, {
-      offset: reset ? 0 : entries.value.length,
+      offset: reset ? 0 : consumed,
       limit: PAGE_SIZE,
+      sessionId: props.sessionId,
     })
     if (current !== generation) return
-    entries.value = reset ? page.entries : [...entries.value, ...page.entries]
+    consumed = (reset ? 0 : consumed) + page.entries.length
+    entries.value = (
+      reset ? page.entries : [...entries.value, ...page.entries]
+    ).slice(-2000)
     eof.value = page.eof
-    if (reset && props.kind === 'job') {
+    if (
+      props.kind === 'external-agent' &&
+      (props.live || following) &&
+      !page.eof
+    )
+      followPending = true
+    if (page.eof) following = false
+    if ((reset && props.kind === 'job') || props.kind === 'external-agent') {
       await nextTick()
       if (output.value) output.value.scrollTop = output.value.scrollHeight
     }
@@ -59,17 +106,31 @@ async function load(reset: boolean): Promise<void> {
       error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
     if (current === generation) loading.value = false
+    if (alive && followPending) follow()
   }
 }
 
 void load(true)
 onBeforeUnmount(() => {
+  alive = false
+  unsubscribe()
+  if (followTimer) clearTimeout(followTimer)
   generation += 1
 })
 
-const text = computed(() => transcriptText(entries.value))
+const text = computed(() =>
+  transcriptText(
+    props.kind === 'external-agent'
+      ? mergeExternalTranscript(entries.value)
+      : entries.value,
+  ),
+)
 const title = computed(() =>
-  props.kind === 'workflow' ? '工作流记录' : '命令输出',
+  props.kind === 'workflow'
+    ? '工作流记录'
+    : props.kind === 'external-agent'
+      ? '子智能体输出'
+      : '命令输出',
 )
 const emptyText = computed(() => {
   if (loading.value) return '正在读取…'
@@ -78,6 +139,34 @@ const emptyText = computed(() => {
 
 function onOpen(open: boolean): void {
   if (!open) emit('close')
+}
+
+const stopping = ref(false)
+
+async function stop(): Promise<void> {
+  if (stopping.value) return
+  if (
+    props.confirmStop &&
+    !(await confirm({
+      title: `停止工作流「${props.label}」？`,
+      body: '它正在运行的子智能体也会一起停止。',
+      confirmLabel: '停止',
+      tone: 'danger',
+    }))
+  )
+    return
+  stopping.value = true
+  try {
+    await core('tasks.cancel', props.taskId, {
+      reason: 'user_stopped_from_environment_card',
+    })
+    emit('stopped')
+    await load(true)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    stopping.value = false
+  }
 }
 </script>
 
@@ -95,7 +184,16 @@ function onOpen(open: boolean): void {
     <p v-if="error" class="task-output-note" data-tone="error" role="alert">
       {{ error }}
     </p>
-    <template v-if="!eof || live" #footer>
+    <template v-if="!eof || live || stoppable" #footer>
+      <Button
+        v-if="stoppable"
+        size="sm"
+        variant="secondary"
+        :loading="stopping"
+        @click="stop"
+      >
+        停止
+      </Button>
       <Button
         v-if="live"
         size="sm"
@@ -108,7 +206,7 @@ function onOpen(open: boolean): void {
       <Button
         v-if="!eof"
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="loading"
         @click="load(false)"
       >
@@ -122,7 +220,7 @@ function onOpen(open: boolean): void {
 .task-output-label {
   margin: 0 0 var(--space-2);
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -133,10 +231,10 @@ function onOpen(open: boolean): void {
   margin: 0;
   padding: var(--space-2-5) var(--space-3);
   overflow: auto;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-1));
   font: var(--font-code-small);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -150,7 +248,7 @@ function onOpen(open: boolean): void {
 .task-output-note {
   margin: 0;
   padding: var(--space-2) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

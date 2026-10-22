@@ -11,9 +11,10 @@
  * Data: the masked config view (`mcp.getConfig`, source of the list), the
  * `mcp.status` snapshot (mirrored into boot.mcp) and boot.tools for tool
  * descriptions — refreshed after every change so the rest of the app (Tools
- * section, composer) sees the new MCP tools. While a server is still
- * connecting the status is polled briefly. Showing the kept-alive page
- * again re-reads the config and the status.
+ * section, composer) sees the new MCP tools. Each `mcp_connection_state`
+ * event re-reads the status (KRN-04: servers connect in the background);
+ * while a server is still connecting the status is also polled briefly.
+ * Showing the kept-alive page again re-reads the config and the status.
  */
 import {
   computed,
@@ -24,6 +25,7 @@ import {
   shallowRef,
   watch,
 } from 'vue'
+import { useDirtyGuard } from '../ui/useDirtyGuard'
 import Button from '../ui/Button.vue'
 import Modal from '../ui/Modal.vue'
 import { DsApi, DsPlus } from '../icons/ds'
@@ -34,12 +36,13 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
 import { core } from '../../api/http'
+import { onCoreEvent } from '../../api/backend'
 import {
   getMcpConfig,
   getMcpStatus,
@@ -190,9 +193,38 @@ function schedulePoll(restart = true) {
   }, POLL_INTERVAL_MS)
 }
 
-onMounted(() => void refresh())
+/** A burst of connection events reads the status once. */
+const EVENT_DEBOUNCE_MS = 150
+let eventTimer: ReturnType<typeof setTimeout> | undefined
+let unsubscribe = () => {}
+
+function onConnectionState() {
+  if (eventTimer !== undefined) return
+  eventTimer = setTimeout(async () => {
+    eventTimer = undefined
+    const before = connectedKey()
+    try {
+      await loadStatus()
+    } catch {
+      // Keep the last snapshot; polling or a manual refresh retries.
+    }
+    if (connectedKey() !== before) await refreshTools()
+  }, EVENT_DEBOUNCE_MS)
+}
+
+onMounted(() => {
+  void refresh()
+  unsubscribe = onCoreEvent((event) => {
+    if ((event as { event?: unknown } | null)?.event === 'mcp_connection_state')
+      onConnectionState()
+  })
+})
 onPageReactivated(() => refresh())
-onBeforeUnmount(() => clearTimeout(pollTimer))
+onBeforeUnmount(() => {
+  clearTimeout(pollTimer)
+  clearTimeout(eventTimer)
+  unsubscribe()
+})
 
 async function toggle(name: string, enabled: boolean) {
   busy[name] = true
@@ -204,7 +236,7 @@ async function toggle(name: string, enabled: boolean) {
     ctx.showToast(enabled ? `已启用 ${name}` : `已停用 ${name}`)
     await refreshTools()
   } catch (error) {
-    ctx.showToast(messageOf(error))
+    ctx.showError(error)
   } finally {
     delete busy[name]
     delete enabledOverride[name]
@@ -253,6 +285,8 @@ const draftBase = ref('')
 const draftError = ref('')
 const saving = ref(false)
 const dirty = computed(() => draft.value !== draftBase.value)
+// Another 能力 tab or leaving the page drops the draft: ask first.
+useDirtyGuard('MCP 配置', dirty)
 
 watch(
   config,
@@ -309,11 +343,14 @@ async function saveDraft() {
     <SettingsGroup title="服务器" :description="summary" variant="stack">
       <EmptyState
         v-if="loadError && !config"
-        compact
         title="无法读取 MCP 配置"
         :description="loadError"
+        variant="inline"
+        framed
       >
-        <Button size="sm" variant="outline" @click="refresh(true)">重试</Button>
+        <Button size="sm" variant="secondary" @click="refresh(true)"
+          >重试</Button
+        >
       </EmptyState>
       <p v-else-if="!config" class="loading">正在读取 MCP 配置…</p>
       <EmptyState
@@ -321,12 +358,13 @@ async function saveDraft() {
         :icon="DsApi"
         title="还没有 MCP 服务器"
         data-testid="mcp-empty"
+        framed
       >
         <template #description>
           <span class="empty-text">{{ EMPTY_DESCRIPTION }}</span>
           <code class="empty-example">{{ EXAMPLE_SNIPPET }}</code>
         </template>
-        <Button size="sm" variant="outline" @click="addOpen = true">
+        <Button size="sm" variant="secondary" @click="addOpen = true">
           <template #icon><DsPlus :size="14" /></template>
           添加服务器
         </Button>
@@ -358,7 +396,7 @@ async function saveDraft() {
         description="密钥显示为 [REDACTED]，保存时会保留原值。"
       >
         <template #meta>
-          <StatusBadge v-if="dirty" tone="warn">未保存</StatusBadge>
+          <Badge v-if="dirty" tone="warn">未保存</Badge>
         </template>
         <Field :error="draftError">
           <CodeEditor
@@ -379,7 +417,7 @@ async function saveDraft() {
           >
             还原
           </Button>
-          <Button size="sm" variant="outline" @click="formatDraft">
+          <Button size="sm" variant="secondary" @click="formatDraft">
             格式化
           </Button>
           <Button
@@ -405,7 +443,7 @@ async function saveDraft() {
         {{ removeError }}
       </p>
       <template #footer>
-        <Button variant="outline" @click="removing = null">取消</Button>
+        <Button variant="secondary" @click="removing = null">取消</Button>
         <Button
           variant="danger"
           data-testid="mcp-remove-confirm"
@@ -425,7 +463,7 @@ async function saveDraft() {
   padding: var(--space-3) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .empty-text {
@@ -437,12 +475,12 @@ async function saveDraft() {
   max-width: 100%;
   margin-top: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
+  border-radius: var(--r-sm);
+  background: var(--surface-hover);
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 

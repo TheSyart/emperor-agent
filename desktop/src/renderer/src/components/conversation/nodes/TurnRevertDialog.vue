@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /**
- * TurnRevertDialog — confirms undoing one recorded turn (plan 7.6): every
- * file is listed and checked, each can be unchecked; files too large to
- * have been recorded cannot be chosen. Core restores only the files that
- * still match the turn's end and skips the rest; there is no redo. A note
- * warns when another session ran in the same workspace during the turn.
+ * TurnRevertDialog — confirms undoing one recorded task (plan 7.6, UI-S15;
+ * one turn in older logs): every file is listed and checked, each can be
+ * unchecked; files too large to have been recorded cannot be chosen. Core
+ * restores only the files that still match the task's end and skips the
+ * rest, in one pass over the task's snapshots; there is no redo. A note
+ * warns when another session ran in the same workspace during the task.
  *
- * Props: sessionId, turn, files, concurrent. v-model:open.
+ * Props: sessionId, turn (the record's), files, concurrent, scope (what the
+ * record covers, for the words), recovered (recorded after Emperor came
+ * back: it may hold outside changes). v-model:open.
  * Emits: done (the Core result; the card updates from the session log).
  */
 import { computed, ref, watch } from 'vue'
@@ -15,16 +18,29 @@ import type {
   TurnFilesReverted,
 } from '@emperor/core/runtime-contract'
 import { core } from '../../../api/http'
+import Badge from '../../ui/Badge.vue'
 import Button from '../../ui/Button.vue'
+import Checkbox from '../../ui/Checkbox.vue'
 import Modal from '../../ui/Modal.vue'
-import { fileStatusTag, splitFilePath } from './turnFilesModel'
+import {
+  fileStatusTag,
+  RECOVERED_REVERT_NOTE,
+  splitFilePath,
+  turnRevertCopy,
+  type TurnFilesScope,
+} from './turnFilesModel'
 
-const props = defineProps<{
-  sessionId: string
-  turn: number
-  files: readonly TurnFileEntry[]
-  concurrent: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    turn: number
+    files: readonly TurnFileEntry[]
+    concurrent: boolean
+    scope?: TurnFilesScope
+    recovered?: boolean
+  }>(),
+  { scope: 'turn', recovered: false },
+)
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ done: [result: TurnFilesReverted] }>()
 
@@ -32,6 +48,7 @@ const chosen = ref(new Set<string>())
 const busy = ref(false)
 const error = ref('')
 
+const copy = computed(() => turnRevertCopy(props.scope))
 const choosable = computed(() => props.files.filter((file) => !file.tooLarge))
 const count = computed(() => chosen.value.size)
 
@@ -73,40 +90,41 @@ async function confirm(): Promise<void> {
 <template>
   <Modal
     v-model:open="open"
-    title="撤销这一轮的改动？"
-    description="只恢复这一轮结束后没有再改过的文件，改过的会跳过并列出。撤销后不能重做。"
+    :title="copy.title"
+    :description="copy.description"
     :width="460"
     :close-on-mask="!busy"
     :closable="!busy"
   >
     <p v-if="concurrent" class="warning" data-turn-revert-concurrent>
-      这一轮期间，同一工作区还有其他会话在运行，列表里可能有它们的改动。
+      {{ copy.concurrent }}
+    </p>
+    <p v-if="recovered" class="warning" data-turn-revert-recovered>
+      {{ RECOVERED_REVERT_NOTE }}
     </p>
     <ul class="files" aria-label="要撤销的文件">
       <li v-for="file in files" :key="file.path">
-        <label class="file" :class="{ disabled: file.tooLarge }">
-          <input
-            type="checkbox"
-            :checked="chosen.has(file.path)"
-            :disabled="file.tooLarge || busy"
-            @change="
-              toggle(file.path, ($event.target as HTMLInputElement).checked)
-            "
-          />
+        <Checkbox
+          class="file"
+          :class="{ disabled: file.tooLarge }"
+          :model-value="chosen.has(file.path)"
+          :disabled="file.tooLarge || busy"
+          @update:model-value="toggle(file.path, $event)"
+        >
           <span class="path" :title="file.path">
             <span class="dir">{{ splitFilePath(file.path).dir }}</span>
             <span class="name">{{ splitFilePath(file.path).name }}</span>
           </span>
-          <span v-if="file.tooLarge" class="tag">过大，无法撤销</span>
-          <span v-else-if="fileStatusTag(file)" class="tag">
+          <Badge v-if="file.tooLarge" tone="warn">过大，无法撤销</Badge>
+          <Badge v-else-if="fileStatusTag(file)">
             {{ fileStatusTag(file) }}
-          </span>
-        </label>
+          </Badge>
+        </Checkbox>
       </li>
     </ul>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <template #footer>
-      <Button variant="outline" :disabled="busy" @click="open = false">
+      <Button variant="secondary" :disabled="busy" @click="open = false">
         取消
       </Button>
       <Button
@@ -127,7 +145,7 @@ async function confirm(): Promise<void> {
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-row);
   background: rgb(var(--warn) / 0.12);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -142,24 +160,19 @@ async function confirm(): Promise<void> {
 
 .file {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
   padding: var(--space-1) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  cursor: pointer;
 }
 
-.file input {
-  flex: none;
-  width: auto;
-  margin: 0;
-  accent-color: rgb(var(--accent));
+.file :deep(.label) {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .file.disabled {
-  cursor: default;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .path {
@@ -175,22 +188,16 @@ async function confirm(): Promise<void> {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
   flex: none;
 }
 
-.tag {
-  flex: none;
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xxs);
-}
-
 .error {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
 }
 </style>

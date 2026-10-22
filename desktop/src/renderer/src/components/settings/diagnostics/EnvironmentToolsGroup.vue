@@ -34,14 +34,12 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
     <EmptyState
       v-if="loading && !status"
       title="正在检测开发环境…"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <EmptyState
       v-else-if="!sections.length"
       :title="error ? '没有检测结果' : '没有需要检测的工具'"
-      variant="plain"
-      compact
+      variant="inline"
     />
 
     <template v-for="section in sections" :key="section.id">
@@ -92,8 +90,8 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
   padding: var(--space-3) 0 var(--space-0-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .subhead:first-child {
@@ -101,7 +99,7 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
 }
 
 .subhead-count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 </style>

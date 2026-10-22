@@ -16,6 +16,7 @@ import type * as _approvalPresets from '../harness/approval/presets'
 import type * as _approvalService from '../harness/approval/service'
 import type * as _compactionEvents from '../harness/compaction/events'
 import type * as _computerUseEvents from '../harness/computer-use/events'
+import type * as _delegationEvents from '../harness/delegation/events'
 import type * as _goalTypes from '../harness/goal/types'
 import type * as _turnFiles from '../harness/host/turn-files'
 import type * as _hooksTypes from '../harness/hooks/types'
@@ -39,6 +40,7 @@ export type SessionEventAugmentations = [
   typeof _compactionEvents,
   typeof _computerUseEvents,
   typeof _goalTypes,
+  typeof _delegationEvents,
   typeof _turnFiles,
   typeof _hooksTypes,
   typeof _jobsRegistry,
@@ -63,6 +65,7 @@ export type {
   SessionHeader,
   SurfaceOp,
   TodoItem,
+  TurnBudgetReason,
   TurnEndReason,
 } from '../session-log/types'
 export type {

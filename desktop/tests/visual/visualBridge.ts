@@ -14,8 +14,15 @@ type VisualProjectInfo = {
 
 type VisualCoreListener = (event: unknown) => void
 
+/** `emperor:open-path` targets (shared/ipc-contract.ts OpenPathTarget). */
+type VisualOpenPathTarget =
+  | { kind: 'diagnostic'; rowId: string }
+  | { kind: 'skill'; name: string; sessionId?: string | null }
+  | { kind: 'invalid-skill'; path: string; sessionId?: string | null }
+
 type VisualBridge = {
-  version: string
+  /** REL-05: main's app.getVersion() over the preload bridge. */
+  appVersion: () => Promise<string>
   platform: string
   selectDirectory: () => Promise<string>
   getPathForFile: (file: File) => string
@@ -23,7 +30,7 @@ type VisualBridge = {
   openSkillsFolder?: (input: {
     scope?: string
   }) => Promise<{ ok: boolean; path?: string }>
-  openPath?: (target: string) => Promise<{ ok: boolean }>
+  openPath?: (target: VisualOpenPathTarget) => Promise<{ ok: boolean }>
   onCoreEvent: (listener: VisualCoreListener) => () => void
   onTerminalEvent: (listener: VisualCoreListener) => () => void
   onSessionEvents: (listener: VisualCoreListener) => () => void
@@ -76,6 +83,16 @@ type VisualBridge = {
   agentDownloadReveal?: (id: string) => Promise<unknown>
   agentDownloadMove?: (id: string) => Promise<unknown>
   agentDownloadSaveAs?: (id: string) => Promise<unknown>
+  prepareDiagnosticsBundle?: () => Promise<unknown>
+  exportDiagnosticsBundle?: (id: string) => Promise<unknown>
+  revealDiagnosticsBundle?: (id: string) => Promise<unknown>
+  discardDiagnosticsBundle?: (id: string) => Promise<unknown>
+  planHomeBackup?: () => Promise<unknown>
+  exportHomeBackup?: (input: Record<string, unknown>) => Promise<unknown>
+  revealHomeBackup?: () => Promise<unknown>
+  openHomeBackup?: () => Promise<unknown>
+  restoreHomeBackup?: (id: string, passphrase?: string) => Promise<unknown>
+  discardHomeBackup?: (id: string) => Promise<unknown>
 }
 
 declare global {
@@ -193,7 +210,11 @@ export async function installVisualCoreBridge(
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
       const visualGoalPhase = visualParams.get('visualGoal')
       const visualTheme = visualParams.get('visualTheme')
-      const visualQueueEnabled = visualParams.get('visualQueue') === 'on'
+      // `?visualQueue=on`: one message queued behind a running turn;
+      // `held`: one waiting as 待发送 after the turn before it failed (KRN-02).
+      const visualQueueMode = visualParams.get('visualQueue')
+      const visualQueueEnabled =
+        visualQueueMode === 'on' || visualQueueMode === 'held'
       const visualControlMode = visualParams.get('visualControl')
       const visualProgressMode = visualParams.get('visualProgress')
       // Targets the Agent of chat-main controls: `agent` (one built-in
@@ -206,6 +227,263 @@ export async function installVisualCoreBridge(
         visualAgentTab !== null
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
+      // AGT-12: `?visualExecutors=signed-out|signed-in|api-key|endpoint|
+      // missing|notice` gives 设置 › 子智能体 an enabled Claude Code in that
+      // state (`notice`: signed out, right after the upgrade that deleted a
+      // saved token).
+      const visualExecutorsMode = visualParams.get('visualExecutors')
+      // FIX-16: `?visualCodexDefault=unavailable` — Codex's own default model
+      // is not in the list its ChatGPT login offers.
+      const visualCodexDefaultUnavailable =
+        visualParams.get('visualCodexDefault') === 'unavailable'
+      // AGT-13: `?visualExecutorUpgrade=found|unverified|failed` — versions
+      // in 设置 › 子智能体, both executors on and installed with npm:
+      // Claude Code 2.1.281 (npm has 2.1.308), Codex 0.153.4 (0.163.0);
+      // `unverified`: Emperor has verified only 0.153; `failed`: a Codex
+      // upgrade failed without write permission. A spec moves an upgrade on
+      // with window.__visualExecutorUpgrade('running' | 'done' | 'failed').
+      const visualUpgradeMode = visualParams.get('visualExecutorUpgrade')
+      const visualUpgrade = {
+        claude: '2.1.281',
+        codex: '0.153.4',
+        dismissed: false,
+        upgrades: [] as Record<string, unknown>[],
+      }
+      const VISUAL_NPM = '/opt/homebrew/lib/node_modules'
+      const VISUAL_CODEX_COMMAND = 'npm install -g @openai/codex@0.163.0'
+      // One upgrade: Core keeps its start time in every event.
+      const visualRunStarted = Date.now() - 12_000
+      const visualCodexRun = (over: Record<string, unknown>) => ({
+        profileId: 'codex-default',
+        backend: 'codex',
+        from: '0.153.4',
+        target: '0.163.0',
+        command: VISUAL_CODEX_COMMAND,
+        state: 'running',
+        startedAt: visualRunStarted,
+        log: [
+          `$ ${VISUAL_CODEX_COMMAND}`,
+          'added 1 package, changed 2 packages in 9s',
+          '正在重新检测 Codex…',
+        ],
+        ...over,
+      })
+      const visualFailedRun = () =>
+        visualCodexRun({
+          state: 'failed',
+          reason: 'permission',
+          path: VISUAL_NPM,
+          exitCode: 243,
+          finishedAt: Date.now(),
+          manualCommand: VISUAL_CODEX_COMMAND,
+          log: [
+            `$ ${VISUAL_CODEX_COMMAND}`,
+            'npm error code EACCES',
+            'npm error syscall rename',
+            `npm error path ${VISUAL_NPM}/@openai/codex`,
+            "npm error Error: EACCES: permission denied, rename '/opt/homebrew/lib/node_modules/@openai/codex'",
+          ],
+        })
+      if (visualUpgradeMode === 'failed') {
+        visualUpgrade.claude = '2.1.308'
+        visualUpgrade.upgrades = [visualFailedRun()]
+      }
+      const visualVersions = () => {
+        const unverified = visualUpgradeMode === 'unverified'
+        const claudeTarget =
+          visualUpgrade.claude === '2.1.308' ? null : '2.1.308'
+        const codexTarget =
+          unverified || visualUpgrade.codex === '0.163.0' ? null : '0.163.0'
+        return {
+          checkedAt: Date.now() - 10 * 60_000,
+          checking: false,
+          error: null,
+          dismissed: visualUpgrade.dismissed,
+          upgrades: visualUpgrade.upgrades,
+          executors: [
+            {
+              profileId: 'claude-default',
+              backend: 'claude-code',
+              enabled: true,
+              installed: visualUpgrade.claude,
+              install: {
+                kind: 'npm',
+                location: `${VISUAL_NPM}/@anthropic-ai/claude-code`,
+              },
+              latest: '2.1.308',
+              verified: [],
+              target: claudeTarget,
+              unverified: null,
+              upgrade: claudeTarget
+                ? {
+                    oneClick: true,
+                    command: 'npm install -g @anthropic-ai/claude-code@2.1.308',
+                  }
+                : null,
+              activeRuns: 0,
+            },
+            {
+              profileId: 'codex-default',
+              backend: 'codex',
+              enabled: true,
+              installed: visualUpgrade.codex,
+              install: { kind: 'npm', location: `${VISUAL_NPM}/@openai/codex` },
+              latest: '0.163.0',
+              verified: unverified ? ['0.153'] : ['0.153', '0.163'],
+              target: codexTarget,
+              unverified:
+                unverified && visualUpgrade.codex !== '0.163.0'
+                  ? '0.163.0'
+                  : null,
+              upgrade: codexTarget
+                ? { oneClick: true, command: VISUAL_CODEX_COMMAND }
+                : null,
+              activeRuns: 1,
+            },
+          ],
+        }
+      }
+      const visualExecutorProfiles = [
+        {
+          id: 'claude-default',
+          backend: 'claude-code',
+          enabled: true,
+          executablePath: 'claude',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'claude-default',
+          concurrencyLimit: 1,
+        },
+        {
+          id: 'codex-default',
+          backend: 'codex',
+          enabled: visualUpgradeMode !== null,
+          executablePath: 'codex',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'codex-default',
+          concurrencyLimit: 1,
+        },
+      ]
+      let visualExecutorConfig: Record<string, unknown> = {
+        schemaVersion: 1,
+        revision: 3,
+        touchedAt: 1,
+        profiles: visualExecutorProfiles,
+        limits: {
+          globalConcurrency: 2,
+          maxQueuedMessages: 16,
+          maxRunsPerTask: 32,
+          maxDepth: 3,
+          runTimeoutMs: 1800000,
+          questionTimeoutMs: 900000,
+          estimatedBudgetUsd: 10,
+        },
+      }
+      const visualClaudeAuth = (mode: string | null) =>
+        mode === 'signed-in'
+          ? {
+              source: null,
+              method: 'claude.ai',
+              email: 'ada@example.com',
+              organization: 'Ada Lab',
+              subscription: 'max',
+            }
+          : mode === 'api-key'
+            ? {
+                source: 'emperor',
+                kind: 'api-key',
+                last4: 'c3d4',
+                method: 'api_key',
+              }
+            : mode === 'endpoint'
+              ? {
+                  source: 'settings',
+                  kind: 'auth-token',
+                  endpoint: 'api.deepseek.com',
+                  method: 'oauth_token',
+                }
+              : { source: null, method: 'none', problem: 'missing' }
+      const visualExecutorProbe = (id: string, mode: string | null) => {
+        const base = {
+          checkedAt: Date.now(),
+          authVerified: false,
+          executableVersion:
+            id === 'codex-default'
+              ? visualUpgrade.codex
+              : visualUpgradeMode
+                ? visualUpgrade.claude
+                : '2.1.300',
+          capabilities: {
+            persistentSession: true,
+            queuedFollowup: true,
+            steer: id === 'codex-default',
+            interrupt: true,
+            questions: true,
+            structuredOutput: true,
+            processBoundary: 'os',
+            usage: 'tokens',
+          },
+        }
+        if (id === 'codex-default')
+          return { ...base, status: 'available', localAuthChecked: true }
+        if (mode === 'missing')
+          return {
+            checkedAt: Date.now(),
+            authVerified: false,
+            capabilities: base.capabilities,
+            status: 'missing',
+            diagnostic: 'claude is not installed',
+          }
+        const auth = visualClaudeAuth(mode)
+        return auth.method !== 'none'
+          ? {
+              ...base,
+              status: 'available',
+              localAuthChecked: true,
+              requiredVersion: '>= 2.1.79',
+              auth,
+            }
+          : {
+              ...base,
+              status: 'needs_auth',
+              localAuthChecked: false,
+              requiredVersion: '>= 2.1.79',
+              diagnostic: 'AUTH_REQUIRED',
+              auth,
+            }
+      }
+      let visualSignInNotice = visualExecutorsMode === 'notice'
+      let visualClaudeMode = visualExecutorsMode
+      /** 登录 Claude Code as Core runs it (FIX-11): running until a spec ends it. */
+      let visualSignIn: Record<string, unknown> | null = null
+      const visualExecutorList = () => ({
+        config: visualExecutorConfig,
+        diagnostic: null,
+        signInNotice: visualSignInNotice,
+        signIn: visualSignIn?.state === 'running' ? visualSignIn : null,
+        profiles: visualExecutorProfiles.map((profile) => ({
+          profile,
+          probe: visualExecutorProbe(profile.id, visualClaudeMode),
+          specialties: [],
+          runtime: {
+            profileId: profile.id,
+            reportedModel: null,
+            configuredModel: null,
+            modelSource: null,
+            provider: null,
+            advertisedTools: null,
+            observedTools: [],
+            hostAllowedTools: [],
+            nativeCapabilities: {
+              search: { status: 'unverified' },
+              imageGeneration: {
+                status:
+                  profile.backend === 'codex' ? 'unverified' : 'unsupported',
+              },
+            },
+          },
+          consent: null,
+        })),
+      })
       const project = {
         project_id: 'visual_project',
         project_path: projectDir,
@@ -225,11 +503,11 @@ export async function installVisualCoreBridge(
           busyPolicy: 'after_turn',
           dangerous: true,
         }),
-        visualCommand('plan', '模型与执行', '开启 Plan 并生成实施方案', {
+        visualCommand('plan', '模型与执行', '开启计划并生成实施方案', {
           busyPolicy: 'after_turn',
           argumentHint: '[on|off|status|open|description]',
         }),
-        visualCommand('goal', '模型与执行', '启动或管理长期 Goal', {
+        visualCommand('goal', '模型与执行', '启动或管理长期目标', {
           busyPolicy: 'after_turn',
           argumentHint: '[start|status|list|pause|resume|cancel]',
         }),
@@ -346,6 +624,12 @@ export async function installVisualCoreBridge(
         apiBase: 'https://api.anthropic.com',
         apiKey: '***a1b2',
         reasoningEffort: 'medium',
+        lastTest: {
+          ok: false,
+          kind: 'text',
+          failure: 'auth',
+          testedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        },
       }
       const visualHaikuEntry = {
         ...visualSecondaryEntry,
@@ -374,6 +658,17 @@ export async function installVisualCoreBridge(
           ...visualModelEntry.resolvedProfile,
           vision: false,
           contextWindowTokens: 1000000,
+        },
+        // MOD-05: the catalog knows it is retired; the last test passed.
+        lifecycle: {
+          status: 'retired',
+          retiresAt: '2026-07-24',
+          replacement: 'deepseek-flash',
+        },
+        lastTest: {
+          ok: true,
+          kind: 'text',
+          testedAt: new Date(Date.now() - 60_000).toISOString(),
         },
       }
       const catalogOption = (
@@ -774,6 +1069,13 @@ export async function installVisualCoreBridge(
           ...scheduler.status,
           jobs: jobs.length,
           enabled: jobs.filter((job) => job.enabled).length,
+          // A spec can mark the service as not started or with jobs set
+          // aside (KRN-10).
+          ...((
+            window as unknown as {
+              __visualSchedulerStatus?: Record<string, unknown>
+            }
+          ).__visualSchedulerStatus ?? {}),
         }
         // IPC results are structured clones: hand back a fresh copy.
         return JSON.parse(JSON.stringify(scheduler))
@@ -1483,6 +1785,8 @@ export async function installVisualCoreBridge(
             worktree: '.',
             conflict: false,
             untracked: false,
+            additions: 12,
+            deletions: 4,
           },
           {
             path: 'README.md',
@@ -1490,6 +1794,8 @@ export async function installVisualCoreBridge(
             worktree: 'M',
             conflict: false,
             untracked: false,
+            additions: 2,
+            deletions: 0,
           },
           {
             path: 'notes/验收记录.md',
@@ -1497,6 +1803,8 @@ export async function installVisualCoreBridge(
             worktree: '?',
             conflict: false,
             untracked: true,
+            additions: 4,
+            deletions: 0,
           },
         ],
         summary: {
@@ -1518,6 +1826,191 @@ export async function installVisualCoreBridge(
        * or run for good (`visualCancelledTasks`).
        */
       const visualCancelledTasks = new Map<string, number>()
+      const visualTaskBudget = {
+        maxSteps: 400,
+        maxBackgroundSteps: 120,
+        maxActiveAgents: 8,
+        maxTotalAgents: 64,
+        maxNoticeWakes: 32,
+      }
+      // 设置 › 高级 › 存储 (KRN-12): sizes in bytes; 清理 frees the spill.
+      const visualStorage: Record<string, number> = {
+        sessions: 186_646_528,
+        attachments: 48_234_496,
+        spill: 31_457_280,
+        memoryVersions: 2_097_152,
+        ledger: 1_572_864,
+        delegations: 9_437_184,
+        other: 412_090_368,
+      }
+      // REL-02 `updates.*`: `?visualUpdate=` available | downloading |
+      // verifying | ready | ready-verified | failed | off | test-feed |
+      // outdated (诊断: Electron 3 majors behind the newest release);
+      // none: up to date. 下载 / 取消 / 在访达中显示 are recorded.
+      const visualUpdateMode = visualParams.get('visualUpdate') ?? ''
+      const visualUpdateRelease = {
+        version: '0.2.1',
+        tag: 'v0.2.1',
+        channel: 'stable',
+        name: 'Emperor Agent v0.2.1',
+        publishedAt: '2026-06-25T08:00:00Z',
+        notesUrl:
+          'https://github.com/TheSyart/emperor-agent/releases/tag/v0.2.1',
+        asset: {
+          name: 'Emperor-Agent-0.2.1-macos-arm64.dmg',
+          size: 231_467_959,
+        },
+      }
+      function visualUpdateDownload(mode: string): Record<string, unknown> {
+        const base = {
+          version: '0.2.1',
+          fileName: 'Emperor-Agent-0.2.1-macos-arm64.dmg',
+        }
+        if (mode === 'downloading')
+          return {
+            phase: 'downloading',
+            ...base,
+            receivedBytes: 96_468_992,
+            totalBytes: 231_467_959,
+          }
+        if (mode === 'verifying')
+          return { phase: 'verifying', ...base, step: 'attestation' }
+        if (mode === 'ready' || mode === 'ready-verified')
+          return {
+            phase: 'ready',
+            ...base,
+            path: '/Users/visual/Downloads/Emperor-Agent-0.2.1-macos-arm64.dmg',
+            attestation:
+              mode === 'ready-verified'
+                ? { status: 'verified' }
+                : { status: 'unavailable', reason: 'gh_missing' },
+          }
+        if (mode === 'failed')
+          return {
+            phase: 'failed',
+            ...base,
+            code: 'update_checksum_mismatch',
+            message:
+              '安装包的 SHA-256 与 SHA256SUMS.txt 不符，已拒绝并删除下载的文件。',
+          }
+        return { phase: 'idle' }
+      }
+      const visualUpdate: Record<string, unknown> = {
+        supported: true,
+        automatic: true,
+        disabledReason: null,
+        enabled: visualUpdateMode !== 'off',
+        currentVersion: '0.2.0',
+        channel: 'stable',
+        checking: false,
+        lastCheckedAt: Date.parse('2026-06-26T11:40:00.000Z'),
+        lastError: null,
+        available: [
+          'available',
+          'downloading',
+          'verifying',
+          'ready',
+          'ready-verified',
+          'failed',
+        ].includes(visualUpdateMode)
+          ? visualUpdateRelease
+          : null,
+        download: visualUpdateDownload(visualUpdateMode),
+        electron: {
+          current: '42.2.0',
+          latest: visualUpdateMode === 'outdated' ? '45.0.1' : '42.2.0',
+          behind: visualUpdateMode === 'outdated' ? 3 : 0,
+          outdated: visualUpdateMode === 'outdated',
+        },
+        feedOverride:
+          visualUpdateMode === 'test-feed' || visualUpdateMode === 'outdated'
+            ? 'http://127.0.0.1:8765/repos/TheSyart/emperor-agent/releases'
+            : null,
+      }
+      function visualUpdateRecord(kind: string): void {
+        ;((
+          window as unknown as Record<string, string[] | undefined>
+        ).__visualUpdateCalls ??= []).push(kind)
+      }
+      function visualUpdateStatus(): Record<string, unknown> {
+        return JSON.parse(JSON.stringify(visualUpdate))
+      }
+      function visualUpdateDiagnostics(): Record<string, unknown> {
+        return {
+          enabled: visualUpdate.enabled,
+          automatic: true,
+          disabledReason: null,
+          channel: 'stable',
+          lastCheckedAt: visualUpdate.lastCheckedAt,
+          lastError: null,
+          available: null,
+          electron: visualUpdate.electron,
+          feedOverride: visualUpdate.feedOverride,
+        }
+      }
+      // REL-03 `storage.versions`: `?visualDataVersions=newer` has two files
+      // a newer Emperor wrote; `=downgrade` also ran 0.3.0 last time.
+      function visualDataVersions() {
+        const mode = visualParams.get('visualDataVersions') ?? ''
+        const newer = mode === 'newer' || mode === 'downgrade'
+        const file = (
+          id: string,
+          path: string,
+          label: string,
+          version: number,
+          supported: number,
+          owner = 'core',
+        ) => ({
+          id,
+          path,
+          label,
+          owner,
+          version,
+          supported,
+          state: version > supported ? 'newer' : 'ok',
+        })
+        return {
+          appVersion: '0.2.0',
+          lastRunVersion: '0.2.0',
+          previousRunVersion: mode === 'downgrade' ? '0.3.0' : '0.2.0',
+          downgradedFrom: mode === 'downgrade' ? '0.3.0' : null,
+          dataVersion: 1,
+          supportedDataVersion: 1,
+          files: [
+            file('installation', 'installation.json', '安装信息', 1, 1),
+            file('settings', 'settings.json', '设置', newer ? 2 : 1, 1),
+            file(
+              'modelConfig',
+              'model_config.json',
+              '模型配置',
+              newer ? 3 : 2,
+              2,
+            ),
+            file('scheduler', 'scheduler/jobs.json', '定时任务', 1, 1),
+            file(
+              'vault',
+              'computer-use/vault.json',
+              '密码管理器',
+              3,
+              3,
+              'desktop',
+            ),
+          ],
+          lastRestore: null,
+        }
+      }
+      function visualStorageUsage() {
+        const categories = Object.entries(visualStorage).map(([id, bytes]) => ({
+          id,
+          bytes,
+        }))
+        return {
+          root: '/Users/visual/.emperor',
+          total: categories.reduce((sum, item) => sum + item.bytes, 0),
+          categories,
+          measuredAt: Date.now(),
+        }
+      }
       function visualBackgroundTask(
         task: Record<string, unknown> & { id: string; kind: string },
       ) {
@@ -1849,6 +2342,8 @@ export async function installVisualCoreBridge(
         },
       ]
       const supportedGoalPhases = new Set([
+        'active',
+        'blocked',
         'contract',
         'planning',
         'executing',
@@ -1866,7 +2361,11 @@ export async function installVisualCoreBridge(
             id: 'goal_visual_lifecycle',
             status: 'active',
             phase: normalizedGoalPhase,
-            outcome: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
+            outcome: '让 Composer 的目标生命周期清晰、可控并且可恢复',
+            objective: '让 Composer 的目标生命周期清晰、可控并且可恢复',
+            revision: 1,
+            roundsStarted: 2,
+            maxGoalRounds: 8,
             sessionId: 'build-ui',
             currentPlanId: visualPlanEnabled ? 'plan_visual' : null,
             cyclesUsed: 2,
@@ -2328,6 +2827,7 @@ export async function installVisualCoreBridge(
             sessionsRoot: '/Users/visual/.emperor/sessions',
             attachmentsRoot: '/Users/visual/.emperor/attachments',
             mcpConfigPath: '/Users/visual/.emperor/mcp_config.json',
+            logsRoot: '/Users/visual/Library/Logs/Emperor Agent',
           },
           workspacePolicy: { workspaceRoot: projectDir },
           modelConfig: {
@@ -2427,6 +2927,40 @@ export async function installVisualCoreBridge(
         unarchivedHistory: [],
         context_used: 12000,
       }
+      // `?visualPluginSuggestion=on` (SEC-07): the project's
+      // .emperor/settings.json suggests a project plugin the user has not
+      // decided on, so 能力 › 插件 asks 「该项目建议启用 …」.
+      if (visualParams.get('visualPluginSuggestion') === 'on')
+        boot.plugins.push({
+          pluginId: 'acme/repo-lint',
+          name: 'Repo Lint',
+          displayName: 'Repo Lint',
+          description: '提交前检查改动',
+          developerName: 'Acme',
+          format: 'portable',
+          logo: null,
+          effective: false,
+          toggleable: true,
+          uninstallable: true,
+          scope: 'project',
+          version: '0.4.0',
+          digest: '9'.repeat(64),
+          source: { kind: 'local', label: 'repo-lint' },
+          signature: { status: 'local_user_source', publisher: null },
+          enabled: false,
+          materialization: 'installed',
+          activation: 'disabled',
+          suggested: true,
+          capabilities: {
+            skills: 1,
+            agents: 0,
+            hooks: 1,
+            mcpServers: 0,
+            lspServers: 0,
+            commands: 0,
+            apps: 0,
+          },
+        } as (typeof boot.plugins)[number])
       // `?visualGithub=off`: the GitHub plugin is turned off, so its Issue /
       // CI tabs go away and github.* reads are refused.
       if (visualParams.get('visualGithub') === 'off') {
@@ -2436,26 +2970,31 @@ export async function installVisualCoreBridge(
           github.activation = 'disabled'
         }
       }
-      const visualQueuedPrompts = visualQueueEnabled
-        ? [
-            {
-              id: 'prompt_visual_queue',
-              turnId: 'turn_visual_queue',
-              clientMessageId: 'prompt_visual_queue',
-              delivery: 'queue',
-              state: 'queued',
-              content: '继续补充视觉验收细节',
-              displayContent: '继续补充视觉验收细节',
-              supportsInterjection: true,
-              createdOrder: 1,
-              createdAt: now,
-              updatedAt: now,
-              attachmentIds: [],
-              requestedSkills: [],
-            },
-          ]
-        : []
-      if (visualQueueEnabled) {
+      let visualQueuedPrompts: Array<Record<string, unknown>> =
+        visualQueueEnabled
+          ? [
+              {
+                id: 'prompt_visual_queue',
+                turnId: 'turn_visual_queue',
+                clientMessageId: 'prompt_visual_queue',
+                delivery: 'queue',
+                state:
+                  visualQueueMode === 'held' ? 'failed-previous' : 'queued',
+                ...(visualQueueMode === 'held'
+                  ? { reason: 'previous-turn-failed' }
+                  : {}),
+                content: '继续补充视觉验收细节',
+                displayContent: '继续补充视觉验收细节',
+                supportsInterjection: true,
+                createdOrder: 1,
+                createdAt: now,
+                updatedAt: now,
+                attachmentIds: [],
+                requestedSkills: [],
+              },
+            ]
+          : []
+      if (visualQueueMode === 'on') {
         boot.runtime.busy = true
         boot.runtime.latestSeq = 2
         boot.runtime.events = [
@@ -3989,6 +4528,19 @@ export async function installVisualCoreBridge(
         delete payload.content
         return payload
       }
+      /**
+       * Core's answer to a call that needs a real session and names none
+       * (`SESSION_REQUIRED`) or names a draft (`invalid_session`); null when
+       * it names a session.
+       */
+      function visualSessionRefusal(sessionId: unknown) {
+        const id = String(sessionId ?? '').trim()
+        if (!id)
+          return visualSkillError('请先打开一个会话再试。', 'SESSION_REQUIRED')
+        if (id.startsWith('draft:'))
+          return visualSkillError(`unknown session ${id}`, 'invalid_session')
+        return null
+      }
       function visualSkillError(message: string, code: string, action = '') {
         return {
           ok: false,
@@ -4240,7 +4792,7 @@ export async function installVisualCoreBridge(
       }
 
       window.emperor = {
-        version: '0.1.0-visual',
+        appVersion: async () => '0.2.0-visual',
         // `?visualDictation=live` is a Mac, so the composer shows its mic.
         platform:
           visualParams.get('visualDictation') === 'live' ? 'darwin' : 'visual',
@@ -4257,12 +4809,209 @@ export async function installVisualCoreBridge(
           ).__visualOpenedPaths ??= []).push(path)
           return { ok: true, path }
         },
-        openPath: async (target: string) => {
+        // REL-01 诊断包: main stages the bundle, the user confirms its
+        // contents, main asks where to save it (here: always ~/Desktop).
+        prepareDiagnosticsBundle: async () => ({
+          ok: true,
+          bundle: {
+            id: 'b_0123456789ab',
+            name: 'emperor-diagnostics-20261020-163000',
+            entries: [
+              {
+                path: 'README.txt',
+                title: '说明：包含什么、不包含什么',
+                bytes: 1180,
+              },
+              {
+                path: 'diagnostics.json',
+                title: 'Core 诊断（diagnostics.get）',
+                bytes: 48213,
+              },
+              {
+                path: 'app.json',
+                title: '版本、fuse、Helper 与扩展状态',
+                bytes: 2306,
+              },
+              {
+                path: 'model-config.json',
+                title: '模型配置结构（不含 Key）',
+                bytes: 1544,
+              },
+              { path: 'system.json', title: '操作系统信息', bytes: 412 },
+              {
+                path: 'crashes.json',
+                title: '崩溃转储清单（只有文件名）',
+                bytes: 96,
+              },
+              {
+                path: 'logs/main.log',
+                title: '主进程日志（脱敏）',
+                bytes: 1_874_002,
+              },
+              {
+                path: 'logs/core.log',
+                title: 'Core 日志（脱敏）',
+                bytes: 220_481,
+              },
+            ],
+            excluded: [
+              '会话与消息内容',
+              '记忆',
+              'API Key、令牌等密钥',
+              '崩溃转储文件本身（只列出文件名）',
+            ],
+          },
+        }),
+        exportDiagnosticsBundle: async (id: string) => {
           ;((
-            window as unknown as { __visualOpenedPaths?: string[] }
-          ).__visualOpenedPaths ??= []).push(target)
+            window as unknown as { __visualDiagnosticsExports?: string[] }
+          ).__visualDiagnosticsExports ??= []).push(id)
+          return {
+            ok: true,
+            name: 'emperor-diagnostics-20261020-163000.zip',
+            location: '~/Desktop',
+          }
+        },
+        revealDiagnosticsBundle: async () => ({ ok: true }),
+        discardDiagnosticsBundle: async (id: string) => {
+          ;((
+            window as unknown as { __visualDiagnosticsDiscarded?: string[] }
+          ).__visualDiagnosticsDiscarded ??= []).push(id)
           return { ok: true }
         },
+        // REL-03 备份与恢复: main counts the backup, asks where to save it
+        // (here: always ~/Documents), opens a backup the user picked and
+        // restarts after a restore. Calls are recorded for the specs.
+        planHomeBackup: async () => ({
+          ok: true,
+          plan: {
+            name: 'Emperor 备份 2026-10-20',
+            categories: [
+              {
+                id: 'config',
+                title: '设置与配置',
+                description: '设置、模型、MCP、Hooks 与子智能体设置',
+                files: 7,
+                bytes: 48_213,
+                optional: false,
+              },
+              {
+                id: 'memory',
+                title: '记忆',
+                description: '长期记忆、用户档案与版本历史',
+                files: 18,
+                bytes: 1_204_118,
+                optional: false,
+              },
+              {
+                id: 'extensions',
+                title: 'Skills、插件与智能体',
+                description: '你安装和编写的 Skills、插件与自定义智能体',
+                files: 214,
+                bytes: 9_437_184,
+                optional: false,
+              },
+              {
+                id: 'projects',
+                title: '项目与定时任务',
+                description: '项目设置和定时任务',
+                files: 6,
+                bytes: 22_016,
+                optional: false,
+              },
+              {
+                id: 'sessions',
+                title: '会话',
+                description: '会话记录、附件与用量记录',
+                files: 1_204,
+                bytes: 128_974_848,
+                optional: true,
+              },
+            ],
+            excluded: [
+              '浏览器登录资料与缓存',
+              'Agent 下载的文件',
+              '日志',
+              '受管环境工具',
+              '运行时与临时文件',
+            ],
+            vault: { state: 'ready', entries: 4 },
+          },
+        }),
+        exportHomeBackup: async (input: Record<string, unknown>) => {
+          ;((
+            window as unknown as {
+              __visualHomeBackupExports?: Array<Record<string, unknown>>
+            }
+          ).__visualHomeBackupExports ??= []).push({ ...input })
+          return {
+            ok: true,
+            name: 'Emperor 备份 2026-10-20.emperor-backup.zip',
+            location: '~/Documents',
+            credentials: typeof input.passphrase === 'string',
+          }
+        },
+        revealHomeBackup: async () => ({ ok: true }),
+        openHomeBackup: async () => ({
+          ok: true,
+          backup: {
+            id: 'r_0123456789ab',
+            name: 'Emperor 备份 2026-10-19.emperor-backup.zip',
+            createdAt: '2026-10-19T08:00:00.000Z',
+            appVersion: '0.2.0',
+            categories: [
+              'config',
+              'memory',
+              'extensions',
+              'projects',
+              'sessions',
+            ],
+            credentials: true,
+            files: 1_449,
+            bytes: 139_685_379,
+            newer: false,
+          },
+        }),
+        restoreHomeBackup: async (id: string, passphrase?: string) => {
+          ;((
+            window as unknown as {
+              __visualHomeBackupRestores?: Array<Record<string, unknown>>
+            }
+          ).__visualHomeBackupRestores ??= []).push({ id, passphrase })
+          return { ok: true }
+        },
+        discardHomeBackup: async (id: string) => {
+          ;((
+            window as unknown as { __visualHomeBackupDiscarded?: string[] }
+          ).__visualHomeBackupDiscarded ??= []).push(id)
+          return { ok: true }
+        },
+        openPath: async (target: VisualOpenPathTarget) => {
+          // Main resolves these through Core; the harness records what the
+          // renderer asked for (an invalid Skill's folder, a Skill, a row).
+          const opened =
+            target.kind === 'invalid-skill'
+              ? target.path.replace(/\/[^/]+\.md$/i, '')
+              : target.kind === 'skill'
+                ? `skill:${target.name}`
+                : `diagnostic:${target.rowId}`
+          ;((
+            window as unknown as { __visualOpenedPaths?: string[] }
+          ).__visualOpenedPaths ??= []).push(opened)
+          return { ok: true }
+        },
+        // UI-S06: `?visualLinks=record` gives the bridge link routing that
+        // records each web link (window.__visualLinks) instead of opening it.
+        ...(visualParams.get('visualLinks') === 'record'
+          ? {
+              openLink: async (url: string) => {
+                ;((
+                  window as unknown as { __visualLinks?: string[] }
+                ).__visualLinks ??= []).push(url)
+                return { opened: 'system' }
+              },
+            }
+          : {}),
         openBrowserUrl: async (input: string) => {
           const text = String(input ?? '').trim()
           ;(visualBrowser.__visualBrowserOpened ??= []).push(text)
@@ -4617,13 +5366,103 @@ export async function installVisualCoreBridge(
           return () => sessionEventListeners.delete(listener)
         },
         invokeCore: async (operationKey: string, ...args: unknown[]) => {
+          // FIX-05: the workspace panes' Core calls, in order and timed, so
+          // specs can count polls and resizes (window.__visualWorkspaceOps).
+          if (/^(?:git|terminals|files|workspace)\./.test(operationKey))
+            ((
+              window as unknown as {
+                __visualWorkspaceOps?: Array<{
+                  op: string
+                  at: number
+                  input: unknown
+                }>
+              }
+            ).__visualWorkspaceOps ??= []).push({
+              op: operationKey,
+              at: performance.now(),
+              input: args[0],
+            })
+          if (
+            operationKey === 'references.resolve' ||
+            operationKey === 'references.preview' ||
+            operationKey === 'references.siteIcon'
+          ) {
+            const state = window as unknown as {
+              __visualResourceOps?: Array<{ operation: string; input: unknown }>
+            }
+            state.__visualResourceOps ??= []
+            state.__visualResourceOps.push({
+              operation: operationKey,
+              input: args[0],
+            })
+          }
           switch (operationKey) {
+            case 'references.siteIcon': {
+              const input = args[0] as { referenceId: string }
+              return input.referenceId.includes('offline')
+                ? { state: 'unavailable', updatedAt: Date.now() }
+                : {
+                    state: 'ready',
+                    dataUrl:
+                      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS8AAAAASUVORK5CYII=',
+                    updatedAt: Date.now(),
+                  }
+            }
+            case 'references.resolve': {
+              const input = args[0] as {
+                href: string
+                label: string
+                sourceMessageId: string
+                sessionId: string
+              }
+              const web = /^https?:/.test(input.href)
+              const path = input.href.replace(/#L\d+$/, '')
+              return {
+                id: `ref:${input.href}`,
+                kind: web ? 'web' : 'project_file',
+                label: input.label,
+                tooltip: web ? input.href : `${projectDir}/${path}`,
+                available: !path.includes('gone'),
+                actions: web ? ['open_external'] : ['open_files'],
+                ...(!web ? { relativePath: path } : {}),
+                ...(path.endsWith('/') ? { directory: true } : {}),
+              }
+            }
+            case 'references.preview': {
+              const input = args[0] as { referenceId: string }
+              if (input.referenceId.includes('offline'))
+                return {
+                  state: 'error',
+                  reason: 'network_unavailable',
+                  updatedAt: Date.now(),
+                }
+              return {
+                state: 'ready',
+                title: input.referenceId.includes('github.com')
+                  ? 'Emperor GitHub 资源'
+                  : '网页指南',
+                description: '这是视觉夹具返回的页面摘要，未进行实际联网。',
+                updatedAt: Date.now(),
+              }
+            }
             case 'bootstrap':
               return boot
             case 'commands.list':
-              return visualCommands
-            case 'commands.complete':
-              return []
+            case 'commands.complete': {
+              // Core's schema (FIX-14): a session id, or a draft id that
+              // may carry its draftSession; never an empty owner.
+              const input = (args[0] ?? {}) as {
+                sessionId?: string
+                draftSession?: unknown
+              }
+              const owner = String(input.sessionId ?? '').trim()
+              if (
+                !owner ||
+                (input.draftSession != null && !owner.startsWith('draft:'))
+              )
+                throw new Error(`Invalid arguments for ${operationKey}`)
+              return operationKey === 'commands.list' ? visualCommands : []
+            }
             case 'commands.invoke':
               return {
                 status: 'rejected',
@@ -4632,6 +5471,14 @@ export async function installVisualCoreBridge(
               }
             case 'sessions.list':
               return sessions
+            case 'sessions.listDeleted':
+              return []
+            case 'sessions.defaults':
+              return { permission: 'workspace-write' }
+            case 'sessions.setDefaults':
+              return {
+                permission: (args[0] as { permission: string }).permission,
+              }
             case 'sessions.activate':
               return { active: args[0], complete: true }
             case 'sessions.history': {
@@ -4660,8 +5507,117 @@ export async function installVisualCoreBridge(
                 lastSeq: raw?.events.at(-1)?.seq ?? -1,
               }
             }
+            case 'sessions.search': {
+              // Content search (UI-S02 palette): one canned hit.
+              const query = (args[0] as { query: string }).query
+              return {
+                hits: query.includes('设计稿')
+                  ? [
+                      {
+                        sessionId: 'chat-main',
+                        title: '普通对话',
+                        role: 'assistant',
+                        snippet: '…对照设计稿，侧栏的间距应该收紧到 8px…',
+                      },
+                    ]
+                  : [],
+              }
+            }
             case 'sessions.lineage':
               return lineageOf((args[0] as { sessionId: string }).sessionId)
+            case 'agents.list': {
+              // The agent tree (AGT-10): every recorded subagent under the
+              // given roots, nested children under their parent.
+              const input = (args[0] ?? {}) as { rootSessionIds?: string[] }
+              const agents: Array<Record<string, unknown>> = []
+              for (const root of input.rootSessionIds ?? []) {
+                // A session with a transcript but no recorded subagents
+                // falls back to the tasks.list fixture's subagents (the
+                // environment card); an empty session stays empty (hero).
+                if (!childrenOf(root).length) {
+                  if (!rawLogs.get(root)?.events.length) continue
+                  for (const task of visualTasksFor(root)) {
+                    if (task.kind !== 'subagent') continue
+                    agents.push({
+                      id: task.id,
+                      kind: 'internal',
+                      backend: 'internal',
+                      rootSessionId: root,
+                      parentAgentId: root,
+                      title: task.description,
+                      phase:
+                        task.status === 'running'
+                          ? 'running'
+                          : task.last_stop_reason === 'error'
+                            ? 'failed'
+                            : 'completed',
+                      createdAt: task.started_at,
+                      updatedAt: task.started_at,
+                    })
+                  }
+                  continue
+                }
+                const queue = [{ session: root, parent: root }]
+                while (queue.length) {
+                  const { session, parent } = queue.shift()!
+                  for (const child of childrenOf(session)) {
+                    const id = String(child.subagentId)
+                    agents.push({
+                      id,
+                      kind: 'internal',
+                      backend: 'internal',
+                      rootSessionId: root,
+                      parentAgentId: parent,
+                      title: String(child.description || id),
+                      phase:
+                        child.status === 'running' ? 'running' : 'completed',
+                      createdAt: 1782475200000,
+                      updatedAt: 1782475200000,
+                      ...(child.callId ? { parentCallId: child.callId } : {}),
+                    })
+                    queue.push({ session: id, parent: id })
+                  }
+                }
+                // Claude Code / Codex runs of the root (UI-S14): the same
+                // phases Core's agent list gives them.
+                const runs = new Map<string, Record<string, unknown>>()
+                for (const event of rawLogs.get(root)?.events ?? []) {
+                  if (event.type !== 'delegation/projection') continue
+                  const data = event.data ?? {}
+                  const task = (data.task ?? {}) as Record<string, unknown>
+                  const status = String(task.status ?? 'running')
+                  const id = String(data.delegation_id)
+                  const createdAt = Number(task.started_at ?? 1782475200000)
+                  runs.set(id, {
+                    id,
+                    kind: 'external',
+                    backend: data.backend,
+                    rootSessionId: root,
+                    parentAgentId: root,
+                    title: String(task.description ?? id),
+                    phase:
+                      status === 'waiting_input'
+                        ? 'waiting'
+                        : status === 'completed'
+                          ? 'completed'
+                          : status === 'interrupted'
+                            ? 'interrupted'
+                            : status === 'failed' || status === 'cancelled'
+                              ? 'failed'
+                              : status === 'outcome_unknown'
+                                ? 'unknown'
+                                : 'running',
+                    createdAt,
+                    updatedAt: Number(task.finished_at ?? createdAt),
+                    ...(data.parent_call_id
+                      ? { parentCallId: data.parent_call_id }
+                      : {}),
+                  })
+                }
+                agents.push(...runs.values())
+              }
+              return { agents }
+            }
             case 'sessions.children':
               return childrenOf((args[0] as { sessionId: string }).sessionId)
             case 'chat.submit': {
@@ -4674,6 +5630,7 @@ export async function installVisualCoreBridge(
               // Recorded so specs can assert where a message was sent.
               const record = window as unknown as {
                 __visualSubmits?: Array<Record<string, unknown>>
+                __visualPromotionDelayMs?: number
               }
               ;(record.__visualSubmits ??= []).push({ ...input })
               // Core promotes a draft on its first message and announces the
@@ -4682,6 +5639,12 @@ export async function installVisualCoreBridge(
               const target = String(input.sessionId || '')
               if (!target.startsWith('draft:'))
                 return streamVisualReply(target, input)
+              // FIX-13: `__visualPromotionDelayMs` holds the announcement
+              // back, for what the user does in the meantime.
+              if (record.__visualPromotionDelayMs)
+                await new Promise((resolve) =>
+                  setTimeout(resolve, record.__visualPromotionDelayMs),
+                )
               const promoted = session(
                 `created-${sessions.length}`,
                 '新会话',
@@ -4696,6 +5659,56 @@ export async function installVisualCoreBridge(
               })
               return streamVisualReply(promoted.id, input)
             }
+            // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
+            case 'storage.usage':
+              return visualStorageUsage()
+            case 'updates.status':
+              return visualUpdateStatus()
+            case 'updates.setEnabled':
+              visualUpdate.enabled = Boolean(args[0])
+              if (!visualUpdate.enabled) visualUpdate.available = null
+              visualUpdateRecord(`switch:${visualUpdate.enabled}`)
+              return visualUpdateStatus()
+            case 'updates.check':
+              visualUpdateRecord('check')
+              return visualUpdateStatus()
+            case 'updates.download':
+              visualUpdateRecord('download')
+              visualUpdate.download = visualUpdateDownload('downloading')
+              return visualUpdateStatus()
+            case 'updates.cancelDownload':
+              visualUpdateRecord('cancel')
+              visualUpdate.download = { phase: 'idle' }
+              return visualUpdateStatus()
+            case 'updates.reveal':
+              visualUpdateRecord('reveal')
+              return visualUpdateStatus()
+            case 'storage.versions':
+              return visualDataVersions()
+            case 'storage.clean': {
+              const freed = visualStorage.spill - 4_194_304
+              visualStorage.spill = 4_194_304
+              const none = { removed: 0, bytes: 0 }
+              return {
+                report: {
+                  sessions: none,
+                  spill: {
+                    removed: freed > 0 ? 12 : 0,
+                    bytes: Math.max(0, freed),
+                  },
+                  memoryVersions: none,
+                  delegations: none,
+                  freedBytes: Math.max(0, freed),
+                  errors: [],
+                },
+                usage: visualStorageUsage(),
+              }
+            }
+            case 'tasks.budget':
+              return { ...visualTaskBudget }
+            case 'tasks.setBudget':
+              Object.assign(visualTaskBudget, args[0] ?? {})
+              return { ...visualTaskBudget }
             case 'tasks.cancel': {
               const id = String(args[0] ?? '')
               if (!visualCancelledTasks.has(id))
@@ -4749,6 +5762,33 @@ export async function installVisualCoreBridge(
                 ((args[0] || {}) as { sessionId?: string }).sessionId || '',
               )
               return ownerSessionId === 'build-ui' ? visualQueuedPrompts : []
+            }
+            // The status bar's queue actions (UI-S04): recorded on
+            // `window.__visualQueueActions`, and the message leaves the list.
+            case 'chat.manageQueuedPrompt': {
+              const body = (args[0] || {}) as {
+                promptId?: string
+                action?: string
+              }
+              const record = window as unknown as {
+                __visualQueueActions?: Array<{
+                  promptId?: string
+                  action?: string
+                }>
+              }
+              record.__visualQueueActions = [
+                ...(record.__visualQueueActions ?? []),
+                { promptId: body.promptId, action: body.action },
+              ]
+              const known = visualQueuedPrompts.some(
+                (item) => item.id === body.promptId,
+              )
+              visualQueuedPrompts = visualQueuedPrompts.filter(
+                (item) => item.id !== body.promptId,
+              )
+              return known
+                ? { ok: true }
+                : { ok: false, reason: 'prompt_not_queued' }
             }
             case 'projects.resolve':
               return project
@@ -4849,7 +5889,25 @@ export async function installVisualCoreBridge(
                 owned: [],
               }
             case 'git.pullRequest':
-              return null
+              // UI-S06: `?visualGitPr=open` — the branch has a draft PR;
+              // `?visualGitPr=gh-missing` — the GitHub CLI is unavailable.
+              if (visualParams.get('visualGitPr') === 'gh-missing')
+                throw new Error('git_gh_unavailable: GitHub CLI unavailable')
+              return visualParams.get('visualGitPr') === 'open'
+                ? {
+                    number: 128,
+                    url: 'https://github.com/emperor-agent/visual-build-project/pull/128',
+                    state: 'OPEN',
+                    draft: true,
+                    mergeable: 'MERGEABLE',
+                    headRefName: 'main',
+                    baseRefName: 'release',
+                    checks: [],
+                  }
+                : null
+            case 'git.enterWorktree':
+            case 'git.exitWorktree':
+              return { status: visualGitStatus }
             case 'git.diff':
               return {
                 content:
@@ -4865,10 +5923,16 @@ export async function installVisualCoreBridge(
                 diff: 'diff --git a/README.md b/README.md\n',
                 truncated: false,
               }
+            case 'git.commit':
+              // `?visualGitCommit=reject`: the pre-commit hook says no.
+              if (visualParams.get('visualGitCommit') === 'reject')
+                throw new Error(
+                  'pre-commit hook failed: eslint found 2 problems in src/app.ts',
+                )
+              return visualGitStatus
             case 'git.stage':
             case 'git.unstage':
             case 'git.discard':
-            case 'git.commit':
             case 'git.fetch':
             case 'git.pull':
             case 'git.push':
@@ -4909,27 +5973,53 @@ export async function installVisualCoreBridge(
                 nextCursor: null,
                 truncated: false,
               }
+            case 'files.stat':
             case 'files.read':
-              return {
-                projectRoot: projectDir,
-                relativePath: String(
-                  ((args[0] || {}) as { relativePath?: string }).relativePath ||
-                    'README.md',
-                ),
-                name: 'README.md',
-                kind: 'text',
-                mimeType: 'text/markdown',
-                bytes: 68,
-                truncated: false,
-                content:
-                  '# Visual Build Project\n\nA project workspace visual fixture.\n',
+            case 'files.preview': {
+              const input = (args[0] || {}) as {
+                path?: string
+                relativePath?: string
               }
+              const path = input.path || input.relativePath || 'README.md'
+              // FIX-05: `window.__visualFileVersion` (default 1) stands for
+              // edits on disk; `src/long.ts` is 240 lines for scrolling.
+              const version =
+                (window as unknown as { __visualFileVersion?: number })
+                  .__visualFileVersion ?? 1
+              const content = path.includes('long')
+                ? Array.from(
+                    { length: 240 },
+                    (_, index) =>
+                      `export const line${index + 1} = ${index + 1} // v${version}`,
+                  ).join('\n') + '\n'
+                : version > 1
+                  ? `# Visual Build Project\n\nA project workspace visual fixture.\n\nEdited on disk (v${version}).\n`
+                  : '# Visual Build Project\n\nA project workspace visual fixture.\n'
+              const bytes = new TextEncoder().encode(content).length
+              const modifiedAt = Date.parse(now) + version
+              if (operationKey === 'files.stat') return { bytes, modifiedAt }
+              return {
+                id: `file:${projectDir}/${path}`,
+                path: `${projectDir}/${path}`,
+                projectRoot: projectDir,
+                relativePath: path,
+                name: path.split('/').pop(),
+                kind: 'text',
+                mimeType: path.endsWith('.md') ? 'text/markdown' : 'text/plain',
+                bytes,
+                modifiedAt,
+                truncated: false,
+                content,
+              }
+            }
             case 'terminals.list':
               return [visualTerminal]
             case 'terminals.create':
               return visualTerminal
             case 'terminals.read':
+              // Core's shape: the terminal's summary with the chunks.
               return {
+                terminal: visualTerminal,
                 terminalId: visualTerminal.id,
                 chunks: [
                   {
@@ -5395,13 +6485,218 @@ export async function installVisualCoreBridge(
                 ok: true,
                 provider: 'visual',
                 protocol: 'openai',
-                source: 'visual-fixture',
+                source: 'vendor_api',
+                truncated: false,
+                totalCount: 3,
                 models: [
-                  { id: 'visual-main', ownedBy: 'Visual Labs' },
-                  { id: 'visual-secondary', ownedBy: 'Visual Labs' },
-                  { id: 'visual-pro', ownedBy: 'Visual Research' },
+                  {
+                    id: 'visual-main',
+                    name: 'Visual Main',
+                    ownedBy: 'Visual Labs',
+                    kind: 'chat',
+                    family: 'visual',
+                    releaseDate: '2026-09-01',
+                    contextWindowTokens: 1_048_576,
+                    maxOutputTokens: 131_072,
+                    capabilities: {
+                      toolCall: true,
+                      vision: true,
+                      reasoning: true,
+                    },
+                    reasoning: {
+                      efforts: ['none', 'low', 'high'],
+                      defaultEffort: 'high',
+                      control: 'effort',
+                    },
+                    source: 'vendor_api',
+                    fieldSources: {},
+                  },
+                  {
+                    id: 'visual-secondary',
+                    ownedBy: 'Visual Labs',
+                    kind: 'chat',
+                    family: 'visual',
+                    releaseDate: '2026-03-01',
+                    contextWindowTokens: 128_000,
+                    maxOutputTokens: 16_384,
+                    capabilities: { toolCall: true },
+                    lifecycle: {
+                      status: 'deprecated',
+                      retiresAt: '2026-12-01',
+                    },
+                    source: 'catalog',
+                    fieldSources: {},
+                  },
+                  {
+                    id: 'visual-pro',
+                    ownedBy: 'Visual Research',
+                    kind: 'chat',
+                    family: 'visual-pro',
+                    releaseDate: '2026-08-15',
+                    contextWindowTokens: 262_144,
+                    maxOutputTokens: 131_072,
+                    capabilities: { toolCall: true, reasoning: true },
+                    reasoning: {
+                      efforts: ['low', 'high', 'max'],
+                      defaultEffort: 'max',
+                      control: 'always',
+                    },
+                    acceptsTemperature: false,
+                    source: 'catalog',
+                    fieldSources: {},
+                  },
                 ],
               }
+            case 'model.probeConnection': {
+              const input = (args[0] || {}) as any
+              if (input.provider === 'lm_studio')
+                return { ok: false, code: 'NETWORK', message: 'refused' }
+              return {
+                ok: true,
+                latencyMs: 42,
+                modelCount: input.provider === 'ollama' ? 2 : 3,
+                method: 'list',
+              }
+            }
+            case 'model.updateConnection': {
+              const input = (args[0] || {}) as any
+              const lead = modelConfig.models.find(
+                (entry: any) => entry.entryId === input.entryId,
+              )
+              let updated = 0
+              for (const entry of modelConfig.models)
+                if (lead && entry.provider === lead.provider) {
+                  if (input.apiKey)
+                    entry.apiKey = `***${String(input.apiKey).slice(-4)}`
+                  if (input.apiBase) entry.apiBase = input.apiBase
+                  updated += 1
+                }
+              // Real IPC structured-clones results (see model.saveEntry).
+              return JSON.parse(JSON.stringify({ ...modelConfig, updated }))
+            }
+            case 'model.refreshMetadata': {
+              const input = (args[0] || {}) as any
+              const diffs = (input.entryIds || []).map((entryId: string) => {
+                const entry = modelConfig.models.find(
+                  (item: any) => item.entryId === entryId,
+                )
+                return {
+                  entryId,
+                  modelId: entry?.modelId ?? entryId,
+                  source: 'catalog',
+                  changes:
+                    entry?.provider === 'anthropic'
+                      ? [
+                          {
+                            field: 'contextWindowTokens',
+                            from: entry.contextWindowTokens,
+                            to: 1_000_000,
+                          },
+                          {
+                            field: 'maxTokens',
+                            from: entry.maxTokens,
+                            to: 32_000,
+                          },
+                        ]
+                      : [],
+                }
+              })
+              if (input.apply)
+                for (const diff of diffs)
+                  for (const change of diff.changes) {
+                    const entry = modelConfig.models.find(
+                      (item: any) => item.entryId === diff.entryId,
+                    )
+                    if (entry) entry[change.field] = change.to
+                  }
+              return { diffs, applied: Boolean(input.apply) }
+            }
+            case 'model.replaceEntry': {
+              const input = (args[0] || {}) as any
+              const index = modelConfig.models.findIndex(
+                (entry: any) => entry.entryId === input.entryId,
+              )
+              const old = modelConfig.models[index]
+              const next = {
+                ...old,
+                entryId: `${input.modelId}-entry`,
+                modelId: input.modelId,
+                displayName: '',
+                effectiveDisplayName: 'DeepSeek V4.1 Flash',
+                contextWindowTokens: 1_048_576,
+                maxTokens: 32_000,
+                lifecycle: undefined,
+                resolvedProfile: {
+                  ...old.resolvedProfile,
+                  vision: true,
+                  contextWindowTokens: 1_048_576,
+                  maxTokens: 32_000,
+                },
+              }
+              modelConfig.models = modelConfig.models.map((entry: any) =>
+                entry === old ? next : entry,
+              )
+              if (modelConfig.activeModelId === old.entryId)
+                modelConfig.activeModelId = next.entryId
+              return JSON.parse(
+                JSON.stringify({
+                  ...modelConfig,
+                  replacedEntryId: next.entryId,
+                }),
+              )
+            }
+            case 'model.lookupDefaults':
+              return {
+                facts: {
+                  key: 'fallback',
+                  kind: 'chat',
+                  capabilities: {},
+                  source: 'fallback',
+                },
+                source: 'fallback',
+              }
+            case 'model.saveEntries': {
+              const input = (args[0] || {}) as any
+              const savedEntryIds: string[] = []
+              for (const entry of input.entries || []) {
+                const entryId =
+                  entry.entryId ||
+                  `visual-entry-${modelConfig.models.length + 1}`
+                const overrides = entry.capabilityOverrides || {}
+                modelConfig.models.push({
+                  ...visualModelEntry,
+                  ...entry,
+                  provider: input.connection.provider,
+                  protocol: input.connection.protocol,
+                  apiBase: input.connection.apiBase,
+                  entryId,
+                  apiKey: '',
+                  effectiveDisplayName: entry.displayName || entry.modelId,
+                  resolvedProfile: {
+                    ...visualModelEntry.resolvedProfile,
+                    toolCall:
+                      overrides.toolCall ?? entry.detected?.toolCall ?? true,
+                    vision: overrides.vision ?? entry.detected?.vision ?? false,
+                    reasoning:
+                      overrides.reasoning ?? entry.detected?.reasoning ?? false,
+                    contextWindowTokens: entry.contextWindowTokens,
+                    maxTokens: entry.maxTokens,
+                  },
+                })
+                savedEntryIds.push(entryId)
+              }
+              if (input.activateEntryId) {
+                modelConfig.activeModelId = input.activateEntryId
+                const active = modelConfig.models.find(
+                  (item: any) => item.entryId === input.activateEntryId,
+                )
+                modelConfig.current = active ? currentForEntry(active) : null
+              }
+              return {
+                ...JSON.parse(JSON.stringify(modelConfig)),
+                savedEntryIds,
+              }
+            }
             case 'model.test': {
               const body = (args[0] || {}) as any
               return {
@@ -5423,6 +6718,20 @@ export async function installVisualCoreBridge(
               return visualMcpConfig()
             case 'mcp.status':
               return visualMcpStatus()
+            case 'mcp.serverLog': {
+              const name = String((args[0] as { name?: string })?.name)
+              return {
+                name,
+                text: visualMcpServers[name]
+                  ? [
+                      'GitHub MCP Server running on stdio',
+                      'Using token sk-***',
+                      'tools/list: 3 tools',
+                      'GET https://api.github.com/search/repositories?q=emperor&token=*** 200 (182 ms)',
+                    ].join('\n')
+                  : null,
+              }
+            }
             case 'mcp.importServers':
               return visualMcpImport(args[0])
             case 'mcp.setServerEnabled': {
@@ -5535,7 +6844,9 @@ export async function installVisualCoreBridge(
               boot.desktopPet.enabled = Boolean(args[0])
               return { ...boot.desktopPet }
             case 'diagnostics.get':
-              return boot.diagnostics
+              return visualUpdateMode
+                ? { ...boot.diagnostics, updates: visualUpdateDiagnostics() }
+                : boot.diagnostics
             case 'environment.getStatus':
               if (
                 localStorage.getItem('visual-environment-outcome') ===
@@ -6061,14 +7372,30 @@ export async function installVisualCoreBridge(
                     state: 'unsupported',
                     reason: 'Emperor 还不支持这个应用连接',
                   },
-                  {
-                    kind: 'hook',
-                    id: 'PreToolUse#1',
-                    title: 'PreToolUse · bash',
-                    description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
-                    state: 'available',
-                    reason: null,
-                  },
+                  // `?visualHookFailure=on` (SEC-07): the guard failed for
+                  // want of a variable its manifest does not declare.
+                  visualParams.get('visualHookFailure') === 'on'
+                    ? {
+                        kind: 'hook',
+                        id: 'PreToolUse#1',
+                        title: 'PreToolUse · bash',
+                        description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
+                        state: 'failed',
+                        reason:
+                          '最近一次运行失败（退出码 1）：KeyError: SEARCH_API_KEY',
+                        variables: [
+                          { name: 'SEARCH_API_KEY', state: 'undeclared' },
+                          { name: 'SEARCH_REGION', state: 'unset' },
+                        ],
+                      }
+                    : {
+                        kind: 'hook',
+                        id: 'PreToolUse#1',
+                        title: 'PreToolUse · bash',
+                        description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
+                        state: 'available',
+                        reason: null,
+                      },
                   {
                     kind: 'hook',
                     id: 'PostToolUse#1',
@@ -6464,6 +7791,11 @@ export async function installVisualCoreBridge(
                   network:
                     plugin.scope === 'managed' ||
                     plugin.pluginId === 'emperor/web-research',
+                  // What its manifest's env lets its hooks read (SEC-07).
+                  env:
+                    plugin.pluginId === 'emperor/web-research'
+                      ? ['SEARCH_REGION']
+                      : [],
                 },
                 components: (members[String(plugin.pluginId)] ?? []).map(
                   (member) =>
@@ -6495,6 +7827,10 @@ export async function installVisualCoreBridge(
                   : plugin.signature.status === 'unverified'
                     ? 'blocked_unverified'
                     : 'active'
+                // The user's choice ends a project's suggestion (SEC-07).
+                if ('suggested' in plugin) plugin.suggested = false
+                if (plugin.scope === 'project' && plugin.enabled)
+                  plugin.effective = true
               }
               return { changed: Boolean(plugin), plugin }
             }
@@ -6511,9 +7847,24 @@ export async function installVisualCoreBridge(
               const [plugin] = index >= 0 ? boot.plugins.splice(index, 1) : []
               return { changed: Boolean(plugin), plugin }
             }
+            // Like Core (FIX-13): no session (a draft) gets the defaults,
+            // and a change needs a real session. A draft keeps plan mode
+            // and the preset itself, so a call here with none is a bug.
             case 'control.get':
-              return { ...boot.control }
+              return args[0]
+                ? { ...boot.control }
+                : {
+                    ...boot.control,
+                    mode:
+                      boot.control.mode === 'plan'
+                        ? String(boot.control.previous_mode || 'auto')
+                        : boot.control.mode,
+                    plan: false,
+                    pending: null,
+                  }
             case 'control.setPermissionMode': {
+              const refused = visualSessionRefusal(args[1])
+              if (refused) return refused
               const permissionMode = String(args[0] || 'ask_before_edit')
               if (boot.control.mode === 'plan')
                 boot.control.previous_mode = permissionMode
@@ -6524,6 +7875,8 @@ export async function installVisualCoreBridge(
               return { ...boot.control }
             }
             case 'control.setMode': {
+              const refused = visualSessionRefusal(args[1])
+              if (refused) return refused
               const nextMode = String(args[0] || 'ask_before_edit')
               if (nextMode === 'plan') {
                 boot.control.previous_mode =
@@ -6532,10 +7885,30 @@ export async function installVisualCoreBridge(
                     : boot.control.mode
                 boot.control.mode = 'plan'
               } else {
-                boot.control.mode = nextMode
+                boot.control.mode =
+                  nextMode === 'default'
+                    ? String(boot.control.previous_mode || 'ask_before_edit')
+                    : nextMode
                 boot.control.previous_mode = null
               }
-              return { ...boot.control }
+              // Like Core: `{ control }`, with the Plan flag.
+              boot.control.plan = nextMode === 'plan'
+              return { control: { ...boot.control } }
+            }
+            case 'goals.pause':
+            case 'goals.resume': {
+              const activeGoal = boot.goals.active as Record<
+                string,
+                unknown
+              > | null
+              if (!activeGoal) throw new Error('Goal is not active')
+              const nextGoal = {
+                ...activeGoal,
+                phase: operationKey === 'goals.pause' ? 'paused' : 'active',
+                revision: Number(activeGoal.revision ?? 0) + 1,
+              }
+              boot.goals.active = nextGoal as typeof boot.goals.active
+              return { accepted: true, goal: nextGoal }
             }
             case 'goals.cancel': {
               const activeGoal = boot.goals.active
@@ -6827,8 +8200,22 @@ export async function installVisualCoreBridge(
                 ],
               }
             }
-            case 'chat.stopRuntime':
+            case 'chat.stopRuntime': {
+              // Recorded (FIX-13), and refused without a session like Core.
+              const input = (args[0] ?? {}) as {
+                taskId?: string | null
+                sessionId?: string | null
+              }
+              const record = window as unknown as {
+                __visualStops?: Array<Record<string, unknown>>
+              }
+              ;(record.__visualStops ??= []).push({ ...input })
+              if (!input.taskId) {
+                const refused = visualSessionRefusal(input.sessionId)
+                if (refused) return refused
+              }
               return { cancelled: false }
+            }
             case 'computerUse.status':
               return visualComputerUse()
             case 'browser.preferences':
@@ -6923,6 +8310,200 @@ export async function installVisualCoreBridge(
               }
               return visualExternalBrowser
             }
+            case 'executors.list':
+              return visualExecutorsMode ? visualExecutorList() : {}
+            case 'executors.probe': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              return visualExecutorProbe(
+                String(input.profileId),
+                visualClaudeMode,
+              )
+            }
+            case 'executors.models': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              if (
+                visualCodexDefaultUnavailable &&
+                input.profileId === 'codex-default'
+              )
+                return {
+                  profileId: input.profileId,
+                  models: [
+                    {
+                      id: 'gpt-6.1-sol',
+                      name: 'gpt-6.1-sol',
+                      source: 'configuration',
+                    },
+                    ...['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'].map(
+                      (id) => ({ id, name: id, source: 'cli' }),
+                    ),
+                  ],
+                  configuredModel: 'gpt-6.1-sol',
+                  provider: 'openai',
+                  checkedAt: Date.now(),
+                  diagnostic: null,
+                  defaultUnavailable: {
+                    model: 'gpt-6.1-sol',
+                    replacement: 'gpt-5.6-sol',
+                  },
+                }
+              return {
+                profileId: input.profileId,
+                models: [],
+                configuredModel: null,
+                provider: 'anthropic',
+                checkedAt: Date.now(),
+                diagnostic: null,
+              }
+            }
+            case 'executors.configure': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { config?: object }
+              visualExecutorConfig = {
+                ...(input.config as Record<string, unknown>),
+                revision: Number(visualExecutorConfig.revision) + 1,
+              }
+              return visualExecutorConfig
+            }
+            case 'executors.setCredential':
+            case 'executors.clearCredential':
+            case 'executors.signOut': {
+              if (!visualExecutorsMode) return {}
+              visualClaudeMode =
+                operationKey === 'executors.setCredential'
+                  ? 'api-key'
+                  : 'signed-out'
+              return {
+                probe: visualExecutorProbe('claude-default', visualClaudeMode),
+              }
+            }
+            case 'executors.signIn': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as {
+                profileId?: string
+                method?: string
+              }
+              // One at a time, as in Core: a second click joins the first.
+              if (visualSignIn?.state !== 'running')
+                visualSignIn = {
+                  profileId: String(input.profileId),
+                  method: input.method === 'console' ? 'console' : 'claude-ai',
+                  state: 'running',
+                  startedAt: Date.now(),
+                }
+              // A spec ends it the way Core pushes the end of claude auth
+              // login: window.__visualClaudeSignIn('signed-in' | 'exit' |
+              // 'timeout').
+              ;(
+                window as unknown as {
+                  __visualClaudeSignIn?: (outcome: string) => void
+                }
+              ).__visualClaudeSignIn = (outcome) => {
+                if (!visualSignIn) return
+                const command =
+                  "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR='/Users/ada/.emperor/delegations/claude-code/config' HOME='/Users/ada/.emperor/delegations/claude-code/home' XDG_CONFIG_HOME='/Users/ada/.emperor/delegations/claude-code/home/.config' XDG_CACHE_HOME='/Users/ada/.emperor/delegations/claude-code/home/.cache' '/Users/ada/.local/bin/claude' auth login" +
+                  (visualSignIn.method === 'console' ? ' --console' : '')
+                if (outcome === 'signed-in') visualClaudeMode = 'signed-in'
+                visualSignIn = {
+                  ...visualSignIn,
+                  finishedAt: Date.now(),
+                  ...(outcome === 'signed-in'
+                    ? { state: 'signed-in' }
+                    : outcome === 'timeout'
+                      ? { state: 'failed', reason: 'timeout', command }
+                      : {
+                          state: 'failed',
+                          reason: 'exit',
+                          exitCode: 1,
+                          command,
+                        }),
+                }
+                const event = {
+                  event: 'executor_sign_in',
+                  seq: 0,
+                  signIn: visualSignIn,
+                  ...(outcome === 'signed-in'
+                    ? {
+                        probe: visualExecutorProbe(
+                          String(visualSignIn.profileId),
+                          visualClaudeMode,
+                        ),
+                      }
+                    : {}),
+                }
+                for (const target of environmentListeners) target(event)
+              }
+              return { signIn: visualSignIn }
+            }
+            case 'executors.cancelSignIn': {
+              if (!visualExecutorsMode) return {}
+              if (visualSignIn?.state !== 'running') return { signIn: null }
+              visualSignIn = {
+                ...visualSignIn,
+                state: 'cancelled',
+                finishedAt: Date.now(),
+              }
+              return { signIn: visualSignIn }
+            }
+            case 'executors.dismissNotice':
+              visualSignInNotice = false
+              return {}
+            case 'executors.versions': {
+              if (!visualUpgradeMode) return {}
+              // A spec moves an upgrade on the way Core pushes it.
+              ;(
+                window as unknown as {
+                  __visualExecutorUpgrade?: (step: string) => void
+                }
+              ).__visualExecutorUpgrade = (step) => {
+                const emit = (event: Record<string, unknown>) => {
+                  for (const target of environmentListeners)
+                    target({ seq: 0, ...event })
+                }
+                visualUpgrade.claude = '2.1.308'
+                const run =
+                  step === 'running'
+                    ? visualCodexRun({})
+                    : step === 'done'
+                      ? visualCodexRun({
+                          state: 'succeeded',
+                          installed: '0.163.0',
+                          finishedAt: Date.now(),
+                        })
+                      : visualFailedRun()
+                if (step === 'done') visualUpgrade.codex = '0.163.0'
+                visualUpgrade.upgrades = [run]
+                emit({
+                  event: 'executor_upgrade',
+                  upgrade: run,
+                  ...(step === 'done'
+                    ? { probe: visualExecutorProbe('codex-default', null) }
+                    : {}),
+                })
+                emit({ event: 'executor_upgrade', versions: visualVersions() })
+              }
+              return visualVersions()
+            }
+            case 'executors.upgrade': {
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                upgrade: visualCodexRun({
+                  profileId: String(input.profileId),
+                  state: 'waiting',
+                }),
+              }
+            }
+            case 'executors.cancelUpgrade':
+              return {
+                upgrade: visualCodexRun({
+                  state: 'cancelled',
+                  finishedAt: Date.now(),
+                }),
+              }
+            case 'executors.dismissUpgrades':
+              visualUpgrade.dismissed = true
+              return visualVersions()
             default:
               return {}
           }

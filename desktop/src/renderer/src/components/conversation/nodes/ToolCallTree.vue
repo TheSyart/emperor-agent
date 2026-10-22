@@ -2,48 +2,101 @@
 /**
  * ToolCallTree — one root tool call plus its nested activity (dsh
  * ToolCallTree): the row, then an indented, left-ruled sub list for the
- * workflow run panel, the delegated child's status line (never its
- * transcript — "打开子会话" opens the child session) and approval
- * escalations raised by the call.
+ * workflow run panel and the approval escalations raised by the call.
  *
- * Props: node (tool).
+ * A call that starts or continues a subagent (local, Claude Code, Codex)
+ * is that subagent's one row (UI-S14, SubagentRow): face, name, source,
+ * status and time, its whole width opening the child — 「/chat/<child>」
+ * for a local one, the run page for Claude Code / Codex, with 任务详情
+ * beside it. Its approvals, grants and workspace waits stay indented
+ * under it; the child's transcript is never inlined.
+ *
+ * Props: node (tool), agentVariant ('single' in the flow, 'grouped'),
+ * step (a step of a process group; false for a subagent row of its own).
  */
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, inject, ref } from 'vue'
+import { routerKey } from 'vue-router'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
-import { DsChevronRight, DsShieldAlert } from '../../icons/ds'
-import StateDot from '../../ui/StateDot.vue'
-import type { StateDotState } from '../../ui/stateDot'
+import { DsShieldAlert } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
-import { subagentStatusLabel } from '../tools/registry'
-import { lastLine } from '../tools/toolModel'
+import {
+  isDelegationCall,
+  subagentAgentId,
+  subagentHref,
+  subagentRowOf,
+} from '../subagentRows'
+import { nativeAgentTarget } from '../tools/toolModel'
+import { useAgentTree } from '../../sidebar/agentTree'
+import SubagentRow from './SubagentRow.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
+import WorkspaceWaitLine from './WorkspaceWaitLine.vue'
+import { workspaceWaitFor } from './workspaceWaits'
 
-const props = defineProps<{ node: ToolChatNode }>()
-const { actions } = useChatContext()
+const props = withDefaults(
+  defineProps<{
+    node: ToolChatNode
+    agentVariant?: 'single' | 'grouped'
+    step?: boolean
+  }>(),
+  { agentVariant: 'grouped', step: true },
+)
+const chat = useChatContext()
+const { actions } = chat
+const router = inject(routerKey, undefined)
 const data = computed(() => props.node.data)
+const owner = computed(() => chat.rootSessionId?.() ?? chat.sessionId())
+const agentTree = useAgentTree()
+/** A continued local child (send_message) the root's agent list knows. */
+const nativeAgent = computed(() => {
+  const id = nativeAgentTarget(data.value)
+  const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
+  return agent?.kind === 'internal' &&
+    agent.backend === 'internal' &&
+    agent.rootSessionId === owner.value
+    ? agent
+    : undefined
+})
+/** The agent list's view of this call's subagent (the card's source). */
+const listed = computed(() => {
+  const id = subagentAgentId(data.value)
+  const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
+  return agent?.rootSessionId === owner.value ? agent : undefined
+})
+const isAgent = computed(
+  () =>
+    isDelegationCall(data.value) ||
+    data.value.externalAgent !== undefined ||
+    nativeAgent.value !== undefined,
+)
+const row = computed(() => subagentRowOf(data.value, listed.value))
+const href = computed(() => subagentHref(row.value, owner.value))
+const detailsRun = ref<{ runId: string; delegationId: string } | null>(null)
+const ExternalAgentDetails = defineAsyncComponent(
+  () => import('../environment/ExternalAgentDetails.vue'),
+)
 
-const subagentDot = computed<StateDotState>(() => {
-  const sub = data.value.subagent
-  if (sub === undefined || sub.status === 'running') return 'ongoing'
-  switch (sub.stopReason) {
-    case 'completed':
-    case undefined:
-      return 'ok'
-    case 'error':
-    case 'refusal':
-      return 'error'
-    default:
-      return 'warn'
+function openAgent(event: MouseEvent) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const id = row.value.agentId
+  if (id === undefined) return
+  if (row.value.backend !== 'internal') {
+    if (!router) return
+    event.preventDefault()
+    void router.push({
+      name: 'external-agent',
+      params: { sessionId: owner.value, delegationId: id },
+    })
+  } else {
+    event.preventDefault()
+    actions.openSubagent(id)
   }
-})
-const subagentLine = computed(() => {
-  const sub = data.value.subagent
-  if (sub === undefined) return ''
-  if (sub.text !== undefined && sub.text.trim() !== '')
-    return lastLine(sub.text).replace(/[`*_#>]/gu, '')
-  return sub.status === 'running' ? '正在处理…' : ''
-})
+}
+
+function openDetails() {
+  const run = row.value.run
+  if (run) detailsRun.value = { ...run }
+}
 
 const APPROVAL_LABEL: Record<string, string> = {
   'allowed-once': '已允许',
@@ -66,19 +119,37 @@ function grantStatus(grant: ToolGrantView): string {
   return GRANT_LABEL[grant.decision] ?? grant.decision
 }
 
+/** This call's write waits for a subagent's workspace (AGT-06). */
+const wait = workspaceWaitFor(props.node.data.callId)
+
 const hasChildren = computed(
   () =>
+    wait.value !== undefined ||
     data.value.workflow !== undefined ||
-    data.value.subagent !== undefined ||
     data.value.approvals.length > 0 ||
     (data.value.grants?.length ?? 0) > 0,
 )
 </script>
 
 <template>
-  <div class="tool-call" :data-chat-call-id="data.callId">
-    <ToolCallRow :data="data" />
+  <div
+    class="tool-call"
+    :data-process-step="step ? '' : undefined"
+    :data-chat-call-id="data.callId"
+    :data-agent="isAgent || undefined"
+  >
+    <SubagentRow
+      v-if="isAgent"
+      :row="row"
+      :href="href"
+      :variant="agentVariant"
+      :details="Boolean(data.externalAgent)"
+      @open="openAgent"
+      @details="openDetails"
+    />
+    <ToolCallRow v-else :data="data" :agent="nativeAgent" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
+      <WorkspaceWaitLine v-if="wait" :wait="wait" />
       <div
         v-for="approval in data.approvals"
         :key="approval.id"
@@ -87,7 +158,7 @@ const hasChildren = computed(
       >
         <span class="sub-leading"><DsShieldAlert :size="14" /></span>
         <span class="sub-title">审批</span>
-        <span class="sep" aria-hidden="true" />
+        <span class="sep" aria-hidden="true">·</span>
         <span class="sub-text">{{ approval.reason ?? approval.toolName }}</span>
         <span class="sub-status">{{
           approval.outcome === undefined
@@ -114,29 +185,9 @@ const hasChildren = computed(
         <span class="sub-title">{{
           grant.highImpact ? '高影响操作确认' : '电脑操作授权'
         }}</span>
-        <span class="sep" aria-hidden="true" />
+        <span class="sep" aria-hidden="true">·</span>
         <span class="sub-text">{{ grant.target }}</span>
         <span class="sub-status">{{ grantStatus(grant) }}</span>
-      </div>
-      <div
-        v-if="data.subagent"
-        class="sub-line"
-        data-subagent-line
-        :data-status="data.subagent.status"
-      >
-        <span class="sub-leading"><StateDot :state="subagentDot" /></span>
-        <span class="sub-title">{{ subagentStatusLabel(data) }}</span>
-        <template v-if="subagentLine">
-          <span class="sep" aria-hidden="true" />
-          <span class="sub-text">{{ subagentLine }}</span>
-        </template>
-        <button
-          type="button"
-          class="open-link"
-          @click="actions.openSubagent(data.subagent.subagentId)"
-        >
-          打开子会话<DsChevronRight :size="12" />
-        </button>
       </div>
       <WorkflowRunPanel
         v-if="data.workflow"
@@ -144,6 +195,19 @@ const hasChildren = computed(
         :expansion-key="`workflow:${data.callId}`"
       />
     </div>
+    <ExternalAgentDetails
+      v-if="detailsRun"
+      :run-id="detailsRun.runId"
+      :delegation-id="detailsRun.delegationId"
+      :session-id="owner"
+      @close="detailsRun = null"
+      @root="router?.push({ name: 'chat', params: { sessionId: owner } })"
+      @configure="
+        router?.push({
+          query: { ...router.currentRoute.value.query, settings: 'executors' },
+        })
+      "
+    />
   </div>
 </template>
 
@@ -152,26 +216,29 @@ const hasChildren = computed(
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
 }
 
 .subcalls {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  margin: var(--space-1) 0 var(--space-0-5)
-    calc(var(--space-4) + var(--space-1-5));
+  gap: 0;
+  margin: 0 0 var(--space-0-5) calc(var(--space-4) + var(--space-1-5));
   padding-left: var(--space-2);
-  border-left: 1px solid var(--border-l2);
+  border-left: 1px solid var(--stroke-2);
+}
+
+/* Under a subagent row: indented to its name. */
+[data-agent] > .subcalls {
+  margin-left: calc(var(--space-2) + var(--space-2-5));
 }
 
 .sub-line {
   display: flex;
   align-items: center;
   min-width: 0;
-  height: var(--lh-base);
-  font-size: var(--fs-s);
-  line-height: var(--lh-base);
+  height: var(--control-sm);
+  font: var(--type-footnote) var(--font-sans);
 }
 
 .sub-leading {
@@ -182,25 +249,22 @@ const hasChildren = computed(
   width: var(--space-4);
   height: var(--space-4);
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 [data-outcome='pending'] .sub-leading {
-  color: rgb(var(--approval));
+  color: rgb(var(--attention));
 }
 
 .sub-title {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .sep {
   flex: none;
-  width: 2px;
-  height: 2px;
-  margin: 0 var(--space-2);
-  border-radius: 50%;
-  background: rgb(var(--label-caption));
+  margin: 0 var(--space-1-5);
+  color: rgb(var(--text-4));
 }
 
 .sub-text {
@@ -209,32 +273,13 @@ const hasChildren = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .sub-status {
   flex: none;
   margin-left: var(--space-2);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
-}
-
-.open-link {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  margin-left: auto;
-  padding: 0 0 0 var(--space-2);
-  border: none;
-  background: none;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--accent-strong));
-  cursor: pointer;
-}
-
-.open-link:hover {
-  text-decoration: underline;
+  color: rgb(var(--text-2));
 }
 </style>

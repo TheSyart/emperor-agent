@@ -1,15 +1,18 @@
 <script setup lang="ts">
 /**
- * One sidebar session row (dsh Rows: 32px, radius 8, 16px status slot, 14/20
- * title, 12/20 tertiary time). Running rows show the gold pixel chase and an
- * "N 个子代理运行中" subline; hover swaps the time for a more-actions button
- * (rename / pin / archive / delete, plus move up/down under manual sort).
+ * One sidebar session row (UI-S11: 32px, radius 8, 16px status slot, 13/20
+ * title, a compact relative time — never an ISO date). The slot shows the
+ * gold dot while running, the attention dot while it waits for an answer or
+ * an approval, and the ok dot for new activity; a running row adds an
+ * "N 个子智能体运行中" subline. Hover swaps the time for 「⋯」 (rename / pin /
+ * archive / delete, plus move up/down under manual sort). Nested rows (a
+ * project's sessions) hang off a hairline guide.
  */
 import { computed, nextTick, ref } from 'vue'
 import { DsMore } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import StateDot from '../ui/StateDot.vue'
+import Dot from '../ui/Dot.vue'
 import type { SessionRuntimeIndicator } from '../../runtime/sidebarModel'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import type { SessionInfo } from '../../types'
@@ -93,6 +96,7 @@ defineExpose({ beginRename })
     :data-active="active || undefined"
     :data-nested="nested || undefined"
     :data-menu-open="menuOpen || undefined"
+    :data-session-id="session.id"
     :aria-current="active ? 'page' : undefined"
     :title="title"
     @click="editing ? undefined : emit('open')"
@@ -101,22 +105,19 @@ defineExpose({ beginRename })
   >
     <div class="line">
       <span class="slot" aria-hidden="true">
-        <StateDot
+        <Dot
           v-if="indicator === 'running'"
-          state="ongoing"
-          :size="10"
+          state="running"
           :label="stateLabel"
         />
-        <StateDot
+        <Dot
           v-else-if="indicator === 'pending'"
-          state="warn"
-          :size="8"
+          state="attention"
           :label="stateLabel"
         />
-        <StateDot
+        <Dot
           v-else-if="indicator === 'attention'"
           state="ok"
-          :size="8"
           :label="stateLabel"
         />
       </span>
@@ -146,7 +147,7 @@ defineExpose({ beginRename })
       </button>
     </div>
     <div v-if="subagents > 0" class="subline">
-      {{ subagents }} 个子代理运行中
+      {{ subagents }} 个子智能体运行中
     </div>
     <div v-else-if="indicator === 'pending' && pendingLabel" class="subline">
       {{ pendingLabel }}
@@ -187,25 +188,36 @@ defineExpose({ beginRename })
   min-height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   user-select: none;
   outline: none;
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .session-row[data-nested] {
+  position: relative;
   padding-left: calc(var(--space-2) + var(--space-5) + 2px);
 }
 
+/* The project's guide: under the folder icon's centre (row padding 8 + 8). */
+.session-row[data-nested]::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--space-4) - 0.5px);
+  width: 1px;
+  background: var(--stroke-2);
+  content: '';
+}
+
 .session-row:hover,
-.session-row[data-menu-open],
-.session-row[data-active] {
-  background: var(--interactive-bg-hover);
+.session-row[data-menu-open] {
+  background: var(--surface-hover);
 }
 
 .session-row[data-active] {
-  background: var(--interactive-bg-active);
+  background: rgb(var(--surface-selected));
 }
 
 .session-row:focus-visible {
@@ -240,7 +252,7 @@ defineExpose({ beginRename })
 }
 
 .session-row[data-active] .title {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .rename {
@@ -248,17 +260,17 @@ defineExpose({ beginRename })
   min-width: 0;
   margin: 0 var(--space-1-5) 0 var(--space-1);
   padding: 0 var(--space-0-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--r-xs);
   outline: none;
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   color: inherit;
   font-size: var(--fs-s);
   line-height: var(--space-5);
 }
 
 .rename:focus {
-  border-color: var(--border-l3);
+  border-color: var(--stroke-3);
   box-shadow: none;
 }
 
@@ -266,7 +278,10 @@ defineExpose({ beginRename })
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
+  font-variant-numeric: tabular-nums;
+  /* 「6月26日」, not 「6 月 26 日」. */
+  text-autospace: no-autospace;
 }
 
 .more {
@@ -278,14 +293,14 @@ defineExpose({ beginRename })
   height: var(--space-4);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .more:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .session-row:hover .more,
@@ -306,7 +321,7 @@ defineExpose({ beginRename })
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -1076,7 +1076,12 @@ export class MacosDesktopDriver implements NativeDesktopDriver {
     else this.paused.delete(targetId)
   }
 
-  async permissions(): Promise<Readonly<Record<string, PermissionStatus>>> {
+  async permissions(
+    options: { readonly connect?: boolean } = {},
+  ): Promise<Readonly<Record<string, PermissionStatus>>> {
+    // A status read never starts the helper nor waits for its launch.
+    if (options.connect === false && !this.client?.diagnostics().connected)
+      return this.latestPermissions ?? {}
     const response = await this.use((client) =>
       client.request('permissions.status', {}, { deadlineMs: 5_000 }),
     )

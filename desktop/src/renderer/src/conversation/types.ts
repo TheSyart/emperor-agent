@@ -12,11 +12,13 @@ import type {
   SubagentStopReason,
   TodoItem,
   TokenUsage,
+  TurnBudgetReason,
   TurnFileEntry,
   TurnFilesReverted,
 } from '@emperor/core/runtime-contract'
 import type { ConversationTimeline } from './locationIndex'
 import type { MessageReference } from '../types'
+import type { PlanSummary } from './planSummary'
 
 export type { TodoItem, TokenUsage }
 
@@ -27,12 +29,18 @@ export type AssistantBlock =
   | { readonly kind: 'image'; readonly attachment: ImageAttachmentRef }
   /**
    * A tool call requested inside the message. Arguments are intentionally
-   * absent in chat: the call renders as its own `tool` node.
+   * absent in chat once the message lands: the call renders as its own
+   * `tool` node.
    */
   | {
       readonly kind: 'tool-call'
       readonly callId: string
       readonly name: string
+      /**
+       * While the step streams: the raw arguments so far, capped at
+       * `TOOL_DRAFT_LIMIT` (the preparing row reads the file name from it).
+       */
+      readonly draft?: string
     }
   | { readonly kind: 'other'; readonly block: unknown }
 
@@ -116,6 +124,9 @@ export interface ToolSubagentView {
   readonly stopReason?: SubagentStopReason
   /** Final text the child returned. */
   readonly text?: string
+  /** `subagent/started` / `subagent/settled` times (the row's 用时). */
+  readonly startedAt?: number
+  readonly settledAt?: number
 }
 
 /** One approval request raised by a tool call (sandbox escalation...). */
@@ -171,7 +182,8 @@ export interface WorkflowRunView {
   readonly description?: string
   readonly tool?: 'workflow' | 'ralph'
   readonly callId?: string
-  readonly status: 'running' | 'completed' | 'cancelled' | 'error'
+  readonly status:
+    'running' | 'completed' | 'cancelled' | 'error' | 'interrupted'
   readonly phases: readonly WorkflowPhaseView[]
   /** Latest narration lines (bounded). */
   readonly logs: readonly string[]
@@ -181,6 +193,26 @@ export interface WorkflowRunView {
 }
 
 /** `tool`: one tool call and everything attached to it. */
+export interface ToolExternalAgentView {
+  readonly title?: string
+  readonly delegationId: string
+  readonly runId: string
+  readonly backend: 'claude-code' | 'codex'
+  readonly phase: string
+  readonly text: string
+  readonly activity: readonly {
+    id?: string
+    name: string
+    status: string
+    detail?: string
+  }[]
+  readonly truncated?: boolean
+  /** The run's start and end (`task.started_at` / `finished_at`). */
+  readonly startedAt?: number
+  readonly finishedAt?: number
+  /** The run's summary: its closing text, or why it failed. */
+  readonly detail?: string
+}
 export interface ToolChatData {
   readonly callId: string
   readonly name: string
@@ -199,6 +231,7 @@ export interface ToolChatData {
   readonly result?: ToolResultView
   readonly job?: ToolJobView
   readonly subagent?: ToolSubagentView
+  readonly externalAgent?: ToolExternalAgentView
   readonly workflow?: WorkflowRunView
   readonly approvals: readonly ToolApprovalView[]
   /** Computer Use grant cards raised by this call. */
@@ -259,7 +292,15 @@ export interface TurnMaxTokensChatData {
   readonly time: number
 }
 
-/** `costCap`: the per-turn cost cap stopped the turn. */
+/** `turnBudget`: the task budget ended a turn (KRN-03): its steps or the task's cost. */
+export interface TurnBudgetChatData {
+  readonly turn: number
+  readonly seq: number
+  readonly time: number
+  readonly reason: TurnBudgetReason
+}
+
+/** `costCap`: the per-turn cost cap stopped the turn (logs before KRN-03). */
 export interface CostCapChatData {
   readonly turn: number
   readonly step: number
@@ -355,7 +396,10 @@ export interface TurnTailChatData {
 
 /** `turnFiles`: the files one turn changed (E-track contract §5). */
 export interface TurnFilesChatData {
+  /** The task's last turn (the turn itself in logs from before UI-S15). */
   readonly turn: number
+  /** The task the record covers (UI-S15); absent in older logs (one turn). */
+  readonly task?: { readonly firstTurn: number; readonly lastTurn: number }
   /** tools: not a Git project; only Emperor's file tools were counted. */
   readonly mode: 'git' | 'tools'
   readonly status: 'recorded' | 'skipped'
@@ -368,11 +412,48 @@ export interface TurnFilesChatData {
   }
   /** More than the listed files changed. */
   readonly truncated: boolean
-  /** Another session ran in the workspace during the turn. */
+  /** Another session ran in the workspace during the task (turn). */
   readonly concurrent: boolean
-  /** Snapshots were kept: the turn can be reviewed and undone. */
+  /** Snapshots were kept: the task (turn) can be reviewed and undone. */
   readonly reviewable: boolean
-  /** The turn was undone (`turn/files-reverted`). */
+  /**
+   * Recorded when the session was next opened after Emperor stopped mid-task
+   * (UI-S15): compared with the project then, outside changes included.
+   */
+  readonly recovered?: boolean
+  /** The task (turn) was undone (`turn/files-reverted`). */
+  readonly reverted?: {
+    readonly reverted: readonly string[]
+    readonly skipped: TurnFilesReverted['skipped']
+  }
+}
+
+/**
+ * `delegationResult`: what a subagent changed in its isolated workspace and
+ * what became of it (AGT-06) — one card per delegation, updated in place.
+ */
+export interface DelegationResultChatData {
+  readonly delegationId: string
+  readonly runId: string
+  readonly backend: 'claude-code' | 'codex'
+  readonly title?: string
+  readonly state: 'ready' | 'conflicted' | 'applied' | 'reverted' | 'discarded'
+  readonly files: readonly TurnFileEntry[]
+  readonly totals: {
+    readonly files: number
+    readonly additions: number
+    readonly deletions: number
+  }
+  readonly truncated: boolean
+  /** Files that also changed in the project (nothing was applied). */
+  readonly conflicts: readonly string[]
+  /** When the result was recorded (the 14-day cleanup prompt counts from it). */
+  readonly at: number
+  readonly by?: 'user' | 'model'
+  /** Applied with an undo record. */
+  readonly undoable: boolean
+  /** 高级 › 验证后再应用 was on: the card opens the checks instead. */
+  readonly verifyFirst: boolean
   readonly reverted?: {
     readonly reverted: readonly string[]
     readonly skipped: TurnFilesReverted['skipped']
@@ -422,12 +503,17 @@ export type TurnMaxTokensChatNode = ChatNodeBase<
   'turnMaxTokens',
   TurnMaxTokensChatData
 >
+export type TurnBudgetChatNode = ChatNodeBase<'turnBudget', TurnBudgetChatData>
 export type CostCapChatNode = ChatNodeBase<'costCap', CostCapChatData>
 export type CompactionChatNode = ChatNodeBase<'compaction', CompactionChatData>
 export type ContextChatNode = ChatNodeBase<'context', ContextChatData>
 export type HookChatNode = ChatNodeBase<'hook', HookChatData>
 export type TurnTailChatNode = ChatNodeBase<'turnTail', TurnTailChatData>
 export type TurnFilesChatNode = ChatNodeBase<'turnFiles', TurnFilesChatData>
+export type DelegationResultChatNode = ChatNodeBase<
+  'delegationResult',
+  DelegationResultChatData
+>
 export type GoalChatNode = ChatNodeBase<'goal', GoalChatData>
 export type WorkflowRunChatNode = ChatNodeBase<'workflowRun', WorkflowRunView>
 
@@ -440,12 +526,14 @@ export type ChatNode =
   | FallbackChatNode
   | TurnErrorChatNode
   | TurnMaxTokensChatNode
+  | TurnBudgetChatNode
   | CostCapChatNode
   | CompactionChatNode
   | ContextChatNode
   | HookChatNode
   | TurnTailChatNode
   | TurnFilesChatNode
+  | DelegationResultChatNode
   | GoalChatNode
   | WorkflowRunChatNode
 
@@ -472,7 +560,9 @@ export interface ContextUsage {
 /**
  * One published chat state. `order` and scalar fields are immutable per
  * snapshot; `nodes` is a stable live reader (an old snapshot observes later
- * flushes through it), matching the dsh ChatSnapshot contract.
+ * flushes through it), matching the dsh ChatSnapshot contract. A flush that
+ * only grows the text of streaming assistant rows publishes no new snapshot
+ * (FIX-04): those rows reach the UI through their per-key node refs.
  */
 export interface ChatSnapshot {
   /** Visible node keys in render order. */
@@ -491,4 +581,9 @@ export interface ChatSnapshot {
   readonly contextUsage: ContextUsage | null
   /** Reference-stable Turn/Step timeline of the window. */
   readonly timeline: ConversationTimeline
+  /**
+   * Latest plan of the window (environment card 计划 row), kept by the
+   * snapshot builder; absent on hand-built snapshots (`planSummary()` scans).
+   */
+  readonly planSummary?: PlanSummary | null
 }

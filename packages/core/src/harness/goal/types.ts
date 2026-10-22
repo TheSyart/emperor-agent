@@ -150,6 +150,7 @@ export type GoalErrorCode =
   | 'GOAL_INVALID_BLOCK_REASON'
   | 'GOAL_INVALID_EDIT'
   | 'GOAL_INVALID_TRANSITION'
+  | 'GOAL_REQUIRED_DELEGATIONS'
 
 /** Who is asking: a host-attested human command, or a model tool call. */
 export type GoalAuthority = 'user' | 'model'

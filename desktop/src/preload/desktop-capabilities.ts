@@ -32,8 +32,20 @@ import {
   BROWSER_OPEN_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL,
+  DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL,
+  DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
+  HOME_BACKUP_DISCARD_CHANNEL,
+  HOME_BACKUP_EXPORT_CHANNEL,
+  HOME_BACKUP_OPEN_CHANNEL,
+  HOME_BACKUP_PLAN_CHANNEL,
+  HOME_BACKUP_RESTORE_CHANNEL,
+  HOME_BACKUP_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
+  MARKDOWN_REMOTE_IMAGE_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_RESET_CHANNEL,
@@ -41,15 +53,21 @@ import {
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
   type AgentPreviewUpdate,
+  type AppMenuCommand,
   type AgentPreviewPointer,
   type BrowserViewAction,
   type BrowserViewState,
@@ -80,6 +98,17 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
     /** A clicked web link: main picks the system or the built-in browser. */
     openLink: (url: string) => ipcRenderer.invoke(LINK_OPEN_CHANNEL, url),
+    /** A remote markdown image the user asked to see: main fetches it. */
+    loadRemoteImage: (url: string) =>
+      ipcRenderer.invoke(MARKDOWN_REMOTE_IMAGE_CHANNEL, { url }),
+    /** App menu items that act in the window (偏好设置… opens 设置). */
+    onMenuCommand: (listener: (command: AppMenuCommand) => void) => {
+      const wrapped = (_event: unknown, command: unknown) => {
+        if (command === 'open-settings') listener(command)
+      }
+      ipcRenderer.on(APP_MENU_COMMAND_CHANNEL, wrapped)
+      return () => ipcRenderer.removeListener(APP_MENU_COMMAND_CHANNEL, wrapped)
+    },
     openSkillsFolder: (input: {
       scope: 'user' | 'project'
       sessionId?: string | null
@@ -95,12 +124,43 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     vaultUnlock: (password: string) =>
       ipcRenderer.invoke(VAULT_UNLOCK_CHANNEL, { password }),
     vaultLock: () => ipcRenderer.invoke(VAULT_LOCK_CHANNEL),
-    vaultSetMaster: (password: string | null) =>
-      ipcRenderer.invoke(VAULT_MASTER_CHANNEL, { password }),
+    /** set (typed twice) / change / remove; change and remove need the current one. */
+    vaultMaster: (request: {
+      action: 'set' | 'change' | 'remove'
+      currentPassword?: string
+      password?: string
+      confirmPassword?: string
+    }) =>
+      ipcRenderer.invoke(VAULT_MASTER_CHANNEL, {
+        action: request.action,
+        ...(request.currentPassword === undefined
+          ? {}
+          : { currentPassword: request.currentPassword }),
+        ...(request.password === undefined
+          ? {}
+          : { password: request.password }),
+        ...(request.confirmPassword === undefined
+          ? {}
+          : { confirmPassword: request.confirmPassword }),
+      }),
     vaultReveal: (handleId: string) =>
       ipcRenderer.invoke(VAULT_REVEAL_CHANNEL, { handleId }),
     /** 清空 (Settings confirms first): every entry and the master password. */
     vaultReset: () => ipcRenderer.invoke(VAULT_RESET_CHANNEL),
+    /** 修复权限: make the local key private again. */
+    vaultRepairKey: () => ipcRenderer.invoke(VAULT_REPAIR_KEY_CHANNEL),
+    /** 重新开始（先备份） (Settings confirms first). */
+    vaultStartOver: () => ipcRenderer.invoke(VAULT_START_OVER_CHANNEL),
+    /** 导出凭据备份: main asks where to save it. */
+    vaultExport: (passphrase: string, confirmPassphrase: string) =>
+      ipcRenderer.invoke(VAULT_EXPORT_CHANNEL, {
+        passphrase,
+        confirmPassphrase,
+      }),
+    /** Main's open dialog picks the backup; no path crosses IPC. */
+    vaultImportPick: () => ipcRenderer.invoke(VAULT_IMPORT_PICK_CHANNEL),
+    vaultImport: (passphrase: string) =>
+      ipcRenderer.invoke(VAULT_IMPORT_CHANNEL, { passphrase }),
     /** Address-bar submit only; main normalizes and may answer ok:false. */
     openBrowserUrl: (url: string) =>
       ipcRenderer.invoke(BROWSER_OPEN_CHANNEL, { url }),
@@ -167,6 +227,40 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, { downloadId }),
     agentDownloadSaveAs: (downloadId: string) =>
       ipcRenderer.invoke(AGENT_DOWNLOAD_SAVE_AS_CHANNEL, { downloadId }),
+    /** 导出诊断包 (REL-01): stage and list; then export / reveal / discard by id. */
+    prepareDiagnosticsBundle: () =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL),
+    exportDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL, { id }),
+    revealDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL, { id }),
+    discardDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL, { id }),
+    // REL-03 备份与恢复: main picks every path; an opened backup is an id.
+    planHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_PLAN_CHANNEL),
+    exportHomeBackup: (input: {
+      includeSessions: boolean
+      passphrase?: string
+      confirmation?: string
+    }) =>
+      ipcRenderer.invoke(HOME_BACKUP_EXPORT_CHANNEL, {
+        includeSessions: input.includeSessions,
+        ...(input.passphrase === undefined
+          ? {}
+          : { passphrase: input.passphrase }),
+        ...(input.confirmation === undefined
+          ? {}
+          : { confirmation: input.confirmation }),
+      }),
+    revealHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_REVEAL_CHANNEL),
+    openHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_OPEN_CHANNEL),
+    restoreHomeBackup: (id: string, passphrase?: string) =>
+      ipcRenderer.invoke(HOME_BACKUP_RESTORE_CHANNEL, {
+        id,
+        ...(passphrase === undefined ? {} : { passphrase }),
+      }),
+    discardHomeBackup: (id: string) =>
+      ipcRenderer.invoke(HOME_BACKUP_DISCARD_CHANNEL, { id }),
     macHelperStatus: () => ipcRenderer.invoke(MAC_HELPER_STATUS_CHANNEL),
     macHelperRequestPermission: (permission: MacHelperPermission) =>
       ipcRenderer.invoke(MAC_HELPER_PERMISSION_CHANNEL, { permission }),

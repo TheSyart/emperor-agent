@@ -409,3 +409,82 @@ describe('session title (test_session_title.py)', () => {
     expect(fallbackSessionTitle('   !!!   ')).toBe('新会话')
   })
 })
+
+describe('SessionStore trash (FIX-01)', () => {
+  function seeded() {
+    const root = tmp('emperor-session-trash-')
+    const store = new SessionStore(root)
+    const keeper = store.create('Keeper')
+    const doomed = store.create('Doomed')
+    writeFileSync(join(store.sessionDir(doomed.id), 'log.jsonl'), 'line\n')
+    return { root, store, keeper, doomed }
+  }
+
+  it('moves a deleted session into .trash and out of the list', () => {
+    const { store, doomed } = seeded()
+    const trashed = store.trash(doomed.id, '2026-10-19T08:00:00.000Z')
+    expect(trashed?.id).toBe(doomed.id)
+    expect(store.get(doomed.id)).toBeNull()
+    expect(existsSync(store.sessionDir(doomed.id))).toBe(false)
+    const dir = join(store.sessionsDir, '.trash', doomed.id)
+    expect(readFileSync(join(dir, 'log.jsonl'), 'utf8')).toBe('line\n')
+    expect(store.listTrashed()).toEqual([
+      expect.objectContaining({
+        id: doomed.id,
+        title: 'Doomed',
+        deleted_at: '2026-10-19T08:00:00.000Z',
+      }),
+    ])
+  })
+
+  it('restores a trashed session with its entry and files unchanged', () => {
+    const { store, doomed } = seeded()
+    const before = store.get(doomed.id)
+    store.trash(doomed.id)
+    const restored = store.restoreTrashed(doomed.id)
+    expect(restored).toEqual(before)
+    expect(store.get(doomed.id)).toEqual(before)
+    expect(
+      readFileSync(join(store.sessionDir(doomed.id), 'log.jsonl'), 'utf8'),
+    ).toBe('line\n')
+    expect(store.listTrashed()).toEqual([])
+    // Survives a reload from disk.
+    expect(new SessionStore(store.root).get(doomed.id)?.title).toBe('Doomed')
+  })
+
+  it('keeps the last session and refuses to restore what is not there', () => {
+    const root = tmp('emperor-session-trash-last-')
+    const store = new SessionStore(root)
+    const only = store.create('Only')
+    expect(store.trash(only.id)).toBeNull()
+    expect(store.get(only.id)).not.toBeNull()
+    expect(store.restoreTrashed('missing')).toBeNull()
+  })
+
+  it('purges a trashed session and lists the ones past a cutoff', () => {
+    const { store, keeper, doomed } = seeded()
+    store.trash(doomed.id, '2026-09-01T00:00:00.000Z')
+    expect(store.trashedBefore(Date.parse('2026-10-01T00:00:00.000Z'))).toEqual(
+      [doomed.id],
+    )
+    expect(store.trashedBefore(Date.parse('2026-08-01T00:00:00.000Z'))).toEqual(
+      [],
+    )
+    expect(store.purgeTrashed(doomed.id)?.id).toBe(doomed.id)
+    expect(existsSync(join(store.sessionsDir, '.trash', doomed.id))).toBe(false)
+    expect(store.listTrashed()).toEqual([])
+    expect(store.get(keeper.id)).not.toBeNull()
+  })
+
+  it('never reads .trash back as a session when the index is rebuilt', () => {
+    const { store, doomed } = seeded()
+    store.trash(doomed.id)
+    unlinkSync(join(store.sessionsDir, 'index.json'))
+    const reloaded = new SessionStore(store.root)
+    expect(reloaded.list().map((item) => item.id)).not.toContain(doomed.id)
+    expect(reloaded.list().map((item) => item.id)).not.toContain('.trash')
+    expect(reloaded.diagnostics().rebuildReasons.join(' ')).not.toContain(
+      '.trash',
+    )
+  })
+})

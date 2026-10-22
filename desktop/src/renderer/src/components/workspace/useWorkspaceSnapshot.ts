@@ -11,6 +11,11 @@
  * activation, on window focus and every 5s while the window is focused.
  * Refresh-key bumps are debounced (280ms). A generation guard drops replies
  * that land after the session switched or a newer request started.
+ *
+ * The 审查 pane rides on this poll instead of keeping its own timer
+ * (FIX-05): it takes Git status and worktrees from each snapshot, and after
+ * a Git write calls `refresh({ force: true })` so a poll that read the
+ * repository before the write cannot land after it.
  */
 import {
   computed,
@@ -40,10 +45,18 @@ export interface WorkspaceSnapshotSource {
   projectPath: () => string
   /** Any change schedules a debounced refresh (e.g. transcript length). */
   refreshKey?: () => unknown
+  /**
+   * The session on screen when it differs from the polled one (a read-only
+   * child log). Panes accept file requests from it without rebinding the
+   * workspace, so the browser, terminal and Files tabs stay put.
+   */
+  viewedSessionId?: () => string
 }
 
 export interface WorkspaceSnapshotView {
   sessionId: ComputedRef<string>
+  /** The session on screen; equals sessionId unless a child log is open. */
+  viewedSessionId: ComputedRef<string>
   /** Snapshot project root, falling back to the bound project path. */
   projectPath: ComputedRef<string>
   snapshot: Readonly<ShallowRef<WorkspaceSnapshot | null>>
@@ -53,7 +66,11 @@ export interface WorkspaceSnapshotView {
   hasProject: ComputedRef<boolean>
   /** The loaded snapshot reports a git repository. */
   hasGit: ComputedRef<boolean>
-  refresh: () => Promise<void>
+  /**
+   * Refresh now; joins a request already in flight for the session unless
+   * `force` starts a new one (the older reply is then dropped).
+   */
+  refresh: (options?: { force?: boolean }) => Promise<void>
   scheduleRefresh: () => void
 }
 
@@ -63,6 +80,9 @@ const loading = ref(false)
 const error = ref('')
 
 const sessionId = computed(() => source.value?.sessionId() ?? '')
+const viewedSessionId = computed(
+  () => source.value?.viewedSessionId?.() || sessionId.value,
+)
 const boundProjectPath = computed(() => source.value?.projectPath() ?? '')
 const hasProject = computed(() =>
   Boolean(
@@ -83,7 +103,7 @@ let pollTimer: ReturnType<typeof setInterval> | undefined
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let binding: EffectScope | null = null
 
-async function refresh(): Promise<void> {
+async function refresh(options: { force?: boolean } = {}): Promise<void> {
   if (!hasProject.value) {
     generation += 1
     refreshingSession = ''
@@ -92,7 +112,7 @@ async function refresh(): Promise<void> {
     return
   }
   const owner = sessionId.value
-  if (loading.value && refreshingSession === owner) return
+  if (!options.force && loading.value && refreshingSession === owner) return
   const current = ++generation
   refreshingSession = owner
   loading.value = true
@@ -213,6 +233,7 @@ export function useWorkspaceSnapshot(
   }
   return {
     sessionId,
+    viewedSessionId,
     projectPath,
     snapshot,
     loading,

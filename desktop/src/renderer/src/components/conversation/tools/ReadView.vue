@@ -2,7 +2,7 @@
 /** ReadView — the returned file window through ReadBlock (IN/OUT fallback). */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import InOutCard from '../../ui/InOutCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import ReadBlock from '../../ui/ReadBlock.vue'
 import { readWindow, resultText, shortPath } from './toolModel'
 
@@ -18,7 +18,7 @@ const readWin = computed(() => readWindow(props.data))
     :label="shortPath(readWin.path)"
     :max-lines="24"
   />
-  <InOutCard
+  <IoBlock
     v-else-if="data.result"
     :output="resultText(data)"
     :error="data.result.isError"

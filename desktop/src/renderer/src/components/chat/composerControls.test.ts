@@ -19,22 +19,22 @@ describe('composer control model', () => {
     expect(source).toContain("submit('queue')")
     expect(source).not.toContain("submit('interject')")
     expect(source).toContain("emit('stop')")
-    const textarea = source.match(/<textarea[\s\S]*?\/>/)?.[0] || ''
-    expect(textarea).toContain(
-      ':disabled="goalCaptureStarting || props.interactionBlocked"',
+    // The editor stays writable while a turn runs (only blocked by a
+    // starting goal or a pending answer, or with no session here, F1).
+    const editor = source.match(/<ComposerEditor[\s\S]*?\/>/)?.[0] || ''
+    expect(editor).toContain(
+      'unavailable || goalCaptureStarting || props.interactionBlocked',
     )
-    expect(textarea).not.toContain(
-      ':disabled="props.busy || goalCaptureStarting"',
-    )
-    expect(source).toContain(':disabled="goalCaptureStarting"')
+    expect(editor).not.toContain('props.busy')
+    expect(source).toContain(':disabled="unavailable || goalCaptureStarting"')
     expect(source).not.toContain('等待当前任务结束后再添加')
-    const queueTray = readFileSync(
+    const queue = readFileSync(
       fileURLToPath(new URL('../composer/QueueDock.vue', import.meta.url)),
       'utf8',
     )
-    expect(queueTray).toContain('编辑消息')
-    expect(queueTray).toContain('插入当前执行')
-    expect(queueTray).toContain('删除')
+    expect(queue).toContain('编辑消息')
+    expect(queue).toContain('插入当前执行')
+    expect(queue).toContain('删除')
   })
 
   it('enables busy queue delivery for text or attachments', () => {
@@ -130,8 +130,8 @@ describe('composer control model', () => {
 
   it('uses pause semantics while the owner session Goal is running', () => {
     expect(composerStopPresentation(true)).toEqual({
-      title: '暂停当前 Goal',
-      label: '暂停 Goal',
+      title: '暂停当前目标',
+      label: '暂停目标',
     })
     expect(composerStopPresentation(false).title).toBe('停止当前任务')
   })

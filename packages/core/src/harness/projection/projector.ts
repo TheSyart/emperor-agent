@@ -22,6 +22,7 @@ import {
   type InteractionPayload,
 } from './interactions'
 import '../computer-use/events'
+import '../delegation/events'
 import '../subagent/manager'
 import '../compaction/events'
 import '../plan/plan-mode'
@@ -108,6 +109,8 @@ export class SessionProjector {
   private readonly questions = new Map<string, InteractionPayload>()
   private readonly grants = new Map<string, InteractionPayload>()
   private turnText = ''
+  /** `turnText` length when the current request attempt started. */
+  private attemptTextStart = 0
   private contextWindow: number | undefined
   private model: string | undefined
   private provider: string | undefined
@@ -154,6 +157,11 @@ export class SessionProjector {
       k += 1
     }
     switch (event.type) {
+      case 'delegation/projection': {
+        const { event: name, ...payload } = event.data
+        emit(name, payload)
+        break
+      }
       case 'host/user-meta':
         this.userMeta.set(event.data.messageId, event.data)
         break
@@ -166,6 +174,7 @@ export class SessionProjector {
       case 'step/start':
         this.step = event.data.step
         this.reasoning.clear()
+        this.attemptTextStart = this.turnText.length
         break
       case 'user/message': {
         // Admitted goal rounds advance `roundsStarted`; later goal changes are validated against it.
@@ -421,10 +430,23 @@ export class SessionProjector {
           source: 'core',
           ...(event.data.error === undefined
             ? { summary: '已压缩较早的对话' }
-            : { summary: event.data.error }),
+            : event.data.repaired === true
+              ? { summary: '应用中断，压缩未完成' }
+              : { summary: event.data.error }),
+        })
+        break
+      case 'compaction/warning':
+        emit('agent_thought', {
+          thought_id: `compaction-warning:${event.seq}`,
+          stage: 'compaction',
+          label: '上下文接近上限',
+          status: 'error',
+          source: 'core',
+          summary: `自动压缩已连续失败 ${event.data.failures} 次。上下文接近上限，建议 /compact 或新开会话。`,
         })
         break
       case 'llm/retry':
+        this.discardAttempt(emit)
         emit('agent_thought', {
           thought_id: `retry:${event.data.retryId}`,
           stage: 'retry',
@@ -444,6 +466,7 @@ export class SessionProjector {
         })
         break
       case 'llm/fallback':
+        this.discardAttempt(emit)
         emit('agent_thought', {
           thought_id: `fallback:${event.data.fallbackId}`,
           stage: 'retry',
@@ -592,6 +615,20 @@ export class SessionProjector {
           })
         } else if (reason.kind === 'interrupted') {
           emit('runtime_task_cancelled', { reason: 'interrupted' })
+        } else if (reason.kind === 'budget') {
+          emit('agent_thought', {
+            thought_id: `budget:${event.data.turn}`,
+            stage: 'retry',
+            label: '达到任务预算',
+            status: 'error',
+            source: 'core',
+            summary:
+              reason.limit === 'steps'
+                ? `本轮已执行 ${reason.maxSteps} 步，达到上限，已停止`
+                : reason.unpricedRoutes !== undefined
+                  ? `模型 ${reason.unpricedRoutes.join(', ')} 缺少单价，无法执行费用上限，已停止`
+                  : `本任务已用 $${(reason.spentUsdNanos / 1e9).toFixed(4)}，上限 $${(reason.capUsdNanos / 1e9).toFixed(4)}，已停止`,
+          })
         }
         emit('assistant_done', {
           content: this.turnText,
@@ -605,6 +642,20 @@ export class SessionProjector {
         break
     }
     return out
+  }
+
+  /**
+   * A failed request attempt is re-requested (retry or fallback): the text it
+   * streamed never becomes part of the reply. Drop it from the turn text and
+   * tell consumers (`assistant_reset` carries the turn's text so far).
+   */
+  private discardAttempt(
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): void {
+    this.reasoning.clear()
+    if (this.turnText.length <= this.attemptTextStart) return
+    this.turnText = this.turnText.slice(0, this.attemptTextStart)
+    emit('assistant_reset', { content: this.turnText })
   }
 
   /** Current goal snapshot for the UI (null when none). */

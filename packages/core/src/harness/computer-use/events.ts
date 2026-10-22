@@ -11,8 +11,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { RepairContributor } from '../../session-log/store'
-import type { SessionEvent } from '../../session-log/types'
+import type { RepairContributor, RepairStep } from '../../session-log/store'
 import type {
   ActionOutcome,
   ControlState,
@@ -193,7 +192,7 @@ export function redactAction(action: UiAction): RedactedUiAction {
   }
 }
 
-type Repair = Omit<SessionEvent, 'seq' | 'time'>
+type Repair = RepairStep
 
 /**
  * §10.2 crash repair:
@@ -202,61 +201,74 @@ type Repair = Omit<SessionEvent, 'seq' | 'time'>
  * - grant asked, never decided → decided `denied` (fail closed)
  * - target opened, never closed or released → closed `shutdown`
  */
-export const computerUseRepair: RepairContributor = (events) => {
-  const prepared = new Map<string, true>()
-  const dispatched = new Map<string, true>()
-  const grants = new Map<string, true>()
-  const targets = new Map<string, true>()
-  for (const event of events) {
-    switch (event.type) {
-      case 'ui/action-prepared':
-        prepared.set(event.data.operationId, true)
-        break
-      case 'ui/action-dispatched':
-        prepared.delete(event.data.operationId)
-        dispatched.set(event.data.operationId, true)
-        break
-      case 'ui/action-settled':
-        prepared.delete(event.data.operationId)
-        dispatched.delete(event.data.operationId)
-        break
-      case 'ui/grant-requested':
-        grants.set(event.data.requestId, true)
-        break
-      case 'ui/grant-decided':
-        grants.delete(event.data.requestId)
-        break
-      case 'ui/target-opened':
-        targets.set(event.data.targetId, true)
-        break
-      case 'ui/target-closed':
-      case 'ui/target-released':
-        targets.delete(event.data.targetId)
-        break
-      default:
-        break
+export const computerUseRepair: RepairContributor = {
+  id: 'computer-use',
+  pairs: [
+    ['ui/action-prepared', 'ui/action-settled'],
+    ['ui/action-dispatched', 'ui/action-settled'],
+    ['ui/grant-requested', 'ui/grant-decided'],
+    ['ui/target-opened', 'ui/target-closed'],
+  ],
+  repair(events) {
+    const prepared = new Map<string, number>()
+    const dispatched = new Map<string, number>()
+    const grants = new Map<string, number>()
+    const targets = new Map<string, number>()
+    for (const event of events) {
+      switch (event.type) {
+        case 'ui/action-prepared':
+          prepared.set(event.data.operationId, event.seq)
+          break
+        case 'ui/action-dispatched':
+          prepared.delete(event.data.operationId)
+          dispatched.set(event.data.operationId, event.seq)
+          break
+        case 'ui/action-settled':
+          prepared.delete(event.data.operationId)
+          dispatched.delete(event.data.operationId)
+          break
+        case 'ui/grant-requested':
+          grants.set(event.data.requestId, event.seq)
+          break
+        case 'ui/grant-decided':
+          grants.delete(event.data.requestId)
+          break
+        case 'ui/target-opened':
+          targets.set(event.data.targetId, event.seq)
+          break
+        case 'ui/target-closed':
+        case 'ui/target-released':
+          targets.delete(event.data.targetId)
+          break
+        default:
+          break
+      }
     }
-  }
-  const out: Repair[] = []
-  for (const operationId of prepared.keys())
-    out.push({
-      type: 'ui/action-settled',
-      data: { operationId, outcome: 'cancelled', errorCode: 'INTERRUPTED' },
-    } as Repair)
-  for (const operationId of dispatched.keys())
-    out.push({
-      type: 'ui/action-settled',
-      data: { operationId, outcome: 'unknown', errorCode: 'OUTCOME_UNKNOWN' },
-    } as Repair)
-  for (const requestId of grants.keys())
-    out.push({
-      type: 'ui/grant-decided',
-      data: { requestId, decision: 'denied', cause: 'repair' },
-    } as Repair)
-  for (const targetId of targets.keys())
-    out.push({
-      type: 'ui/target-closed',
-      data: { targetId, reason: 'shutdown' },
-    } as Repair)
-  return out
+    const out: Repair[] = []
+    for (const [operationId, openedAt] of prepared)
+      out.push({
+        type: 'ui/action-settled',
+        data: { operationId, outcome: 'cancelled', errorCode: 'INTERRUPTED' },
+        openedAt,
+      } as Repair)
+    for (const [operationId, openedAt] of dispatched)
+      out.push({
+        type: 'ui/action-settled',
+        data: { operationId, outcome: 'unknown', errorCode: 'OUTCOME_UNKNOWN' },
+        openedAt,
+      } as Repair)
+    for (const [requestId, openedAt] of grants)
+      out.push({
+        type: 'ui/grant-decided',
+        data: { requestId, decision: 'denied', cause: 'repair' },
+        openedAt,
+      } as Repair)
+    for (const [targetId, openedAt] of targets)
+      out.push({
+        type: 'ui/target-closed',
+        data: { targetId, reason: 'shutdown' },
+        openedAt,
+      } as Repair)
+    return out
+  },
 }

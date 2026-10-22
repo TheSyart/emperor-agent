@@ -17,6 +17,7 @@ import type { ToolRegistry } from '../tools/registry'
 import type { WorkflowEngine } from './engine'
 import type { WorkflowRunRegistry, WorkflowRunTool } from './records'
 import type { ChildProvider, WorkflowResult, WorkflowRun } from './types'
+import type { JobRegistry } from '../jobs/registry'
 
 // ── workflow ───────────────────────────────────────────────────────────
 
@@ -26,14 +27,14 @@ export const WORKFLOW_DESCRIPTION = `Run a JavaScript workflow script that orche
 The workflow's identity rides the \`meta\` parameter as JSON: required \`name\` (short kebab-case) and \`description\` strings, optional \`whenToUse\` string and \`phases\` array (\`{title, detail?, provider?, model?}\`). The \`script\` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO \`export const meta\` statement — meta is a parameter, not code), running with top-level await; end with \`return <value>\` — the value must be JSON-serializable and is this tool's result.
 
 Script-body hooks:
-- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides (either may be provided alone). Anything else (\`effort\`/\`isolation\`/\`agentType\`) is rejected loudly.
+- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides (either may be provided alone). External executors use \`backend\` (internal/claude-code/codex) and \`profileId\`; external calls reject the internal \`provider\` option. Their output includes the retained workspace location and remains unverified until artifact acceptance. Anything else (\`effort\`/\`isolation\`/\`agentType\`) is rejected loudly.
 - \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. An ordinary stage throw drops that ITEM to \`null\` and skips its remaining stages.
 - \`parallel(thunks): Promise<any[]>\` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to \`null\`.
 - \`phase(title)\` — start a progress phase; \`log(message)\` — narrate progress; \`args\` — the tool call's \`args\` input, verbatim.
 
 Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item \`null\`.
 
-Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.`
+Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. By default the run executes in the foreground: this call returns when the whole script finishes. With run_in_background: true it becomes a background job — the call returns the job id at once, the result arrives as a notice when the run settles (read it with job_output), and job_kill stops it. A run is stopped after 30 minutes.`
 
 export const WORKFLOW_PROMPT_SECTION = (toolName: string): string =>
   `Use the ${toolName} tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.`
@@ -115,6 +116,12 @@ const workflowInput = z.object({
     .describe(
       'Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {"files": [...]}).',
     ),
+  run_in_background: z
+    .boolean()
+    .optional()
+    .describe(
+      'Run as a background job: the call returns its job id at once and the result arrives as a notice when the run settles; job_kill stops it.',
+    ),
 })
 
 export interface WorkflowToolDeps {
@@ -122,6 +129,8 @@ export interface WorkflowToolDeps {
   runs: WorkflowRunRegistry
   toolName?: string
   maxResultChars?: number
+  /** Background runs are jobs (KRN-09); absent, `run_in_background` is refused. */
+  jobs?: Pick<JobRegistry, 'start'>
 }
 
 /**
@@ -130,22 +139,22 @@ export interface WorkflowToolDeps {
  */
 async function collectRun(
   run: WorkflowRun,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   runs: WorkflowRunRegistry,
   finish: (result: WorkflowResult) => string | undefined,
 ): Promise<WorkflowResult> {
   const onAbort = (): void => {
     run.cancel('parent step aborted')
   }
-  signal.addEventListener('abort', onAbort, { once: true })
-  if (signal.aborted) run.cancel('parent step aborted')
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) run.cancel('parent step aborted')
   let result: WorkflowResult | undefined
   let rendered: string | undefined
   try {
     result = await run.result
     return result
   } finally {
-    signal.removeEventListener('abort', onAbort)
+    signal?.removeEventListener('abort', onAbort)
     try {
       // Member listeners stay registered through disposal: the engine may
       // synthesize cancelled member endings while reaching quiescence.
@@ -193,6 +202,11 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
         throw new ToolError(
           'workflow tool requires a calling agent (exec.agent was undefined)',
         )
+      if (args.run_in_background === true && deps.jobs === undefined)
+        throw new ToolError(
+          'run_in_background is unavailable here: background jobs are not installed',
+        )
+      const background = args.run_in_background === true
       // META_INVALID / SCRIPT_PARSE throw synchronously here → isError the model can correct.
       const run = deps.engine.start({
         script: args.script,
@@ -200,13 +214,67 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
         ...(args.args === undefined ? {} : { args: args.args }),
         parent,
         callId: context.callId,
-        signal: context.signal,
+        // A background run outlives the step that started it.
+        ...(background ? {} : { signal: context.signal }),
       })
       deps.runs.begin(run, {
         owner: parent,
         tool: 'workflow',
         callId: context.callId,
       })
+      if (background) {
+        const render = (settled: WorkflowResult): string =>
+          renderWorkflowResult(
+            run.meta.name,
+            settled.agentsStarted,
+            settled.value,
+            maxResultChars,
+          )
+        const jobId = deps.jobs!.start({
+          kind: 'workflow',
+          label: run.meta.name,
+          description: run.meta.description,
+          owner: parent,
+          run: () => ({
+            cancel: (reason) =>
+              run.cancel(reason ?? 'background workflow stopped'),
+            done: collectRun(run, undefined, deps.runs, (settled) =>
+              settled.stopReason === 'completed'
+                ? boundRecord(render(settled))
+                : undefined,
+            ).then(
+              (settled) => {
+                const error = workflowStopReasonError(settled)
+                return error === undefined
+                  ? { status: 'completed' as const, output: render(settled) }
+                  : {
+                      status:
+                        settled.stopReason === 'cancelled'
+                          ? ('killed' as const)
+                          : ('failed' as const),
+                      detail: error,
+                      output: error,
+                    }
+              },
+              (error: unknown) => ({
+                status: 'failed' as const,
+                detail: String(error),
+                output: String(error),
+              }),
+            ),
+          }),
+        })
+        return {
+          content: `Started workflow "${run.meta.name}" in the background as job ${jobId}. Its result arrives as a notice when it settles; job_kill ${jobId} stops it.`,
+          meta: {
+            kind: 'workflow',
+            runId: run.id,
+            name: run.meta.name,
+            background: true,
+            jobId,
+          },
+        }
+      }
       const result = await collectRun(
         run,
         context.signal,
@@ -772,6 +840,8 @@ export interface InstallWorkflowOptions {
   toolName?: string
   maxResultChars?: number
   ralph?: RalphConfig
+  /** Background workflow runs are jobs of this registry (KRN-09). */
+  jobs?: Pick<JobRegistry, 'start'>
 }
 
 /**
@@ -793,6 +863,7 @@ export function installWorkflow(
         engine: options.engine,
         runs: options.runs,
         toolName,
+        ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
         ...(options.maxResultChars === undefined
           ? {}
           : { maxResultChars: options.maxResultChars }),

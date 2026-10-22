@@ -3,7 +3,10 @@
  * while `browser_download` has armed it: the file goes to
  * `~/.emperor/browser/downloads/<task>/` with a safe, unique name, is capped
  * in size, refused when it is an executable or installer, and hashed
- * (SHA-256) when complete. Every other download is cancelled and noted.
+ * (SHA-256) when complete. A completed file gets the macOS source mark
+ * (`com.apple.quarantine`, SEC-10) so Gatekeeper checks it before it first
+ * runs; when that fails the file is kept and listed as 未能标记来源. Every
+ * other download is cancelled and noted.
  */
 
 import { createHash, randomBytes } from 'node:crypto'
@@ -31,6 +34,7 @@ import {
   isExecutableDownload,
   safeDownloadName,
 } from '@emperor/core/host-capabilities'
+import { createQuarantine } from '../quarantine'
 
 export interface DownloadItemLike {
   getFilename(): string
@@ -71,6 +75,8 @@ export interface DownloadInboxOptions {
    */
   readonly indexPath?: string
   hashFile?(path: string): Promise<string>
+  /** The source mark; default `createQuarantine()` (macOS `xattr`). */
+  quarantine?(path: string): Promise<void>
   makeDirectory?(path: string): Promise<void>
   exists?(path: string): boolean
   now?(): number
@@ -89,6 +95,8 @@ export interface InboxDownload {
   readonly bytes: number
   /** The file is still where the inbox last put it. */
   readonly exists: boolean
+  /** The macOS source mark could not be set (未能标记来源). */
+  readonly unmarked?: true
 }
 
 interface Armed {
@@ -107,6 +115,8 @@ interface SavedDownload {
   readonly origin?: string
   readonly savedAt?: number
   readonly bytes?: number
+  /** `com.apple.quarantine` could not be set on the file. */
+  readonly unmarked?: true
 }
 
 /**
@@ -145,8 +155,13 @@ export class DownloadInbox {
   private readonly armed = new Map<string, Armed>()
   private readonly saved = new Map<string, SavedDownload>()
   private indexLoaded = false
+  private readonly quarantine: (path: string) => Promise<void>
 
-  constructor(private readonly options: DownloadInboxOptions) {}
+  private newerIndex = false
+
+  constructor(private readonly options: DownloadInboxOptions) {
+    this.quarantine = options.quarantine ?? createQuarantine()
+  }
 
   /**
    * Arm `targetId` for exactly one download, then run `trigger` (the click
@@ -284,7 +299,18 @@ export class DownloadInbox {
         return
       }
       void (this.options.hashFile ?? sha256File)(path).then(
-        (sha256) => {
+        async (sha256) => {
+          // Marked before the Agent hears of it; a file that cannot be
+          // marked is kept, and the download list says so.
+          const marked = await this.quarantine(path).then(
+            () => true,
+            (cause: unknown) => {
+              console.warn(
+                `Agent download ${downloadId} could not get the quarantine mark: ${cause instanceof Error ? cause.message : String(cause)}`,
+              )
+              return false
+            },
+          )
           this.remember(downloadId, {
             path,
             ...(entry.request.ownerSessionId === undefined
@@ -293,6 +319,7 @@ export class DownloadInbox {
             ...(base.origin === null ? {} : { origin: base.origin }),
             savedAt: (this.options.now ?? Date.now)(),
             bytes,
+            ...(marked ? {} : { unmarked: true as const }),
           })
           entry.settle({
             ...base,
@@ -355,6 +382,7 @@ export class DownloadInbox {
           time: entry.savedAt ?? file?.time ?? 0,
           bytes: entry.bytes ?? file?.bytes ?? 0,
           exists: present,
+          ...(entry.unmarked ? { unmarked: true as const } : {}),
         }
       })
       .sort((a, b) => b.time - a.time)
@@ -468,7 +496,8 @@ export class DownloadInbox {
 
   private persistIndex(): void {
     const indexPath = this.options.indexPath
-    if (indexPath === undefined) return
+    // A newer Emperor's index stays as it is (REL-03).
+    if (indexPath === undefined || this.newerIndex) return
     try {
       const temp = join(
         dirname(indexPath),
@@ -495,6 +524,7 @@ export class DownloadInbox {
         version?: unknown
         entries?: unknown
       }
+      if (Number(parsed.version) > 1) this.newerIndex = true
       if (parsed.version !== 1 || !Array.isArray(parsed.entries)) return
       for (const item of parsed.entries.slice(-INDEX_LIMIT)) {
         if (!Array.isArray(item) || item.length !== 2) continue
@@ -505,6 +535,7 @@ export class DownloadInbox {
           origin?: unknown
           savedAt?: unknown
           bytes?: unknown
+          unmarked?: unknown
         }
         if (
           typeof id !== 'string' ||
@@ -523,6 +554,7 @@ export class DownloadInbox {
             : {}),
           ...(count(entry.savedAt) ? { savedAt: entry.savedAt } : {}),
           ...(count(entry.bytes) ? { bytes: entry.bytes } : {}),
+          ...(entry.unmarked === true ? { unmarked: true as const } : {}),
         })
       }
     } catch {

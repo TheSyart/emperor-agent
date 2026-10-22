@@ -14,8 +14,8 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 import type { PullRequestDiffResult } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
 import DiffBlock from '../../ui/DiffBlock.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
-import StatusBadge from '../../settings/ui/StatusBadge.vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import Badge from '../../ui/Badge.vue'
 import { pullIcons } from './pullIcons'
 import {
   diffFileStartsOpen,
@@ -117,11 +117,10 @@ function emptyNote(file: PullDiffFile): string {
 
     <EmptyState
       v-else-if="entry.error && !entry.data"
-      variant="plain"
       title="无法加载 diff"
       :description="entry.error.message"
     >
-      <Button size="sm" variant="outline" @click="emit('retry')">重试</Button>
+      <Button size="sm" variant="secondary" @click="emit('retry')">重试</Button>
     </EmptyState>
 
     <template v-else-if="entry.data">
@@ -132,11 +131,7 @@ function emptyNote(file: PullDiffFile): string {
         </button>
       </p>
 
-      <EmptyState
-        v-if="!files.length"
-        variant="plain"
-        title="这个 Pull Request 没有文件改动"
-      />
+      <EmptyState v-if="!files.length" title="这个 Pull Request 没有文件改动" />
 
       <template v-else>
         <div class="diff-toolbar">
@@ -174,12 +169,12 @@ function emptyNote(file: PullDiffFile): string {
               <template v-if="file.oldPath">{{ file.oldPath }} → </template
               >{{ file.path }}
             </span>
-            <StatusBadge
+            <Badge
               v-if="diffFileStatusLabel(file.status)"
               :tone="file.status === 'deleted' ? 'error' : 'neutral'"
             >
               {{ diffFileStatusLabel(file.status) }}
-            </StatusBadge>
+            </Badge>
             <span class="file-stats">
               <span class="add">+{{ file.additions }}</span>
               <span class="del">−{{ file.deletions }}</span>
@@ -210,7 +205,7 @@ function emptyNote(file: PullDiffFile): string {
 
 .diff-loading {
   padding: var(--space-6) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: center;
@@ -235,7 +230,7 @@ function emptyNote(file: PullDiffFile): string {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -250,9 +245,9 @@ function emptyNote(file: PullDiffFile): string {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
@@ -262,12 +257,12 @@ function emptyNote(file: PullDiffFile): string {
 }
 
 .link:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .diff-file {
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
 }
@@ -285,13 +280,13 @@ function emptyNote(file: PullDiffFile): string {
   border: none;
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
 
 .diff-file[data-open] .file-head {
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   border-radius: var(--radius-card) var(--radius-card) 0 0;
 }
 
@@ -306,7 +301,7 @@ function emptyNote(file: PullDiffFile): string {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .file-head:disabled .chevron {
@@ -318,7 +313,7 @@ function emptyNote(file: PullDiffFile): string {
   min-width: 0;
   overflow: hidden;
   font: var(--font-code-small);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -343,7 +338,7 @@ function emptyNote(file: PullDiffFile): string {
 .file-note {
   padding: 0 var(--space-3) var(--space-2-5)
     calc(var(--space-3) + var(--space-5) + var(--space-0-5));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }

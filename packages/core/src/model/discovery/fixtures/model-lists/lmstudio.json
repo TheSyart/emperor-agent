@@ -1,0 +1,77 @@
+{
+  "vendor": "lmstudio",
+  "source": "Shape: lmstudio.ai/docs/developer/rest/list (GET /api/v1/models: models[] with key, type, loaded_instances[].config.context_length, max_context_length, capabilities; checked 2026-10-19).",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:1234/api/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "models": [
+            {
+              "type": "llm",
+              "publisher": "qwen",
+              "key": "qwen/qwen3-coder-30b",
+              "display_name": "Qwen3 Coder 30B",
+              "architecture": "qwen3moe",
+              "quantization": { "name": "Q4_K_M", "bits_per_weight": 4.8 },
+              "size_bytes": 18556700000,
+              "params_string": "30B",
+              "loaded_instances": [
+                {
+                  "id": "qwen/qwen3-coder-30b",
+                  "config": {
+                    "context_length": 32768,
+                    "eval_batch_size": 512,
+                    "parallel": 4,
+                    "flash_attention": true,
+                    "offload_kv_cache_to_gpu": true
+                  }
+                }
+              ],
+              "max_context_length": 262144,
+              "format": "gguf",
+              "capabilities": {
+                "vision": false,
+                "trained_for_tool_use": true,
+                "reasoning": {
+                  "allowed_options": ["off", "on"],
+                  "default": "on"
+                }
+              }
+            },
+            {
+              "type": "llm",
+              "publisher": "google",
+              "key": "google/gemma-3-27b",
+              "display_name": "Gemma 3 27B",
+              "architecture": "gemma3",
+              "quantization": { "name": "Q4_K_M", "bits_per_weight": 4.5 },
+              "size_bytes": 16800000000,
+              "params_string": "27B",
+              "loaded_instances": [],
+              "max_context_length": 131072,
+              "format": "gguf",
+              "capabilities": { "vision": true, "trained_for_tool_use": false }
+            },
+            {
+              "type": "embedding",
+              "publisher": "nomic-ai",
+              "key": "text-embedding-nomic-embed-text-v1.5",
+              "display_name": "Nomic Embed Text v1.5",
+              "quantization": { "name": "Q8_0", "bits_per_weight": 8 },
+              "size_bytes": 146000000,
+              "params_string": null,
+              "loaded_instances": [],
+              "max_context_length": 2048,
+              "format": "gguf"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

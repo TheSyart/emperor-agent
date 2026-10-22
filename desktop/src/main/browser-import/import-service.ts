@@ -2,9 +2,12 @@
  * Orchestrates "从浏览器导入" (ST-06). `listImportSources` gives the dialog its
  * source dropdown and per-browser running state; `importBrowserData` reads the
  * chosen profile, saves passwords into the vault (skipping duplicates and
- * non-web realms) and writes cookies into the selected persistent profile's
- * session. Everything runs in the main process; the caller (IPC) only learns
- * counts. Logs carry counts only — never a password or a cookie value.
+ * non-web realms) and hands cookies to the selected persistent profile's
+ * sink: in main that is `ImportedCookieStore`, which sets them into the
+ * profile's session in memory and seals them in its imported-cookies.el1,
+ * never in Chromium's `Cookies` (SEC-10). Everything runs in the main
+ * process; the caller (IPC) only learns counts. Logs carry counts only —
+ * never a password or a cookie value.
  */
 import { homedir } from 'node:os'
 import { isExactHttpOrigin } from '../computer-use/web-origin'
@@ -92,6 +95,15 @@ interface VaultLike {
     username?: string
     password: string
   }): unknown
+  /** Save several in one write (preferred; one fsync for the whole import). */
+  saveMany?(
+    drafts: Array<{
+      label: string
+      bindings: Array<{ kind: 'origin'; origin: string }>
+      username?: string
+      password: string
+    }>,
+  ): unknown
 }
 
 /** What `session.cookies.set` takes (the fields we fill). */
@@ -107,7 +119,10 @@ export interface CookieToSet {
   domain?: string
 }
 
-/** Writes cookies into one persistent profile's session, then flushes. */
+/**
+ * Takes the cookies for one persistent profile; `flush` once all are in
+ * (main: `ImportedCookieStore.sinkFor`, memory plus a sealed file).
+ */
 export interface CookieSink {
   set(cookie: CookieToSet): Promise<void>
   flush(): Promise<void>
@@ -233,19 +248,28 @@ export async function importBrowserData(
           entry.username !== undefined
         )
           existing.add(`${binding.origin}\n${entry.username}`)
+    const drafts: Array<{
+      label: string
+      bindings: Array<{ kind: 'origin'; origin: string }>
+      username?: string
+      password: string
+    }> = []
     for (const record of data.passwords) {
       if (!isExactHttpOrigin(record.origin)) continue
       const key = `${record.origin}\n${record.username}`
       if (existing.has(key)) continue
-      deps.vault.save({
+      drafts.push({
         label: labelFor(record.origin),
         bindings: [{ kind: 'origin', origin: record.origin }],
         ...(record.username ? { username: record.username } : {}),
         password: record.password,
       })
       existing.add(key)
-      passwords += 1
     }
+    // One write for the whole import: per-entry fsync froze the app (MAIN-7).
+    if (drafts.length && deps.vault.saveMany) deps.vault.saveMany(drafts)
+    else for (const draft of drafts) deps.vault.save(draft)
+    passwords = drafts.length
   }
 
   let sites = 0

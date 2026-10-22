@@ -17,7 +17,6 @@ import type { GrantAnswerer } from '../computer-use/grants/ask'
 import type { UiGrantScope } from '../computer-use/types'
 import {
   PERMISSION_ALLOW,
-  PERMISSION_DENY,
   PERMISSION_QUESTION_ID,
   PLAN_APPROVE_LABEL,
   PLAN_KEEP_LABEL,
@@ -168,27 +167,33 @@ export class PendingInteractions {
 
   readonly questionAnswerer: UserQuestionAnswerer = (request) =>
     new Promise<UserAnswers>((resolve, reject) => {
+      const abort = () => {
+        if (this.pending.get(wireId) === entry) {
+          this.pending.delete(wireId)
+          this.changed(entry.sessionId)
+          reject(new UserQuestionDismissed('the question was cancelled'))
+        }
+      }
+      const cleanup = () => request.signal?.removeEventListener('abort', abort)
       const entry: PendingQuestion = {
         kind: request.intent?.kind === 'plan-review' ? 'plan' : 'question',
         id: request.id,
         sessionId: request.agent.id,
         questions: request.questions,
-        resolve,
-        reject,
+        resolve: (answers) => {
+          cleanup()
+          resolve(answers)
+        },
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
       }
       const wireId = this.wireId(entry)
       this.pending.set(wireId, entry)
-      request.signal?.addEventListener(
-        'abort',
-        () => {
-          if (this.pending.get(wireId) === entry) {
-            this.pending.delete(wireId)
-            this.changed(entry.sessionId)
-          }
-        },
-        { once: true },
-      )
-      this.changed(entry.sessionId)
+      request.signal?.addEventListener('abort', abort, { once: true })
+      if (request.signal?.aborted) abort()
+      else this.changed(entry.sessionId)
     })
 
   /** Computer Use grant cards (`grant_<id>`); keyed by the root session. */
@@ -254,14 +259,10 @@ export class PendingInteractions {
       const answer = uiAnswer(
         answers[PERMISSION_QUESTION_ID] ?? Object.values(answers)[0],
       )
-      const allowed =
-        answer.optionId === PERMISSION_ALLOW ||
-        (answer.optionId === undefined && /允许|allow/i.test(answer.choice))
+      // Only the allow option id allows: free text like 「不允许」 never does.
       this.take(wireId)
       entry.resolve(
-        allowed && answer.optionId !== PERMISSION_DENY
-          ? 'allowed-once'
-          : 'rejected',
+        answer.optionId === PERMISSION_ALLOW ? 'allowed-once' : 'rejected',
       )
       return
     }

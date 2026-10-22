@@ -3,7 +3,9 @@ import {
   referencesFit,
   type MessageReference,
 } from '../harness/host/message-references'
+import type { DraftSessionInput } from '../api/chat-service'
 import type { SkillInfoPayload } from '../api/services/skill-service'
+import { isDraftSessionId } from '../sessions/constants'
 import { builtinCommandDescriptors } from './builtins'
 import {
   CommandInvocationStore,
@@ -32,6 +34,20 @@ export interface CommandSessionContext {
   exists: boolean
 }
 
+/**
+ * A start-page draft (`draft:<uuid>`): Core has no session for it yet, only
+ * the mode and project its session will get — the `draftSession` that
+ * `chat.submit` and `goals.start` carry (FIX-14).
+ */
+export type CommandDraftSession = DraftSessionInput
+
+/** Whose catalog `list` / `complete` read: a session, or a draft id with its context. */
+export interface CommandOwner {
+  sessionId: string
+  /** Read only with a draft id; none: a Chat draft. */
+  draftSession?: CommandDraftSession | null
+}
+
 export interface CommandExecutionContext {
   sessionId: string
   invocationId: string
@@ -49,6 +65,8 @@ export interface CommandExecutionContext {
 export interface CommandPlatformDeps {
   stateRoot: string
   listSkills: (sessionId: string) => SkillInfoPayload[]
+  /** The Skills a draft's session will see (its Build project's included). */
+  listDraftSkills: (draft: CommandDraftSession) => SkillInfoPayload[]
   sessionContext: (
     sessionId: string,
   ) => CommandSessionContext | Promise<CommandSessionContext>
@@ -81,13 +99,14 @@ export class CommandPlatform {
     this.store = new CommandInvocationStore(deps.stateRoot)
   }
 
-  async list(input: {
-    sessionId: string
-    includeUnavailable?: boolean
-    invocationSource?: CommandInvocationSource
-  }): Promise<CommandDescriptor[]> {
-    const registry = this.registry(input.sessionId)
-    const session = await this.deps.sessionContext(input.sessionId)
+  async list(
+    input: CommandOwner & {
+      includeUnavailable?: boolean
+      invocationSource?: CommandInvocationSource
+    },
+  ): Promise<CommandDescriptor[]> {
+    const registry = this.registry(input)
+    const session = await this.sessionFor(input)
     const source = input.invocationSource ?? 'desktop'
     return registry
       .list()
@@ -116,13 +135,14 @@ export class CommandPlatform {
     }
   }
 
-  async complete(input: {
-    sessionId: string
-    commandId: string
-    rawArgs: string
-    cursor: number
-    invocationSource: CommandInvocationSource
-  }): Promise<CommandCompletion[]> {
+  async complete(
+    input: CommandOwner & {
+      commandId: string
+      rawArgs: string
+      cursor: number
+      invocationSource: CommandInvocationSource
+    },
+  ): Promise<CommandCompletion[]> {
     const descriptor = await this.descriptorFor(input)
     if (!descriptor.available) return []
     const dynamic = await this.deps.completeDynamic(
@@ -177,7 +197,7 @@ export class CommandPlatform {
       throw error
     }
     if (!parsed) return rejected('not_a_command', '输入不是有效斜杠命令。')
-    const registry = this.registry(input.sessionId)
+    const registry = this.registry({ sessionId: input.sessionId })
     const byId = registry.get(input.commandId)
     const byName = registry.resolveName(parsed.name)
     if (!byId || !byName || byId.id !== byName.id)
@@ -272,28 +292,44 @@ export class CommandPlatform {
     return await execute()
   }
 
-  private registry(sessionId: string): CommandRegistry {
+  private registry(owner: CommandOwner): CommandRegistry {
     const registry = new CommandRegistry()
     registry.registerMany(builtinCommandDescriptors())
     registry.registerMany(
       resolveSkillCommandCatalog(
-        this.deps.listSkills(sessionId),
+        isDraftSessionId(owner.sessionId)
+          ? this.deps.listDraftSkills(owner.draftSession ?? {})
+          : this.deps.listSkills(owner.sessionId),
         registry.reservedNames(),
       ).descriptors,
     )
     return registry
   }
 
-  private async descriptorFor(input: {
-    sessionId: string
-    commandId: string
-    invocationSource: CommandInvocationSource
-  }): Promise<CommandDescriptor> {
-    const descriptor = this.registry(input.sessionId).get(input.commandId)
+  /**
+   * A draft lists and completes as the new, idle session it becomes: the
+   * desktop creates that session before `commands.invoke`, which still
+   * needs a real one.
+   */
+  private async sessionFor(
+    owner: CommandOwner,
+  ): Promise<CommandSessionContext> {
+    return isDraftSessionId(owner.sessionId)
+      ? { exists: true }
+      : await this.deps.sessionContext(owner.sessionId)
+  }
+
+  private async descriptorFor(
+    input: CommandOwner & {
+      commandId: string
+      invocationSource: CommandInvocationSource
+    },
+  ): Promise<CommandDescriptor> {
+    const descriptor = this.registry(input).get(input.commandId)
     if (!descriptor) throw new Error(`unknown command: ${input.commandId}`)
     return availability(
       descriptor,
-      await this.deps.sessionContext(input.sessionId),
+      await this.sessionFor(input),
       input.invocationSource,
     )
   }

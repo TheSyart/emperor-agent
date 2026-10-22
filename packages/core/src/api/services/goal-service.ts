@@ -6,6 +6,7 @@
  */
 
 import { EmperorError, OperationRetiredError } from '../../errors'
+import { SessionRequiredError } from '../../harness/host/scope'
 import type { Agent } from '../../harness/agent/agent'
 import type { GoalService as HarnessGoalService } from '../../harness/goal/service'
 import type { GoalRef, GoalView } from '../../harness/goal/types'
@@ -25,6 +26,11 @@ export interface GoalOperationResult {
   accepted: boolean
   /** Post-mutation goal; `null` after a cancel (clear). */
   goal: GoalView | null
+  /**
+   * `goals.start`: the session the goal lives in — the real session a
+   * draft id was materialized into, otherwise the requested one.
+   */
+  sessionId?: string
   /** Tombstone ref written by a cancel. */
   cleared?: GoalRef
 }
@@ -37,13 +43,15 @@ export interface GoalServiceDeps {
   goals: HarnessGoalService
   agentFor(sessionId: string): Agent
   goalView(sessionId: string): GoalPayload | null
-  activeSessionId(): string | null
-  /** Materialize a draft session before the first goal starts in it. */
+  /**
+   * Materialize a draft session before the first goal starts in it;
+   * resolves the session the draft became (a real session id).
+   */
   materializeSession?(input: {
     sessionId: string
     clientDraftId?: string | null
     draftSession?: unknown
-  }): Promise<unknown>
+  }): Promise<{ id: string } | null | undefined>
 }
 
 export class GoalServiceError extends EmperorError {
@@ -59,12 +67,10 @@ export class GoalService {
     const sessionId = this.sessionId(input.sessionId, 'goals.start')
     const objective = String(input.objective ?? '').trim()
     if (!objective)
-      throw new GoalServiceError(
-        'goal_objective_invalid',
-        'Goal 目标不能为空。',
-      )
+      throw new GoalServiceError('goal_objective_invalid', '目标不能为空。')
+    let target = sessionId
     if (this.deps.materializeSession) {
-      await this.deps.materializeSession({
+      const materialized = await this.deps.materializeSession({
         sessionId,
         ...(input.clientDraftId !== undefined
           ? { clientDraftId: input.clientDraftId }
@@ -73,8 +79,11 @@ export class GoalService {
           ? { draftSession: input.draftSession }
           : {}),
       })
+      // A draft id becomes a new session; the goal belongs there.
+      if (typeof materialized?.id === 'string' && materialized.id)
+        target = materialized.id
     }
-    const agent = this.deps.agentFor(sessionId)
+    const agent = this.deps.agentFor(target)
     const maxRounds = input.maxRounds ?? undefined
     const goal = this.deps.goals.create(
       agent,
@@ -84,12 +93,12 @@ export class GoalService {
       },
       'user',
     )
-    return { accepted: true, goal }
+    return { accepted: true, goal, sessionId: target }
   }
 
   async replace(_input: unknown): Promise<never> {
     throw new OperationRetiredError(
-      'Goal 替换已下线：请先取消当前 Goal，再启动新的 Goal。',
+      '不能直接替换目标：请先取消当前目标，再启动新的目标。',
     )
   }
 
@@ -156,8 +165,9 @@ export class GoalService {
     return { agent, ref: { id: goal.id, revision: goal.revision } }
   }
 
+  /** The session a caller named (KRN-01: never the one in view). */
   private optionalSessionId(explicit: string | null | undefined): string {
-    return String(explicit ?? this.deps.activeSessionId() ?? '').trim()
+    return String(explicit ?? '').trim()
   }
 
   private sessionId(
@@ -165,15 +175,11 @@ export class GoalService {
     operation: string,
   ): string {
     const sessionId = this.optionalSessionId(explicit)
-    if (!sessionId)
-      throw new GoalServiceError(
-        'goal_session_required',
-        `${operation} 需要一个会话。`,
-      )
+    if (!sessionId) throw new SessionRequiredError(operation)
     return sessionId
   }
 }
 
 function notFound(): GoalServiceError {
-  return new GoalServiceError('goal_not_found', '当前会话中不存在该 Goal。')
+  return new GoalServiceError('goal_not_found', '当前会话中没有这个目标。')
 }

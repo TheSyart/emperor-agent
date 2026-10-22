@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /**
- * UserBubble — dsh right-aligned user bubble: --bubble-user fill, radius 22,
- * 10/16 padding, 16/24 text, max min(525px, 82%). Attachments render above
- * the bubble (image thumbnails / file chips); copy + edit-resend actions
- * and the send time sit below, revealed on hover.
+ * UserBubble — right-aligned user bubble (UI-S03): --bubble-user fill,
+ * r-xl, 10/16 padding, 15/26 text, at most 80% of the column, no border.
+ * Attachments render above the bubble (image thumbnails / file Tags); copy +
+ * edit-resend actions and the send time sit below, revealed on hover. A
+ * small line names a message inserted into a running turn (运行中插入) or
+ * sent by the scheduler (定时任务); any other delivery shows nothing.
  *
  * Skill / plugin chips show as in the composer (ReferencedText); copying
  * gives their `/name` text and editing puts them back as chips.
@@ -13,14 +15,18 @@
 import { computed } from 'vue'
 import { attachmentRawUrl } from '../../../api/attachments'
 import type { UserChatNode } from '../../../conversation/types'
-import { DsPaperclip } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
 import { formatBytes } from '../chatFormat'
 import MessageIconActions from '../parts/MessageIconActions.vue'
 import ReferencedText from '../parts/ReferencedText.vue'
+import DocumentIcon from '../../ui/DocumentIcon.vue'
+import Tag from '../../ui/Tag.vue'
+import { openResourceImages } from '../resources/resourceImages'
+import { requestResourceDetail } from '../resources/resourceEvents'
+import type { DisplayResource } from '../resources/resourceModel'
 
 const props = defineProps<{ node: UserChatNode }>()
-const { actions } = useChatContext()
+const { actions, sessionId } = useChatContext()
 
 interface AttachmentView {
   id: string
@@ -59,39 +65,88 @@ const images = computed(() => [
 ])
 const files = computed(() => attachments.value.filter((a) => !a.image))
 
+// Only a delivery the reader cares about gets a line (UI-S13); the raw
+// source value (`chat`) never shows.
 const sourceLabel = computed(() => {
   if (props.node.data.steering) return '运行中插入'
   if (props.node.data.source === 'scheduler') return '定时任务'
-  return props.node.data.source ?? ''
+  return ''
 })
+function enlarge(id: string): void {
+  const group = images.value.map((id) =>
+    attachmentResource(id, attachments.value.find((a) => a.id === id)?.name),
+  )
+  const resource = group.find((item) => item.attachmentId === id)
+  if (resource) openResourceImages(resource, sessionId(), group)
+}
+function attachmentResource(
+  id: string,
+  name = id,
+  image = true,
+): DisplayResource {
+  const attachment = attachments.value.find((item) => item.id === id)
+  return {
+    id: `attachment:${id}`,
+    kind: image ? 'image' : 'attachment',
+    href: `attachment:${id}`,
+    attachmentId: id,
+    label: name,
+    subtitle: '附件',
+    sourceMessageId: props.node.data.messageId,
+    role: 'source',
+    provenance: 'provided',
+    ...(attachment?.size !== undefined ? { bytes: attachment.size } : {}),
+  }
+}
 </script>
 
 <template>
   <div class="user-row" data-time-hover-root>
     <div class="stack">
       <div v-if="images.length" class="images">
-        <img
-          v-for="id in images"
-          :key="id"
-          class="thumb"
-          :src="attachmentRawUrl(id)"
-          alt=""
-          loading="lazy"
-        />
+        <figure v-for="id in images" :key="id" class="image-item">
+          <button
+            type="button"
+            class="image-open"
+            :aria-label="`预览图片：${attachments.find((a) => a.id === id)?.name || '图片'}`"
+            @click="enlarge(id)"
+          >
+            <img
+              class="thumb"
+              :src="attachmentRawUrl(id)"
+              alt=""
+              loading="lazy"
+            />
+          </button>
+        </figure>
       </div>
       <div v-if="files.length" class="files">
-        <span v-for="file in files" :key="file.id" class="file-chip">
-          <DsPaperclip :size="14" class="file-icon" />
+        <Tag
+          v-for="file in files"
+          :key="file.id"
+          class="file-tag"
+          :label="file.name"
+          @click="
+            requestResourceDetail(
+              attachmentResource(file.id, file.name, false),
+              sessionId(),
+            )
+          "
+        >
+          <template #leading>
+            <DocumentIcon :path="file.name" :size="16" />
+          </template>
           <span class="file-name">{{ file.name }}</span>
           <span v-if="file.size !== undefined" class="file-size">{{
             formatBytes(file.size)
           }}</span>
-        </span>
+        </Tag>
       </div>
       <div v-if="node.data.text" class="user-bubble">
         <ReferencedText
           :text="node.data.text"
           :references="node.data.references"
+          :source-message-id="node.data.messageId"
         />
       </div>
       <span v-if="sourceLabel" class="source">{{ sourceLabel }}</span>
@@ -108,6 +163,10 @@ const sourceLabel = computed(() => {
 </template>
 
 <style scoped>
+.image-item {
+  margin: 0;
+  width: 120px;
+}
 .user-row {
   display: flex;
   flex-direction: column;
@@ -121,17 +180,17 @@ const sourceLabel = computed(() => {
   align-items: flex-end;
   gap: var(--space-2);
   min-width: 0;
-  max-width: min(525px, 82%);
+  max-width: 80%;
 }
 
 .user-bubble {
   max-width: 100%;
   padding: var(--space-2-5) var(--space-4);
-  border-radius: var(--radius-composer);
+  border: none;
+  border-radius: var(--r-xl);
   background: rgb(var(--bubble-user));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-base);
-  line-height: var(--lh-base);
+  color: rgb(var(--text-1));
+  font: var(--type-body) var(--font-sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -142,11 +201,22 @@ const sourceLabel = computed(() => {
   justify-content: flex-end;
   gap: var(--space-2);
 }
+.image-open {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: none;
+  cursor: pointer;
+}
+.image-open:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 2px;
+}
 
 .thumb {
   width: 120px;
   height: 120px;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   object-fit: cover;
   background: rgb(var(--code-block-bg));
@@ -159,42 +229,26 @@ const sourceLabel = computed(() => {
   gap: var(--space-1-5);
 }
 
-.file-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
+.file-tag {
   max-width: 260px;
-  height: var(--space-8);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-1));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
-}
-
-.file-icon {
-  flex: none;
-  color: rgb(var(--label-tertiary));
 }
 
 .file-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .file-size {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  margin-left: var(--space-1-5);
+  color: rgb(var(--text-3));
 }
 
 .source {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .actions {

@@ -20,7 +20,7 @@
  * Exposes: focus().
  */
 import { computed, ref } from 'vue'
-import { useFieldControl } from './fieldContext'
+import { useFieldControl } from '../../ui/fieldContext'
 
 const props = withDefaults(
   defineProps<{
@@ -130,21 +130,21 @@ defineExpose({ focus: () => textarea.value?.focus() })
   width: 100%;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  transition: border-color var(--duration-ds-fast) ease;
+  transition: border-color var(--motion-fast) ease;
 }
 
 .ds-code-editor:focus-within {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .ds-code-editor[data-invalid] {
-  border-color: rgb(var(--state-error));
+  border-color: rgb(var(--error));
 }
 
 .ds-code-editor[data-fill] {
@@ -158,7 +158,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   flex: none;
   min-width: calc(var(--code-digits) * 1ch + var(--space-5));
   overflow: hidden;
-  border-right: 1px solid var(--border-l1);
+  border-right: 1px solid var(--stroke-1);
   user-select: none;
 }
 
@@ -166,7 +166,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   margin: 0;
   padding: var(--code-pad) var(--space-2-5) var(--code-pad) var(--space-2);
   font: inherit;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   white-space: pre;
 }
@@ -204,11 +204,11 @@ defineExpose({ focus: () => textarea.value?.focus() })
 }
 
 .code::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .ds-code-editor[data-disabled] .code {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: default;
 }
 </style>

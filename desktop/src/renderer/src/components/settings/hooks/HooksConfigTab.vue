@@ -7,7 +7,7 @@
  */
 import { computed } from 'vue'
 import Button from '../../ui/Button.vue'
-import { CodeEditor, SettingsGroup, SettingsRow, StatusBadge } from '../ui'
+import { CodeEditor, SettingsGroup, SettingsRow, Badge } from '../ui'
 import { useHooksController } from './hooksController'
 
 const {
@@ -54,7 +54,7 @@ const validationState = computed(() => {
     <SettingsGroup title="配置来源">
       <SettingsRow title="全局" dense>
         <template #badge>
-          <StatusBadge tone="accent">可编辑</StatusBadge>
+          <Badge tone="accent">可编辑</Badge>
         </template>
         <template #description>
           <code class="path">{{ payload?.path || '—' }}</code>
@@ -67,7 +67,7 @@ const validationState = computed(() => {
         dense
         data-testid="hooks-project-source"
       >
-        <template #badge><StatusBadge>只读</StatusBadge></template>
+        <template #badge><Badge>只读</Badge></template>
         <template #description>
           <code class="path">{{ file }}</code>
         </template>
@@ -103,9 +103,9 @@ const validationState = computed(() => {
           :data-event="row.eventName"
         >
           <span class="event-name">{{ row.eventName }}</span>
-          <StatusBadge :tone="row.count ? 'ok' : 'neutral'" mono>
+          <Badge :tone="row.count ? 'ok' : 'neutral'" mono>
             {{ row.count }}
-          </StatusBadge>
+          </Badge>
         </li>
       </ul>
     </SettingsGroup>
@@ -116,7 +116,7 @@ const validationState = computed(() => {
       plain
     >
       <template #actions>
-        <StatusBadge v-if="dirty" tone="warn" dot>未保存</StatusBadge>
+        <Badge v-if="dirty" tone="warn" variant="dot-label">未保存</Badge>
       </template>
       <div class="editor-block">
         <CodeEditor
@@ -144,22 +144,26 @@ const validationState = computed(() => {
             :data-state="validationState"
             aria-live="polite"
           >
-            <StatusBadge v-if="validationState === 'valid'" tone="ok" dot>
+            <Badge
+              v-if="validationState === 'valid'"
+              tone="ok"
+              variant="dot-label"
+            >
               配置有效
-            </StatusBadge>
-            <StatusBadge
+            </Badge>
+            <Badge
               v-else-if="validationState === 'invalid'"
               tone="error"
-              dot
+              variant="dot-label"
             >
               校验未通过
-            </StatusBadge>
+            </Badge>
             <span v-else class="muted">尚未校验</span>
           </div>
           <div class="actions">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="saving || !dirty"
               @click="resetDraft"
             >
@@ -167,7 +171,7 @@ const validationState = computed(() => {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="saving"
               @click="validate"
             >
@@ -204,7 +208,7 @@ const validationState = computed(() => {
 
 .path {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -230,7 +234,7 @@ const validationState = computed(() => {
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-2-5) 0;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .event-name {
@@ -238,7 +242,7 @@ const validationState = computed(() => {
   overflow: hidden;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -257,7 +261,7 @@ const validationState = computed(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 
@@ -269,12 +273,12 @@ const validationState = computed(() => {
   padding: var(--space-2) var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
 .issue + .issue {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .issue-kind {
@@ -300,7 +304,7 @@ const validationState = computed(() => {
 .muted {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .actions {
@@ -314,7 +318,7 @@ const validationState = computed(() => {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

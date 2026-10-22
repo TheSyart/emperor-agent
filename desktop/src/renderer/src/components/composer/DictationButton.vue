@@ -8,6 +8,7 @@
  * Props: shortcut (a label such as ⇧⌘D), disabled?.
  * Emits: start.
  */
+import IconButton from '../ui/IconButton.vue'
 import { DsMic } from '../icons/ds'
 
 defineProps<{ shortcut: string; disabled?: boolean }>()
@@ -15,16 +16,17 @@ const emit = defineEmits<{ start: [] }>()
 </script>
 
 <template>
-  <button
-    type="button"
+  <IconButton
     class="dictation-mic"
-    aria-label="听写"
-    :title="`听写（${shortcut}）`"
+    label="听写"
+    :shortcut="shortcut"
+    size="md"
+    shape="circle"
     :disabled="disabled"
     @click="emit('start')"
   >
     <DsMic :size="16" />
-  </button>
+  </IconButton>
 </template>
 
 <style scoped>
@@ -38,14 +40,14 @@ const emit = defineEmits<{ start: [] }>()
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .dictation-mic:hover:not(:disabled) {
-  background: rgb(var(--interactive-bg-hover-solid));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-hover-solid));
+  color: rgb(var(--text-1));
 }
 
 .dictation-mic:disabled {

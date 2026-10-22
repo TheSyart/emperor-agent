@@ -17,10 +17,12 @@
  *   landed, drawn on that target's live picture with the on-screen arrow,
  *   also while the window itself is covered. It glides from point to point
  *   (not when the system reduces motion) and fades out after about 2 s.
- * - Beside the chat (1120px column) the stack sits in the right column and
- *   publishes its height so the environment card above stops short.
- *   Narrower, it folds into a counted chip that expands over the chat;
- *   arrow keys switch cards and Escape folds it again.
+ * - From a 1152px conversation region the stack floats beside the chat
+ *   (ConversationView moves the column clear of it, as of the environment
+ *   card, UI-S16) and publishes the span it takes above the bottom of its
+ *   seat, so the card above stops short. Narrower, it folds into a counted
+ *   chip that expands over the chat; arrow keys switch cards and Escape
+ *   folds it again.
  * - Subscriptions stop and every object URL is released when the stack is
  *   folded, the page is hidden, the view is deactivated or unmounted (a
  *   session switch remounts it by key), so no other session's frame shows.
@@ -28,6 +30,7 @@
  * Props: sessionId (the viewed chat), awaiting (a question or card waits for
  * the user in it).
  */
+import Badge from '../../ui/Badge.vue'
 import type {
   ComputerUseStatusView,
   UiTargetView,
@@ -58,7 +61,7 @@ import {
   onCoreEvent,
 } from '../../../api/backend'
 import { useReducedMotion } from '../../../composables/useReducedMotion'
-import Modal from '../../ui/Modal.vue'
+import { openImageViewer } from '../../ui/imageViewer'
 import { modalLayerCount } from '../../ui/modalStack'
 import {
   POINTER_FADE_MS,
@@ -88,8 +91,11 @@ const props = withDefaults(
   { awaiting: false },
 )
 
-/** Conversation column width from which the stack sits beside the chat. */
-const BESIDE_MIN = 1120
+/**
+ * Conversation region width from which the stack sits beside the chat
+ * (ConversationView's FLOAT_BESIDE_MIN).
+ */
+const BESIDE_MIN = 1152
 /** Gap (px) kept between the stack and the environment card above it. */
 const RESERVE_GAP = 12
 
@@ -99,7 +105,6 @@ const compact = ref(false)
 /** The column width is known (no frames stream before it is). */
 const measured = ref(false)
 const expanded = ref(false)
-const enlargedId = ref<string | null>(null)
 const pageVisible = ref(
   typeof document === 'undefined' || document.visibilityState !== 'hidden',
 )
@@ -107,7 +112,6 @@ const activated = ref(true)
 const now = ref(new Date())
 const root = ref<HTMLElement | null>(null)
 const stack = ref<HTMLElement | null>(null)
-let enlargeOpener: HTMLElement | null = null
 
 const targets = computed(() =>
   previewTargetsFor(status.value?.targets, props.sessionId),
@@ -121,23 +125,11 @@ const onScreen = computed(
     measured.value &&
     pageVisible.value &&
     activated.value &&
-    (!compact.value || expanded.value || enlargedId.value !== null),
+    (!compact.value || expanded.value),
 )
 const liveIds = computed(() =>
   liveTargetIds(ordered.value, { onScreen: onScreen.value }),
 )
-const enlarged = computed(
-  () =>
-    ordered.value.find((target) => target.targetId === enlargedId.value) ??
-    null,
-)
-const enlargedOpen = computed({
-  get: () => enlarged.value !== null,
-  set: (open: boolean) => {
-    if (!open) closeEnlarged()
-  },
-})
-
 function statusOf(target: UiTargetView) {
   return previewStatus(target, { awaiting: props.awaiting })
 }
@@ -358,18 +350,40 @@ function cycle(step: 1 | -1): void {
   if (next) bringForward(next.targetId)
 }
 
-function enlarge(targetId: string, event?: Event): void {
-  enlargeOpener =
-    (event?.currentTarget as HTMLElement | null) ??
-    (document.activeElement as HTMLElement | null)
-  enlargedId.value = targetId
-}
-
-function closeEnlarged(): void {
-  enlargedId.value = null
-  void nextTick(() => {
-    if (enlargeOpener?.isConnected) enlargeOpener.focus()
-    enlargeOpener = null
+async function enlarge(targetId: string): Promise<void> {
+  const target = ordered.value.find((target) => target.targetId === targetId)
+  if (!target) return
+  const frame = frameOf(target)
+  const src = frameSrc(frame)
+  if (!src) return
+  const owner = props.sessionId
+  // Clone the already received frame: live preview URLs are revoked on the next frame.
+  let snapshot = src
+  let dispose: (() => void) | undefined
+  if (src.startsWith('blob:')) {
+    try {
+      const blob = await (await fetch(src)).blob()
+      snapshot = URL.createObjectURL(blob)
+      dispose = () => URL.revokeObjectURL(snapshot)
+    } catch {
+      return
+    }
+  }
+  if (owner !== props.sessionId || !activated.value) {
+    dispose?.()
+    return
+  }
+  openImageViewer({
+    owner,
+    dispose,
+    items: [
+      {
+        id: targetId,
+        src: snapshot,
+        name: previewTitle(target),
+        caption: `${statusOf(target).label} · ${frame.note}`,
+      },
+    ],
   })
 }
 
@@ -402,13 +416,17 @@ let host: HTMLElement | null = null
 let hostObserver: ResizeObserver | null = null
 let stackObserver: ResizeObserver | null = null
 
-/** Beside the chat: the span from the column bottom up to the stack's top. */
+/**
+ * The visible chip or expanded stack reserves its span below the info card:
+ * from its top to the bottom of the seat both float in (the view area).
+ */
 function publishReserve(): void {
-  const element = stack.value
+  const element = root.value
+  const seat = element?.parentElement
   previewLayout.reservedHeight =
-    !compact.value && activated.value && host && element && front.value
+    activated.value && host && element && seat && front.value
       ? Math.round(
-          host.getBoundingClientRect().bottom -
+          seat.getBoundingClientRect().bottom -
             element.getBoundingClientRect().top,
         ) + RESERVE_GAP
       : 0
@@ -437,6 +455,7 @@ function observeStack(): void {
   stackObserver?.disconnect()
   stackObserver = new ResizeObserver(publishReserve)
   stackObserver.observe(stack.value)
+  if (root.value) stackObserver.observe(root.value)
 }
 
 // --- wiring --------------------------------------------------------------
@@ -449,8 +468,6 @@ watch(
     const listed = new Set(targetIds)
     for (const targetId of Object.keys(frames.value))
       if (!listed.has(targetId)) dropFrame(targetId)
-    if (enlargedId.value !== null && !listed.has(enlargedId.value))
-      closeEnlarged()
     void nextTick(() => {
       observeHost()
       observeStack()
@@ -499,7 +516,6 @@ onActivated(() => {
 onDeactivated(() => {
   activated.value = false
   expanded.value = false
-  enlargedId.value = null
   stopAllLive()
   forgetPointers()
   setPreviewShownTargets([])
@@ -540,9 +556,9 @@ onBeforeUnmount(() => {
       aria-controls="cu-preview-stack"
       @click="expanded = !expanded"
     >
-      <ScreenShare :size="15" aria-hidden="true" />
+      <ScreenShare :size="16" aria-hidden="true" />
       <span>电脑操作</span>
-      <span class="cu-preview-count">{{ ordered.length }}</span>
+      <Badge variant="count" :label="ordered.length" />
     </button>
     <div
       v-show="!compact || expanded"
@@ -575,12 +591,13 @@ onBeforeUnmount(() => {
           <span class="cu-card-status" :data-tone="statusOf(front).tone">{{
             statusOf(front).label
           }}</span>
-          <span
+          <Badge
             v-if="ordered.length > 1"
             class="cu-card-total"
+            variant="count"
+            :label="ordered.length"
             :aria-label="`共 ${ordered.length} 个目标`"
-            >{{ ordered.length }}</span
-          >
+          />
         </header>
         <p class="cu-card-source" :title="front.url">
           {{ previewSource(front) }}
@@ -590,7 +607,7 @@ onBeforeUnmount(() => {
           type="button"
           class="cu-card-frame"
           :aria-label="`放大查看 ${previewTitle(front)}`"
-          @click="enlarge(front.targetId, $event)"
+          @click="enlarge(front.targetId)"
         >
           <img
             :src="frameSrc(frameOf(front))"
@@ -632,23 +649,6 @@ onBeforeUnmount(() => {
         </p>
       </article>
     </div>
-    <Modal
-      v-model:open="enlargedOpen"
-      :title="enlarged ? previewTitle(enlarged) : ''"
-      :width="960"
-    >
-      <template v-if="enlarged">
-        <img
-          v-if="frameSrc(frameOf(enlarged))"
-          class="cu-enlarged"
-          :src="frameSrc(frameOf(enlarged))"
-          :alt="`${previewTitle(enlarged)}的${frameOf(enlarged).kind === 'shot' ? '最近截图' : '画面'}`"
-        />
-        <p class="cu-enlarged-note">
-          {{ statusOf(enlarged).label }} · {{ frameOf(enlarged).note }}
-        </p>
-      </template>
-    </Modal>
   </section>
 </template>
 
@@ -675,26 +675,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xs);
   cursor: pointer;
-}
-
-.cu-preview-count,
-.cu-card-total {
-  display: inline-grid;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 var(--space-1);
-  place-items: center;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-3));
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xxs);
 }
 
 .cu-preview-stack {
@@ -712,18 +699,18 @@ onBeforeUnmount(() => {
   width: calc(100% - var(--depth) * 2 * var(--space-3));
   margin-bottom: calc(0px - var(--space-1));
   padding: var(--space-1) var(--space-3) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-bottom: 0;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
-  background: rgb(var(--bg-layer-2));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
   text-align: start;
   cursor: pointer;
 }
 
 .cu-strip:hover {
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .cu-strip-title,
@@ -738,7 +725,7 @@ onBeforeUnmount(() => {
 .cu-strip-status,
 .cu-card-status {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 
@@ -754,18 +741,18 @@ onBeforeUnmount(() => {
 
 .cu-strip-status[data-tone='lost'],
 .cu-card-status[data-tone='lost'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .cu-card {
   position: relative;
   min-width: 0;
   padding: var(--space-2-5) var(--space-3) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .cu-card-head {
@@ -773,13 +760,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .cu-card-source {
   margin: var(--space-0-5) 0 var(--space-2);
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -791,9 +778,9 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   cursor: zoom-in;
 }
 
@@ -828,12 +815,12 @@ onBeforeUnmount(() => {
 .cu-pointer-arrow {
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 1px 2px rgb(var(--nb-1000) / 0.45));
+  filter: drop-shadow(0 1px 2px rgb(var(--pointer-ink) / 0.45));
 }
 
 .cu-pointer-arrow path {
-  fill: rgb(var(--nb-1000) / 0.55);
-  stroke: rgb(var(--accent-fill));
+  fill: rgb(var(--pointer-ink) / 0.55);
+  stroke: rgb(var(--accent));
   stroke-width: 1.6;
   stroke-linejoin: round;
 }
@@ -849,16 +836,16 @@ onBeforeUnmount(() => {
   margin: 0;
   aspect-ratio: 16 / 10;
   place-items: center;
-  border: 1px dashed var(--border-l2);
+  border: 1px dashed var(--stroke-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   text-align: center;
 }
 
 .cu-card-note {
   margin: var(--space-1-5) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -884,12 +871,12 @@ onBeforeUnmount(() => {
   max-height: 70vh;
   object-fit: contain;
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
 }
 
 .cu-enlarged-note {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 </style>

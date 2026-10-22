@@ -21,6 +21,13 @@ done < <(git ls-files '*.sh')
 echo "== public documentation boundaries =="
 node scripts/check_public_docs.mjs
 
+# REL-04: every uses: pinned to a commit; the gates call their scripts, on macOS.
+echo "== GitHub Actions pins, workflow lint, unsigned releases =="
+node scripts/ci/check-action-pins.mjs
+node scripts/ci/check-workflows.mjs
+# REL-05: releases are unsigned; no signing secret, identity or notarization.
+node scripts/ci/check-unsigned-release.mjs
+
 echo "== core vitest =="
 npm test --workspace @emperor/core
 

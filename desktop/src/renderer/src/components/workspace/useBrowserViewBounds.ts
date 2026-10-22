@@ -64,6 +64,9 @@ export function useBrowserViewBounds(options: BrowserViewBoundsOptions): {
   }
 
   function sync(): void {
+    // A hidden pane (another pane shows, the column is closed) stays alive:
+    // skip measuring it on every press until it shows again.
+    if (!options.shown()) return send(null)
     const slot = options.viewport.value
     const rect = slot?.getBoundingClientRect()
     send(

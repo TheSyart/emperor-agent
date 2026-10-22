@@ -8,6 +8,14 @@ import {
   type SettingsHeaderHost,
 } from '../settingsHeader'
 import PasswordManagerPage from './PasswordManagerPage.vue'
+import { answerConfirmsForTest } from '../../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const api = vi.hoisted(() => ({
   vaultStatus: vi.fn(),
@@ -15,9 +23,14 @@ const api = vi.hoisted(() => ({
   vaultRemove: vi.fn(),
   vaultUnlock: vi.fn(),
   vaultLock: vi.fn(),
-  vaultSetMaster: vi.fn(),
+  vaultMaster: vi.fn(),
   vaultReveal: vi.fn(),
   vaultReset: vi.fn(),
+  vaultRepairKey: vi.fn(),
+  vaultStartOver: vi.fn(),
+  vaultExport: vi.fn(),
+  vaultImportPick: vi.fn(),
+  vaultImport: vi.fn(),
 }))
 vi.mock('../../../api/backend', () => api)
 
@@ -140,6 +153,7 @@ async function submit(_root: HTMLElement): Promise<void> {
 }
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   container?.remove()
   app = null
@@ -212,7 +226,7 @@ describe('credential vault settings', () => {
     )
     api.vaultReset.mockResolvedValue(undefined)
     const root = await mount()
-    const notice = root.querySelector('.ds-settings-notice')
+    const notice = root.querySelector('.ds-notice')
     expect(notice?.getAttribute('data-tone')).toBe('error')
     expect(notice?.textContent).toContain('已保存的密码无法解密')
     expect(notice?.textContent).toContain('本地密钥')
@@ -221,7 +235,7 @@ describe('credential vault settings', () => {
     expect(addAction()).toBeUndefined()
     expect(button(root, '编辑').disabled).toBe(true)
     expect(button(root, '查看密码').disabled).toBe(true)
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     button(notice as HTMLElement, '清空').click()
     await settle()
     expect(confirm).toHaveBeenCalledTimes(1)
@@ -231,9 +245,8 @@ describe('credential vault settings', () => {
     button(notice as HTMLElement, '清空').click()
     await settle()
     expect(api.vaultReset).toHaveBeenCalledTimes(1)
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
     expect(addAction()).toBeDefined()
-    confirm.mockRestore()
   })
 
   it('names a key file that fails its checks', async () => {
@@ -241,8 +254,8 @@ describe('credential vault settings', () => {
       status({ available: false, problem: 'key-invalid', handles: [] }),
     )
     const root = await mount()
-    const notice = root.querySelector('.ds-settings-notice')
-    expect(notice?.textContent).toContain('权限或属主不对')
+    const notice = root.querySelector('.ds-notice')
+    expect(notice?.textContent).toContain('属主或内容不对')
     expect(button(notice as HTMLElement, '清空')).toBeTruthy()
   })
 
@@ -261,7 +274,7 @@ describe('credential vault settings', () => {
     expect(root.textContent).toContain('基础')
     expect(root.textContent).toContain('建议设置主密码')
     expect(root.textContent).not.toContain('钥匙串')
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
     expect(root.textContent).toContain('尚未代填')
     expect(root.textContent).toContain('上次代填 2026')
 
@@ -385,15 +398,20 @@ describe('credential vault settings', () => {
 
     app?.unmount()
     api.vaultStatus.mockResolvedValue(status())
-    api.vaultSetMaster.mockResolvedValue(undefined)
+    api.vaultMaster.mockResolvedValue(undefined)
     render(root)
     await settle()
     button(root, '设置').click()
     await settle()
     await type(dialogInput('新的主密码'), 'correct horse battery')
+    await type(dialogInput('再次输入新的主密码'), 'correct horse battery')
     expect(document.body.textContent).not.toContain('Touch ID')
     await submitProtect()
-    expect(api.vaultSetMaster).toHaveBeenCalledWith('correct horse battery')
+    expect(api.vaultMaster).toHaveBeenCalledWith({
+      action: 'set',
+      password: 'correct horse battery',
+      confirmPassword: 'correct horse battery',
+    })
   })
 
   it('shows vault failures in Chinese and refreshes into the locked state', async () => {
@@ -412,7 +430,7 @@ describe('credential vault settings', () => {
       '凭据库已锁定，请先用主密码解锁。',
     )
     // A notice at the top of the page, not a loose line.
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(
       root.querySelector('.ds-settings-section > .body')?.firstElementChild,
@@ -433,5 +451,176 @@ describe('credential vault settings', () => {
     expect(intro).not.toBe('')
     expect(intro.split(/[。！？；]/).filter(Boolean)).toHaveLength(1)
     expect(intro.length).toBeLessThanOrEqual(42)
+  })
+
+  /** The open Modal (role dialog) whose title is `title`. */
+  function dialog(title: string): HTMLElement {
+    const found = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="dialog"]'),
+    ].find((item) => item.textContent?.includes(title))
+    if (!found) throw new Error(`no dialog ${title}`)
+    return found
+  }
+
+  function inputIn(root: HTMLElement, label: string): HTMLInputElement {
+    const input = root.querySelector<HTMLInputElement>(
+      `input[aria-label="${label}"]`,
+    )
+    if (!input) throw new Error(`no input ${label}`)
+    return input
+  }
+
+  async function submitIn(root: HTMLElement): Promise<void> {
+    root
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle()
+  }
+
+  it('shows 凭据库无法读取 and starts over only after confirming a backup (SEC-09 #1)', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    api.vaultStatus.mockResolvedValue(
+      status({ available: false, problem: 'vault-unreadable', handles: [] }),
+    )
+    api.vaultStartOver.mockResolvedValue({
+      backup: 'vault.json.unreadable-1700000000000',
+    })
+    const root = await mount()
+    const notice = root.querySelector<HTMLElement>('.ds-notice')!
+    expect(notice.dataset.tone).toBe('error')
+    expect(notice.textContent).toContain('凭据库无法读取')
+    expect(notice.textContent).toContain('原文件')
+    expect(button(notice, '从备份恢复')).toBeTruthy()
+    expect(() => button(notice, '清空')).toThrow()
+    expect(addAction()).toBeUndefined()
+    button(notice, '重新开始（先备份）').click()
+    await settle()
+    expect(api.vaultStartOver).not.toHaveBeenCalled()
+    const ask = dialog('重新开始')
+    expect(ask.textContent).toContain('另存')
+    api.vaultStatus.mockResolvedValue(status({ handles: [] }))
+    button(ask, '备份并重新开始').click()
+    await settle()
+    expect(api.vaultStartOver).toHaveBeenCalledTimes(1)
+    expect(root.querySelector('.ds-notice[data-tone="error"]')).toBeNull()
+    expect(root.textContent).toContain('vault.json.unreadable-1700000000000')
+    expect(confirm).not.toHaveBeenCalled()
+    confirm.mockRestore()
+  })
+
+  it('names a vault written by a newer Emperor and restores from a backup file (SEC-09 #2 #4)', async () => {
+    api.vaultStatus.mockResolvedValue(
+      status({ available: false, problem: 'vault-newer' }),
+    )
+    api.vaultImportPick.mockResolvedValue({ name: '凭据.emperor-vault' })
+    api.vaultImport.mockResolvedValue({ imported: 2 })
+    const root = await mount()
+    const notice = root.querySelector<HTMLElement>('.ds-notice')!
+    expect(notice.textContent).toContain('更新版本的 Emperor')
+    // Its entries are listed, read-only.
+    expect(root.textContent).toContain('Site')
+    expect(button(root, '编辑').disabled).toBe(true)
+    button(notice, '从备份恢复').click()
+    await settle()
+    expect(api.vaultImportPick).toHaveBeenCalledTimes(1)
+    const restore = dialog('从备份恢复')
+    expect(restore.textContent).toContain('凭据.emperor-vault')
+    await type(inputIn(restore, '备份口令'), 'backup passphrase 1')
+    api.vaultStatus.mockResolvedValue(status())
+    await submitIn(restore)
+    expect(api.vaultImport).toHaveBeenCalledWith('backup passphrase 1')
+    expect(root.textContent).toContain('已导入 2 个凭据')
+  })
+
+  it('offers 修复权限 first when the local key is open to others (SEC-09 #3)', async () => {
+    api.vaultStatus.mockResolvedValue(
+      status({ available: false, problem: 'key-permissions' }),
+    )
+    api.vaultRepairKey.mockResolvedValue(true)
+    const root = await mount()
+    const notice = root.querySelector<HTMLElement>('.ds-notice')!
+    expect(notice.textContent).toContain('权限')
+    const repair = button(notice, '修复权限')
+    expect(repair.dataset.variant).toBe('primary')
+    api.vaultStatus.mockResolvedValue(status())
+    repair.click()
+    await settle()
+    expect(api.vaultRepairKey).toHaveBeenCalledTimes(1)
+    expect(api.vaultReset).not.toHaveBeenCalled()
+    expect(root.querySelector('.ds-notice')).toBeNull()
+  })
+
+  it('removes the master password only as its own action with the current one (SEC-09 #5)', async () => {
+    api.vaultStatus.mockResolvedValue(status({ hasMasterPassword: true }))
+    api.vaultMaster.mockResolvedValue(undefined)
+    const root = await mount()
+    // 更改 can no longer turn protection off: every field is required.
+    button(root, '更改').click()
+    await settle()
+    expect(dialogInput('当前主密码').required).toBe(true)
+    expect(dialogInput('新的主密码').required).toBe(true)
+    expect(dialogInput('再次输入新的主密码').required).toBe(true)
+    expect(document.body.textContent).not.toContain('留空保存会关闭主密码')
+    await type(dialogInput('当前主密码'), 'correct horse battery')
+    await type(dialogInput('新的主密码'), 'another passphrase')
+    await type(dialogInput('再次输入新的主密码'), 'another passphrase')
+    await submitProtect()
+    expect(api.vaultMaster).toHaveBeenLastCalledWith({
+      action: 'change',
+      currentPassword: 'correct horse battery',
+      password: 'another passphrase',
+      confirmPassword: 'another passphrase',
+    })
+
+    const remove = button(root, '移除主密码')
+    expect(remove.dataset.variant).toBe('danger')
+    remove.click()
+    await settle()
+    const ask = dialog('移除主密码')
+    await submitIn(ask)
+    expect(api.vaultMaster).toHaveBeenCalledTimes(1)
+    expect(ask.textContent).toContain('请输入当前主密码')
+    await type(inputIn(ask, '当前主密码'), 'another passphrase')
+    await submitIn(ask)
+    expect(api.vaultMaster).toHaveBeenLastCalledWith({
+      action: 'remove',
+      currentPassword: 'another passphrase',
+    })
+  })
+
+  it('refuses a new master password typed differently twice (SEC-09 #6)', async () => {
+    api.vaultStatus.mockResolvedValue(status())
+    const root = await mount()
+    button(root, '设置').click()
+    await settle()
+    await type(dialogInput('新的主密码'), 'correct horse battery')
+    await type(dialogInput('再次输入新的主密码'), 'correct horse batterY')
+    await submitProtect()
+    expect(api.vaultMaster).not.toHaveBeenCalled()
+    expect(
+      document.body.querySelector('form.vault-protect')?.textContent,
+    ).toContain('两次输入的主密码不一致')
+  })
+
+  it('exports a backup under a passphrase typed twice (SEC-09 #4)', async () => {
+    api.vaultStatus.mockResolvedValue(status())
+    api.vaultExport.mockResolvedValue({ ok: true, name: '凭据.emperor-vault' })
+    const root = await mount()
+    button(root, '导出…').click()
+    await settle()
+    const ask = dialog('导出凭据备份')
+    expect(ask.textContent).toContain('本地密钥')
+    await type(inputIn(ask, '备份口令'), 'backup passphrase 1')
+    await type(inputIn(ask, '再次输入备份口令'), 'backup passphrase 2')
+    await submitIn(ask)
+    expect(api.vaultExport).not.toHaveBeenCalled()
+    expect(ask.textContent).toContain('两次输入的口令不一致')
+    await type(inputIn(ask, '再次输入备份口令'), 'backup passphrase 1')
+    await submitIn(ask)
+    expect(api.vaultExport).toHaveBeenCalledWith(
+      'backup passphrase 1',
+      'backup passphrase 1',
+    )
+    expect(root.textContent).toContain('凭据.emperor-vault')
   })
 })

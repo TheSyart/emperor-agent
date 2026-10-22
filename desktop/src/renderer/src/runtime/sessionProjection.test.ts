@@ -108,6 +108,28 @@ describe('session action reducer', () => {
     expect(state.sessions.s2?.attention).toBe(false)
   })
 
+  it('reads assistant_reset (a retried request) as activity of a running turn', () => {
+    const state = reduceSessionProjection(createSessionProjectionState(), {
+      type: 'session_switched',
+      sessionId: 's1',
+    }).state
+    const received = reduceSessionProjection(state, {
+      type: 'runtime_event_received',
+      origin: 'live',
+      event: event({
+        event: 'assistant_reset',
+        seq: 7,
+        session_id: 's2',
+        turn_id: 's2:1',
+        content: '',
+      }),
+    })
+    expect(received.state.sessions.s2).toMatchObject({
+      running: true,
+      lastSeq: 7,
+    })
+  })
+
   it('accepts draft materialization even when the event is owned by the new real session', () => {
     let state = reduceSessionProjection(createSessionProjectionState(), {
       type: 'session_switched',

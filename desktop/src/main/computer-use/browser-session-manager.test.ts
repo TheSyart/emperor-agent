@@ -11,6 +11,7 @@ import {
   AGENT_FRAME_RATES,
   BrowserSessionManager,
   permissionKinds,
+  type BrowserSessionManagerOptions,
   type ElectronFactory,
   type HostLike,
   type ViewLike,
@@ -93,6 +94,7 @@ function setup(
   options?: {
     profilesRoot?: string
     deletions?: Pick<ProfileDeletionQueue, 'mark' | 'reconcile'>
+    profileStorage?: BrowserSessionManagerOptions['profileStorage']
   },
 ) {
   const sessions = new Map<string, FakeSession>()
@@ -175,6 +177,9 @@ function setup(
     removeDirectory: async (path) => {
       removed.push(path)
     },
+    ...(options?.profileStorage === undefined
+      ? {}
+      : { profileStorage: options.profileStorage }),
     now: () => now,
   })
   return {
@@ -242,6 +247,27 @@ describe('BrowserSessionManager', () => {
     expect(a.partition).not.toBe(b.partition)
     expect(k.hosts).toHaveLength(1)
     expect(k.hosts[0]!.children).toHaveLength(2)
+  })
+
+  it('reuses at most four cleared temporary partitions (MAIN-24)', async () => {
+    const k = setup()
+    const open = (url: string) => k.manager.open({ ownerSessionId: 's1', url })
+    const first = await open('https://a.test/')
+    await k.manager.close(first.targetId)
+    const session = k.sessions.get(first.partition)!
+    expect(session.clearStorageData).toHaveBeenCalled()
+    const second = await open('https://b.test/')
+    // The cleared partition comes back instead of a new, never-freed one.
+    expect(second.partition).toBe(first.partition)
+    const more = await Promise.all(
+      ['c', 'd', 'e', 'f'].map((host) => open(`https://${host}.test/`)),
+    )
+    const partitions = new Set([second, ...more].map((tab) => tab.partition))
+    // Five tasks at once: four pooled partitions plus one of its own, all different.
+    expect(partitions.size).toBe(5)
+    expect(
+      [...partitions].filter((name) => name.startsWith('emperor-task-pool-')),
+    ).toHaveLength(4)
   })
 
   it('refuses a blocked or non-web first load before creating anything', async () => {
@@ -633,6 +659,65 @@ describe('BrowserSessionManager', () => {
     expect(k.removed).toEqual([
       '/home/.emperor/browser/profiles/p_0123456789ab',
     ])
+  })
+
+  it('prepares a persistent profile session before its first page and forgets its imported cookies when cleared (SEC-10)', async () => {
+    const calls: string[] = []
+    const sessionsSeen: unknown[] = []
+    const k = setup(
+      () => 'allow',
+      async (url) => {
+        calls.push(`load ${url}`)
+      },
+      {
+        profileStorage: {
+          prepare: async (profileId, session) => {
+            sessionsSeen.push(session)
+            calls.push(`prepare ${profileId}`)
+          },
+          cleared: async (profileId, session) => {
+            sessionsSeen.push(session)
+            calls.push(`cleared ${profileId}`)
+          },
+        },
+      },
+    )
+    await k.manager.open({
+      ownerSessionId: 's1',
+      url: 'https://a.test/',
+      profileId: 'p_0123456789ab',
+    })
+    // Imported cookies are in the session before the first request.
+    expect(calls).toEqual(['prepare p_0123456789ab', 'load https://a.test/'])
+    await k.manager.open({ ownerSessionId: 's1', url: 'https://b.test/' })
+    expect(calls).toEqual([
+      'prepare p_0123456789ab',
+      'load https://a.test/',
+      'load https://b.test/',
+    ])
+    await k.manager.clearProfile('p_0123456789ab', { remove: false })
+    expect(calls.at(-1)).toBe('cleared p_0123456789ab')
+    const profileSession = k.sessions.get(
+      'path:/home/.emperor/browser/profiles/p_0123456789ab',
+    )
+    expect(sessionsSeen).toEqual([profileSession, profileSession])
+  })
+
+  it('opens the profile even when preparing its session fails', async () => {
+    const k = setup(undefined, undefined, {
+      profileStorage: {
+        prepare: async () => {
+          throw new Error('sealed file unreadable')
+        },
+        cleared: async () => undefined,
+      },
+    })
+    const tab = await k.manager.open({
+      ownerSessionId: 's1',
+      url: 'https://a.test/',
+      profileId: 'p_0123456789ab',
+    })
+    expect(tab.closed).toBe(false)
   })
 
   it('sweeps a deleted profile when the next manager starts', async () => {

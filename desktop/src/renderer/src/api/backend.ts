@@ -1,3 +1,4 @@
+import type { OpenPathTarget } from '../../../shared/ipc-contract'
 // Electron desktop talks to CoreApi over preload IPC. Browser-only tests inject
 // this same bridge surface; the product no longer supports HTTP/WS fallback.
 
@@ -67,22 +68,50 @@ export interface VaultEntry extends CredentialHandle {
   readonly lastUsedTarget?: string
 }
 
+export type VaultProblem =
+  | 'key-missing'
+  | 'key-invalid'
+  | 'key-permissions'
+  | 'vault-unreadable'
+  | 'vault-newer'
+
+/** 主密码 changes: change and remove need the current one; set types it twice. */
+export type VaultMasterRequest =
+  | { action: 'set'; password: string; confirmPassword: string }
+  | {
+      action: 'change'
+      currentPassword: string
+      password: string
+      confirmPassword: string
+    }
+  | { action: 'remove'; currentPassword: string }
+
+export type VaultExportResult = { ok: true; name: string } | { canceled: true }
+export type VaultImportPick = { name: string } | { canceled: true }
+
 export interface VaultStatus {
   available: boolean
   /** Where secrets are sealed: `emperor-local` (Emperor's local key file). */
   backend?: string
   /**
-   * Why the vault is unavailable: the local key is gone while entries need
-   * it, or its file failed the permission checks. 清空 (vaultReset) fixes both.
+   * Why the vault is unavailable: vault.json cannot be read or a newer
+   * Emperor wrote it (从备份恢复 / 重新开始（先备份）, the file is kept), the
+   * local key is gone while entries need it or failed its checks (清空), or
+   * other users can read the key (修复权限 first).
    */
-  problem?: 'key-missing' | 'key-invalid'
+  problem?: VaultProblem
   locked: boolean
   hasMasterPassword: boolean
   handles: VaultEntry[]
 }
 
+// The Chinese texts of Core's error codes (errors/messages.ts): a chunk of
+// its own, fetched as soon as this module loads, so its 176 texts stay out
+// of the startup bundle and are in hand by the first failed call.
+const errorTexts = import('../errors/messages').catch(() => null)
+
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
-  'Core IPC bridge is unavailable; use the Electron desktop window.'
+  '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。'
 
 interface EmperorBridge {
   vaultStatus?: () => Promise<VaultStatus>
@@ -90,13 +119,21 @@ interface EmperorBridge {
   vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
   vaultUnlock?: (password: string) => Promise<{ unlocked: boolean }>
   vaultLock?: () => Promise<{ ok: boolean }>
-  vaultSetMaster?: (password: string | null) => Promise<{ ok: boolean }>
+  vaultMaster?: (request: VaultMasterRequest) => Promise<{ ok: boolean }>
   vaultReveal?: (handleId: string) => Promise<{ password: string }>
   vaultReset?: () => Promise<{ ok: boolean }>
+  vaultRepairKey?: () => Promise<{ repaired: boolean }>
+  vaultStartOver?: () => Promise<{ ok: boolean; backup: string | null }>
+  vaultExport?: (
+    passphrase: string,
+    confirmPassphrase: string,
+  ) => Promise<VaultExportResult>
+  vaultImportPick?: () => Promise<VaultImportPick>
+  vaultImport?: (passphrase: string) => Promise<{ imported: number }>
   selectDirectory?: () => Promise<string | null>
   getPathForFile?: (file: File) => string
   openPath?: (
-    target: string,
+    target: OpenPathTarget,
   ) => Promise<{ ok?: boolean; error?: string } | void>
   revealReference?: (input: {
     sessionId: string
@@ -108,6 +145,7 @@ interface EmperorBridge {
   openLink?: (
     url: string,
   ) => Promise<{ ok?: boolean; opened?: 'builtin' | 'system' | 'refused' }>
+  loadRemoteImage?: (url: string) => Promise<RemoteImageResult>
   onBrowserReveal?: (listener: (payload: { url: string }) => void) => () => void
   openSkillsFolder?: (input: {
     scope: SkillFolderScope
@@ -126,6 +164,8 @@ interface EmperorBridge {
     operationKey: Key,
     ...args: CoreOperationArgs<Key>
   ) => Promise<CoreOperationResult<Key> | CoreIpcErrorEnvelope>
+  /** The session on screen; every core call carries it (KRN-01). */
+  setViewingSession?: (sessionId: string | null) => void
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
   onSessionEvents?: (listener: (batch: SessionEventBatch) => void) => () => void
   onTerminalEvent?: (
@@ -172,6 +212,8 @@ interface EmperorBridge {
   revealBrowserExtension?: () => Promise<{ ok: boolean }>
   removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
   onBrowserPairingRequest?: (listener: () => void) => () => void
+  /** App menu items that act in the window (偏好设置… → 设置). */
+  onMenuCommand?: (listener: (command: 'open-settings') => void) => () => void
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewUpdate) => void,
   ) => () => void
@@ -262,11 +304,52 @@ export async function vaultLock(): Promise<void> {
   await invoke()
 }
 
-/** Sets, changes (re-sealing every entry) or, with null, removes it. */
-export async function vaultSetMaster(password: string | null): Promise<void> {
-  const invoke = bridge()?.vaultSetMaster
+/** Sets, changes or removes the master password (re-sealing every entry). */
+export async function vaultMaster(request: VaultMasterRequest): Promise<void> {
+  const invoke = bridge()?.vaultMaster
   if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  await invoke(password)
+  await invoke(request)
+}
+
+/** 修复权限: true when the local key is usable afterwards. */
+export async function vaultRepairKey(): Promise<boolean> {
+  const invoke = bridge()?.vaultRepairKey
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return (await invoke()).repaired
+}
+
+/** 重新开始（先备份）: the backup's file name, or null when there was none. */
+export async function vaultStartOver(): Promise<{ backup: string | null }> {
+  const invoke = bridge()?.vaultStartOver
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const { backup } = await invoke()
+  return { backup }
+}
+
+/** 导出凭据备份: main asks where to save it. */
+export async function vaultExport(
+  passphrase: string,
+  confirmPassphrase: string,
+): Promise<VaultExportResult> {
+  const invoke = bridge()?.vaultExport
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke(passphrase, confirmPassphrase)
+}
+
+/** Step 1 of 导入 / 从备份恢复: main's open dialog picks the file. */
+export async function vaultImportPick(): Promise<VaultImportPick> {
+  const invoke = bridge()?.vaultImportPick
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke()
+}
+
+/** Step 2: open the picked backup with its passphrase. */
+export async function vaultImport(
+  passphrase: string,
+): Promise<{ imported: number }> {
+  const invoke = bridge()?.vaultImport
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke(passphrase)
 }
 
 /** 清空: deletes every entry and the master password; confirm first. */
@@ -296,7 +379,12 @@ export function getPathForFile(file: File): string {
   return path
 }
 
-export async function openPath(target: string): Promise<void> {
+/**
+ * Open a folder in Finder: one Core vouches for (设置 › 诊断's Emperor Home or
+ * project, a Skill's folder). Main resolves the path; the renderer cannot
+ * name one (SEC-05).
+ */
+export async function openPath(target: OpenPathTarget): Promise<void> {
   const opener = bridge()?.openPath
   if (typeof opener !== 'function')
     throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
@@ -359,6 +447,30 @@ export async function openLink(url: string): Promise<'builtin' | 'system'> {
   throw new Error(LINK_REFUSED_MESSAGE)
 }
 
+export type RemoteImageResult =
+  { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/**
+ * A remote image in rendered markdown, on the user's request (UI-38): main
+ * fetches it through the public HTTP client (no cookies, no local or
+ * private addresses) and returns it as a data: URL; the renderer itself
+ * never requests a remote address (CSP img-src has no http(s)).
+ */
+export async function loadRemoteImage(url: string): Promise<RemoteImageResult> {
+  const load = bridge()?.loadRemoteImage
+  if (typeof load !== 'function')
+    return { ok: false, error: CORE_BRIDGE_UNAVAILABLE_MESSAGE }
+  const result = await load(url)
+  if (result?.ok === true && typeof result.dataUrl === 'string') return result
+  return {
+    ok: false,
+    error:
+      result && result.ok === false && typeof result.error === 'string'
+        ? result.error
+        : '图片加载失败',
+  }
+}
+
 /** Main opened a clicked link in the built-in browser. */
 export function onBrowserReveal(
   listener: (payload: { url: string }) => void,
@@ -416,17 +528,33 @@ export async function invokeCore<Key extends CoreOperationKey>(
   const result = await invoke(operationKey, ...args)
   if (isCoreIpcErrorEnvelope(result)) {
     const safeError = safeCoreIpcError(result)
-    const error = new Error(safeError.message) as Error & {
+    // The message is what the UI shows; the code and Core's own message
+    // stay on the error for logic and for copying.
+    const texts = await errorTexts
+    const error = new Error(
+      texts ? texts.coreErrorText(safeError) : safeError.message,
+    ) as Error & {
       errorId?: string
       code?: string
       action?: string
+      detail?: string
     }
+    if (texts) error.detail = texts.coreErrorDetail(safeError)
     if (safeError.errorId) error.errorId = safeError.errorId
     if (safeError.code) error.code = safeError.code
     if (safeError.action) error.action = safeError.action
     throw error
   }
   return result
+}
+
+/**
+ * Tell the bridge which session the window shows (null: none, such as a
+ * draft). Core reads it from each call instead of keeping a focus of its
+ * own (KRN-01).
+ */
+export function setViewingSession(sessionId: string | null): void {
+  bridge()?.setViewingSession?.(sessionId)
 }
 
 export function hasCoreBridge(): boolean {
@@ -802,6 +930,13 @@ export async function removeBrowserExtension(): Promise<BrowserExtensionRemoveRe
 /** An extension asked to pair (main sends nothing else). */
 export function onBrowserPairingRequest(listener: () => void): () => void {
   return bridge()?.onBrowserPairingRequest?.(listener) ?? (() => {})
+}
+
+/** The app menu asked the window to act (偏好设置… ⌘, opens 设置). */
+export function onMenuCommand(
+  listener: (command: 'open-settings') => void,
+): () => void {
+  return bridge()?.onMenuCommand?.(listener) ?? (() => {})
 }
 
 export async function approveBrowserPairing(

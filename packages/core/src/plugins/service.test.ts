@@ -74,7 +74,7 @@ describe('PluginApplicationService', () => {
       materialization: 'installed',
       activation: 'active',
     })
-    expect(service.enabledSkillRoots()).toHaveLength(1)
+    expect(service.enabledSkillRoots(null)).toHaveLength(1)
 
     expect(
       service.setEnabled({
@@ -83,7 +83,7 @@ describe('PluginApplicationService', () => {
         enabled: false,
       }).plugin,
     ).toMatchObject({ enabled: false, materialization: 'installed' })
-    expect(service.enabledSkillRoots()).toEqual([])
+    expect(service.enabledSkillRoots(null)).toEqual([])
 
     const cachePath = service.store.get(
       'official/agent-reach',
@@ -193,7 +193,7 @@ describe('PluginApplicationService', () => {
         activation: 'missing',
       }),
     ])
-    expect(service.enabledSkillRoots()).toEqual([])
+    expect(service.enabledSkillRoots(null)).toEqual([])
   })
 
   it('treats corrupt settings as no enablement intent during bootstrap', () => {
@@ -261,7 +261,7 @@ describe('PluginApplicationService', () => {
       activation: 'blocked_unverified',
       signature: { status: 'unverified' },
     })
-    expect(service.enabledSkillRoots()).toEqual([])
+    expect(service.enabledSkillRoots(null)).toEqual([])
   })
 
   it('installs a local .zip archive as a local user source', async () => {
@@ -301,7 +301,7 @@ describe('PluginApplicationService', () => {
       scope: 'user',
     })
     expect(installed.plugin).toMatchObject({ enabled: true })
-    expect(service.enabledSkillRoots()).toHaveLength(1)
+    expect(service.enabledSkillRoots(null)).toHaveLength(1)
   })
 })
 
@@ -363,7 +363,7 @@ describe('PluginApplicationService package formats', () => {
         preview.digest,
       ),
     )
-    expect(service.enabledSkillRoots()).toEqual([
+    expect(service.enabledSkillRoots(null)).toEqual([
       join(entry.installPath, 'skills'),
     ])
   })
@@ -498,7 +498,7 @@ describe('PluginApplicationService package formats', () => {
       })
       expect(stagingEntries(home)).toEqual([])
       expect(service.list()).toEqual([])
-      expect(service.enabledSkillRoots()).toEqual([])
+      expect(service.enabledSkillRoots(null)).toEqual([])
     },
   )
 
@@ -644,25 +644,20 @@ describe('PluginApplicationService list and detail', () => {
     options: { home?: string; workspace?: string | null } = {},
   ) {
     const home = options.home ?? tempDirectory()
-    let workspace = options.workspace ?? null
-    const service = new PluginApplicationService({
-      emperorHome: home,
-      activeWorkspaceRoot: () => workspace,
-    })
+    const workspace = options.workspace ?? null
+    const service = new PluginApplicationService({ emperorHome: home })
     const source = writePackage(join(tempDirectory(), 'source'), files)
     const preview = await service.inspect({ kind: 'local', path: source })
-    await service.install({
-      previewId: preview.previewId,
-      digest: preview.digest,
-      scope,
-    })
-    return {
-      home,
-      service,
-      setWorkspace: (next: string | null) => {
-        workspace = next
+    // The caller names the project a project-scoped install is for (KRN-01).
+    await service.install(
+      {
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope,
       },
-    }
+      workspace,
+    )
+    return { home, service }
   }
 
   it('lists display fields, flags and real member counts', async () => {
@@ -775,7 +770,7 @@ describe('PluginApplicationService list and detail', () => {
     const workspace = tempDirectory()
     const { home, service } = await installed(DESCRIBED, 'user', { workspace })
     const second = await installed(DESCRIBED, 'project', { home, workspace })
-    const list = second.service.list()
+    const list = second.service.list(workspace)
     expect(
       list.map(({ scope, activation, effective }) => [
         scope,
@@ -787,7 +782,8 @@ describe('PluginApplicationService list and detail', () => {
       ['user', 'active', false],
     ])
     expect(
-      service.detail({ pluginId: 'hello-kit', scope: 'user' }).components[0],
+      service.detail({ pluginId: 'hello-kit', scope: 'user' }, workspace)
+        .components[0],
     ).toMatchObject({
       state: 'disabled',
       reason: '已由项目范围的同一插件提供',
@@ -801,11 +797,10 @@ describe('PluginApplicationService list and detail', () => {
   it('computes Skill roots per project so project plugins stay in their project', async () => {
     const projectA = tempDirectory()
     const projectB = tempDirectory()
-    const { service, setWorkspace } = await installed(DESCRIBED, 'project', {
+    const { service } = await installed(DESCRIBED, 'project', {
       workspace: projectA,
     })
     const entry = service.store.get('hello-kit', 'project')!
-    setWorkspace(projectB)
     expect(service.enabledSkillRoots(projectA)).toEqual([
       join(entry.installPath, 'skills'),
     ])
@@ -1050,13 +1045,11 @@ describe('PluginApplicationService managed packages', () => {
     home: string,
     roots: string[],
     cu = computerUse(false),
-    workspace: string | null = null,
   ) {
     return new PluginApplicationService({
       emperorHome: home,
       bundledPluginRoots: roots,
       computerUse: cu.port,
-      activeWorkspaceRoot: () => workspace,
     })
   }
 

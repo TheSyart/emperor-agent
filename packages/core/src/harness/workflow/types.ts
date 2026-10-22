@@ -47,6 +47,8 @@ export interface WorkflowRunInfo {
 
 /** One `agent()` call's identity within a run. */
 export interface WorkflowAgentInfo {
+  externalRunId?: string
+  backend?: 'internal' | 'claude-code' | 'codex'
   /** 1-based sequence number of this `agent()` call within the run. */
   seq: number
   label: string
@@ -138,6 +140,8 @@ export interface WorkerInit {
 
 /** What the worker asks the host to start for one `agent()` call. */
 export interface ChildStartRequest {
+  backend?: 'internal' | 'claude-code' | 'codex'
+  profileId?: string
   prompt: string
   schema?: ObjectJsonSchema
   provider?: string
@@ -155,6 +159,8 @@ export interface ChildResult {
 
 /** Worker-side handle for one started child. */
 export interface ChildHandle {
+  externalRunId?: string
+  backend?: 'internal' | 'claude-code' | 'codex'
   readonly id: string
   /** Rejects only for an infrastructure fault (`child-failed`). */
   readonly result: Promise<ChildResult>
@@ -181,7 +187,13 @@ export type WorkerToHostMessage =
 export type HostToWorkerMessage =
   | { type: 'go' }
   | { type: 'cancel'; reason: string }
-  | { type: 'child-started'; callId: number; childId: string }
+  | {
+      type: 'child-started'
+      callId: number
+      childId: string
+      externalRunId?: string
+      backend?: 'internal' | 'claude-code' | 'codex'
+    }
   | { type: 'child-start-error'; callId: number; rendered: string }
   | { type: 'child-settled'; callId: number; result: ChildResult }
   | { type: 'child-failed'; callId: number; rendered: string }
@@ -191,6 +203,8 @@ export type HostToWorkerMessage =
 
 /** One published child run (the `SubagentRun` of the dsh seam, reduced). */
 export interface ChildRun {
+  externalRunId?: string
+  backend?: 'internal' | 'claude-code' | 'codex'
   readonly id: string
   /** Never rejects for an ordinary child failure (non-`completed` stop reason instead). */
   readonly result: Promise<ChildResult>
@@ -198,6 +212,9 @@ export interface ChildRun {
 }
 
 export interface ChildProviderStartRequest {
+  backend?: 'internal' | 'claude-code' | 'codex'
+  profileId?: string
+  clientRequestId?: string
   prompt: string
   parent: Agent
   signal: AbortSignal

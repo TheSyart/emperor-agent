@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '../llm/types'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
+import { workspaceMutationDomain } from '../workspace/mutation-coordinator'
 import { CoreMutationGuardError } from './mutation-guard'
 import { coreOperationKeys } from './operations'
 import {
@@ -20,7 +21,12 @@ import {
   type ApiFixture,
 } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const EXPECTED_OPERATIONS = [
+  'agents.list',
+  'agents.send',
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
@@ -55,6 +61,21 @@ const EXPECTED_OPERATIONS = [
   'control.get',
   'control.setMode',
   'control.setPermissionMode',
+  'delegations.abandon',
+  'delegations.apply',
+  'delegations.close',
+  'delegations.collect',
+  'delegations.diff',
+  'delegations.discard',
+  'delegations.get',
+  'delegations.history',
+  'delegations.integrate',
+  'delegations.interrupt',
+  'delegations.receipt',
+  'delegations.recover',
+  'delegations.send',
+  'delegations.undo',
+  'delegations.validate',
   'desktopPet.get',
   'desktopPet.setEnabled',
   'diagnostics.get',
@@ -63,9 +84,25 @@ const EXPECTED_OPERATIONS = [
   'environment.getInstallLog',
   'environment.getStatus',
   'environment.install',
+  'executors.cancelSignIn',
+  'executors.cancelUpgrade',
+  'executors.clearCredential',
+  'executors.configure',
+  'executors.dismissNotice',
+  'executors.dismissUpgrades',
+  'executors.list',
+  'executors.models',
+  'executors.probe',
+  'executors.setCredential',
+  'executors.signIn',
+  'executors.signOut',
+  'executors.upgrade',
+  'executors.versions',
   'files.list',
+  'files.preview',
   'files.read',
   'files.search',
+  'files.stat',
   'git.branches',
   'git.closePullRequest',
   'git.commit',
@@ -114,6 +151,7 @@ const EXPECTED_OPERATIONS = [
   'mcp.importServers',
   'mcp.removeServer',
   'mcp.saveConfig',
+  'mcp.serverLog',
   'mcp.setServerEnabled',
   'mcp.status',
   'memory.checkWatchlist',
@@ -131,13 +169,20 @@ const EXPECTED_OPERATIONS = [
   'memory.tokens',
   'model.activate',
   'model.deleteEntry',
+  'model.discardRejected',
   'model.discoverModels',
   'model.getConfig',
+  'model.lookupDefaults',
+  'model.probeConnection',
+  'model.refreshMetadata',
+  'model.replaceEntry',
   'model.resolveProfile',
+  'model.saveEntries',
   'model.saveEntry',
   'model.savePolicy',
   'model.setReasoningEffort',
   'model.test',
+  'model.updateConnection',
   'onboarding.getProfileStatus',
   'onboarding.skipProfileInterview',
   'onboarding.startProfileInterview',
@@ -156,7 +201,10 @@ const EXPECTED_OPERATIONS = [
   'pullRequests.list',
   'pullRequests.status',
   'pullRequests.view',
+  'references.image',
+  'references.preview',
   'references.resolve',
+  'references.siteIcon',
   'runtime.replay',
   'scheduler.createJob',
   'scheduler.deleteJob',
@@ -168,12 +216,18 @@ const EXPECTED_OPERATIONS = [
   'sessions.activate',
   'sessions.children',
   'sessions.create',
+  'sessions.defaults',
   'sessions.delete',
   'sessions.event',
   'sessions.history',
   'sessions.lineage',
   'sessions.list',
+  'sessions.listDeleted',
+  'sessions.purgeDeleted',
   'sessions.rename',
+  'sessions.restoreDeleted',
+  'sessions.search',
+  'sessions.setDefaults',
   'sessions.watch',
   'sidebar.get',
   'sidebar.patch',
@@ -186,11 +240,16 @@ const EXPECTED_OPERATIONS = [
   'skills.save',
   'skills.tools',
   'skills.validate',
+  'storage.clean',
+  'storage.usage',
+  'storage.versions',
+  'tasks.budget',
   'tasks.cancel',
   'tasks.get',
   'tasks.list',
   'tasks.readOutput',
   'tasks.resume',
+  'tasks.setBudget',
   'tasks.transcript',
   'tasks.wait',
   'terminals.close',
@@ -199,7 +258,15 @@ const EXPECTED_OPERATIONS = [
   'terminals.read',
   'terminals.resize',
   'terminals.write',
+  'tools.networkSettings',
   'tools.readResult',
+  'tools.setNetworkSettings',
+  'updates.cancelDownload',
+  'updates.check',
+  'updates.download',
+  'updates.reveal',
+  'updates.setEnabled',
+  'updates.status',
   'workspace.revertTurn',
   'workspace.snapshot',
   'workspace.turnDiff',
@@ -303,7 +370,7 @@ describe('CoreApi operation surface', () => {
     })
     expect(payload.goals).toEqual({ active: null })
     expect(payload.provider).toBe('test')
-    expect(api.host.activeSessionId).toBe(id)
+    expect(payload.sessionId).toBe(id)
   })
 
   it('rejects draft session ids at bootstrap before activating or replaying', async () => {
@@ -313,7 +380,7 @@ describe('CoreApi operation surface', () => {
     await expect(
       api.bootstrap({ sessionId: 'draft:new-chat' }),
     ).rejects.toThrow(/draft/i)
-    expect(api.host.activeSessionId).toBe(id)
+    expect((await api.bootstrap()).sessionId).toBe(id)
   })
 })
 
@@ -764,70 +831,95 @@ describe('CoreApi control', () => {
 })
 
 describe('CoreApi mutation guard', () => {
-  it('rejects config, MCP, and model writes while plan mode is active', async () => {
+  it('FIX-10 · 1 · settings save while the chat behind the window is in plan mode', async () => {
     const { api } = await setup()
     const id = session(api)
     api.sessions.activate(id)
     api.control.setMode('plan', id)
-    await expect(api.config.save('x')).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
-    await expect(api.mcp.saveConfig({ servers: {} })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    // Settings are global: the chat the window shows does not gate them.
+    const view = { sessionId: id }
+    await expect(
+      api.config.save('## 偏好设置\n\n- 回复用中文\n', view),
+    ).resolves.toBeDefined()
+    await expect(
+      api.mcp.saveConfig({ servers: {} }, view),
+    ).resolves.toBeDefined()
     const pasted = { mcpServers: { docs: { url: 'https://docs.test/mcp' } } }
-    await expect(api.mcp.importServers({ raw: pasted })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
     await expect(
-      api.mcp.importServers({ raw: pasted, dryRun: true }),
-    ).resolves.toMatchObject({ dryRun: true, added: ['docs'] })
+      api.mcp.importServers({ raw: pasted }, view),
+    ).resolves.toMatchObject({ added: ['docs'] })
     await expect(
-      api.mcp.setServerEnabled({ name: 'docs', enabled: false }),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    await expect(api.mcp.removeServer({ name: 'docs' })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+      api.mcp.setServerEnabled({ name: 'docs', enabled: false }, view),
+    ).resolves.toBeDefined()
     await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+      api.mcp.removeServer({ name: 'docs' }, view),
+    ).resolves.toBeDefined()
     await expect(
-      api.model.deleteEntry({ entryId: 'entry-1' }),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    expect(() => api.scheduler.createJob({})).toThrow(CoreMutationGuardError)
-    expect(() => api.skills.save('blocked-save', '# Blocked')).toThrow(
-      CoreMutationGuardError,
-    )
-    expect(() => api.skills.delete('blocked-delete')).toThrow(
-      CoreMutationGuardError,
-    )
-    await expect(api.hooks.saveConfig('{}')).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
+      api.model.saveEntry(validModelEntry('in-plan') as never, view),
+    ).resolves.toBeDefined()
+    expect(() =>
+      api.skills.save(
+        'in-plan',
+        '---\nname: in-plan\ndescription: Saved in plan mode\n---\n# In plan\n',
+        { sessionId: null },
+        view,
+      ),
+    ).not.toThrow()
+    await expect(api.hooks.saveConfig('{}', view)).resolves.toBeDefined()
+    await expect(api.storage.clean(view)).resolves.toBeDefined()
+    // Stopping is never gated.
+    await expect(
+      api.environment.cancelInstall({ id: 'none' } as never, view),
+    ).resolves.not.toMatchObject({ code: 'mutation_blocked_plan' })
+    expect(() =>
+      api.processes.cancel('proc-missing', { sessionId: id, leaseId: 'l' }),
+    ).toThrow(expect.objectContaining({ code: 'mutation_forbidden' }))
+    // A process changes owner only with its own chat's consent.
+    expect(() =>
+      api.processes.reparent('proc-missing', {
+        sessionId: id,
+        leaseId: 'l',
+        ownerKind: 'task',
+        ownerId: 't',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'mutation_blocked_plan',
+        message: expect.stringContaining('计划模式'),
+      }),
     )
   })
 
-  it('rejects config, MCP, and model writes while an interaction is pending', async () => {
+  it('FIX-10 · 1 · settings save while the chat behind the window waits on a question', async () => {
     const { api, events } = await setup({
       replies: [askColor, { text: 'done' }],
     })
     const id = session(api)
     const submitted = api.chat.submit({ content: 'pick', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await expect(api.config.save('x')).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
-    await expect(api.mcp.saveConfig({ servers: {} })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    const view = { sessionId: id }
     await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+      api.config.save('## 偏好设置\n\n- 回复用中文\n', view),
+    ).resolves.toBeDefined()
+    await expect(
+      api.mcp.saveConfig({ servers: {} }, view),
+    ).resolves.toBeDefined()
+    await expect(
+      api.model.saveEntry(validModelEntry('pending') as never, view),
+    ).resolves.toBeDefined()
+    expect(() =>
+      api.processes.reparent('proc-missing', {
+        sessionId: id,
+        leaseId: 'l',
+        ownerKind: 'task',
+        ownerId: 't',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'mutation_blocked_pending' }))
     await api.control.answerInteraction(
       pendingInteractionId(events, 'ask_request'),
       { color: { choice: 'red', freeform: '' } },
     )
     await submitted
-    await expect(api.mcp.saveConfig({ servers: {} })).resolves.toBeDefined()
   })
 
   it('keeps retired install operations retired', async () => {
@@ -846,6 +938,62 @@ describe('CoreApi mutation guard', () => {
 })
 
 describe('CoreApi tasks and tools', () => {
+  it('composes external tools with the shared Core workspace coordinator and stops them with the root', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    api.host.agentFor(id)
+    expect(api.host.delegations).toBe(api.delegationRuntime)
+    // External executors are opt-in (AGT-05) and reuse the local CLI login.
+    expect(
+      api.executorConfig
+        .read()
+        .profiles.every(
+          (profile) =>
+            !profile.enabled && profile.authRef.kind === 'managed-cli-login',
+        ),
+    ).toBe(true)
+    const schema = api.host.tools
+      .schemas()
+      .find((tool) => tool.name === 'subagent')!
+    expect(JSON.stringify(schema.parameters)).toContain('claude-code')
+    const stop = vi.spyOn(api.delegationRuntime, 'stopRoot').mockResolvedValue()
+    api.host.stop(id)
+    expect(stop).toHaveBeenCalledWith(id)
+  })
+  it('holds real internal tool dispatch behind an external workspace lease', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    const agent = api.host.agentFor(id)
+    const root = api.host.sessionWorkspaceRoot(id)
+    let invoked = false
+    api.host.tools.register({
+      name: 'mcp_fixture_writer',
+      description: 'lease fixture',
+      parameters: {},
+      parse: (r) => r,
+      execute: async () => {
+        invoked = true
+        return 'wrote'
+      },
+    })
+    const lease = await api.workspaceMutations.resources.acquire({
+      keys: [workspaceMutationDomain(root)],
+      mode: 'exclusive',
+      owner: 'external',
+    })
+    const run = api.host.tools.execute({
+      name: 'mcp_fixture_writer',
+      arguments: {},
+      agent,
+      callId: 'lease-check',
+      signal: new AbortController().signal,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(invoked).toBe(false)
+    lease.release()
+    expect((await run).isError).toBe(false)
+    expect(invoked).toBe(true)
+  })
   it('lists a background bash job and serves its transcript', async () => {
     const { api } = await setup({
       replies: [
@@ -1007,6 +1155,9 @@ describe('CoreApi tasks and tools', () => {
     writeFileSync(join(root, 'outside.txt'), 'secret')
     expect(api.tools.readResult({ ref: spilled })).toEqual({
       content: 'full text content',
+      page: 1,
+      pages: 1,
+      bytes: 17,
     })
     expect(() =>
       api.tools.readResult({ ref: join(root, 'outside.txt') }),
@@ -1026,6 +1177,41 @@ describe('CoreApi tasks and tools', () => {
 })
 
 describe('CoreApi goals', () => {
+  it('starts a goal from a draft in the real session it creates (FIX-06)', async () => {
+    const { api } = await setup({ replies: [{ text: 'round one' }] })
+    const started = await api.goals.start({
+      sessionId: 'draft:fix06',
+      clientDraftId: 'draft:fix06',
+      draftSession: { mode: 'chat', project: {} },
+      objective: 'ship from a draft',
+    })
+    const real = started.sessionId!
+    expect(real).toBeTruthy()
+    expect(real.startsWith('draft:')).toBe(false)
+    expect(api.host.kept.sessionStore.get(real)).toBeTruthy()
+    expect(await api.goals.list({ sessionId: real })).toEqual([
+      expect.objectContaining({ id: started.goal!.id }),
+    ])
+    await api.host.agentFor(real).whenIdle()
+  })
+
+  it('FIX-13 · 2 · a goal started from a draft takes its preset, never its plan mode', async () => {
+    const { api } = await setup({ replies: [{ text: 'round one' }] })
+    const started = await api.goals.start({
+      sessionId: 'draft:fix13',
+      clientDraftId: 'draft:fix13',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+      objective: 'ship from a draft',
+    })
+    const real = started.sessionId!
+    // Plan and goal exclude each other (composerLifecycle).
+    expect(api.control.get(real)).toMatchObject({
+      plan: false,
+      preset: 'read-only',
+    })
+    await api.host.agentFor(real).whenIdle()
+  })
+
   it('starts, lists, pauses, resumes, and cancels a goal', async () => {
     const { api, adapter, events } = await setup({
       replies: [{ text: 'round one' }, { text: 'round two' }],
@@ -1059,25 +1245,53 @@ describe('CoreApi goals', () => {
     })
     expect(events.some((event) => event.event === 'goal_updated')).toBe(true)
 
-    const paused = await api.goals.pause(goalId)
+    const paused = await api.goals.pause(goalId, id)
     expect(paused.goal).toMatchObject({ id: goalId, phase: 'paused' })
-    expect((await api.goals.get(goalId)).phase).toBe('paused')
-    const resumed = await api.goals.resume(goalId)
+    expect((await api.goals.get(goalId, id)).phase).toBe('paused')
+    const resumed = await api.goals.resume(goalId, id)
     expect(resumed.goal).toMatchObject({ id: goalId, phase: 'active' })
     await agent.whenIdle()
-    const cancelled = await api.goals.cancel(goalId)
+    const cancelled = await api.goals.cancel(goalId, null, id)
     expect(cancelled).toMatchObject({
       accepted: true,
       goal: null,
       cleared: { id: goalId },
     })
     expect((await api.bootstrap({ sessionId: id })).goals.active).toBeNull()
-    await expect(api.goals.get(goalId)).rejects.toMatchObject({
+    await expect(api.goals.get(goalId, id)).rejects.toMatchObject({
       code: 'goal_not_found',
     })
     await expect(
       api.goals.start({ sessionId: id, objective: '  ' }),
     ).rejects.toMatchObject({ code: 'goal_objective_invalid' })
+  })
+})
+
+describe('CoreApi sessions.create (FIX-13)', () => {
+  it('2 · a session a typed command creates for a draft starts in its plan mode and preset', async () => {
+    const { api, adapter } = await setup()
+    const created = api.sessions.create({
+      title: '新会话',
+      mode: 'chat',
+      plan: true,
+      preset: 'danger-full-access',
+    })
+    expect(api.control.get(String(created.id))).toMatchObject({
+      plan: true,
+      preset: 'danger-full-access',
+    })
+    // A creation-time fact: nothing is announced to the model.
+    const types = api.host
+      .sessionLog(String(created.id))!
+      .events.map((event) => event.type)
+    expect(types).not.toContain('context/message')
+    expect(adapter.requests).toHaveLength(0)
+    // Without them it is the defaults, as before.
+    const plain = api.sessions.create({ title: 'plain' })
+    expect(api.control.get(String(plain.id))).toMatchObject({
+      plan: false,
+      preset: api.host.defaultPreset,
+    })
   })
 })
 
@@ -1105,7 +1319,7 @@ describe('CoreApi commands', () => {
       status: 'completed',
       receipt: { code: 'session_transitioned' },
     })
-    const next = String(api.host.activeSessionId)
+    const next = String((await api.bootstrap()).sessionId)
     expect(next).not.toBe(previous)
     expect(api.host.kept.sessionStore.get(next)).toMatchObject({
       parent_session_id: previous,
@@ -1130,7 +1344,7 @@ describe('CoreApi commands', () => {
       invocationSource: 'desktop',
     })
     expect(result).toMatchObject({ status: 'completed' })
-    const next = String(api.host.activeSessionId)
+    const next = String((await api.bootstrap()).sessionId)
     expect(next).not.toBe(previous)
     expect(api.host.controlPayload(next)).toMatchObject({
       preset: 'read-only',
@@ -1192,78 +1406,232 @@ describe('CoreApi commands', () => {
   })
 })
 
+// FIX-14: the start page is a draft (`draft:<uuid>`) Core has no session for.
+// Its slash commands and Skills come from the draft's own mode and project,
+// never from whichever real session happens to exist.
+describe('CoreApi commands on a start-page draft (FIX-14)', () => {
+  function skillAt(dir: string, name: string): void {
+    mkdirSync(join(dir, name), { recursive: true })
+    writeFileSync(
+      join(dir, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: The ${name} skill\n---\n`,
+    )
+  }
+
+  async function draftFixture() {
+    const root = tmp('emperor-core-api-draft-commands-')
+    const stateRoot = join(root, 'home')
+    const projectA = join(root, 'project-a')
+    const projectB = join(root, 'project-b')
+    skillAt(join(stateRoot, 'skills'), 'reviewer')
+    skillAt(join(projectA, '.emperor', 'skills'), 'deploy')
+    skillAt(join(projectB, '.emperor', 'skills'), 'release')
+    const fixture = await setup({ root, stateRoot })
+    return { ...fixture, projectA, projectB }
+  }
+
+  const ids = (commands: Array<{ id: string }>) =>
+    commands.map((command) => command.id)
+
+  it('1 · lists the builtins and personal Skills with no session at all', async () => {
+    const { api } = await draftFixture()
+    expect(api.host.kept.sessionStore.list()).toEqual([])
+    const commands = await api.commands.list({
+      sessionId: 'draft:fresh',
+      draftSession: { mode: 'chat', project: null },
+      invocationSource: 'desktop',
+    })
+    expect(ids(commands)).toEqual(
+      expect.arrayContaining([
+        'builtin.new',
+        'builtin.plan',
+        'builtin.permissions',
+        'builtin.goal',
+        'skill.user.reviewer',
+      ]),
+    )
+    expect(commands.every((command) => command.available)).toBe(true)
+    // Listing never creates the session.
+    expect(api.host.kept.sessionStore.list()).toEqual([])
+  })
+
+  it('2 · lists the Skills of a Build draft’s project, not another project’s', async () => {
+    const { api, projectA, projectB } = await draftFixture()
+    // A real Build session on project A exists; the drafts must not see it.
+    api.sessions.create({ title: 'A', mode: 'build', project_path: projectA })
+    const draftOn = (mode: string, path: string) =>
+      api.commands.list({
+        sessionId: 'draft:next',
+        draftSession: {
+          mode,
+          project: {
+            project_id: path,
+            project_path: path,
+            project_name: 'P',
+          },
+        },
+        invocationSource: 'desktop',
+      })
+    const onA = ids(await draftOn('build', projectA))
+    expect(onA).toEqual(
+      expect.arrayContaining(['skill.project.deploy', 'skill.user.reviewer']),
+    )
+    expect(onA).not.toContain('skill.project.release')
+    const onB = ids(await draftOn('build', projectB))
+    expect(onB).toEqual(
+      expect.arrayContaining(['skill.project.release', 'skill.user.reviewer']),
+    )
+    expect(onB).not.toContain('skill.project.deploy')
+    // A Chat draft has no project Skills, whatever path it carries.
+    const chat = ids(await draftOn('chat', projectA))
+    expect(chat).toContain('skill.user.reviewer')
+    expect(chat).not.toContain('skill.project.deploy')
+  })
+
+  it('3 · completes command arguments on a draft', async () => {
+    const { api } = await draftFixture()
+    const completions = await api.commands.complete({
+      sessionId: 'draft:fresh',
+      draftSession: { mode: 'chat', project: null },
+      commandId: 'builtin.permissions',
+      rawArgs: 'read',
+      cursor: 4,
+      invocationSource: 'desktop',
+    })
+    expect(completions.map((item) => item.value)).toContain('read-only')
+  })
+})
+
 describe('CoreApi sessions and kept services', () => {
-  it('deletes a session and its log', async () => {
+  it('moves a deleted session to the trash, and undo brings it back byte for byte (FIX-01 1)', async () => {
     const { api } = await setup({ replies: [{ text: 'hello' }] })
     const keep = session(api, 'Keep')
     const doomed = session(api, 'Doomed')
     await api.chat.submit({ content: 'hi', sessionId: doomed })
-    expect(api.host.sessions.has(doomed)).toBe(true)
+    await api.host.agentFor(doomed).whenIdle()
+    await api.host.sessions.flush(doomed, { sync: true })
+    const logPath = join(
+      api.host.kept.sessionStore.sessionDir(doomed),
+      'log.jsonl',
+    )
+    const bytes = readFileSync(logPath)
     const forget = vi.spyOn(api.turnFiles, 'forgetSession')
-    await api.sessions.delete(doomed)
-    // Its kept turn snapshots go first, while the project is still known.
-    expect(forget).toHaveBeenCalledWith(doomed)
+    const result = await api.sessions.delete(doomed)
+    expect(result).toMatchObject({ deleted: true, restorable: true })
+    // Snapshots stay until the trash is emptied, so undo keeps revert.
+    expect(forget).not.toHaveBeenCalled()
     expect(api.host.sessions.has(doomed)).toBe(false)
     expect(api.host.kept.sessionStore.get(doomed)).toBeNull()
     expect(api.host.kept.sessionStore.get(keep)).not.toBeNull()
+    expect(api.sessions.listDeleted()).toEqual([
+      expect.objectContaining({ id: doomed, title: 'Doomed' }),
+    ])
+    const restored = await api.sessions.restoreDeleted(doomed)
+    expect(restored.id).toBe(doomed)
+    expect(readFileSync(logPath).equals(bytes)).toBe(true)
+    expect(api.sessions.listDeleted()).toEqual([])
+    expect(api.host.agentFor(doomed).session.events.length).toBeGreaterThan(0)
+  })
+
+  it('keeps a deleted session in 最近删除 until it is purged (FIX-01 2)', async () => {
+    const { api } = await setup()
+    session(api, 'Keep')
+    const doomed = session(api, 'Doomed')
+    await api.sessions.delete(doomed)
+    expect(api.sessions.listDeleted().map((item) => item.id)).toEqual([doomed])
+    const forget = vi.spyOn(api.turnFiles, 'forgetSession')
+    await api.sessions.purgeDeleted(doomed)
+    expect(forget).toHaveBeenCalledWith(doomed, null)
+    expect(api.sessions.listDeleted()).toEqual([])
+    await expect(api.sessions.restoreDeleted(doomed)).rejects.toThrow()
+  })
+
+  it('empties trash entries older than 30 days (FIX-01 3)', async () => {
+    const { api } = await setup()
+    session(api, 'Keep')
+    const old = session(api, 'Old')
+    const fresh = session(api, 'Fresh')
+    await api.sessions.delete(old)
+    await api.sessions.delete(fresh)
+    const store = api.host.kept.sessionStore
+    // Backdate the first deletion past the 30-day window.
+    store.trash(store.restoreTrashed(old)!.id, '2026-08-01T00:00:00.000Z')
+    const purged = await api.sessions.purgeExpiredDeleted(
+      Date.parse('2026-10-19T00:00:00.000Z'),
+    )
+    expect(purged).toEqual([old])
+    expect(api.sessions.listDeleted().map((item) => item.id)).toEqual([fresh])
   })
 
   it('returns structured scheduler payloads and rejects non agent_turn payloads', async () => {
     const { api } = await setup()
-    const created = api.scheduler.createJob({
-      name: 'Typed scheduler job',
-      schedule: { kind: 'every', everyMs: 60_000 },
-      payload: {
-        kind: 'agent_turn',
-        message: 'run a typed task',
-        deliver: true,
+    const created = api.scheduler.createJob(
+      {
+        name: 'Typed scheduler job',
+        schedule: { kind: 'every', everyMs: 60_000 },
+        payload: {
+          kind: 'agent_turn',
+          message: 'run a typed task',
+          deliver: true,
+        },
+        deleteAfterRun: false,
+        misfirePolicy: 'latest',
       },
-      deleteAfterRun: false,
-      misfirePolicy: 'latest',
-    })
+      VIEW,
+    )
     expect(created).toMatchObject({
       job: { name: 'Typed scheduler job', misfirePolicy: 'latest' },
       scheduler: { jobs: expect.any(Array) },
     })
     const jobId = String((created.job as Record<string, unknown>).id)
     expect(
-      api.scheduler.updateJob(jobId, { misfirePolicy: 'catch-up-one' }).job,
+      api.scheduler.updateJob(jobId, { misfirePolicy: 'catch-up-one' }, VIEW)
+        .job,
     ).toMatchObject({ misfirePolicy: 'catch-up-one' })
     expect(
-      api.scheduler.updateJob(jobId, { name: 'Renamed' }).job,
+      api.scheduler.updateJob(jobId, { name: 'Renamed' }, VIEW).job,
     ).toMatchObject({ name: 'Renamed', misfirePolicy: 'catch-up-one' })
-    expect(api.scheduler.pauseJob(jobId)).toMatchObject({
+    expect(api.scheduler.pauseJob(jobId, VIEW)).toMatchObject({
       job: { id: jobId, enabled: false },
     })
-    expect(api.scheduler.deleteJob(jobId)).toMatchObject({
+    expect(api.scheduler.deleteJob(jobId, VIEW)).toMatchObject({
       deleted: jobId,
       scheduler: { jobs: expect.any(Array) },
     })
 
     const schedule = { kind: 'every', everyMs: 60_000 }
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'system_event', message: 'internal' },
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'system_event', message: 'internal' },
+        },
+        VIEW,
+      ),
     ).toThrow(/system_event.*internal/i)
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'team_wake', message: 'wake' },
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'team_wake', message: 'wake' },
+        },
+        VIEW,
+      ),
     ).toThrow(/agent_turn/)
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'agent_turn', message: 'run' },
-        misfirePolicy: 'replay-all',
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'agent_turn', message: 'run' },
+          misfirePolicy: 'replay-all',
+        },
+        VIEW,
+      ),
     ).toThrow(/misfirePolicy/)
-    expect(() => api.scheduler.deleteJob('missing')).toThrow(/not found/)
+    expect(() => api.scheduler.deleteJob('missing', VIEW)).toThrow(/not found/)
   })
 
   it('normalizes missing and legacy sidebar state', async () => {
@@ -1379,7 +1747,9 @@ describe('CoreApi sessions and kept services', () => {
     const { api, root, stateRoot } = await setup()
     const id = session(api)
     api.sessions.activate(id)
-    const diagnostics = (await api.diagnostics.get()) as Record<string, any>
+    const diagnostics = (await api.diagnostics.get({
+      sessionId: id,
+    })) as Record<string, any>
     expect(diagnostics.kernel).toMatchObject({
       activeSessionId: id,
       busySessions: [],
@@ -1416,7 +1786,10 @@ describe('CoreApi sessions and kept services', () => {
 
   it('saves model config in stateRoot', async () => {
     const { api, root, stateRoot } = await setup()
-    await api.model.saveEntry(validModelEntry('state-root-model') as never)
+    await api.model.saveEntry(
+      validModelEntry('state-root-model') as never,
+      VIEW,
+    )
     expect(existsSync(join(stateRoot, 'model_config.json'))).toBe(true)
     expect(existsSync(join(root, 'model_config.json'))).toBe(false)
     expect(
@@ -1431,7 +1804,7 @@ describe('CoreApi sessions and kept services', () => {
     mkdirSync(join(stateRoot, 'skills', 'demo'), { recursive: true })
     writeFileSync(join(stateRoot, 'skills', 'demo', 'SKILL.md'), '# Demo\n')
     const { api } = await setup({ root, stateRoot })
-    expect(api.skills.delete('demo')).toMatchObject({
+    expect(api.skills.delete('demo', { sessionId: null }, VIEW)).toMatchObject({
       deleted: 'demo',
       scope: 'user',
     })
@@ -1487,13 +1860,13 @@ describe('CoreApi sessions and kept services', () => {
 
   it('manages desktop pet preference without spawning a process', async () => {
     const { api } = await setup()
-    expect(await api.desktopPet.setEnabled(true)).toMatchObject({
+    expect(await api.desktopPet.setEnabled(true, VIEW)).toMatchObject({
       enabled: true,
       running: false,
       lastError: null,
     })
     expect((await api.desktopPet.get()).enabled).toBe(true)
-    expect(await api.desktopPet.setEnabled(false)).toMatchObject({
+    expect(await api.desktopPet.setEnabled(false, VIEW)).toMatchObject({
       enabled: false,
       running: false,
     })
@@ -1518,13 +1891,13 @@ describe('CoreApi sessions and kept services', () => {
     expect(api.hooks.validateConfig({ content: '{not json' })).toMatchObject({
       valid: false,
     })
-    const saved = await api.hooks.saveConfig(JSON.stringify(config))
+    const saved = await api.hooks.saveConfig(JSON.stringify(config), VIEW)
     expect(saved).toMatchObject({ events: { PreToolUse: 1 }, errors: [] })
     expect(
       JSON.parse(readFileSync(join(stateRoot, 'hooks.json'), 'utf8')),
     ).toEqual(config)
     expect((await api.hooks.getConfig()).content).toContain('PreToolUse')
-    await expect(api.hooks.saveConfig('{not json')).rejects.toThrow()
+    await expect(api.hooks.saveConfig('{not json', VIEW)).rejects.toThrow()
     expect(api.hooks.getMetadata()).toMatchObject({ format: 'claude-code' })
   })
 
@@ -1554,5 +1927,53 @@ describe('CoreApi sessions and kept services', () => {
     await expect(
       api.files.list({ sessionId: id, relativePath: '' } as never),
     ).rejects.toMatchObject({ code: 'workspace_project_required' })
+  })
+})
+
+describe('CoreApi agents.send (AGT-10)', () => {
+  it('6 · the user writes to a child from its page and the child answers in its own conversation', async () => {
+    const { api } = await setup({
+      replies: [
+        {
+          tools: [
+            {
+              id: 'd1',
+              name: 'subagent',
+              args: {
+                description: 'research',
+                prompt: 'find x',
+                run_in_background: false,
+              },
+            },
+          ],
+        },
+        { text: 'child found x' },
+        { text: 'parent done' },
+        { text: 'child checked again' },
+        { text: 'parent saw it' },
+      ],
+    })
+    const id = session(api)
+    await api.chat.submit({ content: 'delegate', sessionId: id })
+    const childId = api.sessions.children({ sessionId: id })[0]!.subagentId
+    const sent = api.agents.send({ sessionId: childId, text: '再检查一遍' })
+    expect(sent.messageId).toEqual(expect.any(String))
+    await waitFor(() =>
+      JSON.stringify(
+        api.sessions.history({ sessionId: childId }).events,
+      ).includes('child checked again'),
+    )
+    const events = JSON.stringify(
+      api.sessions.history({ sessionId: childId }).events,
+    )
+    expect(events).toContain('再检查一遍')
+    // Only a subagent's own conversation takes a message this way.
+    expect(() => api.agents.send({ sessionId: id, text: 'x' })).toThrow(
+      /子智能体/,
+    )
+    expect(() =>
+      api.agents.send({ sessionId: 'sub-missing', text: 'x' }),
+    ).toThrow(/子智能体/)
+    expect(() => api.agents.send({ sessionId: childId, text: '  ' })).toThrow()
   })
 })

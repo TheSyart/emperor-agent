@@ -1,3 +1,5 @@
+import type { PluginHookVariable } from '../harness/hooks/plugin-health'
+
 export type PluginScope = 'user' | 'project' | 'local' | 'managed'
 
 export type PluginSource =
@@ -119,6 +121,8 @@ export interface ResolvedPluginPackage {
   readonly skillRoots: readonly string[]
   readonly mcpServers: readonly PluginMcpServerSpec[]
   readonly hooks: readonly PluginHookSpec[]
+  /** Names the manifest's `env` lets its hooks read from Emperor's environment (SEC-07). */
+  readonly envAllowlist: readonly string[]
   readonly components: readonly ResolvedPluginComponent[]
 }
 
@@ -173,6 +177,11 @@ export interface PluginSummary {
   readonly effective: boolean
   readonly toggleable: boolean
   readonly uninstallable: boolean
+  /**
+   * A project row the repository's `.emperor/settings.json` asks to enable
+   * and the user has not decided on yet (SEC-07); absent otherwise.
+   */
+  readonly suggested?: boolean
   /** Real member counts (contract §2). */
   readonly capabilities: {
     readonly skills: number
@@ -192,6 +201,8 @@ export interface PluginComponentView {
   readonly description: string
   readonly state: PluginComponentState
   readonly reason: string | null
+  /** A failed hook: the variables it may need (SEC-07). */
+  readonly variables?: readonly PluginHookVariable[]
 }
 
 /** One tool a plugin brings, as its detail lists it. */
@@ -253,6 +264,8 @@ export interface PluginDetail {
   readonly permissions: {
     readonly runsCommands: boolean
     readonly network: boolean
+    /** Variables of Emperor's environment its hooks may read (manifest `env`). */
+    readonly env: readonly string[]
   }
   readonly components: readonly PluginComponentView[]
   readonly tools: PluginToolsView
@@ -278,10 +291,12 @@ export interface PluginMcpRuntimeState {
 
 /** Live facts the detail view layers onto a package's own verdicts. */
 export interface PluginRuntimeView {
+  /** `projectRoot`: the project whose instance runs a project-scoped server. */
   mcpServer(
     pluginId: string,
     scope: PluginScope,
     server: string,
+    projectRoot?: string | null,
   ): PluginMcpRuntimeState | null
   /**
    * An app member's connection, when Emperor has an adapter for that member
@@ -296,11 +311,20 @@ export interface PluginRuntimeView {
       'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'
     readonly reason: string | null
   } | null
+  /** A hook member's last failure, with the variables it may need (SEC-07). */
+  hookFailure?(
+    pluginId: string,
+    hookId: string,
+  ): {
+    readonly reason: string
+    readonly variables: readonly PluginHookVariable[]
+  } | null
   /** The tools one plugin MCP server has registered while it runs (none otherwise). */
   mcpTools?(
     pluginId: string,
     scope: PluginScope,
     server: string,
+    projectRoot?: string | null,
   ): readonly PluginToolView[]
   /** Computer Use's GUI tools by family (`ui` and each driver); static, so listed while it is off. */
   computerUseTools?(): ReadonlyArray<{

@@ -258,7 +258,7 @@ describe('GitHub › Issue', () => {
     installBridge()
     await mount(GitHubIssuesPage, '/github/issues')
     await until(() => reads('github.listIssues').length === 1)
-    $('[data-segment="owned"]')!.click()
+    $('[data-tab-id="owned"]')!.click()
     await until(() => reads('github.listIssues').length === 2)
     expect(reads('github.listIssues')[1]).toEqual({ filter: 'owned' })
     // Remembered for the next visit.

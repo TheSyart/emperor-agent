@@ -244,6 +244,17 @@ export const VAULT_MASTER_CHANNEL = 'emperor:computer-use:vault-master'
 export const VAULT_REVEAL_CHANNEL = 'emperor:computer-use:vault-reveal'
 /** 清空: drop every entry and the master password (and an unusable local key). */
 export const VAULT_RESET_CHANNEL = 'emperor:computer-use:vault-reset'
+/** 修复权限: make a local key that other users can read private again. */
+export const VAULT_REPAIR_KEY_CHANNEL = 'emperor:computer-use:vault-repair-key'
+/** 重新开始（先备份）: move an unreadable or newer vault.json aside. */
+export const VAULT_START_OVER_CHANNEL = 'emperor:computer-use:vault-start-over'
+/** 导出凭据备份: main asks where to save; the passphrase comes from Settings. */
+export const VAULT_EXPORT_CHANNEL = 'emperor:computer-use:vault-export'
+/** 导入 / 从备份恢复, step 1: main's own open dialog picks the file. */
+export const VAULT_IMPORT_PICK_CHANNEL =
+  'emperor:computer-use:vault-import-pick'
+/** Step 2: open the picked file with its passphrase and merge it in. */
+export const VAULT_IMPORT_CHANNEL = 'emperor:computer-use:vault-import'
 
 export interface AgentPreviewFrame {
   targetId: string
@@ -418,6 +429,11 @@ export interface AgentDownloadView {
   bytes: number
   exists: boolean
   /**
+   * An inbox file whose macOS source mark (`com.apple.quarantine`) could not
+   * be set (SEC-10): the list says 未能标记来源.
+   */
+  unmarked?: true
+  /**
    * Downloaded in the user's own Chrome or Edge (PLAN-CAP-001 RV-09): the
    * file stays in that browser's download folder (no file actions here).
    */
@@ -448,6 +464,54 @@ export function channelForCoreOperation(
   if (!OPERATION_KEY_RE.test(key))
     throw new Error(`invalid core IPC operation: ${operationKey}`)
   return CORE_IPC_PREFIX + key.replaceAll('.', ':')
+}
+
+/**
+ * The context a Core call carries besides its arguments (KRN-01): the
+ * session the renderer shows. The preload puts it first on every core
+ * channel; main takes it off and hands it to the operation, which uses it
+ * when the call names no session. Nothing in main or Core remembers it.
+ */
+export const CORE_CALL_CONTEXT_KEY = 'emperorCoreCall'
+
+export interface CoreCallEnvelope {
+  readonly [CORE_CALL_CONTEXT_KEY]: 1
+  readonly view: { readonly sessionId: string | null }
+}
+
+export function coreCallEnvelope(sessionId: string | null): CoreCallEnvelope {
+  return { [CORE_CALL_CONTEXT_KEY]: 1, view: { sessionId } }
+}
+
+/** Split a core channel's arguments into the call context and the operation's own. */
+export function splitCoreCallEnvelope(args: readonly unknown[]): {
+  view: { sessionId: string | null } | undefined
+  args: unknown[]
+} {
+  const first = args[0]
+  if (
+    !first ||
+    typeof first !== 'object' ||
+    Array.isArray(first) ||
+    !Object.hasOwn(first, CORE_CALL_CONTEXT_KEY)
+  )
+    return { view: undefined, args: [...args] }
+  const envelope = first as Record<string, unknown>
+  const view = envelope.view as Record<string, unknown> | undefined
+  const sessionId = view?.sessionId
+  if (
+    envelope[CORE_CALL_CONTEXT_KEY] !== 1 ||
+    !view ||
+    typeof view !== 'object' ||
+    Object.keys(envelope).length !== 2 ||
+    Object.keys(view).length !== 1 ||
+    !(
+      sessionId === null ||
+      (typeof sessionId === 'string' && sessionId.length <= 256)
+    )
+  )
+    throw new Error('invalid core call context')
+  return { view: { sessionId }, args: args.slice(1) }
 }
 
 /** One batch of raw session-log events sent on {@link SESSION_EVENT_CHANNEL}. */
@@ -573,3 +637,200 @@ export interface DictationStartRequest {
 export type DictationStartResult =
   | { ok: true; session: string }
   | { ok: false; code: DictationErrorCode; message: string }
+
+// ── Main window and pet windows (SEC-05: main and preload use these
+// constants, no channel name is a string literal there) ──────────────────
+
+/**
+ * Renderer → main: the running app's version, `app.getVersion()` (REL-05);
+ * the preload carries no version of its own.
+ */
+export const APP_VERSION_CHANNEL = 'emperor:app-version'
+/** Renderer → main: the native folder picker; answers the path or null. */
+export const SELECT_DIRECTORY_CHANNEL = 'emperor:select-directory'
+/**
+ * Renderer → main {@link OpenPathTarget}: open a folder Core vouches for in
+ * Finder. Never a path of the renderer's choosing (SEC-05); answers
+ * `{ ok: true } | { ok: false, error }`.
+ */
+export const OPEN_PATH_CHANNEL = 'emperor:open-path'
+/**
+ * 设置 › 高级 › 诊断 › 导出诊断包 (REL-01), trusted main window only.
+ * `prepare` (no argument) stages the bundle and answers
+ * {@link DiagnosticsBundlePrepareResult}: what the zip will hold, for the
+ * user to confirm. `export` `{ id }` asks where to save it and writes the
+ * zip ({@link DiagnosticsBundleExportResult}); `reveal` `{ id }` shows an
+ * exported zip in Finder; `discard` `{ id }` drops a staged bundle. Ids
+ * only: no path crosses IPC.
+ */
+export const DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL =
+  'emperor:diagnostics:bundle-prepare'
+export const DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL =
+  'emperor:diagnostics:bundle-export'
+export const DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL =
+  'emperor:diagnostics:bundle-reveal'
+export const DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL =
+  'emperor:diagnostics:bundle-discard'
+
+/** One file of a staged diagnostics bundle. */
+export interface DiagnosticsBundleEntryView {
+  /** Inside the zip's folder, e.g. `logs/main.log`. */
+  path: string
+  /** What it is, in the UI's words. */
+  title: string
+  bytes: number
+}
+
+export interface DiagnosticsBundleView {
+  /** `b_` + 12 hex. */
+  id: string
+  /** The zip's folder and default file name (without `.zip`). */
+  name: string
+  entries: DiagnosticsBundleEntryView[]
+  /** What the bundle never holds. */
+  excluded: string[]
+}
+
+export type DiagnosticsBundlePrepareResult =
+  { ok: true; bundle: DiagnosticsBundleView } | { ok: false; error: string }
+
+export type DiagnosticsBundleExportResult =
+  | { ok: true; name: string; location: string }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+/**
+ * 设置 › 高级 › 存储 › 备份与恢复 (REL-03), trusted main window only. `plan`
+ * counts what a backup would hold; `export` `{ includeSessions,
+ * passphrase?, confirmation? }` asks where to save and writes the
+ * `.emperor-backup.zip` (the vault only sealed under the passphrase);
+ * `reveal` shows the last export in Finder; `open` asks for a backup,
+ * unzips and checks it ({@link HomeBackupView}); `restore` `{ id,
+ * passphrase? }` imports the vault (when given), schedules the restore and
+ * restarts; `discard` `{ id }` drops an opened backup. No path crosses IPC.
+ */
+export const HOME_BACKUP_PLAN_CHANNEL = 'emperor:home-backup:plan'
+export const HOME_BACKUP_EXPORT_CHANNEL = 'emperor:home-backup:export'
+export const HOME_BACKUP_REVEAL_CHANNEL = 'emperor:home-backup:reveal'
+export const HOME_BACKUP_OPEN_CHANNEL = 'emperor:home-backup:open'
+export const HOME_BACKUP_RESTORE_CHANNEL = 'emperor:home-backup:restore'
+export const HOME_BACKUP_DISCARD_CHANNEL = 'emperor:home-backup:discard'
+
+export interface HomeBackupCategoryView {
+  id: string
+  title: string
+  description: string
+  optional: boolean
+  files: number
+  bytes: number
+}
+
+export interface HomeBackupPlan {
+  /** The default file name, without `.emperor-backup.zip`. */
+  name: string
+  categories: HomeBackupCategoryView[]
+  excluded: string[]
+  /** 密码管理器: `ready` can go in under a passphrase. */
+  vault: {
+    state: 'empty' | 'ready' | 'locked' | 'unavailable'
+    entries: number
+  }
+}
+
+export interface HomeBackupExportInput {
+  includeSessions: boolean
+  passphrase?: string
+  confirmation?: string
+}
+
+/** A backup main unzipped and checked, ready to restore. */
+export interface HomeBackupView {
+  /** `r_` + 12 hex. */
+  id: string
+  name: string
+  createdAt: string
+  appVersion: string
+  categories: string[]
+  credentials: boolean
+  files: number
+  bytes: number
+  /** Written by a newer Emperor than this one. */
+  newer: boolean
+}
+
+export type HomeBackupPlanResult =
+  { ok: true; plan: HomeBackupPlan } | { ok: false; error: string }
+
+export type HomeBackupExportResult =
+  | { ok: true; name: string; location: string; credentials: boolean }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
+export type HomeBackupOpenResult =
+  | { ok: true; backup: HomeBackupView }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
+export type HomeBackupResult = { ok: true } | { ok: false; error: string }
+/**
+ * Main window → main: the composer's + › 截图 (UI-S04, macOS). Main hides
+ * the window, runs the system's interactive region capture into a private
+ * temporary folder, reads the PNG back, deletes it and answers
+ * {@link ScreenshotCaptureResult}. One capture at a time.
+ */
+export const SCREENSHOT_CAPTURE_CHANNEL = 'emperor:screenshot:capture'
+
+export type ScreenshotCaptureResult =
+  | { ok: true; name: string; mime: 'image/png'; data: Uint8Array }
+  | {
+      ok: false
+      /**
+       * `cancelled`: Esc (no picture). `busy`: a capture is already open.
+       * `permission`: screen recording is not allowed for Emperor.
+       */
+      reason: 'cancelled' | 'busy' | 'unsupported' | 'permission' | 'failed'
+      message: string
+    }
+/** Main window → main: open, close or ask about the desktop pet. */
+export const PET_OPEN_CHANNEL = 'emperor:pet:open'
+export const PET_CLOSE_CHANNEL = 'emperor:pet:close'
+export const PET_STATUS_REQUEST_CHANNEL = 'emperor:pet:status'
+/**
+ * Pet window → main (src/pet/preload.js keeps these strings literally: it is
+ * plain sandboxed JS; pet-sandbox.test.ts checks they match).
+ */
+export const PET_RENDERER_BOOTSTRAP_CHANNEL = 'emperor:pet:renderer-bootstrap'
+export const PET_RENDERER_CLOSE_CHANNEL = 'emperor:pet:renderer-close'
+
+/**
+ * What `emperor:open-path` may open — names Core resolves, never a path the
+ * renderer picked:
+ * - diagnostic: 设置 › 诊断's Emperor Home or the current project;
+ * - skill: an installed Skill's folder (by name, in a session's scope);
+ * - invalid-skill: a rejected Skill folder Core lists for that scope.
+ */
+export type OpenPathTarget =
+  | {
+      kind: 'diagnostic'
+      /** `logs-path`: the folder of main.log and core.log (REL-01). */
+      rowId: 'global-state-root' | 'active-project-path' | 'logs-path'
+      /** The session the Diagnostics page was opened from (its project row). */
+      sessionId?: string | null
+    }
+  | { kind: 'skill'; name: string; sessionId?: string | null }
+  | { kind: 'invalid-skill'; path: string; sessionId?: string | null }
+
+/**
+ * Renderer → main `{ url }`: a remote image in rendered markdown the user
+ * asked to see (UI-38). Main fetches it through the public HTTP client (no
+ * cookies, no local or private addresses) and answers
+ * {@link RemoteImageResult}; the renderer never requests remote images.
+ */
+export const MARKDOWN_REMOTE_IMAGE_CHANNEL = 'emperor:markdown:remote-image'
+
+export type RemoteImageResult =
+  { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/** Main → renderer {@link AppMenuCommand}: an app menu item was chosen. */
+export const APP_MENU_COMMAND_CHANNEL = 'emperor:menu:command'
+
+export type AppMenuCommand = 'open-settings'

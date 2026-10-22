@@ -1,5 +1,6 @@
 import type { ConversationDefinition } from '../assembler'
 import { assistantDefinition } from './assistant'
+import { delegationResultDefinition } from './delegationResult'
 import { nextStepInboxDefinition, userMetaDefinition } from './ledgers'
 import { contextDefinition, userDefinition } from './messages'
 import {
@@ -8,6 +9,7 @@ import {
   goalDefinition,
   hookDefinition,
   retryDefinition,
+  turnBudgetDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
 } from './notices'
@@ -33,6 +35,7 @@ export const CHAT_DEFINITIONS: readonly ConversationDefinition[] = [
   fallbackDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
+  turnBudgetDefinition,
   costCapDefinition,
   compactionDefinition,
   hookDefinition,
@@ -40,6 +43,7 @@ export const CHAT_DEFINITIONS: readonly ConversationDefinition[] = [
   workflowRunDefinition,
   turnTailDefinition,
   turnFilesDefinition,
+  delegationResultDefinition,
   todosFactDefinition,
   requestContextFactDefinition,
 ] as readonly ConversationDefinition[]

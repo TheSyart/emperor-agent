@@ -11,21 +11,7 @@ import type {
 
 export type GitHubTone = 'ok' | 'warn' | 'error' | 'neutral' | 'accent'
 
-/** The GitHub pages exist while the GitHub plugin is the one in effect and active. */
-export function githubPluginOn(
-  plugins: ReadonlyArray<{
-    pluginId: string
-    effective?: boolean
-    activation: string
-  }>,
-): boolean {
-  return plugins.some(
-    (plugin) =>
-      plugin.pluginId === 'github' &&
-      plugin.effective !== false &&
-      plugin.activation === 'active',
-  )
-}
+export { githubPluginOn } from './githubPlugin'
 
 /** Where 「在插件里启用」 goes: the managed GitHub plugin's detail. */
 export const GITHUB_PLUGIN_LOCATION = {

@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { AttachmentRef } from '../../types'
+import { openImageViewer } from '../ui/imageViewer'
+import { requestWorkspace } from '../workspace/workspaceState'
 import { attachmentRawUrl } from '../../api/attachments'
 import { attachmentIcon } from '../../icons'
 
-const props = defineProps<{ data: AttachmentRef; removable?: boolean }>()
+const props = defineProps<{
+  data: AttachmentRef
+  removable?: boolean
+  owner?: string
+  group?: readonly AttachmentRef[]
+}>()
 const emit = defineEmits<{ (e: 'remove'): void }>()
 
 const isImage = computed(() => props.data.kind === 'image')
 const thumbFailed = ref(false)
-const previewOpen = ref(false)
-const closeButton = ref<HTMLButtonElement | null>(null)
 const previewUrl = computed(() =>
   isImage.value && !thumbFailed.value ? attachmentRawUrl(props.data.id) : null,
 )
@@ -26,33 +31,43 @@ function formatBytes(n: number): string {
 }
 
 function openPreview() {
-  if (!previewUrl.value) return
-  previewOpen.value = true
-  void nextTick(() => closeButton.value?.focus())
+  const owner = props.owner || ''
+  const group = (props.group ?? [props.data]).filter(
+    (item) => item.kind === 'image',
+  )
+  openImageViewer({
+    owner,
+    index: Math.max(
+      0,
+      group.findIndex((item) => item.id === props.data.id),
+    ),
+    items: group.map((item) => ({
+      id: item.id,
+      name: item.name,
+      src: attachmentRawUrl(item.id),
+      file: {
+        owner,
+        target: { source: 'attachment' as const, attachmentId: item.id },
+      },
+    })),
+  })
 }
-
-function closePreview() {
-  previewOpen.value = false
+function openFile() {
+  if (props.owner)
+    requestWorkspace({
+      pane: 'files',
+      file: {
+        owner: props.owner,
+        target: { source: 'attachment', attachmentId: props.data.id },
+      },
+    })
 }
-
-function onPreviewKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
-  event.preventDefault()
-  closePreview()
-}
-
-watch(previewOpen, (open) => {
-  if (open) window.addEventListener('keydown', onPreviewKeydown)
-  else window.removeEventListener('keydown', onPreviewKeydown)
-})
-
-onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
 </script>
 
 <template>
   <div class="attach-chip" :class="{ 'is-image': isImage }" :title="data.name">
     <button
-      v-if="previewUrl"
+      v-if="isImage"
       type="button"
       class="attach-preview-trigger"
       :aria-label="`放大预览 ${data.name}`"
@@ -60,18 +75,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
       @click="openPreview"
     >
       <img
+        v-if="previewUrl"
         class="attach-thumb"
         :src="previewUrl"
         :alt="data.name"
         loading="lazy"
         @error="thumbFailed = true"
       />
+      <span v-else class="attach-doc-icon" aria-hidden="true">
+        <component :is="iconComp" :size="20" />
+      </span>
     </button>
     <span v-else class="attach-doc-icon" aria-hidden="true">
-      <component :is="iconComp" :size="22" />
+      <component :is="iconComp" :size="20" />
     </span>
-    <div class="attach-meta">
-      <div class="attach-name">{{ data.name }}</div>
+    <div v-if="!isImage" class="attach-meta">
+      <button
+        type="button"
+        class="attach-name attach-file-open"
+        @click="openFile"
+      >
+        {{ data.name }}
+      </button>
       <div class="attach-sub">
         {{ formatBytes(data.size) }} · {{ data.kind
         }}<span v-if="data.hasText"> · 已抽文本</span>
@@ -88,32 +113,56 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
       ×
     </button>
   </div>
-
-  <Teleport to="body">
-    <div
-      v-if="previewOpen && previewUrl"
-      class="attachment-preview-modal"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="`图片预览：${data.name}`"
-      @click.self="closePreview"
-    >
-      <div class="attachment-preview-stage">
-        <button
-          ref="closeButton"
-          type="button"
-          class="attachment-preview-close"
-          aria-label="关闭图片预览"
-          @click="closePreview"
-        >
-          ×
-        </button>
-        <img :src="previewUrl" :alt="data.name" />
-        <div class="attachment-preview-caption">
-          <strong>{{ data.name }}</strong>
-          <span>{{ data.mime }} · {{ formatBytes(data.size) }}</span>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 </template>
+<style scoped>
+.attach-chip.is-image {
+  position: relative;
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+}
+.attach-chip.is-image .attach-preview-trigger {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: inherit;
+}
+.attach-chip.is-image .attach-thumb,
+.attach-chip.is-image .attach-doc-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: inherit;
+}
+.attach-chip.is-image .attach-remove {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  background: rgb(var(--image-viewer-bg) / 80%);
+  color: rgb(var(--image-viewer-ink));
+}
+.attach-chip.is-image .attach-remove:hover {
+  background: rgb(var(--image-viewer-bg));
+  color: rgb(var(--accent));
+}
+.attach-file-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.attach-chip .attach-file-open {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.attach-file-open:hover {
+  color: rgb(var(--accent));
+}
+</style>

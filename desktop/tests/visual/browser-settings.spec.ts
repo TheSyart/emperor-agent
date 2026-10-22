@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -63,7 +63,7 @@ function groupTitles(dialog: Locator) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`browser settings main page (${theme})`, async ({ page }) => {
+  test(`browser settings main page (${theme}) @baseline`, async ({ page }) => {
     const dialog = await openBrowser(page, { theme })
     await expect(dialog.getByTestId('browser-agent-card')).toContainText(
       '让 Emperor 控制内置浏览器',
@@ -78,9 +78,8 @@ for (const theme of ['dark', 'light'] as const) {
       '下载',
       '浏览器权限',
     ])
-    await expect(dialog.locator('#browser-link-target')).toContainText(
-      '系统默认浏览器',
-    )
+    // Where a web link opens is 常规 › 会话 › 网页链接 (UI-S07).
+    await expect(dialog.locator('#browser-link-target')).toHaveCount(0)
     await expect(dialog.locator('#browser-local-target')).toContainText(
       'Emperor',
     )
@@ -88,7 +87,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The control card opens the page: no lead-in, no notice while all is
     // well, and 导入… sits beside 自动填充和密码.
     await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     const autofill = dialog.locator('.ds-settings-group').filter({
       has: page.locator('.head .title', { hasText: /^自动填充和密码$/ }),
     })
@@ -97,6 +96,7 @@ for (const theme of ['dark', 'light'] as const) {
     ).toBeVisible()
     await noHorizontalOverflow(page)
     await shot(page, `browser-${theme}`)
+    await expectBaseline(page, 'settings', `browser-${theme}`)
 
     await dialog.locator('#browser-local-target').click()
     await page.getByRole('menuitem', { name: /^系统默认浏览器/ }).click()
@@ -120,7 +120,7 @@ for (const theme of ['dark', 'light'] as const) {
       '密码管理器',
     )
     await expect(page).toHaveURL(/page=passwords/)
-    await expect(groupTitles(dialog)).toHaveText(['保护', '已保存'])
+    await expect(groupTitles(dialog)).toHaveText(['保护', '已保存', '备份'])
     await expect(dialog).toContainText('GitHub')
     await expect(dialog).toContainText('公司邮箱')
     // Sealed with Emperor's own key, said plainly; no Keychain, no Touch ID.
@@ -145,7 +145,13 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('input[type="password"]')).toHaveCount(0)
     await dialog.locator('[data-action="vault-set-master"]').click()
     const master = page.getByRole('dialog', { name: '设置主密码' })
-    await master.getByLabel('新的主密码').fill('correct horse battery')
+    await master
+      .getByLabel('新的主密码', { exact: true })
+      .fill('correct horse battery')
+    // Setting a master password asks for it twice (SEC-09).
+    await master
+      .getByLabel('再次输入新的主密码', { exact: true })
+      .fill('correct horse battery')
     await expect(master).not.toContainText('Touch ID')
     await expect(master.locator('input[type="checkbox"]')).toHaveCount(0)
     await shot(page, `passwords-master-${theme}`)
@@ -163,7 +169,7 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
       page: 'passwords&visualVault=key-missing',
     })
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('已保存的密码无法解密')
     await expect(notice).toContainText('本地密钥文件不见了')
@@ -172,12 +178,11 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await noHorizontalOverflow(page)
     await shot(page, `passwords-key-missing-${theme}`)
-    // 清空 asks first; accepting starts the vault over.
-    page.once('dialog', (prompt) => {
-      expect(prompt.message()).toContain('无法恢复')
-      void prompt.accept()
-    })
+    // 清空 asks first; confirming starts the vault over.
     await notice.getByRole('button', { name: '清空' }).click()
+    const confirm = page.locator('.ds-modal [role="dialog"]')
+    await expect(confirm).toContainText('无法恢复')
+    await confirm.getByRole('button', { name: '清空', exact: true }).click()
     await expect(notice).toHaveCount(0)
     await expect(dialog).toContainText('还没有保存的密码')
     await expect(dialog.locator('[data-action="add-credential"]')).toBeVisible()
@@ -329,7 +334,7 @@ for (const theme of ['dark', 'light'] as const)
     })
     const dialog = await openBrowser(page, { theme })
     await dialog.locator('#browser-agent').click()
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('电脑操作服务没有响应')
     // On top of the page, above the control card.
@@ -337,7 +342,7 @@ for (const theme of ['dark', 'light'] as const)
       .locator('.ds-settings-section > .body > *')
       .first()
       .getAttribute('class')
-    expect(first).toContain('ds-settings-notice')
+    expect(first).toContain('ds-notice')
     await dialog.locator('[data-action="clear-browser-data"]').click()
     const outcome = dialog.locator('[data-clear-status]')
     await expect(outcome).toHaveText('清除失败')

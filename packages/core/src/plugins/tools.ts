@@ -31,6 +31,8 @@ export function pluginToolsView(input: {
   readonly computerUse?: boolean | null
   readonly components: readonly PluginComponentView[]
   readonly runtime: PluginRuntimeView
+  /** The project whose instance runs project-scoped servers (null: Chat). */
+  readonly projectRoot?: string | null
   /** Rewrites the package root out of text shown to the renderer. */
   readonly scrub: (text: string) => string
 }): PluginToolsView {
@@ -73,7 +75,12 @@ function mcpGroup(
   const tools =
     member.state === 'running'
       ? (
-          input.runtime.mcpTools?.(input.pluginId, input.scope, member.id) ?? []
+          input.runtime.mcpTools?.(
+            input.pluginId,
+            input.scope,
+            member.id,
+            input.projectRoot ?? null,
+          ) ?? []
         ).map((tool) => ({
           ...tool,
           description: input.scrub(tool.description),

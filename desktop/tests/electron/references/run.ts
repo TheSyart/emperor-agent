@@ -11,6 +11,16 @@
  *   `turn/files` matching `git diff` against the project's start, without
  *   touching the user's index; the turn ends with the 「已编辑 N 个文件」
  *   card, 审核 shows its diff in 审查, and 撤销 puts the files back.
+ *   UI-S15: a turn a background job's result woke belongs to the task —
+ *   no card while the job runs, then one card after the woken turn that
+ *   sums the task (the job's own file too), and the woken turn is tagged.
+ *   Resource upgrade: real Core/IPC and renderer cards, on-demand metadata,
+ *   file line navigation and SVGs, output/source lists, GitHub routes, and
+ *   ordinary Chat attachments. Only Finder's final native launch is recorded.
+ *   These added checks use the local scripted model, not a paid real model.
+ *   FIX-14: first, in a fresh Emperor Home of its own (no session at all),
+ *   the start page offers the slash commands and Skills, /plan runs as the
+ *   command, and a Build draft lists its project's Skills.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=references        (after `npm run build`)
@@ -34,6 +44,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
 import { startFixtureSite } from '../fixtures/site'
+
+/** 文件's tabs (UI-S06: the shared editor tab bar, no draft tab). */
+const FILE_TABS = '.files-pane .workspace-tab-bar .tab-item'
+const ACTIVE_FILE_TAB = `${FILE_TABS}[data-active]`
 import {
   startFakeModel,
   type ChatRequest,
@@ -209,7 +223,7 @@ async function sessionIdOf(page: Page): Promise<string> {
   return decodeURIComponent(id)
 }
 
-/** A small Git project: two source files, a folder and a document. */
+/** A small Git project: source files, a folder and a document. */
 function prepareProject(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-e2e-refs-')))
   mkdirSync(join(root, 'src', 'lib'), { recursive: true })
@@ -219,6 +233,10 @@ function prepareProject(): string {
     'export const first = 1\nexport const second = 2\nexport const third = 3\n',
   )
   writeFileSync(join(root, 'src', 'lib', 'util.ts'), 'export {}\n')
+  writeFileSync(
+    join(root, 'src', '资源示例.ts'),
+    'export const first = 1\nexport const second = 2\nexport const third = 3\n',
+  )
   writeFileSync(join(root, 'docs', 'guide.md'), '# Guide\n\nHello.\n')
   git(root, 'init', '-q', '-b', 'main')
   git(root, 'add', '-A')
@@ -235,7 +253,7 @@ async function launch(
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
   const app = await _electron.launch({
-    args: ['.'],
+    args: ['.', `--user-data-dir=${join(home, 'electron-profile')}`],
     cwd: desktop,
     env,
     timeout: 60_000,
@@ -284,8 +302,9 @@ async function openBuildSession(
           filePaths: [dir],
         })) as typeof dialog.showOpenDialog
       }, project)
-      await page.getByRole('button', { name: '新建项目会话' }).click()
-      await page.getByRole('menuitem', { name: '选择项目文件夹…' }).click()
+      // UI-S01: projects are opened from the 项目 header's 「+」 menu.
+      await page.getByRole('button', { name: '项目操作' }).click()
+      await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
       await page.getByLabel('消息输入框').first().waitFor({ timeout: 10_000 })
     },
     { critical: true },
@@ -329,6 +348,12 @@ async function documentLinks(
       throw new Error(`label ${await app.innerText()}`)
     if ((await app.getAttribute('data-md-badge')) !== 'TS')
       throw new Error('no TS badge')
+    const artwork = await app.evaluate((element) => {
+      const style = getComputedStyle(element, '::before')
+      return { image: style.backgroundImage, mask: style.maskImage }
+    })
+    if (!artwork.image.includes('%233178C6') || artwork.mask !== 'none')
+      throw new Error('filled TS artwork lost its colors or is still masked')
     if (
       (await link(page, 'docs/guide.md').getAttribute('data-md-icon')) !==
       'document'
@@ -361,7 +386,7 @@ async function documentLinks(
       const active = page.locator('.file-code-line.reference-line-active')
       await active.waitFor({ timeout: 10_000 })
       const line = await active.getAttribute('data-line')
-      const tab = (await page.locator('.file-tab.active').innerText()).trim()
+      const tab = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
       if (line !== '2' || !tab.includes('app.ts'))
         throw new Error(`line ${line}, tab ${tab}`)
       return { tab, line }
@@ -387,12 +412,12 @@ async function documentLinks(
   })
 
   await check(page, 'a missing file opens nothing', async () => {
-    const before = (await page.locator('.file-tab.active').innerText()).trim()
+    const before = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
     // aria-disabled: Playwright would wait for it to become enabled.
     await link(page, 'src/old.ts').click({ force: true })
     await page.waitForTimeout(800)
-    const after = (await page.locator('.file-tab.active').innerText()).trim()
-    const tabs = await page.locator('.file-tab').count()
+    const after = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
+    const tabs = await page.locator(FILE_TABS).count()
     if (after !== before) throw new Error(`active tab moved to ${after}`)
     if (
       (await link(page, 'src/old.ts').getAttribute('data-md-state')) !==
@@ -418,6 +443,7 @@ interface TurnFiles {
   }>
   totals: { files: number; additions: number; deletions: number }
   snapshot?: { before: string; after: string }
+  task?: { firstTurn: number; lastTurn: number }
 }
 
 async function turnRecords(page: Page, sessionId: string) {
@@ -531,12 +557,35 @@ async function turnFileRecord(
     await card.waitFor({ timeout: 10_000 })
     const headline = (await card.locator('.headline').innerText()).trim()
     if (headline !== '已编辑 3 个文件') throw new Error(`headline ${headline}`)
+    // UI-S15: the record names its task; the card says 这次任务.
+    const scope = (await card.locator('.scope').innerText()).trim()
+    if (scope !== '这次任务' || record.task?.lastTurn !== record.turn)
+      throw new Error(`scope ${scope}, task ${JSON.stringify(record.task)}`)
     const names = await card.locator('.file .name').allInnerTexts()
+    const geometry = await card.evaluate((element) => {
+      const title = element.querySelector('.headline')!.getBoundingClientRect()
+      const totals = element.querySelector('.totals')!.getBoundingClientRect()
+      const badge = element
+        .querySelector('.icon-badge')!
+        .getBoundingClientRect()
+      return {
+        totalsBelowTitle: totals.top >= title.bottom,
+        badgeWidth: badge.width,
+        fileIcons: element.querySelectorAll('.file .document-icon').length,
+      }
+    })
+    if (
+      !geometry.totalsBelowTitle ||
+      geometry.badgeWidth < 40 ||
+      geometry.fileIcons !== 3
+    )
+      throw new Error(`file summary layout: ${JSON.stringify(geometry)}`)
     await page.screenshot({ path: join(shots, 'turn-files-card.png') })
-    return { headline, names }
+    await card.screenshot({ path: join(shots, 'turn-files-card-detail.png') })
+    return { headline, names, geometry }
   })
 
-  await check(page, '审核 shows the turn’s diff in 审查', async () => {
+  await check(page, '查看变更 shows the turn’s diff in 审查', async () => {
     if (record === undefined) throw new Error('no record')
     const card = page.locator(`[data-turn-files="${record.turn}"]`)
     await card.locator('[data-action="review"]').click()
@@ -556,12 +605,83 @@ async function turnFileRecord(
 
   await check(
     page,
+    '审查 lists the changes in 未暂存 and its 分支名 ▾ menu holds every Git action',
+    async () => {
+      // UI-S06: back from the turn's review to the working tree.
+      const back = page.locator('.turn-review [aria-label="返回审查"]')
+      if (await back.isVisible()) await back.click()
+      const pane = page.locator('.git-review-pane')
+      await pane.waitFor({ timeout: 10_000 })
+      const unstaged = pane.locator('[data-group="unstaged"] .change-row')
+      // FIX-08: a read gives up after 20 s with a reason; wait past that and
+      // fail with the pane's reason rather than a bare timeout.
+      const readError = pane.locator('[data-git-read-error]')
+      await until(
+        async () =>
+          (await unstaged.count()) >= 3 || (await readError.count()) > 0,
+        25_000,
+        'the turn’s changes in 未暂存',
+      )
+      if ((await unstaged.count()) < 3)
+        throw new Error(`审查: ${(await readError.innerText()).trim()}`)
+      const paths = await unstaged.evaluateAll((rows) =>
+        rows.map((row) => (row as HTMLElement).dataset.path ?? ''),
+      )
+      for (const path of ['docs/guide.md', 'src/app.ts', 'src/new.ts'])
+        if (!paths.includes(path)) throw new Error(`未暂存: ${paths}`)
+      if (await pane.locator('[data-group="staged"]').count())
+        throw new Error('an empty 已暂存 group is drawn')
+      await pane.locator('button[data-branch-menu]').click()
+      const menu = page.getByRole('menu', { name: 'Git 操作' })
+      await menu.waitFor({ timeout: 5_000 })
+      const actions = await menu
+        .locator('[data-action]')
+        .evaluateAll((items) =>
+          items.map((item) => (item as HTMLElement).dataset.action ?? ''),
+        )
+      const expected = [
+        'switch-branch',
+        'create-branch',
+        'fetch',
+        'pull',
+        'push',
+        'compare',
+        'enter-worktree',
+      ]
+      if (JSON.stringify(actions) !== JSON.stringify(expected))
+        throw new Error(`menu: ${actions}`)
+      await page.waitForTimeout(300) // let the menu finish fading in
+      await page.screenshot({ path: join(shots, 'review-branch-menu.png') })
+      await page.keyboard.press('Escape')
+      await menu.waitFor({ state: 'hidden', timeout: 5_000 })
+      // The working-tree diff comes from Git, under the row.
+      await unstaged
+        .filter({ hasText: 'app.ts' })
+        .locator('.change-main')
+        .click()
+      await until(
+        async () =>
+          (await pane.locator('.change-diff').innerText()).includes(
+            'export const fourth = 4',
+          ),
+        10_000,
+        'the app.ts diff under its row',
+      )
+      const pr = await pane.locator('[data-pr-line]').count()
+      if (pr !== 1) throw new Error(`Pull Request lines: ${pr}`)
+      await page.screenshot({ path: join(shots, 'review-pane.png') })
+      return { paths, actions }
+    },
+  )
+
+  await check(
+    page,
     '撤销 from the card restores the turn and leaves Git clean',
     async () => {
       if (record === undefined) throw new Error('no record')
       const card = page.locator(`[data-turn-files="${record.turn}"]`)
       await card.locator('[data-action="undo"]').click()
-      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
       await dialog.waitFor({ timeout: 5_000 })
       await dialog.locator('[data-action="confirm"]').click()
       await until(
@@ -743,7 +863,7 @@ async function referencesAndCard(
         'the reply',
       )
       const sessionId = await sessionIdOf(page)
-      // The turn's record lands as the turn ends, just after the reply.
+      // The task's record lands as it ends, just after the reply.
       await until(
         async () =>
           (await turnRecords(page, sessionId))
@@ -758,7 +878,7 @@ async function referencesAndCard(
       const card = page.locator(`[data-turn-files="${record.turn}"]`)
       await card.waitFor({ timeout: 10_000 })
       await card.locator('[data-action="undo"]').click()
-      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
       await dialog.waitFor({ timeout: 5_000 })
       await dialog.locator('[data-action="confirm"]').click()
       await until(
@@ -777,6 +897,91 @@ async function referencesAndCard(
         throw new Error('the later edit was overwritten')
       await page.screenshot({ path: join(shots, 'turn-files-skipped.png') })
       return { summary }
+    },
+  )
+
+  await check(
+    page,
+    'a turn its background job woke belongs to the task: one card, after it (UI-S15)',
+    async () => {
+      const sessionId = await sessionIdOf(page)
+      const before = (await turnRecords(page, sessionId)).length
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: { file_path: 'notes/task-a.md', content: '# A\n' },
+            },
+            {
+              name: 'bash',
+              args: {
+                command: "sleep 3 && printf '# Job\\n' > notes/task-job.md",
+                description: 'Write a note in the background',
+                run_in_background: true,
+              },
+            },
+          ],
+        }),
+        () => ({ text: '后台任务已经开始。' }),
+        // Woken by the job's result: the same task goes on.
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: { file_path: 'notes/task-b.md', content: '# B\n' },
+            },
+          ],
+        }),
+        () => ({ text: '后台任务完成，三份笔记都在。' }),
+      )
+      await send(page, '写一份笔记，再在后台写一份，后台写完再写一份。')
+      await until(
+        () => assistantSaid(page, '后台任务已经开始'),
+        30_000,
+        'the first reply',
+      )
+      // The first turn is over and its job still runs: no record, no card.
+      await page.waitForTimeout(800)
+      const early = (await turnRecords(page, sessionId)).length
+      if (early !== before) throw new Error('a record before the task ended')
+      await until(
+        () => assistantSaid(page, '三份笔记都在'),
+        30_000,
+        'the woken turn',
+      )
+      await until(
+        async () => (await turnRecords(page, sessionId)).length === before + 1,
+        15_000,
+        'the task record',
+      )
+      const record = (await turnRecords(page, sessionId)).at(-1)!
+      const paths = record.files.map((file) => file.path).join(',')
+      if (paths !== 'notes/task-a.md,notes/task-b.md,notes/task-job.md')
+        throw new Error(`files ${paths}`)
+      if (
+        record.task?.firstTurn !== record.turn - 1 ||
+        record.task.lastTurn !== record.turn
+      )
+        throw new Error(`task ${JSON.stringify(record.task)}`)
+      const card = page.locator(`[data-turn-files="${record.turn}"]`)
+      await card.waitFor({ timeout: 10_000 })
+      if (
+        (await page.locator(`[data-turn-files="${record.turn - 1}"]`).count()) >
+        0
+      )
+        throw new Error('a card after the first turn')
+      const scope = (await card.locator('.scope').innerText()).trim()
+      if (scope !== '这次任务') throw new Error(`scope ${scope}`)
+      const tag = page.locator(
+        `[data-chat-turn="${record.turn}"] [data-process-continued]`,
+      )
+      await tag.waitFor({ timeout: 10_000 })
+      const tagText = (await tag.innerText()).trim()
+      if (tagText !== '后台任务完成后继续') throw new Error(`tag ${tagText}`)
+      await card.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(shots, 'task-files-woken.png') })
+      return { files: paths, task: record.task, tag: tagText }
     },
   )
 
@@ -803,14 +1008,9 @@ async function referencesAndCard(
     const items = (await menu.getByRole('menuitem').allInnerTexts()).map(
       (text) => text.split('\n')[0]!.trim(),
     )
-    for (const item of [
-      '打开工作台',
-      '工作位置',
-      '切换分支',
-      '提交或推送',
-      '比较分支',
-    ])
-      if (!items.includes(item)) throw new Error(`menu: ${items}`)
+    // UI-S05: a read-only card; the Git actions live in 审查.
+    if (items.join('|') !== '复制项目路径|在访达中显示|隐藏此卡片')
+      throw new Error(`menu: ${items}`)
     await page.waitForTimeout(400) // let the menu finish fading in
     await page.screenshot({ path: join(shots, 'environment-card.png') })
     await page.keyboard.press('Escape')
@@ -818,7 +1018,1145 @@ async function referencesAndCard(
   })
 }
 
+interface ResourceOperation {
+  operation: string
+  args: unknown[]
+  preview?: { state: string; reason?: string; updatedAt: number }
+}
+
+interface ResourceObservation {
+  operations: ResourceOperation[]
+  revealed: string[]
+}
+
+/** Observe the existing main handlers; their authorization and real Core still run. */
+async function observeResources(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ ipcMain, shell }, nativeFinder) => {
+    type Handler = (event: unknown, ...args: unknown[]) => unknown
+    const handlers = (
+      ipcMain as unknown as { _invokeHandlers: Map<string, Handler> }
+    )._invokeHandlers
+    if (!(handlers instanceof Map))
+      throw new Error('Electron IPC handler registry is unavailable')
+    const observation: ResourceObservation = { operations: [], revealed: [] }
+    const originals = new Map<string, Handler>()
+    const originalReveal = shell.showItemInFolder
+    const state = globalThis as {
+      __resourceObservation?: ResourceObservation
+      __restoreResourceObservation?: () => void
+    }
+    state.__resourceObservation = observation
+    for (const operation of [
+      'references.resolve',
+      'references.preview',
+      'references.siteIcon',
+      'files.read',
+      'files.preview',
+      'attachments.rawPath',
+      'reference:reveal',
+    ]) {
+      const channel =
+        operation === 'reference:reveal'
+          ? 'emperor:reference:reveal'
+          : `emperor:core:${operation.replaceAll('.', ':')}`
+      const original = handlers.get(channel)
+      if (!original) throw new Error(`missing real IPC handler: ${channel}`)
+      originals.set(channel, original)
+      handlers.set(channel, async (event, ...args) => {
+        // Core channels carry the call context first (KRN-01); record the
+        // operation's own arguments.
+        const first = args[0] as { emperorCoreCall?: unknown } | undefined
+        const own =
+          channel.startsWith('emperor:core:') && first?.emperorCoreCall === 1
+            ? args.slice(1)
+            : args
+        const entry: ResourceOperation = { operation, args: own }
+        observation.operations.push(entry)
+        const result = await original(event, ...args)
+        if (
+          ['references.preview', 'references.siteIcon'].includes(operation) &&
+          result
+        ) {
+          const preview = result as {
+            state?: string
+            reason?: string
+            updatedAt?: number
+          }
+          if (preview.state && typeof preview.updatedAt === 'number')
+            entry.preview = {
+              state: preview.state,
+              updatedAt: preview.updatedAt,
+              ...(preview.reason ? { reason: preview.reason } : {}),
+            }
+        }
+        return result
+      })
+    }
+    shell.showItemInFolder = (path) => {
+      observation.revealed.push(path)
+      if (nativeFinder) originalReveal(path)
+    }
+    state.__restoreResourceObservation = () => {
+      for (const [channel, original] of originals)
+        handlers.set(channel, original)
+      shell.showItemInFolder = originalReveal
+      delete state.__resourceObservation
+      delete state.__restoreResourceObservation
+    }
+  }, process.env.EMPEROR_E2E_NATIVE_FINDER === '1')
+}
+
+async function resourceObservation(
+  app: ElectronApplication,
+): Promise<ResourceObservation> {
+  return app.evaluate(() => {
+    const observation = (
+      globalThis as { __resourceObservation?: ResourceObservation }
+    ).__resourceObservation
+    if (!observation) throw new Error('resource observation was not installed')
+    return observation
+  })
+}
+
+function resourceCard(page: Page, href: string) {
+  return page
+    .locator('.assistant-step .resource-card')
+    .filter({ has: page.locator(`a.resource-title[href="${href}"]`) })
+    .last()
+}
+
+/**
+ * UI-S16: in a narrow conversation (a workspace pane open) an opened
+ * environment card floats over the chat (`data-env-overlay`) and may cover
+ * what a step clicks. Close it with its header toggle, as a user would.
+ */
+async function dismissEnvironmentOverlay(page: Page): Promise<void> {
+  if (!(await page.locator('.conversation-root[data-env-overlay]').count()))
+    return
+  await page
+    .getByRole('button', { name: '环境信息', exact: true })
+    .first()
+    .click()
+  await page.locator('.environment-card').waitFor({ state: 'detached' })
+}
+
+async function closeResourceDetails(page: Page): Promise<void> {
+  if (await page.locator('[data-resource-dialog]').count()) {
+    await page.keyboard.press('Escape')
+    await page.locator('[data-resource-dialog]').waitFor({ state: 'detached' })
+  }
+}
+
+/** Product acceptance through real UI, bridge, Core, filesystem and app routing. */
+async function conversationResources(
+  app: ElectronApplication,
+  page: Page,
+  model: FakeModel,
+  project: string,
+): Promise<void> {
+  const web = 'https://example.com/?emperor-e2e-resources=1'
+  const linePath = 'src/资源示例.ts'
+  const lineHref = `src/${encodeURIComponent('资源示例.ts')}:2`
+  const entities = [
+    {
+      kind: 'pull-request',
+      href: 'https://github.com/TheSyart/emperor-agent/pull/42',
+      path: '/pulls/TheSyart/emperor-agent/42',
+    },
+    {
+      kind: 'issue',
+      href: 'https://github.com/TheSyart/emperor-agent/issues/7',
+      path: '/github/issues/TheSyart/emperor-agent/7',
+    },
+    {
+      kind: 'run',
+      href: 'https://github.com/TheSyart/emperor-agent/actions/runs/123',
+      path: '/github/ci/TheSyart/emperor-agent/123',
+    },
+  ]
+  const reply = [
+    '资源验收完成。',
+    '',
+    web,
+    '',
+    ...entities.flatMap(({ href }) => [href, '']),
+    `[资源第二行](${linePath}:2)`,
+    '',
+    '[缺失文件](src/resource-missing.ts)',
+    '',
+    '本次输出：[发布说明](notes/resources-output.md)。',
+    `重复来源：[文档一](${web}#one) 和 [文档二](${web}#two)。`,
+    '网站图标：[Hugging Face](https://huggingface.co)、[ModelScope](https://modelscope.cn)、[OpenRouter](https://openrouter.ai)、[Replicate](https://replicate.com)、[n8n](https://n8n.io)、[LangChain](https://www.langchain.com)。',
+  ].join('\n')
+  const prompt = `资源验收 ${web}\n\`\`\`txt\nhttps://hidden.example.com\n\`\`\`\n请生成发布说明。`
+  let actualAssistantId = ''
+  let buildSessionId = ''
+  await observeResources(app)
+  try {
+    await check(
+      page,
+      'resource cards preserve composer text and exclude fenced code',
+      async () => {
+        let received = ''
+        model.enqueue(
+          (request) => {
+            received =
+              request.messages
+                .filter((message) => message.role === 'user')
+                .map((message) => textOf(message.content))
+                .at(-1) ?? ''
+            return {
+              tools: [
+                { name: 'read', args: { file_path: 'docs/guide.md' } },
+                {
+                  name: 'write',
+                  args: {
+                    file_path: 'notes/resources-output.md',
+                    content: '# Resource output\n',
+                  },
+                },
+              ],
+            }
+          },
+          () => ({ text: reply }),
+        )
+        const editor = page.getByLabel('消息输入框').first()
+        await editor.fill(prompt)
+        // Links are re-detected once typing pauses (REDECORATE_DELAY_MS).
+        await page.waitForTimeout(400)
+        const decorated = await editor
+          .locator('.composer-url-decoration')
+          .allTextContents()
+        if (JSON.stringify(decorated) !== JSON.stringify([web]))
+          throw new Error(
+            `URL decorations include code or lose the URL: ${JSON.stringify(decorated)}`,
+          )
+        await editor.press('Enter')
+        await resourceCard(page, entities[2]!.href).waitFor({ timeout: 30_000 })
+        await until(
+          () => assistantSaid(page, '资源验收完成。'),
+          30_000,
+          'resource reply',
+        )
+        if (received !== prompt)
+          throw new Error(`composer text changed: ${received}`)
+        buildSessionId = await sessionIdOf(page)
+        const history = await core<{
+          events: Array<{
+            type: string
+            data: { message?: { id?: string; content?: unknown } }
+          }>
+        }>(page, 'sessions.history', {
+          sessionId: buildSessionId,
+          maxMessages: 50,
+        })
+        actualAssistantId =
+          history.events
+            .slice()
+            .reverse()
+            .find(
+              (event) =>
+                event.type === 'assistant/message' &&
+                textOf(event.data.message?.content).includes('资源验收完成。'),
+            )?.data.message?.id ?? ''
+        if (!actualAssistantId)
+          throw new Error(
+            'resource reply has no durable assistant message identity',
+          )
+        const observation = await resourceObservation(app)
+        const previews = observation.operations.filter(
+          (item) => item.operation === 'references.preview',
+        )
+        if (previews.length)
+          throw new Error('rendering started remote metadata requests')
+        if (
+          await page.locator('.md-link-detail, .resource-inline button').count()
+        )
+          throw new Error('inline links still have individual ellipsis buttons')
+        await page.screenshot({ path: join(shots, 'resource-cards.png') })
+        return {
+          model: 'local-scripted-model',
+          cardCount: await page
+            .locator('.assistant-step .resource-card')
+            .count(),
+          metadataRequestsBeforeDetails: previews.length,
+          originalTextPreserved: true,
+        }
+      },
+      { critical: true },
+    )
+
+    await check(
+      page,
+      'real website favicons render inline without opening metadata details',
+      async () => {
+        const workbench = page.getByRole('button', {
+          name: '关闭工作台',
+          exact: true,
+        })
+        if (await workbench.isVisible()) await workbench.click()
+        // Real site icons are opt-in (设置 › 常规 › 显示网站图标).
+        await page.evaluate(() =>
+          localStorage.setItem(
+            'emperor.ui.prefs.v1',
+            JSON.stringify({ siteIcons: true }),
+          ),
+        )
+        await page.reload()
+        await page
+          .locator('.assistant-step a.md-link-chip')
+          .first()
+          .waitFor({ timeout: 15_000 })
+
+        const sites = [
+          'huggingface.co',
+          'modelscope.cn',
+          'openrouter.ai',
+          'replicate.com',
+          'n8n.io',
+          'www.langchain.com',
+        ]
+        await page
+          .locator('.assistant-step a.md-link-chip')
+          .filter({ hasText: 'Hugging Face' })
+          .scrollIntoViewIfNeeded()
+        await until(
+          async () =>
+            page
+              .locator('.assistant-step a.md-link-chip')
+              .evaluateAll(
+                (anchors, sites) =>
+                  sites.every((site) =>
+                    anchors.some(
+                      (anchor) =>
+                        new URL((anchor as HTMLAnchorElement).href).hostname ===
+                          site &&
+                        (anchor.querySelector('img')?.naturalWidth ?? 0) > 0,
+                    ),
+                  ),
+                sites,
+              ),
+          35_000,
+          'six decoded public website icons',
+        )
+        const icons = await page
+          .locator('.assistant-step a.md-link-chip[data-site-icon="ready"]')
+          .evaluateAll((anchors) =>
+            anchors.map((a) => {
+              const image = a.querySelector('img')!
+              const text = [...a.childNodes].find(
+                (node) => node.nodeType === Node.TEXT_NODE,
+              )!
+              const range = document.createRange()
+              range.selectNodeContents(text)
+              return {
+                href: a.getAttribute('href'),
+                width: image.naturalWidth,
+                renderedWidth: image.getBoundingClientRect().width,
+                gap:
+                  range.getClientRects()[0]!.left -
+                  image.getBoundingClientRect().right,
+              }
+            }),
+          )
+        const missing = sites.filter(
+          (site) =>
+            !icons.some(
+              (icon) =>
+                icon.href &&
+                new URL(icon.href).hostname === site &&
+                icon.width > 0,
+            ),
+        )
+        if (missing.length)
+          throw new Error(`real site icons missing: ${missing.join(', ')}`)
+        // UI-S03: the source icon in front of a link is 12px, 6px from it.
+        if (
+          icons.some(
+            (icon) => icon.gap < 5.9 || Math.round(icon.renderedWidth) !== 12,
+          )
+        )
+          throw new Error(
+            `website icon spacing is cramped: ${JSON.stringify(icons)}`,
+          )
+        await page.screenshot({ path: join(shots, 'real-website-icons.png') })
+        await page
+          .locator('.assistant-step .ds-md-html p')
+          .filter({ hasText: '网站图标：' })
+          .screenshot({ path: join(shots, 'website-links-detail.png') })
+        return { sites, icons, network: 'real-public-https', paidModel: false }
+      },
+    )
+
+    await check(
+      page,
+      'a resource card opens its real file line with the custom SVG',
+      async () => {
+        await dismissEnvironmentOverlay(page)
+        const card = resourceCard(page, lineHref)
+        await card.waitFor({ timeout: 10_000 })
+        if (
+          (await card.locator('[data-icon-id="typescript"] svg').count()) !== 1
+        )
+          throw new Error('the authored file card lost its TypeScript SVG')
+        await card.locator('a.resource-title').click()
+        await until(
+          async () =>
+            (await page
+              .locator('.file-code-line.reference-line-active')
+              .getAttribute('data-line')) === '2',
+          10_000,
+          'resource line 2',
+        )
+        const tab = page.locator(ACTIVE_FILE_TAB)
+        if (!(await tab.innerText()).includes('资源示例.ts'))
+          throw new Error('the card opened the wrong file')
+        if (
+          (await tab.locator('[data-icon-id="typescript"] svg').count()) !== 1
+        )
+          throw new Error('the Files tab lost its TypeScript SVG')
+        const missing = resourceCard(page, 'src/resource-missing.ts')
+        await until(
+          async () => (await missing.getAttribute('data-missing')) !== null,
+          10_000,
+          'missing resource state',
+        )
+        // The file opened in the Files pane: the narrower chat may now have
+        // the card over it, right where this forced click lands.
+        await dismissEnvironmentOverlay(page)
+        await missing.locator('a.resource-title').click({ force: true })
+        if (await page.locator('[data-resource-dialog]').count())
+          throw new Error('the missing-file click opened an unrelated resource')
+        if (
+          !(await page.locator(ACTIVE_FILE_TAB).innerText()).includes(
+            '资源示例.ts',
+          )
+        )
+          throw new Error('a missing resource changed the active file')
+        const reads = (await resourceObservation(app)).operations.filter(
+          (item) => item.operation === 'files.preview',
+        )
+        if (
+          !reads.some(
+            (item) =>
+              (item.args[0] as { source?: string }).source === 'reference',
+          )
+        )
+          throw new Error('the card did not reach real Core files.preview')
+        await page.screenshot({ path: join(shots, 'resource-file-line.png') })
+        return {
+          line: 2,
+          svg: 'typescript',
+          realFile: readFileSync(join(project, linePath), 'utf8').includes(
+            'export const second = 2',
+          ),
+          missingInert: true,
+        }
+      },
+    )
+
+    await check(
+      page,
+      'remote metadata starts only after details and keeps the real message owner',
+      async () => {
+        await dismissEnvironmentOverlay(page)
+        const card = resourceCard(page, web)
+        const button = card.locator('[data-resource-detail]')
+        await button.click()
+        await page
+          .locator('[data-resource-dialog]')
+          .waitFor({ timeout: 10_000 })
+        await until(
+          async () =>
+            (await resourceObservation(app)).operations.some(
+              (item) =>
+                item.operation === 'references.preview' &&
+                item.preview !== undefined,
+            ),
+          15_000,
+          'real metadata result or typed failure',
+        )
+        const observation = await resourceObservation(app)
+        const previews = observation.operations.filter(
+          (item) => item.operation === 'references.preview',
+        )
+        if (previews.length !== 1)
+          throw new Error(
+            `one details action made ${previews.length} metadata calls`,
+          )
+        const identity = previews[0]!.args[0] as {
+          sessionId?: string
+          referenceId?: string
+          href?: string
+        }
+        if (
+          identity.sessionId !== buildSessionId ||
+          !identity.referenceId?.startsWith('ref_') ||
+          identity.href !== undefined
+        )
+          throw new Error(
+            `preview did not use an opaque session reference: ${JSON.stringify(identity)}`,
+          )
+        const resolved = observation.operations
+          .slice()
+          .reverse()
+          .find(
+            (item) =>
+              item.operation === 'references.resolve' &&
+              (item.args[0] as { href?: string })?.href === web,
+          )
+        if (
+          (resolved?.args[0] as { sourceMessageId?: string })
+            ?.sourceMessageId !== actualAssistantId
+        )
+          throw new Error(
+            'details resolved a placeholder or different message owner',
+          )
+        const state = previews[0]!.preview!
+        if (!['ready', 'unavailable', 'error'].includes(state.state))
+          throw new Error(`unexpected metadata state: ${state.state}`)
+        if (
+          await page
+            .getByRole('button', { name: '打开', exact: true })
+            .isDisabled()
+        )
+          throw new Error('metadata failure disabled the original link')
+        await page.screenshot({
+          path: join(shots, 'resource-lazy-details.png'),
+        })
+        await closeResourceDetails(page)
+        if (
+          !(await button.evaluate(
+            (element) => element === document.activeElement,
+          ))
+        )
+          throw new Error('Escape did not restore the details trigger focus')
+        return {
+          metadataRequestsBeforeDetails: 0,
+          metadataRequestsAfterDetails: 1,
+          result: state,
+          messageIdentityVerified: true,
+        }
+      },
+    )
+
+    await check(
+      page,
+      'the 来源 view lists each source once and keeps every use',
+      async () => {
+        await closeResourceDetails(page)
+        const sidebar = page.locator('.environment-card')
+        if (!(await sidebar.isVisible().catch(() => false)))
+          await page
+            .getByRole('button', { name: '环境信息', exact: true })
+            .first()
+            .click()
+        // UI-S13: no 输出 row; 来源 lists three and opens the rest in the
+        // workbench's 来源 view.
+        if ((await sidebar.locator('[data-row="outputs"]').count()) !== 0)
+          throw new Error('the card still has an 输出 row')
+        const listed = await sidebar
+          .locator('[data-section="sources"] [data-source-item]')
+          .count()
+        if (listed !== 3) throw new Error(`the card lists ${listed} sources`)
+        const workbench = page.getByRole('button', {
+          name: '关闭工作台',
+          exact: true,
+        })
+        const wasOpen = await workbench.isVisible()
+        await sidebar.locator('[data-row="sources-all"]').click()
+        const view = page.locator('[data-sources-view]')
+        await view.waitFor({ timeout: 10_000 })
+        const groups = await view
+          .locator('[data-source-group] .section-title')
+          .allInnerTexts()
+        if (!groups.some((title) => title.startsWith('已查看')))
+          throw new Error(`no 已查看 group: ${JSON.stringify(groups)}`)
+        const read = view.locator('[data-source-group="read"]')
+        if (!(await read.innerText()).includes('guide.md'))
+          throw new Error('the file the agent read is not under 已查看')
+        const source = view
+          .locator('[data-source-entry]')
+          .filter({ hasText: 'example.com' })
+        if ((await source.count()) !== 1)
+          throw new Error('the repeated website was not deduplicated')
+        await page.screenshot({
+          path: join(shots, 'resource-sources-view.png'),
+        })
+        await source.first().click()
+        const dialog = page.locator('[data-resource-dialog]')
+        await dialog.waitFor({ timeout: 10_000 })
+        const uses = await dialog
+          .locator('.source-uses button')
+          .allTextContents()
+        if (
+          uses.length < 4 ||
+          !uses.some((text) => text.includes('提供的参考')) ||
+          !uses.some((text) => text.includes('已引用'))
+        )
+          throw new Error(
+            `source occurrences lost their provenance: ${JSON.stringify(uses)}`,
+          )
+        await page.screenshot({ path: join(shots, 'resource-source-uses.png') })
+        await closeResourceDetails(page)
+        await view.getByRole('button', { name: '返回', exact: true }).click()
+        if (!wasOpen && (await workbench.isVisible())) await workbench.click()
+        return {
+          listedOnCard: listed,
+          groups,
+          sourceRows: 1,
+          uses: uses.length,
+        }
+      },
+    )
+
+    for (const entity of entities) {
+      await check(
+        page,
+        `GitHub ${entity.kind} resource opens its real internal route`,
+        async () => {
+          await closeResourceDetails(page)
+          await resourceCard(page, entity.href)
+            .locator('[data-resource-detail]')
+            .click()
+          await page
+            .getByRole('button', { name: '在 Emperor 查看', exact: true })
+            .click()
+          await until(
+            async () =>
+              (await page.evaluate(() => location.pathname)) === entity.path,
+            10_000,
+            entity.path,
+          )
+          if (await page.locator('[data-resource-dialog]').count())
+            throw new Error('resource details survived route navigation')
+          await page.screenshot({
+            path: join(shots, `resource-route-${entity.kind}.png`),
+          })
+          await page.goBack()
+          await until(
+            async () => (await sessionIdOf(page)) === buildSessionId,
+            10_000,
+            'the owning Build conversation',
+          )
+          await resourceCard(page, entity.href).waitFor({ timeout: 10_000 })
+          return { path: entity.path, realRouter: true }
+        },
+      )
+    }
+
+    await check(
+      page,
+      'ordinary Chat uploads and previews an image through the real attachment protocol',
+      async () => {
+        await closeResourceDetails(page)
+        await page
+          .getByRole('button', { name: '新对话', exact: true })
+          .first()
+          .click()
+        const input = page.locator('.composer-root input[type="file"]').first()
+        await input.setInputFiles([
+          {
+            name: 'resource-note.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('Ordinary Chat attachment\n'),
+          },
+          {
+            name: 'resource-image.png',
+            mimeType: 'image/png',
+            buffer: Buffer.from(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMwarn6HwAFAgKLJGxTlgAAAABJRU5ErkJggg==',
+              'base64',
+            ),
+          },
+        ])
+        await until(
+          async () => {
+            const text = await page.getByLabel('待发送附件').innerText()
+            return (
+              text.includes('resource-note.txt') &&
+              (await page
+                .getByLabel('待发送附件')
+                .getByRole('button', {
+                  name: '放大预览 resource-image.png',
+                  exact: true,
+                })
+                .count()) === 1 &&
+              (await page
+                .locator('.composer-attachments-tray .uploading')
+                .count()) === 0
+            )
+          },
+          15_000,
+          'both real attachment uploads',
+        )
+        const draftImage = page.locator('.attach-chip.is-image')
+        if (
+          (await draftImage.innerText()).includes('resource-image.png') ||
+          (await draftImage.locator('.attach-meta').count()) !== 0
+        )
+          throw new Error('draft image still displays its name or metadata')
+        await page.screenshot({
+          path: join(shots, 'resource-image-draft-minimal.png'),
+          animations: 'disabled',
+        })
+        const draftOwner = await sessionIdOf(page)
+        const beforePreviewSessions = await core<unknown[]>(
+          page,
+          'sessions.list',
+        )
+        await page
+          .getByLabel('待发送附件')
+          .getByRole('button', { name: 'resource-note.txt', exact: true })
+          .click()
+        const draftFiles = page.locator('.files-pane')
+        await until(
+          async () =>
+            (await draftFiles.locator('.file-code-view').innerText()).includes(
+              'Ordinary Chat attachment',
+            ),
+          10_000,
+          'unsent draft attachment preview',
+        )
+        if (await draftFiles.locator('.file-tree-column').count())
+          throw new Error('draft preview listed a workspace')
+        if (
+          (await core<unknown[]>(page, 'sessions.list')).length !==
+            beforePreviewSessions.length ||
+          (await sessionIdOf(page)) !== draftOwner
+        )
+          throw new Error('preview materialized the draft')
+        await page
+          .getByLabel('待发送附件')
+          .getByRole('button', {
+            name: '放大预览 resource-image.png',
+            exact: true,
+          })
+          .click()
+        await page.locator('.image-lightbox').waitFor({ timeout: 10_000 })
+        await page.keyboard.press('Escape')
+        await page.locator('.image-lightbox').waitFor({ state: 'detached' })
+        model.enqueue(() => ({ text: '普通 Chat 附件已收到。' }))
+        await send(page, '请查看这两个附件。')
+        await until(
+          () => assistantSaid(page, '普通 Chat 附件已收到。'),
+          30_000,
+          'ordinary Chat attachment reply',
+        )
+        const chatId = await sessionIdOf(page)
+        const sessions = await core<Array<{ id: string; mode: string }>>(
+          page,
+          'sessions.list',
+        )
+        if (sessions.find((session) => session.id === chatId)?.mode !== 'chat')
+          throw new Error('attachment acceptance is not in an ordinary Chat')
+        // The existing Files pane narrows this Chat, so its environment
+        // card becomes an intentional overlay. Dismiss it through the UI.
+        await dismissEnvironmentOverlay(page)
+        const sentImages = page.locator('.user-row').last().locator('.images')
+        if (
+          (await sentImages.innerText()).trim() ||
+          (await sentImages.locator('figcaption').count()) !== 0
+        )
+          throw new Error('sent image still displays its file name')
+        await page.screenshot({
+          path: join(shots, 'resource-image-sent-minimal.png'),
+          animations: 'disabled',
+        })
+        await page
+          .locator('.user-row')
+          .last()
+          .getByRole('button', {
+            name: '预览图片：resource-image.png',
+            exact: true,
+          })
+          .click()
+        const image = page.locator('.image-lightbox img.viewer-image')
+        await image.waitFor({ timeout: 10_000 })
+        await until(
+          async () =>
+            await image.evaluate(
+              (element) =>
+                (element as HTMLImageElement).complete &&
+                (element as HTMLImageElement).naturalWidth > 0,
+            ),
+          10_000,
+          'attachment image pixels',
+        )
+        const src = await image.getAttribute('src')
+        if (!src?.startsWith('app://attachments/'))
+          throw new Error(`image bypassed the attachment protocol: ${src}`)
+        await page.screenshot({ path: join(shots, 'resource-chat-image.png') })
+        await page
+          .getByRole('button', { name: '向右旋转', exact: true })
+          .click()
+        await page.getByRole('button', { name: '放大', exact: true }).click()
+        await page.keyboard.press('Escape')
+        await page.locator('.image-lightbox').waitFor({ state: 'detached' })
+        return {
+          sessionMode: 'chat',
+          imageProtocol: 'app://attachments',
+          decodedPixels: true,
+        }
+      },
+      { critical: true },
+    )
+
+    await check(
+      page,
+      'ordinary Chat file attachment reveals only the Core-authorized path',
+      async () => {
+        const before = await resourceObservation(app)
+        await page
+          .locator('.user-row')
+          .last()
+          .getByRole('button', { name: /resource-note\.txt/ })
+          .click()
+        const pane = page.locator('.files-pane')
+        await pane.waitFor({ timeout: 10_000 })
+        await until(
+          async () =>
+            (await pane.locator('.file-code-view').innerText()).length > 0,
+          10_000,
+          'file attachment content',
+        )
+        if (await pane.locator('.file-tree-column').count())
+          throw new Error('ordinary Chat exposed a project tree')
+        await pane
+          .getByRole('button', { name: '在访达中显示', exact: true })
+          .click()
+        await until(
+          async () =>
+            (await resourceObservation(app)).revealed.length ===
+            before.revealed.length + 1,
+          10_000,
+          'authorized Finder reveal',
+        )
+        const observation = await resourceObservation(app)
+        const revealed = observation.revealed.at(-1)!
+        const resolve = observation.operations
+          .slice()
+          .reverse()
+          .find(
+            (item) =>
+              item.operation === 'references.resolve' &&
+              String((item.args[0] as { href?: string })?.href).startsWith(
+                'attachment:',
+              ),
+          )
+        const input = resolve?.args[0] as {
+          href?: string
+          sourceMessageId?: string
+        }
+        if (
+          !input.href?.startsWith('attachment:att_') ||
+          !input.sourceMessageId
+        )
+          throw new Error(
+            'the attachment was not resolved by its managed identity',
+          )
+        const attachment = await core<{ path: string }>(
+          page,
+          'attachments.rawPath',
+          input.href.slice('attachment:'.length),
+        )
+        // Core resolves symlinks before revealing (macOS /var -> /private/var).
+        if (revealed !== realpathSync(attachment.path))
+          throw new Error(
+            'Finder received a path other than the Core attachment path',
+          )
+        const reveal = observation.operations
+          .slice()
+          .reverse()
+          .find((item) => item.operation === 'reference:reveal')?.args[0] as
+          Record<string, unknown> | undefined
+        if (
+          !reveal ||
+          typeof reveal.referenceId !== 'string' ||
+          typeof reveal.sessionId !== 'string' ||
+          Object.keys(reveal).sort().join(',') !== 'referenceId,sessionId'
+        )
+          throw new Error(
+            `renderer supplied more than opaque reveal identity: ${JSON.stringify(reveal)}`,
+          )
+        if (
+          observation.operations.filter(
+            (item) => item.operation === 'references.preview',
+          ).length !==
+          before.operations.filter(
+            (item) => item.operation === 'references.preview',
+          ).length
+        )
+          throw new Error('opening a local attachment started remote metadata')
+        await page.screenshot({ path: join(shots, 'resource-chat-finder.png') })
+        return {
+          sessionMode: 'chat',
+          authorizedReferenceOnly: true,
+          finderLaunch:
+            process.env.EMPEROR_E2E_NATIVE_FINDER === '1'
+              ? 'native Finder launched; inspect UI during hold'
+              : 'recorded; native Finder not opened',
+          reveals: 1,
+        }
+      },
+    )
+    await check(
+      page,
+      'ordinary Chat edited files open a real read-only preview and report deletion',
+      async () => {
+        await closeResourceDetails(page)
+        const path = '点击预览 with spaces.md'
+        const content = '# 文件点击验收\n\n来自真实文件的只读内容。\n'
+        model.enqueue(
+          () => ({
+            tools: [{ name: 'write', args: { file_path: path, content } }],
+          }),
+          () => ({ text: '点击文件测试就绪。' }),
+        )
+        await send(page, '创建一份用于点击预览的 Markdown 文件。')
+        await until(
+          () => assistantSaid(page, '点击文件测试就绪'),
+          30_000,
+          'file write reply',
+        )
+        const row = page
+          .locator('.turn-files button.file')
+          .filter({ hasText: path })
+          .last()
+        await row.waitFor({ timeout: 10_000 })
+        if (await row.isDisabled())
+          throw new Error('Chat file is still disabled')
+        const sessionId = await sessionIdOf(page)
+        const record = (await turnRecords(page, sessionId))
+          .slice()
+          .reverse()
+          .find((item) => item.files.some((file) => file.path === path))!
+        if (record.mode !== 'tools')
+          throw new Error('not a tools-only Chat record')
+        await row.focus()
+        await row.press('Enter')
+        const pane = page.locator('.files-pane')
+        await pane.waitFor({ timeout: 10_000 })
+        await until(
+          async () =>
+            (await pane.locator('.file-markdown-preview').innerText()).includes(
+              '来自真实文件的只读内容',
+            ),
+          10_000,
+          'real Markdown content',
+        )
+        if (await page.getByRole('dialog').count())
+          throw new Error('file preview opened a modal')
+        await page.screenshot({
+          path: join(shots, 'turn-file-chat-preview.png'),
+          animations: 'disabled',
+        })
+        await pane.screenshot({
+          path: join(shots, 'turn-file-chat-preview-detail.png'),
+          animations: 'disabled',
+        })
+        await pane.getByRole('button', { name: '源码', exact: true }).click()
+        if (
+          !(await pane.locator('.file-code-view').innerText()).includes(
+            '# 文件点击验收',
+          )
+        )
+          throw new Error('original source missing')
+        const read = await core<{ projectRoot: string }>(page, 'files.read', {
+          sessionId,
+          relativePath: path,
+          turn: record.turn,
+        })
+        rmSync(join(read.projectRoot, path))
+        await pane
+          .getByRole('button', { name: '刷新文件', exact: true })
+          .click()
+        await until(
+          async () =>
+            (await pane.locator('[role="alert"]').innerText()).includes(
+              '文件或目录不存在',
+            ),
+          10_000,
+          'deleted-file notice',
+        )
+        await page.screenshot({
+          path: join(shots, 'turn-file-chat-missing.png'),
+          animations: 'disabled',
+        })
+        await page.keyboard.press('Escape')
+        return {
+          mode: record.mode,
+          keyboardOpen: true,
+          realFile: true,
+          sourceToggle: true,
+          missingFileReported: true,
+        }
+      },
+    )
+  } finally {
+    await app.evaluate(() =>
+      (
+        globalThis as { __restoreResourceObservation?: () => void }
+      ).__restoreResourceObservation?.(),
+    )
+  }
+}
+
 /** A real model, once: its reply links the files it names. */
+// ---------------------------------------------------------------------------
+// FIX-14: the start page of a fresh install, with no session at all. Its own
+// Emperor Home and window, before the main flow creates any session: the
+// slash commands and Skills are there, /plan runs as a command, and a Build
+// draft lists its project's Skills.
+
+const PERSONAL_SKILL = '记录这次 e2e 的笔记'
+const PROJECT_SKILL = '部署这个 e2e 项目'
+
+function writeSkill(dir: string, name: string, description: string): void {
+  mkdirSync(join(dir, name), { recursive: true })
+  writeFileSync(
+    join(dir, name, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${description}。\n`,
+  )
+}
+
+/**
+ * + › 插入 Skill 或插件: the text of each Skill and plugin it offers (a
+ * screenshot of the open list goes to `shot`).
+ */
+async function insertableSkills(page: Page, shot: string): Promise<string[]> {
+  await page.getByRole('button', { name: '添加附件与能力' }).click()
+  await page.getByRole('menuitem', { name: '插入 Skill 或插件' }).click()
+  const picker = page.locator('.capability-picker')
+  await picker.waitFor({ timeout: 10_000 })
+  const items = await picker.locator('.capability-picker-item').allInnerTexts()
+  await page.screenshot({ path: join(shots, shot) })
+  // Focusing the input closes the list.
+  await page.getByLabel('消息输入框').first().click()
+  await picker.waitFor({ state: 'hidden' })
+  return items.map((item) => item.replace(/\s+/g, ' ').trim())
+}
+
+const offers = (items: string[], description: string): boolean =>
+  items.some((item) => item.includes(description))
+
+async function startPageWithoutSessions(model: FakeModel): Promise<void> {
+  const home = realpathSync(
+    mkdtempSync(join(tmpdir(), 'emperor-e2e-start-home-')),
+  )
+  const project = realpathSync(
+    mkdtempSync(join(tmpdir(), 'emperor-e2e-start-project-')),
+  )
+  let app: ElectronApplication | null = null
+  try {
+    prepareHome(home, model)
+    writeSkill(join(home, 'skills'), 'e2e-notes', PERSONAL_SKILL)
+    writeSkill(join(project, '.emperor', 'skills'), 'e2e-deploy', PROJECT_SKILL)
+    const launched = await launch(home)
+    app = launched.app
+    const page = launched.page
+    await check(
+      page,
+      'FIX-14 · with no session at all, + lists the personal Skill on the start page',
+      async () => {
+        await page.getByLabel('消息输入框').first().waitFor({ timeout: 30_000 })
+        await until(
+          async () => /\/chat\/draft:/.test(page.url()),
+          10_000,
+          'the start page (a draft)',
+        )
+        const sessions = await core<unknown[]>(page, 'sessions.list', {
+          includeArchived: true,
+        })
+        if (sessions.length) throw new Error(`${sessions.length} sessions`)
+        let skills: string[] = []
+        await until(
+          async () =>
+            offers(
+              (skills = await insertableSkills(page, 'fix14-start-skills.png')),
+              PERSONAL_SKILL,
+            ),
+          15_000,
+          'the personal Skill in + › 插入 Skill 或插件',
+        )
+        return { skills }
+      },
+    )
+    await check(
+      page,
+      'FIX-14 · /plan typed on the start page with no session runs as the command',
+      async () => {
+        const served = model.served.length
+        const box = page.getByLabel('消息输入框').first()
+        await box.click()
+        await box.fill('/plan')
+        await box.press('Enter')
+        await until(
+          async () => /\/chat\/(?!draft:)[^/?#]+/.test(page.url()),
+          15_000,
+          'the session the command created',
+        )
+        const sessionId = await sessionIdOf(page)
+        await until(
+          async () =>
+            (await core<{ plan?: boolean }>(page, 'control.get', sessionId))
+              .plan === true,
+          10_000,
+          'plan mode on in the new session',
+        )
+        await page
+          .getByRole('button', { name: '退出计划' })
+          .waitFor({ timeout: 10_000 })
+        if (await page.locator('.user-bubble', { hasText: '/plan' }).count())
+          throw new Error('/plan was sent as a message')
+        if (model.served.length !== served)
+          throw new Error('the model was asked')
+        await page.screenshot({ path: join(shots, 'fix14-start-plan.png') })
+        return { session: '<new>', plan: true, modelRequests: 0 }
+      },
+    )
+    await check(
+      page,
+      'FIX-14 · a Build draft lists its project’s Skills',
+      async () => {
+        await app!.evaluate(({ dialog }, dir) => {
+          dialog.showOpenDialog = (async () => ({
+            canceled: false,
+            filePaths: [dir],
+          })) as typeof dialog.showOpenDialog
+        }, project)
+        await page.getByRole('button', { name: '项目操作' }).click()
+        await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
+        await until(
+          async () => /\/chat\/draft:/.test(page.url()),
+          10_000,
+          'the Build draft',
+        )
+        let skills: string[] = []
+        await until(
+          async () =>
+            offers(
+              (skills = await insertableSkills(
+                page,
+                'fix14-build-draft-skills.png',
+              )),
+              PROJECT_SKILL,
+            ),
+          15_000,
+          'the project Skill in + › 插入 Skill 或插件',
+        )
+        if (!offers(skills, PERSONAL_SKILL))
+          throw new Error(`no personal Skill: ${skills.join(' / ')}`)
+        return { skills }
+      },
+    )
+  } finally {
+    await app?.close().catch(() => undefined)
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+}
+
 async function realModel(page: Page): Promise<void> {
   await check(page, 'a real reply links the files it names', async () => {
     await send(
@@ -873,7 +2211,7 @@ async function realModel(page: Page): Promise<void> {
         .at(-1) ?? ''
     await until(
       async () =>
-        (await page.locator('.file-tab.active').innerText()).includes(name),
+        (await page.locator(ACTIVE_FILE_TAB).innerText()).includes(name),
       10_000,
       `${name} open in 文件`,
     )
@@ -888,6 +2226,15 @@ async function realModel(page: Page): Promise<void> {
     async () => {
       const site = await startFixtureSite()
       try {
+        // UI-S03: the finished turn folds its steps; list the tool rows.
+        await page.evaluate(() =>
+          localStorage.setItem(
+            'emperor.ui.prefs.v1',
+            JSON.stringify({ processDisplay: 'expanded' }),
+          ),
+        )
+        await page.reload()
+        await page.locator('.app-frame').waitFor({ timeout: 60_000 })
         await core(page, 'computerUse.setEnabled', true)
         const box = page.getByLabel('消息输入框').first()
         await box.click()
@@ -949,13 +2296,111 @@ async function realModel(page: Page): Promise<void> {
   )
 }
 
+/**
+ * KRN-11, last (it changes the Build session's working directory and its
+ * runtime context): in a managed worktree the agent's shell and file tools
+ * work there, and leaving brings it back.
+ */
+async function worktreeSession(
+  page: Page,
+  model: FakeModel,
+  project: string,
+  sessionId: string,
+): Promise<void> {
+  await check(
+    page,
+    'in a managed worktree the agent runs and writes there, and comes back (KRN-11)',
+    async () => {
+      const status = await core<{ revision: string }>(page, 'git.status', {
+        sessionId,
+      })
+      const entered = await core<{ worktree: { path: string } }>(
+        page,
+        'git.enterWorktree',
+        {
+          sessionId,
+          name: 'krn11-e2e',
+          expectedRevision: status.revision,
+          confirmed: true,
+        },
+      )
+      if (!entered?.worktree?.path)
+        throw new Error(`enterWorktree: ${JSON.stringify(entered)}`)
+      const worktree = realpathSync(entered.worktree.path)
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'bash',
+              args: {
+                command: 'mkdir -p notes && pwd > notes/where.txt',
+                description: 'Record the working directory',
+              },
+            },
+            {
+              name: 'write',
+              args: { file_path: 'notes/worktree.md', content: '# Here\n' },
+            },
+          ],
+        }),
+        () => ({ text: '在 worktree 里写好了。' }),
+      )
+      const before = (await turnRecords(page, sessionId)).length
+      await core(page, 'chat.submit', {
+        sessionId,
+        content: '在当前目录记一下位置，再写一份笔记。',
+      })
+      await until(
+        async () => (await turnRecords(page, sessionId)).length > before,
+        30_000,
+        'turn/files in the worktree',
+      )
+      const where = readFileSync(join(worktree, 'notes/where.txt'), 'utf8')
+      if (where.trim() !== worktree)
+        throw new Error(`bash ran in ${where.trim()}, not ${worktree}`)
+      if (!existsSync(join(worktree, 'notes/worktree.md')))
+        throw new Error('the write tool did not write into the worktree')
+      if (
+        existsSync(join(project, 'notes/where.txt')) ||
+        existsSync(join(project, 'notes/worktree.md'))
+      )
+        throw new Error('the original checkout was written')
+      const record = (await turnRecords(page, sessionId)).at(-1)!
+      const paths = record.files.map((file) => file.path).sort()
+      if (JSON.stringify(paths) !== '["notes/where.txt","notes/worktree.md"]')
+        throw new Error(`turn record: ${paths}`)
+      const left = await core<{ revision: string }>(page, 'git.status', {
+        sessionId,
+      })
+      await core(page, 'git.exitWorktree', {
+        sessionId,
+        action: 'keep',
+        discardChanges: false,
+        expectedRevision: left.revision,
+        confirmed: true,
+      })
+      const history = await core<{
+        events: Array<{ type: string; data: { reason?: string } }>
+      }>(page, 'sessions.history', { sessionId, maxMessages: 50 })
+      const reasons = history.events
+        .filter((event) => event.type === 'working-directory/change')
+        .map((event) => event.data.reason)
+      return { worktree: '<worktree>', paths, reasons }
+    },
+  )
+}
+
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const model = real ? null : await startFakeModel({ agentTool: 'read' })
-  const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-refs-home-'))
+  // Match file-tool metadata's canonical paths on macOS (/var -> /private/var).
+  const home = realpathSync(
+    mkdtempSync(join(tmpdir(), 'emperor-e2e-refs-home-')),
+  )
   const project = prepareProject()
   let app: ElectronApplication | null = null
   try {
+    if (model !== null) await startPageWithoutSessions(model)
     prepareHome(home, model)
     const launched = await launch(home)
     app = launched.app
@@ -965,6 +2410,10 @@ async function main(): Promise<void> {
       await documentLinks(launched.page, model, project)
       await turnFileRecord(launched.page, model, project)
       await referencesAndCard(launched.page, model, project)
+      // The Build session exists once its first message went out.
+      const buildSession = await sessionIdOf(launched.page)
+      await conversationResources(app, launched.page, model, project)
+      await worktreeSession(launched.page, model, project, buildSession)
     }
   } catch (error) {
     if (!(error instanceof Abort))
@@ -979,6 +2428,10 @@ async function main(): Promise<void> {
             : String(error),
       })
   } finally {
+    // Optional local acceptance: leave the synthetic attachment alive long
+    // enough to inspect Finder with the native UI automation tool.
+    if (process.env.EMPEROR_E2E_NATIVE_FINDER === '1')
+      await new Promise((resolve) => setTimeout(resolve, 30_000))
     await app?.close().catch(() => undefined)
     await model?.close()
     rmSync(home, { recursive: true, force: true })

@@ -8,6 +8,11 @@ import PlanReviewPanel from './PlanReviewPanel.vue'
 import QuestionComposer from './QuestionComposer.vue'
 import TakeoverSeat from './TakeoverSeat.vue'
 import { approvalActions, approvalPresentation } from './approvalModel'
+import {
+  isTakeoverMinimized,
+  minimizeTakeover,
+  resetTakeoverMinimized,
+} from './takeoverModel'
 
 let container: HTMLDivElement | null = null
 let unmount: (() => void) | null = null
@@ -15,6 +20,7 @@ let unmount: (() => void) | null = null
 afterEach(() => {
   unmount?.()
   unmount = null
+  resetTakeoverMinimized()
   container?.remove()
   container = null
 })
@@ -197,8 +203,13 @@ describe('QuestionComposer', () => {
     root.querySelector<HTMLButtonElement>('[aria-label="上一题"]')!.click()
     await nextTick()
     expect(root.querySelector('.title')?.textContent).toBe('选择风格？')
+    // Esc confirming an input-method candidate does nothing; Esc itself only
+    // folds the card away: the question stays open.
+    key(card, 'Escape', { isComposing: true })
+    expect(isTakeoverMinimized('ask-1')).toBe(false)
     key(card, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('ask-1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('ask-1')).toBe(true)
   })
 
   it('accepts a free-form answer in the custom row', async () => {
@@ -254,7 +265,7 @@ describe('ApprovalPanel', () => {
     const deny = button(root, '拒绝')
     const allow = button(root, '允许本次')
     expect(deny.dataset.variant).toBe('danger')
-    expect(allow.dataset.variant).toBe('primary')
+    expect(allow.dataset.variant).toBe('secondary')
     allow.click()
     await nextTick()
     expect(ctx.sendInteractionAnswer).toHaveBeenCalledWith('approval_1', {
@@ -266,7 +277,7 @@ describe('ApprovalPanel', () => {
     expect(ctx.sendInteractionAnswer).toHaveBeenCalledTimes(1)
   })
 
-  it('re-arms after a rejected send and supports Esc to cancel', async () => {
+  it('re-arms after a rejected send; Esc folds the card instead of cancelling', async () => {
     const ctx = fakeContext({ sendInteractionAnswer: vi.fn(() => false) })
     const { root } = await mount(
       ApprovalPanel,
@@ -280,7 +291,8 @@ describe('ApprovalPanel', () => {
     })
     expect(button(root, '拒绝').disabled).toBe(false)
     key(root.querySelector('.card')!, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('approval_1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('approval_1')).toBe(true)
   })
 
   it('derives outline/primary from several allow options', () => {
@@ -302,9 +314,69 @@ describe('ApprovalPanel', () => {
     )
     expect(actions.map((a) => [a.label, a.variant])).toEqual([
       ['拒绝', 'danger'],
-      ['本次允许', 'outline'],
-      ['总是允许', 'primary'],
+      ['本次允许', 'ghost'],
+      ['总是允许', 'secondary'],
     ])
+  })
+
+  it('asks before an external executor spends quota: 不允许 / 本次允许 / 以后都允许', async () => {
+    // The shape Core projects for a `question/asked` with `consent`.
+    const consent = permission({
+      id: 'ask_consent-1',
+      context:
+        'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+      questions: [
+        {
+          id: 'executor-consent',
+          header: '子智能体',
+          question:
+            'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+          options: [
+            { id: 'allow_once', label: '本次允许' },
+            { id: 'allow_always', label: '以后都允许' },
+            { id: 'deny', label: '不允许' },
+          ],
+        },
+      ],
+      meta: {
+        interaction_type: 'permission',
+        question_id: 'consent-1',
+        executor_consent: { backend: 'codex', profileId: 'codex-default' },
+        permission: {
+          version: 2,
+          operation_count: 1,
+          operations: [
+            {
+              tool_name: 'Codex',
+              risk: 'quota',
+              reason:
+                'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+              summary: 'Review parser',
+            },
+          ],
+        },
+      },
+    })
+    const { ctx, root } = await mount(ApprovalPanel, { interaction: consent })
+    expect(root.querySelector('.headline')?.textContent).toContain('交给 Codex')
+    expect(root.querySelector('.meta')?.textContent).toContain(
+      'Codex · 使用额度',
+    )
+    expect(root.querySelector('.command')?.textContent).toBe('Review parser')
+    expect(approvalActions(consent).map((a) => [a.label, a.variant])).toEqual([
+      ['不允许', 'danger'],
+      ['本次允许', 'ghost'],
+      ['以后都允许', 'secondary'],
+    ])
+    button(root, '以后都允许').click()
+    await nextTick()
+    expect(ctx.sendInteractionAnswer).toHaveBeenCalledWith('ask_consent-1', {
+      'executor-consent': {
+        option_id: 'allow_always',
+        choice: '以后都允许',
+        freeform: '',
+      },
+    })
   })
 
   it('summarizes multi-operation requests', () => {
@@ -351,8 +423,11 @@ describe('PlanReviewPanel', () => {
     await nextTick()
     expect(ctx.sendPlanComment).toHaveBeenCalledWith('plan-1', '拆小一点')
     expect(field.value).toBe('')
+    key(root.querySelector('.card')!, 'Escape', { keyCode: 229 })
+    expect(isTakeoverMinimized('plan-1')).toBe(false)
     key(root.querySelector('.card')!, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('plan-1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('plan-1')).toBe(true)
   })
 
   it('stays hidden for provisional or resolved plans', async () => {
@@ -382,5 +457,21 @@ describe('TakeoverSeat', () => {
       container?.remove()
       container = null
     }
+  })
+})
+
+describe('folded takeover', () => {
+  it('shows one line above the composer and unfolds on 展开', async () => {
+    minimizeTakeover('ask-1')
+    const { root } = await mount(TakeoverSeat, { interaction: ask() })
+    expect(root.querySelector('.card')).toBeNull()
+    expect(root.textContent).toContain('等待你回答')
+    button(root, '展开').click()
+    await nextTick()
+    expect(isTakeoverMinimized('ask-1')).toBe(false)
+    // The seat's transition is out-in: the card enters after the line leaves.
+    for (let i = 0; i < 50 && !root.querySelector('.card'); i++)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(root.querySelector('.card')).not.toBeNull()
   })
 })

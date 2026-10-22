@@ -1,3 +1,4 @@
+import type { ViewScope } from '../../harness/host/scope'
 import { resolve } from 'node:path'
 import {
   loadLocalConfig,
@@ -8,7 +9,7 @@ import {
 
 export interface CoreBrowserPreferencesServiceDeps {
   stateRoot?: string | null
-  assertMutation?: (area: string, action: string) => void
+  /** The mutation guard of the session the caller shows (KRN-01). */
   /** Main routes links and the pane follows the switch: tell them. */
   changed?: (preferences: BrowserPreferences) => void
 }
@@ -35,8 +36,8 @@ export class CoreBrowserPreferencesService {
 
   async update(
     change: Partial<BrowserPreferences>,
+    _view: ViewScope,
   ): Promise<BrowserPreferences> {
-    this.deps.assertMutation?.('browser', 'settings')
     const config = await loadLocalConfig(this.stateRoot)
     const browser = normalizeBrowserPreferences({
       ...config.browser,

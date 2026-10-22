@@ -34,9 +34,8 @@ import type {
 export interface CoreSkillServiceDeps {
   runtimeRoot?: string
   manager?: SkillManager
-  /** Kernel tool catalog (HarnessHost ToolRegistry.schemas()). */
-  toolNames?: () => SkillServiceToolEntry[]
-  refreshRuntimeContext?: () => void
+  /** The tools a session sees (null: a Chat session or none) (KRN-01). */
+  toolNames?: (sessionId: string | null) => SkillServiceToolEntry[]
   installService?: SkillInstallService
   resolveMissing?: (
     requirements: SkillRequirements,
@@ -182,8 +181,9 @@ export class CoreSkillService {
       })
   }
 
-  tools(): ToolInfoPayload[] {
-    return (this.deps.toolNames?.() ?? []).map((tool) => {
+  /** The tools of one session (its project's MCP tools included); null: Chat. */
+  tools(sessionId: string | null = null): ToolInfoPayload[] {
+    return (this.deps.toolNames?.(sessionId) ?? []).map((tool) => {
       // Server names may contain `_`, and builtins such as `mcp_config` share
       // the prefix: only the adapter-provided server name marks an MCP tool.
       const server = tool.mcpServer ?? ''
@@ -207,7 +207,11 @@ export class CoreSkillService {
 
   /** Effective Skills of a session plus invalid Skills with reasons. */
   list(opts: SkillSessionScope = {}): SkillListPayload {
-    const projectRoot = this.projectRoot(opts.sessionId)
+    return this.listForProject(this.projectRoot(opts.sessionId))
+  }
+
+  /** The same, seen from a project root (null: none) — a start-page draft's. */
+  listForProject(projectRoot: string | null): SkillListPayload {
     const scan = this.library.list(projectRoot)
     return {
       skills: scan.skills.map((skill) => this.describe(skill, projectRoot)),
@@ -426,9 +430,7 @@ export class CoreSkillService {
     return this.deps.projectRootFor?.(sessionId) ?? null
   }
 
-  private changed(): void {
-    this.deps.refreshRuntimeContext?.()
-  }
+  private changed(): void {}
 }
 
 function invalidPayload(skill: InvalidSkill): InvalidSkillPayload {

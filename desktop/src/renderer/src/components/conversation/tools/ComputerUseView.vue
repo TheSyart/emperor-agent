@@ -8,6 +8,8 @@
  * brings it to the front of the preview and enlarges it.
  */
 import { computed, ref } from 'vue'
+import { openImageViewer } from '../../ui/imageViewer'
+import { useChatContext } from '../chatContext'
 import { attachmentRawUrl } from '../../../api/attachments'
 import {
   moveAgentDownload,
@@ -15,7 +17,7 @@ import {
   saveAgentDownloadAs,
 } from '../../../api/backend'
 import type { ToolChatData } from '../../../conversation/types'
-import Pill from '../../ui/Pill.vue'
+import Badge from '../../ui/Badge.vue'
 import {
   previewShownTargets,
   requestPreviewFocus,
@@ -33,6 +35,22 @@ import {
 } from './computerUseModel'
 
 const props = defineProps<{ data: ToolChatData }>()
+const { sessionId } = useChatContext()
+function enlargeShot() {
+  const value = shot.value
+  if (value)
+    openImageViewer({
+      owner: sessionId(),
+      items: [
+        {
+          id: value.attachmentId,
+          name: `截图 ${value.width}×${value.height}`,
+          src: attachmentRawUrl(value.attachmentId),
+          caption: '工具观察截图',
+        },
+      ],
+    })
+}
 const meta = computed(() => computerUseMeta(props.data))
 const unknown = computed(() => computerUseUnknown(meta.value))
 const shot = computed(() => meta.value?.screenshot)
@@ -94,14 +112,14 @@ async function moveDownload(): Promise<void> {
 <template>
   <div class="cu-view" data-testid="computer-use-view">
     <div v-if="meta" class="badges">
-      <Pill v-if="meta.driver">{{
+      <Badge v-if="meta.driver">{{
         DRIVER_LABEL[meta.driver] ?? meta.driver
-      }}</Pill>
-      <Pill v-if="meta.granted" tone="accent">授权 · {{ meta.granted }}</Pill>
-      <Pill
+      }}</Badge>
+      <Badge v-if="meta.granted" tone="accent">授权 · {{ meta.granted }}</Badge>
+      <Badge
         v-if="meta.outcome && !unknown"
-        :tone="meta.outcome === 'observed' ? 'default' : 'approval'"
-        >{{ OUTCOME_LABEL[meta.outcome] ?? meta.outcome }}</Pill
+        :tone="meta.outcome === 'observed' ? 'neutral' : 'attention'"
+        >{{ OUTCOME_LABEL[meta.outcome] ?? meta.outcome }}</Badge
       >
       <button
         v-if="previewTarget"
@@ -203,12 +221,12 @@ async function moveDownload(): Promise<void> {
         ></span
       >
     </div>
-    <a
+    <button
+      type="button"
       v-if="shot"
       class="shot"
-      :href="attachmentRawUrl(shot.attachmentId)"
-      target="_blank"
-      rel="noreferrer"
+      @click="enlargeShot"
+      aria-label="放大工具截图"
       :title="`截图 ${shot.width}×${shot.height}`"
     >
       <img
@@ -216,12 +234,19 @@ async function moveDownload(): Promise<void> {
         :alt="`页面截图 ${shot.width}×${shot.height}`"
         loading="lazy"
       />
-    </a>
+    </button>
     <GenericToolCard :data="data" />
   </div>
 </template>
 
 <style scoped>
+button.shot {
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  cursor: zoom-in;
+}
 .cu-view {
   display: flex;
   flex-direction: column;
@@ -261,14 +286,14 @@ async function moveDownload(): Promise<void> {
 }
 
 .title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: 22px;
   overflow-wrap: anywhere;
 }
 
 .url {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -278,15 +303,15 @@ async function moveDownload(): Promise<void> {
 .mismatch {
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
+  background: rgb(var(--error-soft));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 20px;
 }
 
 .records-text {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: 20px;
 }
@@ -298,7 +323,7 @@ async function moveDownload(): Promise<void> {
   gap: var(--space-0-5);
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -309,11 +334,11 @@ async function moveDownload(): Promise<void> {
 }
 
 .message {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .hint {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .download {
@@ -322,7 +347,7 @@ async function moveDownload(): Promise<void> {
   align-items: baseline;
   gap: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -332,17 +357,17 @@ async function moveDownload(): Promise<void> {
 .download[data-state='too-large'],
 .download[data-state='interrupted'],
 .download[data-state='timed-out'] {
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
 }
 
 .download-name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
 .download-meta {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .download-reveal {
@@ -361,14 +386,14 @@ async function moveDownload(): Promise<void> {
 
 .download-error {
   flex-basis: 100%;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .shot {
   display: block;
   align-self: flex-start;
   max-width: 100%;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   overflow: hidden;
   background: rgb(var(--code-block-bg));

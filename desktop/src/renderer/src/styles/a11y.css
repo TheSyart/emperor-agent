@@ -1,7 +1,7 @@
 /* ── Centralized accessibility adaptation ───────────────────────────────────
    三种独立偏好信号集中在此处理,组件自身零 a11y 代码:
    - prefers-reduced-motion    → 动效塌缩为 1ms(弹簧在 JS 侧另行直达)
-   - prefers-reduced-transparency → 材质实体化:提高 alpha、去掉 blur
+   - prefers-reduced-transparency → 背板实体化:去掉 blur、看图底色不透明
    - prefers-contrast: more     → 边框/底色增强对比
    在 surface 样式之前导入(见 main.ts),媒体查询只负责覆盖 token。 */
 
@@ -15,26 +15,23 @@
     --duration-fast: 1ms;
     --duration: 1ms;
     --duration-slow: 1ms;
-    --duration-ds-fast: 1ms;
-    --duration-ds: 1ms;
-    --duration-ds-slow: 1ms;
+    --motion-fast: 1ms;
+    --motion-base: 1ms;
+    --motion-slow: 1ms;
   }
   /* dsh 连续动效(styles/dsh/animations.css):扫光直接移除;shimmer 退回
-     静态实色文字;StateDot 追逐环定格为半亮。html:root 前缀用于压过
-     组件 scoped 选择器的特异性(无需强制优先级标记)。 */
+     静态实色文字(Dot 的运行脉冲由下方的全局动画塌缩停住)。html:root
+     前缀用于压过组件 scoped 选择器的特异性(无需强制优先级标记)。 */
   html:root .ds-glare::after {
     content: none;
   }
   html:root .ds-shimmer {
     background: none;
-    color: rgb(var(--accent-fill));
+    color: rgb(var(--accent));
     -webkit-text-fill-color: currentColor;
   }
   html:root .ds-shimmer[data-tone='neutral'] {
-    color: rgb(var(--label-secondary));
-  }
-  html:root .ds-chase-cell {
-    opacity: 0.6;
+    color: rgb(var(--text-2));
   }
   *,
   *::before,
@@ -54,25 +51,20 @@
   :root,
   :root[data-theme='dark'],
   :root[data-theme='light'] {
-    --material-1-alpha: 0.97;
-    --material-2-alpha: 0.98;
-    --material-3-alpha: 0.99;
-    --material-1-blur: 0px;
-    --material-2-blur: 0px;
-    --material-3-blur: 0px;
-    --glass-alpha: var(--glass-solid-alpha);
-    --glass-blur: 0px;
+    --backdrop-blur: 0px;
+    --backdrop-blur-strong: 0px;
+    --image-viewer-veil: 0.98;
   }
 }
 
 @media (prefers-contrast: more) {
   :root,
   :root[data-theme='dark'] {
-    --border: 88 88 98;
-    --border-strong: 140 140 150;
+    --stroke-solid: 88 88 98;
+    --stroke-solid-strong: 140 140 150;
   }
   :root[data-theme='light'] {
-    --border: 150 150 158;
-    --border-strong: 120 120 128;
+    --stroke-solid: 150 150 158;
+    --stroke-solid-strong: 120 120 128;
   }
 }

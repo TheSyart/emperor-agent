@@ -18,6 +18,12 @@ import {
   isHelperMethod,
   parseHelperMessage,
 } from './messages'
+import {
+  helloProof,
+  isLaunchToken,
+  parseLaunchSecret,
+  welcomeProof,
+} from './handshake'
 import { helperProtocolJsonSchema } from './schema'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -87,6 +93,36 @@ describe('helper protocol messages', () => {
         generation: 1,
         expectedRevision: 1,
         action: { kind: 'evaluate', script: 'alert(1)' },
+      }),
+    ).toThrow()
+  })
+
+  // SEC-09: the launch secret travels on the Helper's stdin; both sides
+  // prove they hold it. The Swift suite checks the same vector.
+  it('computes the launch handshake proofs the native Helper computes', () => {
+    const vector = JSON.parse(
+      readFileSync(resolve(here, 'fixtures/handshake.json'), 'utf8'),
+    ) as Record<string, string>
+    const secret = parseLaunchSecret(`${vector.secret}\n`)
+    expect(secret.toString('hex')).toBe(vector.secret)
+    expect(helloProof(secret, vector.serverNonce!, vector.clientNonce!)).toBe(
+      vector.helloProof,
+    )
+    expect(welcomeProof(secret, vector.serverNonce!, vector.clientNonce!)).toBe(
+      vector.welcomeProof,
+    )
+    expect(vector.helloProof).not.toBe(vector.welcomeProof)
+    for (const bad of ['', 'zz'.repeat(32), '00'.repeat(31), '00'.repeat(33)])
+      expect(() => parseLaunchSecret(`${bad}\n`)).toThrow()
+    expect(isLaunchToken(vector.serverNonce)).toBe(true)
+    expect(isLaunchToken('0123456789abcdef0123456789abcdef')).toBe(false)
+    expect(isLaunchToken(vector.serverNonce!.toUpperCase())).toBe(false)
+    // The old argv nonce is gone from welcome; a proof replaces it.
+    expect(() =>
+      parseHelperMessage({
+        type: 'welcome',
+        protocol: 1,
+        nonce: '0123456789abcdef0123456789abcdef',
       }),
     ).toThrow()
   })

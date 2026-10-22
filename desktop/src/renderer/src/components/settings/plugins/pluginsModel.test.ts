@@ -3,11 +3,14 @@ import {
   componentStateBadge,
   filterPlugins,
   groupPlugins,
+  hookVariableNotes,
   memberGroups,
   pluginFacts,
   pluginKey,
+  pluginMembersText,
   pluginMonogram,
   pluginSourceTag,
+  pluginSuggestions,
   pluginToolGroups,
 } from './pluginsModel'
 import type { PluginDetail, PluginSummary } from './pluginInstall'
@@ -71,7 +74,7 @@ function detail(patch: Partial<PluginDetail> = {}): PluginDetail {
     signature: { status: 'local_user_source', publisher: null },
     digest: 'a'.repeat(64),
     installedAt: '2026-09-30T08:00:00.000Z',
-    permissions: { runsCommands: false, network: false },
+    permissions: { runsCommands: false, network: false, env: [] },
     components: [],
     tools: { note: null, groups: [] },
     ...patch,
@@ -187,7 +190,7 @@ describe('plugin detail model', () => {
             title: 'a',
             description: '',
             state: 'unsupported',
-            reason: 'Emperor 不支持插件里的子代理',
+            reason: 'Emperor 不支持插件里的子智能体',
           },
           {
             kind: 'command',
@@ -248,7 +251,11 @@ describe('plugin detail model', () => {
         category: '开发',
         homepage: 'https://acme.example',
         license: 'MIT',
-        permissions: { runsCommands: true, network: true },
+        permissions: {
+          runsCommands: true,
+          network: true,
+          env: ['ACME_URL', 'ACME_TOKEN'],
+        },
       }),
     )
     expect(items.map((item) => [item.term, item.value])).toEqual([
@@ -257,6 +264,7 @@ describe('plugin detail model', () => {
       ['格式', '可移植插件'],
       ['版本', '1.0.0'],
       ['权限', '会运行本机命令，会联网'],
+      ['可读环境变量', 'ACME_URL、ACME_TOKEN'],
       ['类别', '开发'],
       ['主页', 'https://acme.example'],
       ['许可证', 'MIT'],
@@ -403,5 +411,63 @@ describe('plugin detail model', () => {
       ],
       ['docs', '服务器没有运行', null, []],
     ])
+  })
+})
+
+describe('plugin trust model (SEC-07)', () => {
+  it('lists the project’s suggestions: project rows the repository asks for and the user has not decided', () => {
+    const suggested = summary({
+      pluginId: 'repo-kit',
+      scope: 'project',
+      enabled: false,
+      activation: 'disabled',
+      suggested: true,
+    })
+    expect(
+      pluginSuggestions([
+        summary(),
+        suggested,
+        summary({ pluginId: 'other', scope: 'project', suggested: false }),
+      ]).map(pluginKey),
+    ).toEqual([pluginKey(suggested)])
+    expect(pluginSuggestions([summary()])).toEqual([])
+  })
+
+  it('says what a plugin brings in a few words', () => {
+    expect(
+      pluginMembersText({
+        skills: 2,
+        agents: 0,
+        hooks: 1,
+        mcpServers: 1,
+        lspServers: 0,
+        commands: 3,
+        apps: 1,
+      }),
+    ).toBe('2 个 Skill、1 个 MCP server、1 个 Hook、1 个应用连接')
+    expect(
+      pluginMembersText({
+        skills: 0,
+        agents: 0,
+        hooks: 0,
+        mcpServers: 0,
+        lspServers: 0,
+        commands: 0,
+        apps: 0,
+      }),
+    ).toBe('')
+  })
+
+  it('explains each variable a failed hook may need', () => {
+    expect(
+      hookVariableNotes([
+        { name: 'ACME_TOKEN', state: 'undeclared' },
+        { name: 'ACME_URL', state: 'unset' },
+      ]),
+    ).toEqual([
+      { name: 'ACME_TOKEN', note: '插件清单的 env 没有声明' },
+      { name: 'ACME_URL', note: 'Emperor 的环境里没有' },
+    ])
+    expect(hookVariableNotes(undefined)).toEqual([])
   })
 })

@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { CoreBrowserPreferencesService } from './browser-preferences-service'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 describe('CoreBrowserPreferencesService', () => {
   it('defaults to the system browser and persists a change across restarts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'emperor-browser-prefs-'))
@@ -17,7 +20,7 @@ describe('CoreBrowserPreferencesService', () => {
       downloadDirectory: null,
       askWhereToSave: false,
     })
-    await service.update({ linkTarget: 'builtin', showFullUrl: false })
+    await service.update({ linkTarget: 'builtin', showFullUrl: false }, VIEW)
     expect(changed).toHaveBeenCalledWith({
       linkTarget: 'builtin',
       localTarget: 'builtin',
@@ -26,7 +29,7 @@ describe('CoreBrowserPreferencesService', () => {
       downloadDirectory: null,
       askWhereToSave: false,
     })
-    await service.update({ localTarget: 'system' })
+    await service.update({ localTarget: 'system' }, VIEW)
     expect((await service.get()).localTarget).toBe('system')
     const again = new CoreBrowserPreferencesService(root)
     expect((await again.get()).linkTarget).toBe('builtin')
@@ -40,10 +43,13 @@ describe('CoreBrowserPreferencesService', () => {
     const root = await mkdtemp(join(tmpdir(), 'emperor-browser-prefs-'))
     const changed = vi.fn()
     const service = new CoreBrowserPreferencesService(root, { changed })
-    await service.update({
-      downloadDirectory: '/Users/me/Downloads/web',
-      askWhereToSave: true,
-    })
+    await service.update(
+      {
+        downloadDirectory: '/Users/me/Downloads/web',
+        askWhereToSave: true,
+      },
+      VIEW,
+    )
     expect(changed).toHaveBeenLastCalledWith(
       expect.objectContaining({
         downloadDirectory: '/Users/me/Downloads/web',
@@ -55,20 +61,7 @@ describe('CoreBrowserPreferencesService', () => {
       downloadDirectory: '/Users/me/Downloads/web',
       askWhereToSave: true,
     })
-    await again.update({ downloadDirectory: null })
+    await again.update({ downloadDirectory: null }, VIEW)
     expect((await service.get()).downloadDirectory).toBeNull()
-  })
-
-  it('is a guarded mutation', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'emperor-browser-prefs-'))
-    const service = new CoreBrowserPreferencesService(root, {
-      assertMutation: () => {
-        throw new Error('a card is pending')
-      },
-    })
-    await expect(service.update({ history: false })).rejects.toThrow(
-      /card is pending/,
-    )
-    expect((await service.get()).history).toBe(true)
   })
 })

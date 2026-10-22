@@ -4,13 +4,37 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
+import {
+  filePreviewResult,
+  previewCanonicalFile,
+  type FilePreviewInput,
+  type FilePreviewResult,
+  type FileStatInput,
+  type FileStatResult,
+} from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
+import type { WorkspaceAccessLeaseProvider } from '../harness/tools/registry'
+import {
+  SessionRequiredError,
+  type BackgroundTurnOptions,
+  type BackgroundTurnOutcome,
+  type ViewScope,
+} from '../harness/host/scope'
 import type { UiAnswers } from '../harness/host/interactions'
 import { runGoalCommand } from '../harness/goal'
 import type { Agent } from '../harness/agent/agent'
@@ -27,9 +51,7 @@ import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import { listGuiTools } from '../harness/computer-use/tools/listing'
 import {
   DEFAULT_EXTERNAL_BROWSER_SETTINGS,
-  applyExternalBrowserSettingsPatch,
   externalBrowserSettingsView,
-  widensExternalBrowserSettings,
   type ExternalBrowserSettingsPatch,
   type ExternalBrowserSettingsView,
 } from '../harness/computer-use/external-site-rules'
@@ -41,6 +63,8 @@ import {
   type WorkflowRunRecord,
 } from '../harness/workflow/records'
 import type { Session } from '../session-log/session'
+import { LOG_FILE } from '../session-log/store'
+import { readUtf8Page, type ResultPage } from '../harness/tools/spill'
 import type { SessionEvent } from '../session-log/types'
 import {
   sanitizeForWire,
@@ -65,15 +89,41 @@ import {
   CoreConfigService,
   type UserConfigPayload,
 } from './services/config-service'
+import { CoreAgentService } from './services/agent-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
 import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
+import { CoreWebToolsService } from './services/web-tools-service'
+import { CoreTaskBudgetService } from './services/task-budget-service'
+import {
+  CoreSessionDefaultsService,
+  type SessionDefaults,
+} from './services/session-defaults-service'
+import type { SessionPermission } from '../config/local-config'
+import type { WebToolsStatus } from '../harness/host/web-tools'
+import type {
+  TaskBudgetSettings,
+  WebToolPreferences,
+} from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
+import { loadLocalConfig, saveLocalConfig } from '../config/local-config'
+import { CoreUpdateService } from '../updates/service'
+import { createGhAttestation } from '../updates/attestation'
+import type {
+  UpdateHostOptions,
+  UpdateStatus,
+  UpdateTransport,
+} from '../updates/types'
+import { ghProcessEnvironment } from '../workspace/git-pull-requests'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
-import { CoreModelService } from './services/model-service'
+import {
+  CoreModelService,
+  type ModelConnectionInput,
+  type ModelDiscoveryInput,
+} from './services/model-service'
 import { CoreSkillService } from './services/skill-service'
 import { OnboardingService } from './services/onboarding-service'
 import { PluginActivationController } from '../plugins/activation'
@@ -92,8 +142,19 @@ import {
 } from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
+import { redactLogText } from '../util/redaction'
 import { EmperorError, OperationRetiredError } from '../errors'
-import { CoreSessionApplicationService } from './services/session-application-service'
+import {
+  CoreSessionApplicationService,
+  SESSION_TRASH_RETENTION_MS,
+} from './services/session-application-service'
+import {
+  RetentionService,
+  type RetentionReport,
+  type StorageUsage,
+} from '../storage/retention'
+import type { DataVersionsReport } from '../storage/data-files'
+import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
   CoreCommandApplicationService,
@@ -125,11 +186,74 @@ import { GitOperationReceiptStore } from '../workspace/git-receipts'
 import {
   WorkspaceMutationCoordinator,
   workspaceMutationDomain,
+  WORKSPACE_WAIT_NOTICE_MS,
 } from '../workspace/mutation-coordinator'
 import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
+import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
+import { SnapshotService } from '../workspace/delegation-snapshot'
+import { DelegationResults } from '../workspace/delegation-results'
+import {
+  developmentEnvironmentOf,
+  localSubagentModelOf,
+  defaultWorkspaceOf,
+  ExecutorConfigStore,
+} from '../harness/delegation/config'
+import { ExecutorFactsStore } from '../harness/delegation/facts'
+import { CoreExecutorService } from './services/executor-service'
+import {
+  CoreDelegationService,
+  externalTask,
+} from './services/delegation-service'
+import {
+  DelegationReceipts,
+  requiresArtifactAcceptance,
+} from '../harness/delegation/receipts'
+import { DelegationAcceptance } from '../harness/delegation/acceptance'
+import { DelegationIntegration } from '../workspace/delegation-integration'
+import type {
+  DelegationState,
+  DelegationEvent,
+} from '../harness/delegation/fold'
+import type {
+  DelegationProjection,
+  DelegationResultRecord,
+} from '../harness/delegation/events'
+import { agentTitle } from '../runtime/agent-view'
+
+import { ExecutorRegistry } from '../harness/delegation/registry'
+import { DelegationService } from '../harness/delegation/service'
+import { ExecutorDispatchGate } from '../harness/delegation/dispatch-gate'
+import { executorEnvironment } from '../harness/delegation/environment'
+import {
+  NPM_REGISTRY_URL,
+  PublishedVersionStore,
+  registryFetcher,
+  registryOverrideUrl,
+} from '../harness/delegation/published-versions'
+import { ExecutorUpgradeService } from '../harness/delegation/upgrade-service'
+import { nodeUpdateTransport } from '../updates/http'
+import { sanitizeFailureMessage } from '../harness/delegation/failure'
+import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ExecutorConsentStore } from '../harness/delegation/consent'
+import {
+  createLoginShellEnvironment,
+  type LoginShellEnvironment,
+} from '../harness/delegation/login-shell'
+import { ExecutorModelCatalogService } from '../harness/delegation/models'
+import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
+import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
+import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
+import { estimateExecutorUsd } from '../harness/delegation/pricing'
+import {
+  DelegationError,
+  type ExecutorAdapter,
+} from '../harness/delegation/types'
+import { ManagedAgentProcess } from '../harness/delegation/process'
+import { loadModelConfig } from '../config/model-config'
 import {
   TurnFileRecorder,
+  mayWriteFiles,
   type TurnFilesReverted,
 } from '../harness/host/turn-files'
 import {
@@ -139,8 +263,12 @@ import {
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
 import { WorkspaceReferenceService } from '../workspace/references'
+import type {
+  GitHubPreviewTarget,
+  ReferencePreview,
+} from '../workspace/reference-preview'
 import type { WorkspaceSnapshot } from '../workspace/snapshot'
-import { CommandPlatform } from '../commands/platform'
+import { CommandPlatform, type CommandOwner } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
 import { startSkillFork } from '../harness/subagent/skill-fork'
 import type {
@@ -152,16 +280,47 @@ import type {
 type Dict = Record<string, unknown>
 
 export interface CoreApiCreateOptions extends HarnessHostOptions {
+  /** Host decoder validates native image deliverables after path/size checks. */
+  verifyGeneratedImage?: (bytes: Uint8Array) => boolean
   /** Test hook: use an existing host instead of creating one. */
   host?: HarnessHost | null
   appVersion?: string
   runtimeRevision?: string
   terminalHost?: PtyHost | null
   terminalEventSink?: ((event: TerminalEvent) => void) | null
-  /** Host HTTP client used by plugin installs. */
+  /** Host public HTTP client used by plugin installs and lazy reference previews. */
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
+  /** Where the host writes its logs (REL-01); diagnostics show it. */
+  logDirectory?: string | null
+  /**
+   * 检查更新 (REL-02): the desktop host's network, Finder, Downloads folder
+   * and whether checks may run. Omitted: Core never checks.
+   */
+  updates?: UpdateHostOptions | null
+  /**
+   * 子智能体 › 版本 (AGT-13): the host's HTTP for npm's public registry
+   * (Electron's net; Node's https when omitted), a test registry on this
+   * Mac (EMPEROR_EXECUTOR_REGISTRY_URL), and whether the check once a day
+   * at startup may run (the packaged app, or with a test registry).
+   */
+  executorVersions?: {
+    transport?: UpdateTransport
+    registry?: string | null
+    automatic: boolean
+  } | null
+  /**
+   * Test hook: the home, environment and login shell external executors
+   * read sign-ins from (defaults: the user's own).
+   */
+  executorHome?: {
+    home?: string
+    environment?: NodeJS.ProcessEnv
+    loginShell?: LoginShellEnvironment
+    /** 登录 Claude Code's time limit (FIX-11; default ten minutes). */
+    signInTimeoutMs?: number
+  } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -188,7 +347,17 @@ export interface CoreRuntimeReplayPayload {
 /** A Task-panel row: a background job, a subagent session, or a workflow run. */
 export interface CoreTaskRecord {
   id: string
-  kind: 'job' | 'subagent' | 'workflow'
+  kind: 'job' | 'subagent' | 'workflow' | 'external-agent'
+  delegation_id?: string
+  backend?: string
+  model?: string
+  capabilities?: import('../harness/delegation/types').ExecutorCapabilities
+  acceptance?: import('../harness/delegation/types').DelegationRunRecord['acceptance']
+  receipt_id?: string
+  usage?: import('../harness/delegation/types').DelegationRunRecord['usage']
+  workspace_summary?: string
+  recoverable?: boolean
+  revision?: number
   job_kind?: string
   label: string
   description: string
@@ -228,6 +397,9 @@ export class CoreApi {
   readonly effectiveConfigService: CoreEffectiveConfigService
   readonly desktopPetService: CoreDesktopPetService
   readonly browserPreferencesService: CoreBrowserPreferencesService
+  readonly webToolsService: CoreWebToolsService
+  readonly taskBudgetService: CoreTaskBudgetService
+  readonly sessionDefaultsService: CoreSessionDefaultsService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
@@ -247,11 +419,45 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  /** How long a write waits for a subagent's workspace before saying so (AGT-06). */
+  workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
+  readonly executorConfig: ExecutorConfigStore
+  readonly executorFacts: ExecutorFactsStore
+  readonly executorRegistry: ExecutorRegistry
+  /** The upgrade that deletes an earlier build's Claude token (AGT-12). */
+  private readonly claudeKeysMigrated: Promise<boolean>
+  readonly delegationRuntime: DelegationService
+  readonly delegationService: CoreDelegationService
+  readonly delegations: CoreDelegationService
+  private readonly agentService: CoreAgentService
+  private readonly agentIndexSubscriptions: Array<() => void> = []
+  private readonly delegationStates = new Map<string, DelegationState>()
+  readonly executors: CoreExecutorService
+  /** 子智能体 › 版本 and 升级 (AGT-13). */
+  readonly executorUpgrades: ExecutorUpgradeService
+  readonly delegationReceipts: DelegationReceipts
+  readonly delegationAcceptance: DelegationAcceptance
+  readonly delegationIntegration: DelegationIntegration
+  private closePromise?: Promise<void>
+  private readonly delegationOutput = new Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>
+      output: { role: string; content: string }[]
+    }
+  >()
   /** Per-turn file records of Build projects (E-track contract §5). */
   readonly turnFiles: TurnFileRecorder
   readonly gitReceipts: GitOperationReceiptStore
   readonly terminalService: TerminalService
   readonly sessionApplicationService: CoreSessionApplicationService
+  /** Retention sweep and 设置 › 高级 › 存储 (KRN-12). */
+  readonly retention: RetentionService
+  private retentionAtStartup: Promise<void> | null = null
+  /** The release running (REL-03 `storage.versions`). */
+  private readonly appVersion: string
+  /** 检查更新 and the update download (REL-02). */
+  readonly updateService: CoreUpdateService
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -285,13 +491,16 @@ export class CoreApi {
       },
       onPendingChange: (listener) => host.pending.onChange(listener),
       sessions: kept.sessionStore,
+      // The interview runs as a background turn in its own session; the
+      // user answers its questions in that session (policy `wait`).
       submitHidden: async (sessionId, content) =>
-        await host.submit({
-          sessionId,
-          content,
-          displayContent: '',
+        await host.runBackgroundTurn(host.scopeFor(sessionId), content, {
           source: 'onboarding',
+          displayContent: '',
           uiHidden: true,
+          // A hidden prompt cannot wait in the user's queue.
+          unconsumed: 'withdraw',
+          interactionPolicy: 'wait',
         }),
       cancelInteraction: (id) => host.cancelInteraction(id),
       emit: (event) => host.emitHost(event),
@@ -299,13 +508,12 @@ export class CoreApi {
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
           this.onboardingService.reconcile()
         },
         reloadMcp: () => host.reloadMcp(),
       },
-      { templatesDir: kept.templatesDir },
+      { templatesDir: kept.templatesDir, sealer: kept.secretSealer },
     )
     this.effectiveConfigService = new CoreEffectiveConfigService(
       this.paths.stateRoot,
@@ -316,28 +524,40 @@ export class CoreApi {
     )
     this.desktopPetService = new CoreDesktopPetService(this.root, {
       stateRoot: this.paths.stateRoot,
-      assertMutation: (area, action) => this.assertMutation(area, action),
     })
     this.browserPreferencesService = new CoreBrowserPreferencesService(
       this.root,
       {
         stateRoot: this.paths.stateRoot,
-        assertMutation: (area, action) => this.assertMutation(area, action),
         changed: (preferences) =>
           host.emitHost({ event: 'browser_preferences_changed', preferences }),
       },
     )
+    this.sessionDefaultsService = new CoreSessionDefaultsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      host,
+    })
+    this.taskBudgetService = new CoreTaskBudgetService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      host,
+    })
+    this.webToolsService = new CoreWebToolsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      tools: host.webTools,
+      changed: (status) =>
+        host.emitHost({ event: 'web_tools_changed', settings: status }),
+    })
     this.modelService = new CoreModelService(this.paths.stateRoot, {
+      sealer: kept.secretSealer,
       refreshModelConfig: () => host.refreshModelConfig(),
       afterConfigSaved: () => this.onboardingService.start({ manual: false }),
     })
     this.hooksService = new CoreHooksService({
       stateRoot: this.paths.stateRoot,
-      hooks: host.hooks,
-      activeProjectRoot: () => this.activeProjectRoot(),
-      assertMutation: (area, action) => this.assertMutation(area, action),
-      sessionEvents: () => {
-        const sessionId = host.activeSessionId
+      hooks: host.hookConfig,
+      projectRoot: (view) => this.viewProjectRoot(view),
+      sessionEvents: (view) => {
+        const sessionId = this.viewedSession(view)?.id ?? null
         return sessionId === null
           ? []
           : (host.sessionLog(sessionId)?.events ?? [])
@@ -350,11 +570,9 @@ export class CoreApi {
       tokenTracker: kept.tokenTracker,
       watchlist: host.watchlist,
       sessionStore: kept.sessionStore,
-      activeSessionId: () => host.activeSessionId,
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       compactNow: (sessionId) => host.compactNow(sessionId),
       measureContext: (sessionId) => host.measureContext(sessionId),
-      refreshRuntimeContext: () => {},
       schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
@@ -369,22 +587,32 @@ export class CoreApi {
         setEnabled: (enabled) => host.setComputerUseEnabled(enabled),
       },
       webFetchClient: opts.webFetchClient ?? null,
-      activeWorkspaceRoot: () => this.activeProjectRoot(),
       runtime: {
-        mcpServer: (pluginId, scope, server) =>
-          this.pluginActivation.mcpServer(pluginId, scope, server),
+        mcpServer: (pluginId, scope, server, projectRoot) =>
+          this.pluginActivation.mcpServer(
+            pluginId,
+            scope,
+            server,
+            projectRoot ?? null,
+          ),
         // The detail's 工具: what a running server registered, and the GUI
         // tools' own definitions (never run to list them).
-        mcpTools: (pluginId, scope, server) => {
+        mcpTools: (pluginId, scope, server, projectRoot) => {
           const key = this.pluginActivation.mcpServerKey(
             pluginId,
             scope,
             server,
+            projectRoot ?? null,
           )
+          const running =
+            scope === 'project' || scope === 'local'
+              ? projectRoot
+                ? host.projectMcp.tools(projectRoot)
+                : []
+              : kept.mcpClient.getTools()
           return key === null
             ? []
-            : kept.mcpClient
-                .getTools()
+            : running
                 .filter(
                   (tool) =>
                     tool.mcpServerName === key && tool.pluginId === pluginId,
@@ -397,6 +625,8 @@ export class CoreApi {
                 }))
         },
         computerUseTools: () => listGuiTools(),
+        hookFailure: (pluginId, hookId) =>
+          host.pluginHookHealth.failure(pluginId, hookId),
         appConnection: (pluginId, scope, appId) =>
           this.appConnections.state(
             appConnectionKey({ scope, pluginId, appId }),
@@ -413,10 +643,17 @@ export class CoreApi {
           ),
       },
       onChanged: () => this.pluginsChanged(),
+      // Pre-0.2 project choices move to stateRoot once (SEC-07).
+      knownProjects: () =>
+        kept.projectStore.list().map((project) => project.project_path),
     })
+    // A plugin hook starting or stopping to fail re-reads its detail.
+    host.pluginHookHealth.onChange(() => this.emitPluginsChanged('hooks'))
+    // Plugins apply per session scope (KRN-01): user-wide and shipped ones
+    // everywhere, a project's own only in that project's sessions.
     this.pluginActivation = new PluginActivationController({
-      packages: () =>
-        this.pluginService.effectivePackages(this.activeProjectRoot()),
+      packages: (projectRoot) =>
+        this.pluginService.effectivePackages(projectRoot),
       userServerNames: async () =>
         Object.keys((await loadMcpConfig(this.paths.stateRoot)).servers),
       emperorHome: this.paths.stateRoot,
@@ -427,29 +664,31 @@ export class CoreApi {
         pluginServerSnapshot: (key) => kept.mcpClient.pluginServerSnapshot(key),
         pluginSkippedTools: (key) => kept.mcpClient.pluginSkippedTools(key),
       },
-      hooks: host.hooks,
+      projectMcp: host.projectMcp,
+      hooks: host.pluginHooks,
+      projectOf: (agent) => host.projectRootOfAgent(agent),
     })
-    kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
-      this.pluginService.enabledSkillRoots(projectRoot),
-    )
-    // `@plugin` gestures read the plugin service (E-track contract §3).
-    host.setPluginReferenceResolver((id) => this.pluginReference(id))
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: kept.skillManager,
       installService: kept.skillInstallService,
-      toolNames: () => {
+      // The tools a session of that scope sees (KRN-01: its project's MCP).
+      toolNames: (sessionId) => {
+        const scope =
+          sessionId === null ? null : host.scopeFor(sessionId, 'skills.tools')
         const adapters = new Map(
-          kept.mcpClient.getTools().map((tool) => [tool.name, tool] as const),
+          host.mcpTools
+            .adaptersFor(scope?.projectRoot ?? null)
+            .map((tool) => [tool.name, tool] as const),
         )
-        return host.tools.schemas().map((schema) => {
+        return host.toolSchemasFor(scope).map((schema) => {
           const adapter = adapters.get(schema.name)
           if (adapter === undefined) {
             // The GUI tools come with the Computer Use plugin (its detail
             // lists them); every other builtin names its category.
             if (Object.hasOwn(GUI_TOOL_CATALOG, schema.name))
               return { ...schema, pluginId: COMPUTER_USE_PLUGIN_ID }
-            const category = host.tools.get(schema.name)?.category
+            const category = host.toolCategory(schema.name)
             return category === undefined ? schema : { ...schema, category }
           }
           return {
@@ -460,23 +699,51 @@ export class CoreApi {
         })
       },
       library: kept.skillLibrary,
-      // `undefined` = the active session; `null` = chat (no project Skills).
-      projectRootFor: (sessionId) =>
-        host.projectRootForSession(
-          sessionId === undefined ? host.activeSessionId : sessionId,
-        ),
-      refreshRuntimeContext: () => {},
+      // `null` = chat (no project Skills); callers always name the session.
+      projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
+    })
+    this.appVersion = opts.appVersion ?? '0.0.0-dev'
+    // 检查更新 (REL-02): the switch is settings.json `updates.check`; gh
+    // checks the download's attestation when it can (2 minutes at most).
+    const runGhAttestation = createGhCommandRunner(
+      new NodeEnvironmentProcessRunner(),
+      { timeoutMs: 120_000, maxOutputBytes: 1024 * 1024 },
+    )
+    this.updateService = new CoreUpdateService({
+      appVersion: this.appVersion,
+      host: opts.updates ?? null,
+      settings: {
+        load: async () =>
+          (await loadLocalConfig(this.paths.stateRoot)).updates.check,
+        save: async (enabled) => {
+          const config = await loadLocalConfig(this.paths.stateRoot)
+          await saveLocalConfig(this.paths.stateRoot, {
+            ...config,
+            updates: { check: enabled },
+          })
+        },
+      },
+      emit: (event) => host.emitHost(event),
+      attestation: createGhAttestation({
+        cwd: this.paths.stateRoot,
+        resolveRuntime: () => this.resolveGhRuntime(this.paths.stateRoot),
+        run: runGhAttestation,
+        environment: ghProcessEnvironment,
+      }),
+      log: (message, detail) => logger.info(message, detail),
     })
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
       catalog: kept.environmentCatalog,
       probe: kept.environmentProbe,
       skillManager: kept.skillManager,
-      projectRoot: () => this.activeProjectRoot() ?? this.root,
+      // Status without a session in view reads the runtime root.
+      projectRoot: () => this.root,
       appVersion: opts.appVersion ?? '0.0.0-dev',
       runtimeRevision: opts.runtimeRevision ?? kept.environmentCatalog.revision,
+      // Environment events are app-wide, not about any one session.
       emitRuntime: async (event) => {
-        host.emitHost({ ...event, session_id: host.activeSessionId })
+        host.emitHost(event)
       },
       reconcileBlockedSkills: async () =>
         await this.skillService.reconcileBlocked(),
@@ -513,11 +780,16 @@ export class CoreApi {
     const runGh = createGhCommandRunner(new NodeEnvironmentProcessRunner())
     const resolveGit = async (projectRoot: string) => {
       const runtime = await this.resolveGitRuntime(projectRoot)
-      if (!runtime)
+      if (!runtime) {
+        // Why, when the check said (FIX-15): 「（探测失败：timeout）」.
+        const why = this.gitUnavailable.get(projectRoot)?.reason
         throw new WorkspaceOperationError(
           'git_unavailable',
-          '当前签名执行环境中没有可用 Git。',
+          why
+            ? `当前签名执行环境中没有可用 Git（${why}）。`
+            : '当前签名执行环境中没有可用 Git。',
         )
+      }
       return runtime
     }
     const runGit = async (request: GitCommandRequest) => {
@@ -540,7 +812,12 @@ export class CoreApi {
       resolveProject: resolveWorkspaceProject,
       resolveRuntime: resolveGit,
       run: runGit,
-      hasActiveWriter: (sessionId) => host.isBusy(sessionId),
+      hasActiveWriter: (sessionId) =>
+        host.isBusy(sessionId) ||
+        this.workspaceMutations.hasActiveWriter(
+          resolveWorkspaceProject(sessionId).projectRoot,
+          'renderer_git',
+        ),
       stateRoot: this.paths.stateRoot,
       bindings: this.workspaceBindings,
       receipts: this.gitReceipts,
@@ -559,12 +836,477 @@ export class CoreApi {
       run: runGit,
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
+    this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    const executorConsent = new ExecutorConsentStore(this.paths.delegationsRoot)
+    host.delegationConsent.store = executorConsent
+    this.executorFacts = new ExecutorFactsStore(
+      this.paths.delegationsRoot,
+      opts.verifyGeneratedImage,
+    )
+    // The user's own Claude Code API key (使用 API Key), under the local key
+    // (AGT-12). A Claude.ai token an earlier build kept is deleted
+    // here, once, and 设置 › 子智能体 says so.
+    const claudeKeys = {
+      root: this.paths.delegationsRoot,
+      sealer: kept.secretSealer,
+    }
+    this.claudeKeysMigrated = import('../harness/delegation/claude-sign-in')
+      .then((m) => {
+        // Scripts an earlier 0.2 build left for Terminal (FIX-11).
+        m.removeSignInScripts(this.paths.delegationsRoot)
+        return new m.ClaudeKeyStore(claudeKeys).migrate()
+      })
+      .catch(() => false)
+    const executorHome = opts.executorHome ?? {}
+    const executorLoginShell =
+      executorHome.loginShell ?? createLoginShellEnvironment()
+    this.executorRegistry = new ExecutorRegistry({
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorLoginShell,
+    })
+    const executorRuntime = new ExecutorRuntimeService({
+      root: this.paths.delegationsRoot,
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorLoginShell,
+      claudeKeys,
+      // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
+      developmentEnvironment: () =>
+        developmentEnvironmentOf(this.executorConfig.read()),
+      resolveRoute: async (id, backend) => {
+        const config = await loadModelConfig(this.paths.modelConfigFile, {
+          sealer: kept.secretSealer,
+        })
+        const entry = config.raw.models.find((entry) => entry.entryId === id)
+        if (!entry?.apiKey)
+          throw new DelegationError(
+            'AUTH_REQUIRED',
+            'selected model credential route is missing',
+          )
+        if (
+          entry.protocol !==
+          (backend === 'claude-code' ? 'anthropic' : 'openai')
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_INVALID',
+            'credential route protocol does not match the external executor',
+          )
+        if (
+          (entry.legacy?.extraBody &&
+            Object.keys(entry.legacy.extraBody).length) ||
+          (entry.legacy?.extraHeaders &&
+            Object.keys(entry.legacy.extraHeaders).length)
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_UNSUPPORTED',
+            'external executors require a credential route without custom legacy headers/body',
+          )
+        return { apiKey: entry.apiKey, baseUrl: entry.apiBase }
+      },
+    })
+    const executorProcesses = new ManagedAgentProcess({
+      sandbox: host.sandboxBackend,
+      // 诊断模式: boundary markers and the native scanner (AGT-04).
+      diagnostics: () => this.executorConfig.read().diagnosticsMode === true,
+    })
+    // Claude Code's sign-in is what `claude auth status` says in the run's
+    // own environment and sandbox (AGT-12); a model route needs no check.
+    const checkExecutorAuth = async (
+      profile: Parameters<typeof executorRuntime.prepare>[0],
+    ) => {
+      const runtime = await executorRuntime.probe(profile)
+      this.executorFacts.bind(profile, runtime.environment)
+      if (
+        profile.backend !== 'claude-code' ||
+        profile.authRef.kind !== 'managed-cli-login'
+      )
+        return runtime.auth
+      const executable = await this.executorRegistry.locate(profile)
+      if (!executable)
+        throw new DelegationError('EXECUTOR_MISSING', 'claude is not installed')
+      const { checkClaudeSignIn } =
+        await import('../harness/delegation/claude-sign-in')
+      return checkClaudeSignIn({
+        executable,
+        runtime,
+        processes: executorProcesses,
+      })
+    }
+    const claudeSignIn = {
+      // 登录 Claude Code (FIX-11): the installed claude's own `auth login`
+      // in the run's folders, started here; the user finishes in the
+      // browser. Its output is never read.
+      start: async (
+        profile: Parameters<typeof executorRuntime.prepare>[0],
+        console: boolean,
+      ) => {
+        const executable = await this.executorRegistry.locate(profile)
+        if (!executable)
+          throw new DelegationError(
+            'EXECUTOR_MISSING',
+            'claude is not installed',
+          )
+        const runtime = await executorRuntime.probe(profile)
+        const sign = await import('../harness/delegation/claude-sign-in')
+        const login = await sign.startClaudeLogin({
+          executable,
+          environment: runtime.environment,
+          cwd: sign.prepareClaudeDirectories(this.paths.delegationsRoot).home,
+          console,
+          ...(executorHome.signInTimeoutMs
+            ? { timeoutMs: executorHome.signInTimeoutMs }
+            : {}),
+        })
+        return {
+          login,
+          command: sign.claudeSignInCommand({
+            executable,
+            environment: runtime.environment,
+            console,
+          }),
+        }
+      },
+      signOut: async (
+        profile: Parameters<typeof executorRuntime.prepare>[0],
+      ) => {
+        const executable = await this.executorRegistry.locate(profile)
+        if (!executable)
+          throw new DelegationError(
+            'EXECUTOR_MISSING',
+            'claude is not installed',
+          )
+        const runtime = await executorRuntime.probe(profile)
+        const { signOutClaude } =
+          await import('../harness/delegation/claude-sign-in')
+        await signOutClaude({
+          executable,
+          runtime,
+          processes: executorProcesses,
+        })
+      },
+    }
+    const externalWorkspaces = new DelegationWorkspaceService({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      snapshots: new SnapshotService({
+        runner: turnGit,
+        tempRoot: join(this.paths.delegationsRoot, 'indexes'),
+        resources: this.workspaceMutations.resources,
+      }),
+    })
+    const delegationResults = new DelegationResults({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+    })
+    // An executor being upgraded takes no new delegations (AGT-13).
+    const executorGate = new ExecutorDispatchGate()
+    this.delegationRuntime = new DelegationService({
+      facts: this.executorFacts,
+      root: this.paths.delegationsRoot,
+      config: () => this.executorConfig.read(),
+      registry: this.executorRegistry,
+      dispatchGate: executorGate,
+      checkAuth: checkExecutorAuth,
+      adapters: new Map<string, ExecutorAdapter>([
+        [
+          'claude-code',
+          new ClaudeExecutorAdapter({ processes: executorProcesses }),
+        ],
+        ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
+      ]),
+      parent: (owner) => host.delegationParent(owner),
+      workspaces: externalWorkspaces,
+      results: delegationResults,
+      mutations: this.workspaceMutations,
+      // Claude Code's own Console sign-in is API billing too (AGT-07): the
+      // last claude auth status says which sign-in it is (AGT-12).
+      runtime: async (profile, id) => {
+        const prepared = await executorRuntime.prepare(profile, id)
+        return profile.backend === 'claude-code' &&
+          prepared.billing === 'subscription' &&
+          this.executorFacts.probe(profile)?.auth?.method === 'api_key'
+          ? { ...prepared, billing: 'api' as const }
+          : prepared
+      },
+      // AGT-07: API-billed runs priced from the bundled catalog, and their
+      // settled cost counted in the root task's budget.
+      estimateUsd: estimateExecutorUsd,
+      taskBudget: {
+        exhausted: (owner) => host.delegationTaskSpent(owner),
+        charge: (owner, usd) => host.chargeDelegation(owner, usd),
+      },
+      notices: {
+        parent: (owner) => host.delegationNoticeParent(owner),
+        canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
+        flush: (sessionId) => host.sessions.flush(sessionId),
+      },
+      acceptanceCurrent: (id) => this.delegationAcceptance.current(id),
+      deliveryRequiresAcceptance: (id, record) => {
+        const receipt = this.delegationReceipts.get(id)
+        return requiresArtifactAcceptance(record, receipt)
+      },
+      onState: (state, event) => {
+        this.projectDelegation(state, event)
+        // A settled run may end its root's task (UI-S15).
+        const root = state.record?.owner.rootSessionId
+        if (root !== undefined) host.noteTaskSettled(root)
+      },
+      onEvent: (event) => {
+        if (
+          event.type !== 'text_delta' &&
+          event.type !== 'tool_started' &&
+          event.type !== 'tool_finished'
+        )
+          return
+        const key = event.runId,
+          pending = this.delegationOutput.get(key)
+        const item = {
+          role: event.type === 'text_delta' ? 'assistant' : 'tool',
+          content:
+            event.type === 'text_delta'
+              ? event.text
+              : JSON.stringify({
+                  type: event.type,
+                  id: event.id,
+                  ...('name' in event ? { name: event.name } : {}),
+                  ...('status' in event ? { status: event.status } : {}),
+                  ...('detail' in event ? { detail: event.detail } : {}),
+                }),
+        }
+        if (pending) pending.output.push(item)
+        else
+          this.delegationOutput.set(key, {
+            output: [item],
+            timer: setTimeout(() => this.flushDelegationOutput(key), 100),
+          })
+      },
+      onSettled: async (id, runId) => {
+        this.flushDelegationOutput(runId)
+        // The receipt chain reads the whole result; only 高级 › 验证后再应用
+        // collects it when a run ends (AGT-06). Otherwise 收集成果 does.
+        if (this.executorConfig.read().verifyBeforeApply !== true) return
+        const receipt = await this.delegationReceipts.collect(runId)
+        await this.delegationRuntime.bindReceipt(
+          id,
+          runId,
+          receipt.id,
+          'unverified',
+        )
+      },
+      onStopRoot: (id) => this.delegationAcceptance.stopRoot(id),
+      onQuestion: (question, signal) =>
+        host.delegationInteractions.ask(question, signal),
+      consent: (owner, profile, spec, signal) =>
+        host.delegationConsent.decide({
+          owner,
+          profile,
+          description: spec.description,
+          ...(owner.parentCallId ? { callId: owner.parentCallId } : {}),
+          ...(signal ? { signal } : {}),
+        }),
+    })
+    host.delegations = this.delegationRuntime
+    this.agentService = new CoreAgentService({
+      sessions: host.sessions,
+      roots: () =>
+        host.kept.sessionStore.list({ includeArchived: true }).map((s) => s.id),
+      external: () => this.delegationRuntime.list(),
+      live: (id) => host.subagents.record(id),
+      waiting: (id) => host.pending.hasPending(id),
+      changed: (event) =>
+        host.emitHost({
+          event: 'agent_tree_changed',
+          ...event,
+          session_id: event.rootSessionId,
+        }),
+    })
+    this.agentService.list([])
+    this.agentIndexSubscriptions.push(
+      host.rawTap((id, event) => this.agentService.sessionChanged(id, event)),
+      host.pending.onChange((id) => this.agentService.sessionChanged(id)),
+    )
+    const facts = (runId: string) => {
+      const state = this.delegationRuntime.list().find((s) => s.runs[runId])
+      if (!state?.record)
+        throw new DelegationError('RUN_NOT_FOUND', 'external run not found')
+      return {
+        record: state.record,
+        run: state.runs[runId]!,
+        lease: externalWorkspaces.get(state.record.workspaceLeaseId),
+      }
+    }
+    this.delegationReceipts = new DelegationReceipts({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      resolve: facts,
+    })
+    this.delegationAcceptance = new DelegationAcceptance({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      mutations: this.workspaceMutations,
+      processes: executorProcesses,
+      scope: (runId) => {
+        const { record, run } = facts(runId),
+          parent = host.delegationParent(record.owner)
+        return {
+          taskScopeId: record.owner.taskScopeId,
+          permission: parent.planMode ? 'read-only' : parent.policy.mode,
+          rootSessionId: record.owner.rootSessionId,
+          generation: run.generation,
+        }
+      },
+    })
+    this.delegationIntegration = new DelegationIntegration({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      mutations: this.workspaceMutations,
+      runner: turnGit,
+      scope: (runId) => facts(runId).record.owner.taskScopeId,
+      canApply: (runId) => {
+        const { record } = facts(runId),
+          entry = host.kept.sessionStore.get(record.owner.rootSessionId)
+        if (!entry || entry.archived_at) return false
+        const parent = host.delegationParent(record.owner)
+        return !parent.planMode && parent.policy.mode !== 'read-only'
+      },
+    })
+    this.delegationService = new CoreDelegationService({
+      root: this.paths.delegationsRoot,
+      service: this.delegationRuntime,
+      cachedState: (id) => this.delegationStates.get(id),
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      integration: this.delegationIntegration,
+      session: (id) => host.kept.sessionStore.get(id),
+      // Guarded by the owning chat itself, named by the caller (KRN-01).
+      assertMutation: (id, action) => {
+        if (action !== 'control')
+          this.assertMutation('delegations', action, { sessionId: id })
+      },
+    })
+    this.delegations = this.delegationService
+    // 版本 and 升级 (AGT-13): npm's public version numbers; the upgrade
+    // command of the install source, after the user confirmed.
+    const versionHost = opts.executorVersions ?? null
+    let registry = new URL(NPM_REGISTRY_URL)
+    try {
+      registry = registryOverrideUrl(versionHost?.registry) ?? registry
+    } catch {
+      logger.warn(
+        'EMPEROR_EXECUTOR_REGISTRY_URL ignored: not a registry on this Mac',
+      )
+    }
+    const executorUpgrades = new ExecutorUpgradeService({
+      root: this.paths.delegationsRoot,
+      home: executorHome.home ?? homedir(),
+      profiles: () => {
+        try {
+          return this.executorConfig.read().profiles
+        } catch {
+          return []
+        }
+      },
+      locate: (profile) => this.executorRegistry.locate(profile),
+      lastProbe: (profile) => this.executorFacts.probe(profile),
+      probe: (profileId) => this.executors.probe({ profileId }),
+      environment: () =>
+        executorEnvironment(executorHome.environment, executorHome.home),
+      // claudeDirectories(…).config: `claude install` keeps its records in
+      // Emperor's dedicated folder, never ~/.claude.
+      claudeConfigDir: () =>
+        join(this.paths.delegationsRoot, 'claude-code', 'config'),
+      published: new PublishedVersionStore({
+        root: this.paths.delegationsRoot,
+        fetch: registryFetcher({
+          transport:
+            versionHost?.transport ??
+            opts.updates?.transport ??
+            nodeUpdateTransport,
+          registry,
+          userAgent: `Emperor-Agent/${this.appVersion}`,
+        }),
+      }),
+      activeRuns: (backend) => this.delegationRuntime.activeRuns(backend),
+      gate: executorGate,
+      emit: (event) => host.emitHost(event),
+      automatic: versionHost?.automatic ?? false,
+    })
+    this.executorUpgrades = executorUpgrades
+    this.executors = new CoreExecutorService({
+      upgrades: executorUpgrades,
+      modelCatalog: new ExecutorModelCatalogService({
+        root: this.paths.delegationsRoot,
+        runtime: executorRuntime,
+        processes: executorProcesses,
+        // A claude the last check found signed out is not started (AGT-12).
+        signedIn: (profile) =>
+          profile.backend !== 'claude-code' ||
+          this.executorFacts.probe(profile)?.status !== 'needs_auth',
+        onPrepared: (profile, runtime) =>
+          this.executorFacts.bind(profile, runtime.environment),
+      }),
+      facts: this.executorFacts,
+      store: this.executorConfig,
+      registry: this.executorRegistry,
+      refresh: () => this.delegationRuntime.probeProfiles(),
+      checkAuth: checkExecutorAuth,
+      consent: executorConsent,
+      claudeKeys,
+      claudeSignIn,
+      signInChanged: (change) =>
+        host.emitHost({ event: 'executor_sign_in', ...change }),
+    })
+    host.delegationQuestionTimeoutMs = () => {
+      try {
+        return this.executorConfig.read().limits.questionTimeoutMs
+      } catch {
+        return 15 * 60_000
+      }
+    }
     const projectRootOf = (sessionId: string): string | null => {
       try {
         return resolveWorkspaceProject(sessionId).projectRoot
       } catch {
         return null
       }
+    }
+    const workspaceAccess: WorkspaceAccessLeaseProvider = {
+      acquire: async (call) => {
+        if (!mayWriteFiles(call.name)) return undefined
+        const root = host.sandbox.resolve({
+          session: call.agent?.session,
+        }).workspaceRoot
+        const args = call.arguments as {
+          workdir?: unknown
+          file_path?: unknown
+        } | null
+        const extra = args?.workdir ?? args?.file_path
+        const keys = [workspaceMutationDomain(root)]
+        if (typeof extra === 'string')
+          keys.push(workspaceMutationDomain(resolve(root, extra)))
+        // Waiting on a subagent working in the folder itself: after a while
+        // the conversation says so, with 「停止它」 (AGT-06).
+        return this.workspaceMutations.acquireWriterWithNotice(
+          root,
+          call.callId,
+          {
+            keys,
+            signal: call.signal,
+            noticeMs: this.workspaceWaitNoticeMs,
+            onWait: (blockers) =>
+              this.announceWorkspaceWait(call.agent, call.callId, blockers),
+          },
+        )
+      },
     }
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
@@ -576,6 +1318,7 @@ export class CoreApi {
       rootOf: (agent) => host.rootOf(agent),
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       workspaceBusy: (projectRoot) => {
+        if (this.workspaceMutations.hasActiveWriter(projectRoot)) return true
         const domain = workspaceMutationDomain(projectRoot)
         return host
           .busySessions()
@@ -601,7 +1344,26 @@ export class CoreApi {
       runExclusive: (workspaceRoot, owner, action) =>
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })
-    this.turnFiles.install(host)
+    // Everything CoreApi plugs into the kernel, in one registration (KRN-13).
+    host.extend({
+      turnFiles: this.turnFiles,
+      workspaceAccess,
+      pluginOverrides: (projectRoot) =>
+        this.pluginActivation.replacedIn(projectRoot),
+      pluginSkills: (projectRoot) =>
+        this.pluginService.enabledSkillRoots(projectRoot),
+      // `@plugin` gestures read the plugin service (E-track contract §3).
+      pluginReferences: (id, agent) =>
+        this.pluginReference(id, host.projectRootOfAgent(agent)),
+      // A session in a managed worktree works there (KRN-11).
+      worktrees: (sessionId, projectRoot) =>
+        this.workspaceBindings.resolve(sessionId, projectRoot),
+      // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10).
+      localSubagentModel: () =>
+        localSubagentModelOf(this.executorConfig.read()),
+      // 设置 › 子智能体 › 改代码的位置 (AGT-10).
+      defaultWorkspace: () => defaultWorkspaceOf(this.executorConfig.read()),
+    })
     this.appConnections = new AppConnectionRegistry({
       [appConnectionKey(GITHUB_APP)]: {
         check: async () =>
@@ -639,7 +1401,39 @@ export class CoreApi {
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
+      delegatedImageRoots: (sessionId, delegationId) =>
+        this.delegationImageRoots(
+          this.delegationService.get({ id: delegationId, sessionId }).record!,
+        ),
+      delegatedRoot: (sessionId, delegationId) => {
+        this.requireReadableSession(sessionId, 'references.resolve')
+        return this.delegationService.get({ id: delegationId, sessionId })
+          .record!.cwd
+      },
       resolveProject: resolveWorkspaceProject,
+      resolveFileRoot: (sessionId) =>
+        this.host.sessionWorkspaceRoot(
+          this.requireReadableLogSession(sessionId, 'references.resolve'),
+        ),
+      authorizeSession: (sessionId) => {
+        this.requireReadableLogSession(sessionId, 'references.preview')
+      },
+      webFetchClient: opts.webFetchClient ?? null,
+      resolveAttachment: (attachmentId) => {
+        const attachment = this.attachmentStore.get(attachmentId)
+        return attachment
+          ? {
+              root: this.attachmentStore.base,
+              relativePath: relative(
+                this.attachmentStore.base,
+                resolve(this.attachmentStore.root, attachment.rel_path),
+              ),
+              label: attachment.name,
+            }
+          : null
+      },
+      githubPreview: (target, signal) =>
+        this.readGitHubReferencePreview(target, signal),
     })
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
@@ -652,36 +1446,64 @@ export class CoreApi {
       goals: host.goals,
       agentFor: (sessionId) => host.agentFor(sessionId),
       goalView: (sessionId) => host.goalView(sessionId),
-      activeSessionId: () => host.activeSessionId,
-      materializeSession: async (input) =>
-        (
+      materializeSession: async (input) => {
+        const draft = (input.draftSession ?? null) as DraftSessionInput | null
+        return (
           await this.chatService.materializeSession(
             {
               sessionId: input.sessionId,
               clientDraftId: input.clientDraftId ?? null,
-              draftSession: (input.draftSession ??
-                null) as DraftSessionInput | null,
+              // Plan and goal exclude each other: a goal takes the draft's
+              // preset, never its plan mode (FIX-13).
+              draftSession: draft === null ? null : { ...draft, plan: false },
             },
             'goals.start',
           )
-        ).session,
+        ).session
+      },
     })
     this.sessionApplicationService = new CoreSessionApplicationService({
       sessions: kept.sessionStore,
       resolveProject: (projectPath) =>
         kept.projectStore.resolve(projectPath) as unknown as Dict,
-      endSession: async (sessionId) => {
-        await this.turnFiles.forgetSession(sessionId)
-        host.deleteSession(sessionId)
-      },
+      unloadSession: (sessionId) => host.unloadSession(sessionId),
+      forgetSessionTree: (sessionId, dir) =>
+        host.forgetSessionTree(sessionId, join(dir, LOG_FILE)),
+      forgetTurnFiles: (sessionId, projectRoot) =>
+        this.turnFiles.forgetSession(sessionId, projectRoot),
+      forgetDelegations: (sessionId) =>
+        this.delegationRuntime.forgetRoot(sessionId),
       stopSession: (sessionId) => {
         host.stop(sessionId)
       },
       closeTerminals: (sessionId) =>
         this.terminalService.closeSession(sessionId),
       activateSession: (sessionId) => this.activateSession(sessionId),
-      deleteSessionLog: (sessionId) => host.sessions.delete(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
+    })
+    this.retention = new RetentionService({
+      paths: this.paths,
+      memoryVersions: kept.sharedMemory.versions,
+      delegations: () =>
+        this.delegationRuntime.list().flatMap((state) =>
+          state.record
+            ? [
+                {
+                  id: state.record.id,
+                  rootSessionId: state.record.owner.rootSessionId,
+                  availability: state.record.availability,
+                },
+              ]
+            : [],
+        ),
+      sessions: {
+        expired: () =>
+          kept.sessionStore.trashedBefore(
+            Date.now() - SESSION_TRASH_RETENTION_MS,
+          ),
+        purgeExpired: () =>
+          this.sessionApplicationService.purgeExpiredDeleted(),
+      },
     })
     this.workspaceApplicationService = new CoreWorkspaceApplicationService({
       requireReadableSession: (sessionId, operation) =>
@@ -719,13 +1541,31 @@ export class CoreApi {
       getSession: (sessionId) => kept.sessionStore.get(sessionId),
       skillsForSession: (sessionId) =>
         this.skillService.list({ sessionId }).skills,
+      // A draft's session will be Build on its project or Chat (FIX-14),
+      // as `materializeSession` creates it.
+      skillsForDraft: (draft) =>
+        this.skillService.listForProject(
+          host.projectRootFor({
+            mode: draft.mode === 'build' ? 'build' : 'chat',
+            project_path: draft.project?.project_path ?? null,
+          }),
+        ).skills,
+      // Prompts held after a failed or stopped turn wait for the user; they
+      // do not make the session busy.
       sessionBusy: (sessionId) =>
-        host.isBusy(sessionId) || host.queuedPrompts(sessionId).length > 0,
+        host.isBusy(sessionId) ||
+        host
+          .queuedPrompts(sessionId)
+          .some((prompt) => prompt.state === 'queued'),
       compact: (sessionId) => host.compactNow(sessionId),
       stop: (sessionId) => host.stop(sessionId),
-      activateModel: async (entryId) => await this.model.activate({ entryId }),
-      setReasoningEffort: async (entryId, reasoningEffort) =>
-        await this.model.setReasoningEffort({ entryId, reasoningEffort }),
+      activateModel: async (entryId, sessionId) =>
+        await this.model.activate({ entryId }, { sessionId }),
+      setReasoningEffort: async (entryId, reasoningEffort, sessionId) =>
+        await this.model.setReasoningEffort(
+          { entryId, reasoningEffort },
+          { sessionId },
+        ),
       setPermissionPreset: (sessionId, preset) =>
         host.setPermissionPreset(sessionId, preset),
       presets: () => host.presets.options(),
@@ -756,6 +1596,8 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
       listSkills: (sessionId) =>
         this.commandApplicationService.skillsForSession(sessionId),
+      listDraftSkills: (draft) =>
+        this.commandApplicationService.skillsForDraft(draft),
       sessionContext: async (sessionId) =>
         await this.commandApplicationService.sessionContext(sessionId),
       isBusy: (sessionId) =>
@@ -783,35 +1625,51 @@ export class CoreApi {
     })
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
+      logDirectory: opts.logDirectory ?? null,
       legacyStateMigration: kept.legacyStateMigration,
-      activeProjectLegacyPrivateData: () => {
-        const projectPath = host.activeSession()?.project_path
+      projectLegacyPrivateData: (view) => {
+        const projectPath = this.viewProjectRoot(view)
         if (!projectPath) return null
         return {
           projectPath,
           ...kept.projectStore.detectLegacyPrivateData(projectPath),
         }
       },
-      schedulerDiagnostics: () => kept.schedulerStore.diagnostics(),
-      runtimeStats: () => this.runtimeStats(host.activeSessionId),
-      workspacePolicy: () => ({
-        workspaceRoot: host.activeWorkspaceRoot(),
-        sandbox: host.controlPayload(host.activeSessionId).sandbox,
+      schedulerDiagnostics: () => ({
+        ...kept.schedulerStore.diagnostics(),
+        startError: kept.schedulerService.startFailure(),
       }),
+      runtimeStats: (view) =>
+        this.runtimeStats(this.viewedSession(view)?.id ?? null),
+      workspacePolicy: (view) => {
+        const entry = this.viewedSession(view)
+        return {
+          workspaceRoot: host.workspaceRootFor(entry),
+          sandbox: host.controlPayload(entry?.id ?? null).sandbox,
+        }
+      },
       sandboxCapability: () => ({ ...kept.processSandbox.capability() }),
       processRuntime: () => kept.processRuntime.capabilityReport(),
-      subagents: () => this.allSubagents(),
-      kernel: () => ({
-        activeSessionId: host.activeSessionId,
+      subagents: (view) => this.allSubagents(view),
+      kernel: (view) => ({
+        // The session the page was opened from (the UI's, never a focus).
+        activeSessionId: this.viewedSession(view)?.id ?? null,
         busySessions: host.busySessions(),
         activeRoute: host.llm.activeRoute()?.id ?? null,
-        tools: host.tools.schemas().map((tool) => tool.name),
+        tools: host
+          .toolSchemasFor(this.viewScopeOf(view))
+          .map((tool) => tool.name),
+        projectMcp: host.projectMcp.snapshot().map((instance) => ({
+          projectRoot: instance.projectRoot,
+          holders: instance.holders,
+          state: instance.state,
+        })),
         archivedLegacySessions: kept.archivedLegacySessions,
         lifecycle: this.lifecyclePayload(),
       }),
       effectiveConfig: () => this.effectiveConfigService.payload(),
-      commandCatalog: () => {
-        const sessionId = host.activeSessionId
+      commandCatalog: (view) => {
+        const sessionId = this.viewedSession(view)?.id ?? null
         return sessionId
           ? this.commandPlatform.diagnostics(sessionId)
           : { status: 'ok', registeredSkills: 0, conflicts: [], warnings: [] }
@@ -821,9 +1679,10 @@ export class CoreApi {
       desktopPetPayload: () => this.desktopPet.get(),
       computerUse: async () =>
         computerUseDiagnostics(await this.computerUse.status()),
+      updates: () => this.updateService.diagnostics(),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
-      externalToolConfig: () => {
-        const projectPath = host.activeSession()?.project_path
+      externalToolConfig: (view) => {
+        const projectPath = this.viewProjectRoot(view)
         const workspaceConfig = projectPath
           ? join(projectPath, 'config', 'mcporter.json')
           : null
@@ -848,13 +1707,37 @@ export class CoreApi {
 
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
-    const host = opts.host ?? (await HarnessHost.create(opts))
+    const host =
+      opts.host ??
+      (await HarnessHost.create({ ...opts, startScheduler: false }))
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      await api.claudeKeysMigrated
+      await api.delegationRuntime.reconcile()
+      api.agentService.rebuild()
+      await api.delegationAcceptance.reconcile()
+      api.delegationIntegration.reconcile()
       await api.environmentService.initialize()
+      await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
-      await api.syncPlugins()
+      // Plugin servers connect in the background: the window never waits
+      // for one (KRN-04).
+      await api.syncPlugins({ waitForMcp: false })
+      // After the plugins: a run caught up on at launch needs their Hooks.
+      await host.startScheduler()
+      // 最近删除 keeps a deleted session for 30 days (FIX-01).
+      await api.sessionApplicationService
+        .purgeExpiredDeleted()
+        .catch((error: unknown) =>
+          logger.warn('purging expired deleted sessions failed', {
+            error: String(error),
+          }),
+        )
+      api.startRetention()
+      await api.updateService.start()
+      // 子智能体 › 版本: npm once a day, at startup (AGT-13).
+      api.executorUpgrades.start()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -863,10 +1746,219 @@ export class CoreApi {
     }
   }
 
-  async close(): Promise<void> {
+  /**
+   * Write and sync every session's pending log events now. Synchronous, so
+   * quit can call it before anything that might hang or be cut short.
+   */
+  flushAll(): void {
+    this.host.sessions.flush(undefined, { sync: true })
+  }
+
+  /**
+   * Quit overran its deadline: kill every child process tree and terminal
+   * now, synchronously, so nothing outlives the app (FIX-07).
+   */
+  forceStop(): void {
+    this.host.kept.processRuntime.terminateAll('app quit timeout')
     this.terminalService.closeAll()
-    this.onboardingService.dispose()
-    await this.host.close()
+  }
+
+  /**
+   * The retention sweep after startup (KRN-12): in the background, so it
+   * never holds up or fails startup; what it could not do is only logged.
+   */
+  private startRetention(): void {
+    this.retentionAtStartup = this.retention.sweep().then(
+      (report) => {
+        if (report.errors.length > 0)
+          logger.warn('retention sweep incomplete', { errors: report.errors })
+        else if (report.freedBytes > 0)
+          logger.info('retention sweep freed space', {
+            bytes: report.freedBytes,
+          })
+      },
+      (error: unknown) =>
+        logger.warn('retention sweep failed', { error: String(error) }),
+    )
+  }
+
+  close(): Promise<void> {
+    this.closePromise ??= (async () => {
+      // A sweep still running gets a moment; quit never waits on it longer.
+      if (this.retentionAtStartup)
+        await Promise.race([
+          this.retentionAtStartup,
+          new Promise<void>((done) => setTimeout(done, 2000).unref()),
+        ])
+      this.updateService.close()
+      this.flushAll()
+      await this.executors.close()
+      this.terminalService.closeAll()
+      this.onboardingService.dispose()
+      for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()
+      try {
+        await this.delegationAcceptance.stopRoot()
+        await this.delegationRuntime.shutdown()
+      } finally {
+        for (const key of this.delegationOutput.keys())
+          this.flushDelegationOutput(key)
+        await this.host.close()
+      }
+    })()
+    return this.closePromise
+  }
+
+  private flushDelegationOutput(runId: string): void {
+    const pending = this.delegationOutput.get(runId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.delegationOutput.delete(runId)
+    const state = [...this.delegationStates.values()].find((s) => s.runs[runId])
+    if (!state?.record) return
+    this.appendDelegationProjection(state, {
+      event: 'delegation_output',
+      delegation_id: state.record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      output: pending.output,
+    })
+  }
+  private appendDelegationProjection(
+    state: DelegationState,
+    projection: DelegationProjection,
+  ): void {
+    if (
+      !state.record ||
+      !this.host.kept.sessionStore.get(state.record.owner.rootSessionId)
+    )
+      return
+    const owner = state.record.owner
+    const payload = JSON.parse(
+      JSON.stringify({
+        ...projection,
+        parent_call_id: owner.parentCallId,
+        current_run_id: state.record.currentRunId,
+        backend: state.record.backend,
+      }),
+    ) as DelegationProjection
+    // The log, not the agent: projecting a state change must not open a
+    // historical conversation or run its SessionStart hooks (AGT-04).
+    const parent = this.host.sessionLog(owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/projection', payload)
+      this.host.sessions.flush(parent.id)
+    }
+    // Child log projection streams raw events to its own timeline. Its
+    // legacy projector does not forward delegation events to the root UI.
+    if (owner.parentAgentId !== owner.rootSessionId)
+      this.host.emitHost({ ...payload, session_id: owner.rootSessionId })
+  }
+  private projectDelegation(
+    state: DelegationState,
+    event: DelegationEvent,
+  ): void {
+    const record = state.record
+    if (!record) return
+    this.delegationStates.set(record.id, state)
+    this.agentService.externalChanged(state)
+    const name =
+      event.type === 'created'
+        ? 'delegation_created'
+        : event.type === 'interaction'
+          ? 'delegation_interaction'
+          : event.type === 'receipt'
+            ? 'delegation_receipt'
+            : 'delegation_run_changed'
+    const runId =
+      'runId' in event
+        ? event.runId
+        : event.type === 'run-created'
+          ? event.run.id
+          : record.currentRunId
+    const run = runId ? state.runs[runId] : undefined
+    this.appendDelegationProjection(state, {
+      event: name,
+      delegation_id: record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      ...(run ? { task: externalTask(state, run) } : {}),
+    })
+    if (event.type === 'run-result')
+      this.appendDelegationResult(state, event.runId)
+  }
+
+  /** The result card's record in the parent's conversation (AGT-06). */
+  private appendDelegationResult(state: DelegationState, runId: string): void {
+    const record = state.record,
+      result = state.runs[runId]?.result
+    if (
+      !record ||
+      !result ||
+      !this.host.kept.sessionStore.get(record.owner.rootSessionId)
+    )
+      return
+    const payload: DelegationResultRecord = {
+      delegation_id: record.id,
+      run_id: runId,
+      ...(record.owner.parentCallId
+        ? { parent_call_id: record.owner.parentCallId }
+        : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      state: result.state,
+      files: result.files,
+      totals: result.totals,
+      ...(result.truncated ? { truncated: true as const } : {}),
+      ...(result.conflicts?.length ? { conflicts: result.conflicts } : {}),
+      at: result.at,
+      ...(result.by ? { by: result.by } : {}),
+      ...(result.state === 'applied' && result.undo
+        ? { undoable: true as const }
+        : {}),
+      ...(result.reverted ? { reverted: result.reverted } : {}),
+      ...(this.executorConfig.read().verifyBeforeApply === true
+        ? { verify_first: true as const }
+        : {}),
+    }
+    const parent = this.host.sessionLog(record.owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/result', payload)
+      this.host.sessions.flush(parent.id)
+    }
+  }
+
+  /**
+   * A main-session write has waited for a subagent's workspace: the
+   * conversation shows 「正在等待子智能体释放工作区 · 停止它」 under the
+   * call until the wait ends (AGT-06).
+   */
+  private announceWorkspaceWait(
+    agent: Agent | undefined,
+    callId: string,
+    blockers: string[],
+  ): (() => void) | undefined {
+    const state = blockers
+      .map((owner) => this.delegationStates.get(owner))
+      .find((candidate) => candidate?.record)
+    if (!state?.record) return undefined
+    const record = state.record
+    // The conversation the waiting call is in.
+    const sessionId = agent?.id ?? record.owner.rootSessionId
+    const base = {
+      event: 'workspace_wait',
+      session_id: sessionId,
+      call_id: callId,
+    }
+    this.host.emitHost({
+      ...base,
+      waiting: true,
+      delegation_id: record.id,
+      ...(record.currentRunId ? { run_id: record.currentRunId } : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      owner_session_id: record.owner.rootSessionId,
+    })
+    return () => this.host.emitHost({ ...base, waiting: false })
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
@@ -876,7 +1968,12 @@ export class CoreApi {
         this.requireReadableSession(sessionId, 'bootstrap').id,
       )
     const kept = this.host.kept
-    const activeSessionId = this.host.activeSessionId
+    // The UI's starting state is the session it shows (KRN-01: besides
+    // activateSession, the only reader of it).
+    const focused = this.focusedSessionId
+    const activeSessionId =
+      focused !== null && kept.sessionStore.get(focused) ? focused : null
+    const view: ViewScope = { sessionId: activeSessionId }
     const sessionDiagnostics = kept.sessionStore.diagnostics()
     const route = this.host.llm.activeRoute()
     const replay =
@@ -885,22 +1982,24 @@ export class CoreApi {
         : { events: [], latestSeq: 0 }
     return {
       app: 'Emperor Agent',
+      /** The session this bootstrap describes: the one the UI shows (null: none). */
+      sessionId: activeSessionId,
       sessionIndexSource: sessionDiagnostics.sessionIndexSource,
       repairedSessions: sessionDiagnostics.repairedSessions,
       model: route?.modelId ?? '',
       provider: route?.catalogProvider ?? '',
       providerLabel: route?.displayName ?? '',
-      tools: this.skills.tools(),
+      tools: this.skills.tools(view),
       ...(() => {
         const catalog = this.skills.list({ sessionId: activeSessionId })
         return { skills: catalog.skills, invalidSkills: catalog.invalid }
       })(),
-      plugins: this.plugins.list(),
-      memory: this.memory.get(),
+      plugins: this.plugins.list(view),
+      memory: this.memory.get(view),
       modelConfig: await this.model.getConfig(),
       profileOnboarding: this.onboarding.getProfileStatus(),
       scheduler: this.scheduler.get(),
-      control: this.control.get(),
+      control: this.control.get(activeSessionId),
       goals: await this.goalService.bootstrap(activeSessionId),
       hooks: await this.hooks.getConfig(),
       desktopPet: await this.desktopPet.get(),
@@ -915,7 +2014,7 @@ export class CoreApi {
       },
       mcp: this.mcp.status(),
       projects: this.projects.list(),
-      diagnostics: await this.diagnostics.get(),
+      diagnostics: await this.diagnostics.get(view),
     }
   }
 
@@ -938,6 +2037,8 @@ export class CoreApi {
       source?: string | null
       /** In-process adapters only: this session's UI events during the submit. */
       emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
+      /** In-process adapters only: discard the prompt if no turn takes it. */
+      unconsumed?: 'keep' | 'withdraw' | null
       /** Accepted for adapter compatibility; turn ids are assigned by the kernel. */
       turnId?: string | null
     }) =>
@@ -956,14 +2057,16 @@ export class CoreApi {
         signal: opts.signal ?? null,
         source: opts.source ?? 'chat',
         emit: opts.emit ?? null,
+        unconsumed: opts.unconsumed ?? null,
       }),
     listQueuedPrompts: (opts: { sessionId: string }) =>
       this.chatService.listQueuedPrompts(opts),
     manageQueuedPrompt: (opts: {
       sessionId: string
       promptId: string
-      action: 'cancel' | 'interject'
+      action: 'cancel' | 'interject' | 'send'
     }) => this.chatService.manageQueuedPrompt(opts),
+    /** Stop a task, or the turn of the named session (KRN-01: never a default). */
     stopRuntime: async (
       opts: {
         taskId?: string | null
@@ -972,31 +2075,59 @@ export class CoreApi {
       } = {},
     ) => {
       const taskId = String(opts.taskId ?? '').trim()
+      const sessionId = String(opts.sessionId ?? '').trim()
       let cancelled = 0
       if (taskId) {
-        cancelled = this.cancelTask(taskId) ? 1 : 0
+        cancelled = this.cancelTask(taskId, sessionId || null) ? 1 : 0
       } else {
-        const sessionId =
-          String(opts.sessionId ?? '').trim() || this.host.activeSessionId
-        if (sessionId && this.host.stop(sessionId)) cancelled = 1
+        if (!sessionId) throw new SessionRequiredError('chat.stopRuntime')
+        if (this.host.stop(sessionId)) cancelled = 1
       }
       return { cancelled, active: this.activeTaskInfos() }
     },
+    /**
+     * In-process adapters (ACP): one background turn in the named session,
+     * which keeps its own scope and never moves the session in view.
+     */
+    runBackground: async (
+      input: { sessionId: string; content: string } & BackgroundTurnOptions,
+    ): Promise<BackgroundTurnOutcome> => {
+      const session = this.requireReadableSession(
+        String(input.sessionId ?? '').trim(),
+        `${input.source}.runBackground`,
+      ) as { id: string; transitioned_to_session_id?: string | null }
+      if (session.transitioned_to_session_id)
+        throw new InvalidSessionError(
+          `${input.source}.runBackground cannot append to transitioned session ${session.id}`,
+          session.id,
+        )
+      return await this.host.runBackgroundTurn(
+        this.host.scopeFor(session.id),
+        String(input.content ?? ''),
+        input,
+      )
+    },
   }
 
+  /**
+   * `list` and `complete` take a session, or a start-page draft's id with
+   * its `draftSession` (FIX-14); `invoke` needs the real session.
+   */
   readonly commands = {
-    list: (input: {
-      sessionId: string
-      includeUnavailable?: boolean
-      invocationSource?: CommandInvocationSource
-    }) => this.commandPlatform.list(input),
-    complete: (input: {
-      sessionId: string
-      commandId: string
-      rawArgs: string
-      cursor: number
-      invocationSource: CommandInvocationSource
-    }): Promise<CommandCompletion[]> => this.commandPlatform.complete(input),
+    list: (
+      input: CommandOwner & {
+        includeUnavailable?: boolean
+        invocationSource?: CommandInvocationSource
+      },
+    ) => this.commandPlatform.list(input),
+    complete: (
+      input: CommandOwner & {
+        commandId: string
+        rawArgs: string
+        cursor: number
+        invocationSource: CommandInvocationSource
+      },
+    ): Promise<CommandCompletion[]> => this.commandPlatform.complete(input),
     invoke: (input: {
       sessionId: string
       commandId: string
@@ -1021,8 +2152,10 @@ export class CoreApi {
         format?: 'projection' | null
       } = {},
     ): CoreRuntimeReplayPayload => {
+      if (!String(opts.sessionId ?? '').trim())
+        throw new SessionRequiredError('runtime.replay')
       const sessionId = this.requireReadableSessionId(
-        opts.sessionId ?? this.host.activeSessionId ?? null,
+        opts.sessionId,
         'runtime.replay',
       )
       const afterSeq = normalizedNonNegativeNumber(
@@ -1046,11 +2179,11 @@ export class CoreApi {
     effective: () => this.effectiveConfigService.payload(),
     get: (): UserConfigPayload => this.configService.getUserConfig(),
     save: async (
-      body: { content?: unknown } | string = {},
+      body: { content?: unknown } | string | undefined,
+      _view: ViewScope,
     ): Promise<UserConfigPayload> => {
-      this.assertMutation('config', 'save')
       const content =
-        typeof body === 'string' ? body : String(body.content ?? '')
+        typeof body === 'string' ? body : String(body?.content ?? '')
       await this.hooksService.authorizeConfigChange('config.save', { content })
       return this.configService.saveUserConfig(content)
     },
@@ -1070,20 +2203,29 @@ export class CoreApi {
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
     status: () => this.host.kept.mcpClient.snapshot(),
-    saveConfig: async (raw: Dict) => {
+    /** A server's last 200 stderr lines, redacted like the logs (KRN-04); null: not running. */
+    serverLog: (input: { name: string }) => {
+      const text = this.host.kept.mcpClient.serverStderr(input.name)
+      return {
+        name: input.name,
+        text: text === null ? null : redactLogText(text),
+      }
+    },
+    saveConfig: async (raw: Dict, _view: ViewScope) => {
       // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
-      this.assertMutation('mcp', 'saveConfig')
       await this.hooksService.authorizeConfigChange('mcp.saveConfig', raw)
       return this.configService.saveMcpConfig(raw)
     },
     /** Merge pasted servers (Claude/Cursor/VS Code/Emperor formats) by name; `dryRun` previews. */
-    importServers: async (input: {
-      raw: unknown
-      overwrite?: boolean | string[]
-      dryRun?: boolean
-    }) => {
+    importServers: async (
+      input: {
+        raw: unknown
+        overwrite?: boolean | string[]
+        dryRun?: boolean
+      },
+      _view?: ViewScope,
+    ) => {
       if (input.dryRun !== true) {
-        this.assertMutation('mcp', 'importServers')
         await this.hooksService.authorizeConfigChange(
           'mcp.importServers',
           input,
@@ -1092,8 +2234,10 @@ export class CoreApi {
       const result = await this.configService.importMcpServers(input)
       return { ...result, status: this.host.kept.mcpClient.snapshot() }
     },
-    setServerEnabled: async (input: { name: string; enabled: boolean }) => {
-      this.assertMutation('mcp', 'setServerEnabled')
+    setServerEnabled: async (
+      input: { name: string; enabled: boolean },
+      _view: ViewScope,
+    ) => {
       await this.hooksService.authorizeConfigChange(
         'mcp.setServerEnabled',
         input,
@@ -1101,8 +2245,7 @@ export class CoreApi {
       const result = await this.configService.setMcpServerEnabled(input)
       return { ...result, status: this.host.kept.mcpClient.snapshot() }
     },
-    removeServer: async (input: { name: string }) => {
-      this.assertMutation('mcp', 'removeServer')
+    removeServer: async (input: { name: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('mcp.removeServer', input)
       const result = await this.configService.removeMcpServer(input)
       return { ...result, status: this.host.kept.mcpClient.snapshot() }
@@ -1111,7 +2254,9 @@ export class CoreApi {
 
   readonly hooks = {
     getConfig: async (opts: Dict = {}) => this.hooksService.getConfig(opts),
-    saveConfig: async (raw: unknown) => this.hooksService.saveConfig(raw),
+    saveConfig: async (raw: unknown, view: ViewScope) =>
+      this.hooksService.saveConfig(raw, view),
+    /** `hook/*` audit of the session in view. */
     getAudit: async (
       opts: {
         cursor?: string | number | null
@@ -1120,15 +2265,18 @@ export class CoreApi {
         outcome?: string | null
         sourceId?: string | null
         runId?: string | null
-      } = {},
-    ) => this.hooksService.getAudit(opts),
+      },
+      view: ViewScope,
+    ) => this.hooksService.getAudit(opts, view),
     getMetadata: () => this.hooksService.getMetadata(),
-    validateConfig: (input: Dict) => this.hooksService.validateConfig(input),
+    validateConfig: (input: Dict, view?: ViewScope) =>
+      this.hooksService.validateConfig(input, view),
     setProjectTrust: async (input: Dict) =>
       this.hooksService.setProjectTrust(input),
-    testMatch: async (input: Dict) => this.hooksService.testMatch(input),
-    testRun: async (input: Dict): Promise<Dict> =>
-      this.hooksService.testRun(input),
+    testMatch: async (input: Dict, view?: ViewScope) =>
+      this.hooksService.testMatch(input, view),
+    testRun: async (input: Dict, view: ViewScope): Promise<Dict> =>
+      this.hooksService.testRun(input, view),
     cancelRun: async (input: Dict) => this.hooksService.cancelRun(input),
   }
 
@@ -1137,48 +2285,100 @@ export class CoreApi {
     resolveProfile: (
       input: Parameters<CoreModelService['resolveProfile']>[0],
     ) => this.modelService.resolveProfile(input),
-    saveEntry: async (entry: Parameters<CoreModelService['saveEntry']>[0]) => {
-      this.assertMutation('model', 'saveEntry')
+    saveEntry: async (
+      entry: Parameters<CoreModelService['saveEntry']>[0],
+      _view: ViewScope,
+    ) => {
       await this.hooksService.authorizeConfigChange('model.saveEntry', entry)
       return this.modelService.saveEntry(entry)
     },
+    saveEntries: async (
+      input: Parameters<CoreModelService['saveEntries']>[0],
+      _view: ViewScope,
+    ) => {
+      await this.hooksService.authorizeConfigChange('model.saveEntries', input)
+      return this.modelService.saveEntries(input)
+    },
+    updateConnection: async (
+      input: Parameters<CoreModelService['updateConnection']>[0],
+      _view: ViewScope,
+    ) => {
+      await this.hooksService.authorizeConfigChange('model.updateConnection', {
+        ...input,
+        apiKey: input.apiKey ? '***' : input.apiKey,
+      })
+      return this.modelService.updateConnection(input)
+    },
+    refreshMetadata: async (
+      input: Parameters<CoreModelService['refreshMetadata']>[0],
+      _view: ViewScope,
+    ) => {
+      // A preview only reads; applying writes the file.
+      if (input.apply) {
+        await this.hooksService.authorizeConfigChange(
+          'model.refreshMetadata',
+          input,
+        )
+      }
+      return this.modelService.refreshMetadata(input)
+    },
+    replaceEntry: async (
+      input: Parameters<CoreModelService['replaceEntry']>[0],
+      _view: ViewScope,
+    ) => {
+      await this.hooksService.authorizeConfigChange('model.replaceEntry', input)
+      return this.modelService.replaceEntry(input)
+    },
+    lookupDefaults: (
+      input: Parameters<CoreModelService['lookupDefaults']>[0],
+    ) => this.modelService.lookupDefaults(input),
+    discardRejected: async ({ key }: { key: string }, _view: ViewScope) => {
+      await this.hooksService.authorizeConfigChange('model.discardRejected', {
+        key,
+      })
+      return this.modelService.discardRejected(key)
+    },
     savePolicy: async (
       policy: Parameters<CoreModelService['savePolicy']>[0],
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'savePolicy')
       await this.hooksService.authorizeConfigChange('model.savePolicy', policy)
       return this.modelService.savePolicy(policy)
     },
-    deleteEntry: async ({ entryId }: { entryId: string }) => {
-      this.assertMutation('model', 'deleteEntry')
+    deleteEntry: async ({ entryId }: { entryId: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('model.deleteEntry', {
         entryId,
       })
       return this.modelService.deleteEntry(entryId)
     },
-    activate: async ({ entryId }: { entryId: string }) => {
-      this.assertMutation('model', 'activate')
+    activate: async ({ entryId }: { entryId: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('model.activate', {
         entryId,
       })
       return this.modelService.activate(entryId)
     },
-    setReasoningEffort: async ({
-      entryId,
-      reasoningEffort,
-    }: {
-      entryId: string
-      reasoningEffort: string | null
-    }) => {
-      this.assertMutation('model', 'setReasoningEffort')
+    setReasoningEffort: async (
+      {
+        entryId,
+        reasoningEffort,
+      }: {
+        entryId: string
+        reasoningEffort: string | null
+      },
+      _view: ViewScope,
+    ) => {
       await this.hooksService.authorizeConfigChange(
         'model.setReasoningEffort',
         { entryId, reasoningEffort },
       )
       return this.modelService.setReasoningEffort(entryId, reasoningEffort)
     },
-    discoverModels: async (body: Dict) =>
+    /** Read-only: the vendor's model list for a draft connection. */
+    discoverModels: async (body: ModelDiscoveryInput) =>
       this.modelService.discoverModels(body),
+    /** Read-only: check a draft connection's key and address (UI-29). */
+    probeConnection: async (body: ModelConnectionInput) =>
+      this.modelService.probeConnection(body),
     test: async (body: Dict): Promise<Dict> => this.modelService.test(body),
   }
 
@@ -1190,16 +2390,17 @@ export class CoreApi {
   }
 
   readonly control = {
-    get: (sessionId?: string | null) =>
+    /** The control state of a session (null: none, e.g. a draft: the defaults). */
+    get: (sessionId: string | null) =>
       this.host.controlPayload(this.controlSessionId(sessionId)),
     /** Switch the permission preset (`read-only` | `workspace-write` | `danger-full-access`). */
-    setPermissionMode: (preset: string, sessionId?: string | null) =>
+    setPermissionMode: (preset: string, sessionId: string) =>
       this.host.setPermissionPreset(
         this.requireControlSession(sessionId, 'control.setPermissionMode'),
         preset,
       ),
     /** `plan` enters plan mode, anything else leaves it. */
-    setMode: (mode: string, sessionId?: string | null) => {
+    setMode: (mode: string, sessionId: string) => {
       const id = this.requireControlSession(sessionId, 'control.setMode')
       const outcome = this.host.setPlanMode(id, mode === 'plan')
       return { outcome, control: this.host.controlPayload(id) }
@@ -1224,15 +2425,18 @@ export class CoreApi {
       this.settleInteraction(id, () => this.host.cancelInteraction(id)),
   }
 
+  /** Goals of a named session (KRN-01: never the one in view by default). */
   readonly goals = {
     start: (input: GoalStartInput) => this.goalService.start(input),
-    list: (input: { sessionId?: string | null } = {}) =>
-      this.goalService.list(input),
-    get: (goalId: string) => this.goalService.get(goalId),
-    pause: (goalId: string) => this.goalService.pause(goalId),
-    resume: (goalId: string) => this.goalService.resume(goalId),
-    cancel: (goalId: string, reason?: string | null) =>
-      this.goalService.cancel(goalId, reason),
+    list: (input: { sessionId: string | null }) => this.goalService.list(input),
+    get: (goalId: string, sessionId: string) =>
+      this.goalService.get(goalId, sessionId),
+    pause: (goalId: string, sessionId: string) =>
+      this.goalService.pause(goalId, sessionId),
+    resume: (goalId: string, sessionId: string) =>
+      this.goalService.resume(goalId, sessionId),
+    cancel: (goalId: string, reason: string | null, sessionId: string) =>
+      this.goalService.cancel(goalId, reason, sessionId),
   }
 
   readonly scheduler = {
@@ -1243,8 +2447,8 @@ export class CoreApi {
         .map(schedulerJobPublicPayload),
       diagnostics: this.host.kept.schedulerStore.diagnostics(),
     }),
-    createJob: (args: Dict) => {
-      this.assertMutation('scheduler', 'create')
+    /** A job without a session runs in the one the creator shows (`view`). */
+    createJob: (args: Dict, view: ViewScope) => {
       const schedule = SchedulerSchedule.fromDict(
         requiredRecord(args.schedule, 'schedule'),
       )
@@ -1259,14 +2463,14 @@ export class CoreApi {
           args.deleteAfterRun ?? args.delete_after_run ?? false,
         ),
         misfirePolicy: schedulerMisfirePolicyFromApi(args.misfirePolicy),
+        targetSessionId: this.viewedSession(view)?.id ?? null,
       })
       return {
         job: schedulerJobPublicPayload(job),
         scheduler: this.scheduler.get(),
       }
     },
-    updateJob: (jobId: string, args: Dict) => {
-      this.assertMutation('scheduler', 'update')
+    updateJob: (jobId: string, args: Dict, view: ViewScope) => {
       const current = this.host.kept.schedulerService.getJob(jobId)
       if (!current) throw new Error(`scheduler job not found: ${jobId}`)
       if (current.protected)
@@ -1291,6 +2495,7 @@ export class CoreApi {
           args.misfirePolicy === undefined
             ? undefined
             : schedulerMisfirePolicyFromApi(args.misfirePolicy),
+        targetSessionId: this.viewedSession(view)?.id ?? null,
       })
       if (result === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -1301,16 +2506,14 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    runJob: async (jobId: string) => {
-      this.assertMutation('scheduler', 'run')
+    runJob: async (jobId: string, _view: ViewScope) => {
       const ran = await this.host.kept.schedulerService.runJob(jobId, {
         force: true,
       })
       if (!ran) throw new Error(`scheduler job not found: ${jobId}`)
       return { scheduler: this.scheduler.get() }
     },
-    pauseJob: (jobId: string) => {
-      this.assertMutation('scheduler', 'pause')
+    pauseJob: (jobId: string, _view: ViewScope) => {
       const job = this.host.kept.schedulerService.enableJob(jobId, false)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -1319,8 +2522,7 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    resumeJob: (jobId: string) => {
-      this.assertMutation('scheduler', 'resume')
+    resumeJob: (jobId: string, _view: ViewScope) => {
       const job = this.host.kept.schedulerService.enableJob(jobId, true)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -1329,8 +2531,7 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    deleteJob: (jobId: string) => {
-      this.assertMutation('scheduler', 'delete')
+    deleteJob: (jobId: string, _view: ViewScope) => {
       const result = this.host.kept.schedulerService.removeJob(jobId)
       if (result === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -1342,23 +2543,96 @@ export class CoreApi {
     },
   }
 
+  /** Read-only children of existing owning roots; archived roots remain inspectable. */
+  readonly agents = {
+    list: (input: { rootSessionIds: string[] }) => {
+      const roots = [
+        ...new Set(input.rootSessionIds.map((id) => String(id).trim())),
+      ]
+      for (const id of roots) {
+        if (
+          !id ||
+          id.startsWith(DRAFT_SESSION_PREFIX) ||
+          !this.host.kept.sessionStore.get(id)
+        )
+          throw new InvalidSessionError(
+            'agents.list requires a readable owning root session',
+            id,
+          )
+      }
+      return this.agentService.list(roots)
+    },
+    /**
+     * The user writes to a local subagent from its conversation page
+     * (AGT-10): the message starts the child's next turn.
+     */
+    send: (input: { sessionId: string; text: string }) => {
+      const id = String(input.sessionId).trim()
+      const text = String(input.text).trim()
+      if (!text) throw new EmperorError('消息不能为空。', 'validation_error')
+      const live =
+        id.startsWith('sub-') &&
+        this.host.kept.sessionStore.get(id) !== undefined
+      if (!live)
+        throw new EmperorError(
+          '这个会话不是子智能体，不能这样发消息。',
+          'subagent_not_live',
+        )
+      try {
+        return { messageId: this.host.messageSubagent(id, text) }
+      } catch {
+        throw new EmperorError(
+          '这个子智能体已经结束，不能再发消息。可以在主会话里让 Agent 重新安排任务。',
+          'subagent_not_live',
+        )
+      }
+    },
+  }
+
   readonly sessions = {
     list: (opts: { includeArchived?: boolean } = {}) =>
       this.sessionApplicationService.list(opts),
+    /**
+     * `plan` / `preset`: a draft's own settings when a typed command creates
+     * its session (FIX-13), set before anything runs in it.
+     */
     create: (
       opts: {
         title?: string
         mode?: string
         project?: Dict | null
         project_path?: string | null
+        plan?: boolean
+        preset?: string
       } = {},
-    ) => this.sessionApplicationService.create(opts),
+    ) => {
+      const { plan, preset, ...rest } = opts
+      this.chatService.checkDraftSettings({ preset })
+      const session = this.sessionApplicationService.create(rest)
+      this.chatService.applyDraftSettings(session.id, { plan, preset })
+      return session
+    },
     rename: async (
       sessionId: string,
       patch: string | { title?: string | null; archived?: boolean | null },
     ) => this.sessionApplicationService.rename(sessionId, patch),
+    /** Soft delete: the session goes to 最近删除 and can be restored. */
     delete: (sessionId: string): Promise<Dict> =>
       this.sessionApplicationService.delete(sessionId),
+    listDeleted: () => this.sessionApplicationService.listDeleted(),
+    /** 设置 › 常规 › 会话: the permission preset a new session starts in. */
+    defaults: (): SessionDefaults => this.sessionDefaultsService.get(),
+    setDefaults: (
+      change: { permission: SessionPermission },
+      view: ViewScope,
+    ): Promise<SessionDefaults> =>
+      this.sessionDefaultsService.update(change, view),
+    restoreDeleted: (sessionId: string) =>
+      this.sessionApplicationService.restoreDeleted(sessionId),
+    purgeDeleted: (sessionId: string) =>
+      this.sessionApplicationService.purgeDeleted(sessionId),
+    purgeExpiredDeleted: (now?: number) =>
+      this.sessionApplicationService.purgeExpiredDeleted(now),
     activate: (sessionId: string) =>
       this.sessionApplicationService.activate(sessionId),
     /** One message-boundary page of a session's raw log, sanitized for the wire. */
@@ -1403,6 +2677,25 @@ export class CoreApi {
         )
       return event
     },
+    /**
+     * 命令面板 (UI-S02): sessions whose own messages or replies contain the
+     * query, newest first, one snippet each. Archived sessions are included.
+     */
+    search: async (input: {
+      query: string
+      limit?: number
+    }): Promise<{ hits: SessionSearchHit[] }> => {
+      this.host.sessions.flush(undefined, { sync: true })
+      const hits = await searchSessionLogs({
+        root: this.host.sessions.root,
+        sessions: this.sessionApplicationService.list({
+          includeArchived: true,
+        }),
+        query: input.query,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      })
+      return { hits }
+    },
     /** Ancestor chain of a (child) session, root first. */
     lineage: (input: { sessionId: string }): SessionLineage => {
       const sessionId = this.requireReadableLogSession(
@@ -1438,6 +2731,16 @@ export class CoreApi {
   }
 
   private watchedSessions = new Set<string>()
+  /**
+   * The session the UI shows (KRN-01): written by `activateSession`, read by
+   * `bootstrap`, never used to pick what runs where.
+   */
+  private focusedSessionId: string | null = null
+  /** Why Git is unavailable per project, last logged (FIX-15). */
+  private readonly gitUnavailable = new Map<
+    string,
+    { reason: string; signature: string }
+  >()
   private statusRead: Promise<ComputerUseStatusView> | null = null
 
   /** One Computer Use status read, shared by the driver checks of one refresh. */
@@ -1453,7 +2756,109 @@ export class CoreApi {
     return this.watchedSessions.has(sessionId)
   }
 
+  private delegationImageRoots(record: {
+    id: string
+    backend: string
+    profileId: string
+  }): string[] {
+    if (record.backend !== 'codex') return []
+    try {
+      const profile = this.executorConfig
+        .read()
+        .profiles.find((p) => p.id === record.profileId)
+      if (!profile) return []
+      const root = nativeGeneratedImageRoot(
+        join(
+          this.paths.delegationsRoot,
+          'runtime',
+          profile.stateDirectoryId,
+          record.id,
+        ),
+        this.paths.delegationsRoot,
+      )
+      return root ? [root] : []
+    } catch {
+      return []
+    }
+  }
+
   readonly references = {
+    siteIcon: (input: Parameters<WorkspaceReferenceService['siteIcon']>[0]) =>
+      this.workspaceReferenceService.siteIcon(input),
+    preview: (input: Parameters<WorkspaceReferenceService['preview']>[0]) =>
+      this.workspaceReferenceService.preview(input),
+    image: async (input: { sessionId: string; referenceId: string }) => {
+      this.requireReadableSession(input.sessionId, 'references.image')
+      const descriptor = this.workspaceReferenceService.authorize(
+        input.referenceId,
+        input.sessionId,
+      )
+      const target = this.workspaceReferenceService.previewPath(
+        input.referenceId,
+        input.sessionId,
+      )
+      if (!/\.(png|jpe?g|gif|webp)$/i.test(target))
+        throw new WorkspaceOperationError(
+          'reference_image_unsupported',
+          '该文件不支持图片预览。',
+        )
+      if (descriptor.kind === 'project_file')
+        // Same path as files.preview: works for Build projects and for the
+        // workspace of an ordinary chat.
+        return this.workspaceReferenceService.previewFile(input)
+      const delegationId = this.workspaceReferenceService.delegationScope(
+        input.referenceId,
+        input.sessionId,
+      )
+      const ownedRecord = delegationId
+        ? this.delegationService.get({
+            id: delegationId,
+            sessionId: input.sessionId,
+          }).record!
+        : undefined
+      const ownedRoots = ownedRecord
+        ? [ownedRecord.cwd, ...this.delegationImageRoots(ownedRecord)]
+        : [
+            this.host.sessionWorkspaceRoot(input.sessionId),
+            ...this.delegationRuntime
+              .list()
+              .flatMap((state) =>
+                state.record?.owner.rootSessionId === input.sessionId
+                  ? [
+                      state.record.cwd,
+                      ...this.delegationImageRoots(state.record),
+                    ]
+                  : [],
+              ),
+          ]
+      for (const root of ownedRoots) {
+        let cwd: string
+        try {
+          cwd = realpathSync(root)
+        } catch {
+          continue
+        }
+        const path = relative(cwd, target)
+        if (
+          !path ||
+          isAbsolute(path) ||
+          path === '..' ||
+          path.startsWith('..' + sep)
+        )
+          continue
+        const files = new WorkspaceFilesService({
+          resolveProject: () => ({
+            sessionId: input.sessionId,
+            projectRoot: cwd,
+          }),
+        })
+        return files.read({ sessionId: input.sessionId, relativePath: path })
+      }
+      throw new WorkspaceOperationError(
+        'reference_image_outside_workspace',
+        '图片不属于当前会话工作区。',
+      )
+    },
     resolve: (input: Parameters<WorkspaceReferenceService['resolve']>[0]) =>
       this.workspaceReferenceService.resolve(input),
     /** Electron main-only capability; returns a path only after reference ownership checks. */
@@ -1464,20 +2869,24 @@ export class CoreApi {
       ),
   }
 
+  /** Processes of a named session (KRN-01: `SESSION_REQUIRED` without one). */
   readonly processes = {
-    list: (opts: { activeOnly?: boolean } = {}): Dict[] =>
+    list: (opts: { sessionId?: string | null; activeOnly?: boolean }): Dict[] =>
       this.host.kept.processRuntime
         .list({
           activeOnly: opts.activeOnly,
-          sessionId: this.host.activeSessionId,
+          sessionId: this.requireSessionId(opts.sessionId, 'processes.list'),
         })
         .map((receipt) => receipt as unknown as Dict),
     cancel: (
       processId: string,
-      opts: { leaseId: string; reason?: string },
+      opts: { sessionId?: string | null; leaseId: string; reason?: string },
     ): Dict => {
-      this.assertMutation('processes', 'cancel')
-      this.assertProcessOwner(processId)
+      const sessionId = this.requireSessionId(
+        opts.sessionId,
+        'processes.cancel',
+      )
+      this.assertProcessOwner(processId, sessionId)
       return this.host.kept.processRuntime.cancel(
         processId,
         opts.leaseId,
@@ -1487,17 +2896,22 @@ export class CoreApi {
     reparent: (
       processId: string,
       opts: {
+        sessionId?: string | null
         leaseId: string
         ownerKind: 'session' | 'task' | 'terminal'
         ownerId: string
       },
     ): Dict => {
-      this.assertMutation('processes', 'reparent')
-      this.assertProcessOwner(processId)
+      const sessionId = this.requireSessionId(
+        opts.sessionId,
+        'processes.reparent',
+      )
+      this.assertMutation('processes', 'reparent', { sessionId })
+      this.assertProcessOwner(processId, sessionId)
       return this.host.kept.processRuntime.reparent(processId, opts.leaseId, {
         kind: opts.ownerKind,
         id: opts.ownerId,
-        sessionId: this.host.activeSessionId,
+        sessionId,
       }) as unknown as Dict
     },
   }
@@ -1534,13 +2948,18 @@ export class CoreApi {
     enterWorktree: (
       input: Parameters<WorkspaceGitService['enterWorktree']>[0],
     ) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.enterWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const entered = await this.workspaceGitService.enterWorktree(input)
+        // The session's tools, sandbox and records move with it (KRN-11).
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-enter')
+        return entered
+      }),
     exitWorktree: (input: Parameters<WorkspaceGitService['exitWorktree']>[0]) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.exitWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const left = await this.workspaceGitService.exitWorktree(input)
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-exit')
+        return left
+      }),
     pullRequest: (input: Parameters<WorkspaceGitService['pullRequest']>[0]) =>
       this.workspaceGitService.pullRequest(input),
     publishPreview: (
@@ -1619,13 +3038,77 @@ export class CoreApi {
     status: () => this.pullRequestBrowser.status(),
     list: (input: Parameters<PullRequestBrowserService['list']>[0] = {}) =>
       this.pullRequestBrowser.list(input),
-    view: (input: Parameters<PullRequestBrowserService['view']>[0]) =>
-      this.pullRequestBrowser.view(input),
+    view: (
+      input: Parameters<PullRequestBrowserService['view']>[0],
+      options?: Parameters<PullRequestBrowserService['view']>[1],
+    ) => this.pullRequestBrowser.view(input, options),
     diff: (input: Parameters<PullRequestBrowserService['diff']>[0]) =>
       this.pullRequestBrowser.diff(input),
   }
 
   readonly files = {
+    preview: async (input: FilePreviewInput): Promise<FilePreviewResult> => {
+      if (input.source === 'reference')
+        return this.workspaceReferenceService.previewFile(input)
+      if (input.source === 'attachment') {
+        const ref = this.attachmentStore.get(input.attachmentId)
+        if (!ref)
+          throw new WorkspaceOperationError(
+            'reference_attachment_unknown',
+            '附件不存在或已被移除。',
+          )
+        // Managed attachments have the same global access as attachments.rawPath.
+        const root = realpathSync(this.attachmentStore.root)
+        const path = resolve(root, ref.rel_path)
+        const canonical = realpathSync(path)
+        const fromRoot = relative(root, canonical)
+        if (
+          fromRoot.startsWith('..') ||
+          isAbsolute(fromRoot) ||
+          canonical !== path
+        )
+          throw new WorkspaceOperationError(
+            'reference_attachment_invalid',
+            '附件路径超出存储范围。',
+          )
+        const value = await previewCanonicalFile(canonical)
+        const extracted =
+          ref.mime === 'application/pdf' && ref.has_text
+            ? this.attachmentStore.readText(ref, 1024 * 1024)
+            : ''
+        return {
+          ...value,
+          name: ref.name,
+          mimeType: ref.mime,
+          revealable: true,
+          ...(extracted
+            ? {
+                kind: 'text' as const,
+                content: Buffer.from(extracted)
+                  .subarray(0, 1024 * 1024)
+                  .toString('utf8'),
+                extractedText: true,
+                truncated: Buffer.byteLength(extracted) >= 1024 * 1024,
+              }
+            : {}),
+        }
+      }
+      return filePreviewResult(
+        await this.files.read({
+          sessionId: input.sessionId,
+          relativePath: input.path,
+          ...(input.source === 'turn' ? { turn: input.turn } : {}),
+        }),
+      )
+    },
+    /** Size and mtime of a preview that can change on disk (FIX-05). */
+    stat: async (input: FileStatInput): Promise<FileStatResult> =>
+      input.source === 'reference'
+        ? this.workspaceReferenceService.statFile(input)
+        : this.workspaceFilesService.stat({
+            sessionId: input.sessionId,
+            relativePath: input.path,
+          }),
     list: (
       input: Parameters<WorkspaceFilesService['list']>[0],
     ): Promise<WorkspaceFileListResult> =>
@@ -1634,10 +3117,38 @@ export class CoreApi {
       input: Parameters<WorkspaceFilesService['search']>[0],
     ): Promise<WorkspaceFileListResult> =>
       this.workspaceFilesService.search(input),
-    read: (
-      input: Parameters<WorkspaceFilesService['read']>[0],
-    ): Promise<WorkspaceFileReadResult> =>
-      this.workspaceFilesService.read(input),
+    read: async (
+      input: Parameters<WorkspaceFilesService['read']>[0] & { turn?: number },
+    ): Promise<WorkspaceFileReadResult> => {
+      if (input.turn === undefined)
+        return this.workspaceFilesService.read(input)
+      const sessionId = this.requireReadableLogSession(
+        input.sessionId,
+        'files.read',
+      )
+      const recorded = this.host
+        .sessionLog(sessionId)
+        ?.events.some(
+          (event) =>
+            event.type === 'turn/files' &&
+            event.data.turn === input.turn &&
+            event.data.status === 'recorded' &&
+            event.data.files.some((file) => file.path === input.relativePath),
+        )
+      if (!recorded)
+        throw new WorkspaceOperationError(
+          'turn_file_not_recorded',
+          '这份改动记录里没有这个文件。',
+        )
+      // The persisted record authorizes this exact path, not the whole Chat workspace.
+      // Reuse the existing bounded reader and canonical path / symlink checks.
+      return new WorkspaceFilesService({
+        resolveProject: () => ({
+          sessionId,
+          projectRoot: this.host.sessionWorkspaceRoot(sessionId),
+        }),
+      }).read({ sessionId, relativePath: input.relativePath })
+    },
   }
 
   readonly terminals = {
@@ -1662,7 +3173,9 @@ export class CoreApi {
   }
 
   readonly memory = {
-    get: () => this.memoryService.getMemory(),
+    /** Memory and the context gauge of the session in view. */
+    get: (view: ViewScope) =>
+      this.memoryService.getMemory(this.viewedSession(view)?.id ?? null),
     save: (content: string) => this.memoryService.saveMemory(content),
     getEpisode: (date?: string | null) =>
       this.memoryService.getEpisode(String(date ?? '')),
@@ -1671,18 +3184,23 @@ export class CoreApi {
     listVersions: (opts: { limit?: number; target?: string | null } = {}) =>
       this.memoryService.listVersions(opts),
     getVersion: (versionId: string) => this.memoryService.getVersion(versionId),
-    restoreVersion: (versionId: string) =>
-      this.memoryService.restoreVersion(versionId),
+    restoreVersion: (versionId: string, view: ViewScope) =>
+      this.memoryService.restoreVersion(
+        versionId,
+        this.viewedSession(view)?.id ?? null,
+      ),
     getWatchlist: () => this.memoryService.getWatchlist(),
     saveWatchlist: (content: string) =>
       this.memoryService.saveWatchlist(content),
     checkWatchlist: async () => this.memoryService.checkWatchlist(),
-    tokens: () => this.memoryService.tokens(),
-    compact: (opts: { force?: boolean } = {}) =>
+    tokens: (view: ViewScope) =>
+      this.memoryService.tokens(this.viewedSession(view)?.id ?? null),
+    compact: (opts: { force?: boolean; sessionId: string | null }) =>
       this.memoryService.compact(opts),
-    explainContext: (
-      opts: { sessionId?: string | null; turnId?: string | null } = {},
-    ) => this.memoryService.explainContext(opts),
+    explainContext: (opts: {
+      sessionId: string | null
+      turnId?: string | null
+    }) => this.memoryService.explainContext(opts),
   }
 
   readonly projects = {
@@ -1690,15 +3208,21 @@ export class CoreApi {
     resolve: (path: string) => this.host.kept.projectStore.resolve(path),
   }
 
+  /**
+   * Skills of a named session (`sessionId: null` = Chat, no project
+   * Skills); KRN-01: never the session in view by default.
+   */
   readonly skills = {
-    tools: () => this.skillService.tools(),
-    /** Effective Skills of a session (default: the active one) plus invalid Skills with reasons. */
-    list: (opts: { sessionId?: string | null } = {}) =>
-      this.skillService.list(opts),
-    get: (name: string, opts: { sessionId?: string | null } = {}) =>
+    /** The tools the session in view sees (its project's MCP tools included). */
+    tools: (view: ViewScope) =>
+      this.skillService.tools(this.viewedSession(view)?.id ?? null),
+    list: (opts: { sessionId: string | null }) => this.skillService.list(opts),
+    get: (name: string, opts: { sessionId: string | null }) =>
       this.skillService.get(name, opts),
-    create: (input: Parameters<CoreSkillService['create']>[0]) => {
-      this.assertMutation('skills', 'create')
+    create: (
+      input: Parameters<CoreSkillService['create']>[0],
+      _view: ViewScope,
+    ) => {
       return this.skillService.create(input)
     },
     validate: (input: Parameters<CoreSkillService['validate']>[0]) =>
@@ -1706,27 +3230,31 @@ export class CoreApi {
     save: (
       name: string,
       content: string,
-      opts: { sessionId?: string | null } = {},
+      opts: { sessionId: string | null },
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'save')
       return this.skillService.save(name, content, opts)
     },
     delete: (
       name: string,
       opts: {
-        sessionId?: string | null
+        sessionId: string | null
         scope?: 'user' | 'project' | null
-      } = {},
+      },
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'delete')
       return this.skillService.delete(name, opts)
     },
-    import: async (input: Parameters<CoreSkillService['import']>[0]) => {
-      this.assertMutation('skills', 'import')
+    import: async (
+      input: Parameters<CoreSkillService['import']>[0],
+      _view: ViewScope,
+    ) => {
       return await this.skillService.import(input)
     },
-    copyToUser: (input: Parameters<CoreSkillService['copyToUser']>[0]) => {
-      this.assertMutation('skills', 'copyToUser')
+    copyToUser: (
+      input: Parameters<CoreSkillService['copyToUser']>[0],
+      _view: ViewScope,
+    ) => {
       return this.skillService.copyToUser(input)
     },
     /** Electron main-only capability: the Skills folder of a scope (created when missing). */
@@ -1734,31 +3262,15 @@ export class CoreApi {
       this.skillService.folderPath(input),
   }
 
+  /** Plugins as the project of the session in view sees them (KRN-01). */
   readonly plugins = {
-    list: () => this.pluginService.list(),
+    list: (view: ViewScope) =>
+      this.pluginService.list(this.viewProjectRoot(view)),
     /** Connection checks (such as gh) run first, so app members show their real state. */
     getDetail: async (
       input: Parameters<PluginApplicationService['detail']>[0],
-    ) => {
-      const detail = this.pluginService.detail(input)
-      // Only an active package shows its members' own states, so nothing
-      // is checked otherwise (asking a Computer Use driver can launch the
-      // macOS Helper).
-      if (detail.activation !== 'active' || !detail.effective) return detail
-      const apps = detail.components
-        .filter((component) => component.kind === 'app')
-        .map((component) =>
-          appConnectionKey({
-            scope: detail.scope,
-            pluginId: detail.pluginId,
-            appId: component.id,
-          }),
-        )
-        .filter((key) => this.appConnections.has(key))
-      if (!apps.length) return detail
-      await this.appConnections.refresh(apps)
-      return this.pluginService.detail(input)
-    },
+      view: ViewScope,
+    ) => await this.pluginDetail(input, this.viewProjectRoot(view)),
     /** Electron main-only: a logo's bytes for the `app://plugin-assets` handler. */
     logo: (input: Parameters<PluginApplicationService['logo']>[0]) =>
       this.pluginService.logo(input),
@@ -1767,32 +3279,34 @@ export class CoreApi {
     // Each mutation resolves once its MCP servers and hooks are applied.
     install: async (
       input: Parameters<PluginApplicationService['install']>[0],
+      view: ViewScope,
     ) => {
-      this.assertMutation('plugins', 'install')
-      const result = await this.pluginService.install(input)
+      const result = await this.pluginService.install(
+        input,
+        this.viewProjectRoot(view),
+      )
       await this.pluginActivation.settled()
       return result
     },
     uninstall: async (
       input: Parameters<PluginApplicationService['uninstall']>[0],
+      view: ViewScope,
     ) => {
-      this.assertMutation('plugins', 'uninstall')
-      const result = this.pluginService.uninstall(input)
+      const result = this.pluginService.uninstall(
+        input,
+        this.viewProjectRoot(view),
+      )
       await this.pluginActivation.settled()
       return result
     },
     setEnabled: async (
       input: Parameters<PluginApplicationService['setEnabled']>[0],
+      view: ViewScope,
     ) => {
-      // Switching Computer Use off narrows what the Agent can do: like its
-      // Settings switch, a pending card never blocks it.
-      const narrowsComputerUse =
-        input.scope === 'managed' &&
-        input.pluginId === COMPUTER_USE_PLUGIN_ID &&
-        !input.enabled
-      if (!narrowsComputerUse)
-        this.assertMutation('plugins', input.enabled ? 'enable' : 'disable')
-      const result = this.pluginService.setEnabled(input)
+      const result = this.pluginService.setEnabled(
+        input,
+        this.viewProjectRoot(view),
+      )
       await this.pluginActivation.settled()
       return result
     },
@@ -1808,9 +3322,10 @@ export class CoreApi {
     },
     viewIssue: async (
       input: Parameters<PullRequestBrowserService['viewIssue']>[0],
+      options?: Parameters<PullRequestBrowserService['viewIssue']>[1],
     ) => {
       this.requireGitHubPlugin()
-      return await this.pullRequestBrowser.viewIssue(input)
+      return await this.pullRequestBrowser.viewIssue(input, options)
     },
     listRuns: async (
       input: Parameters<PullRequestBrowserService['listRuns']>[0],
@@ -1820,16 +3335,23 @@ export class CoreApi {
     },
     viewRun: async (
       input: Parameters<PullRequestBrowserService['viewRun']>[0],
+      options?: Parameters<PullRequestBrowserService['viewRun']>[1],
     ) => {
       this.requireGitHubPlugin()
-      return await this.pullRequestBrowser.viewRun(input)
+      return await this.pullRequestBrowser.viewRun(input, options)
     },
   }
 
   readonly environment = {
+    /** Status for the project of the session in view (the runtime root otherwise). */
     getStatus: (
-      input: Parameters<CoreEnvironmentService['getStatus']>[0] = {},
-    ) => this.environmentService.getStatus(input),
+      input: { forceRefresh?: boolean } | undefined,
+      view: ViewScope,
+    ) =>
+      this.environmentService.getStatus({
+        forceRefresh: input?.forceRefresh ?? false,
+        projectRoot: this.viewProjectRoot(view) ?? this.root,
+      }),
     createInstallPlan: (
       _input: Parameters<CoreEnvironmentService['createInstallPlan']>[0],
     ): Promise<never> =>
@@ -1850,8 +3372,8 @@ export class CoreApi {
       ),
     cancelInstall: (
       input: Parameters<CoreEnvironmentService['cancelInstall']>[0],
+      _view: ViewScope,
     ) => {
-      this.assertMutation('environment', 'cancel install')
       return this.environmentService.cancelInstall(input)
     },
     getInstallLog: (
@@ -1898,24 +3420,27 @@ export class CoreApi {
   }
 
   readonly diagnostics = {
-    get: async () => this.diagnosticsService.payload(),
+    /** Diagnostics, with the facts of the session the page was opened from. */
+    get: async (view: ViewScope) =>
+      this.diagnosticsService.payload(this.viewOf(view, 'diagnostics.get')),
   }
 
   /**
-   * Computer Use (GUI control). Switching off and revoking never call
-   * `assertMutation`: narrowing capability must work while a grant card or
-   * plan mode is pending.
+   * Computer Use (GUI control). Its switches are settings: the chat shown
+   * behind the window never gates them (FIX-10).
    */
   readonly computerUse = {
     status: async (): Promise<ComputerUseStatusView> =>
       (await this.host.computerUse?.service.status()) ??
       unsupportedComputerUseStatus(),
     /** One driver's switch. Turning on is guarded; turning off never is. */
-    setDriverEnabled: async (input: {
-      driver: DriverKind
-      enabled: boolean
-    }): Promise<ComputerUseStatusView> => {
-      if (input.enabled) this.assertMutation('computerUse', 'enable')
+    setDriverEnabled: async (
+      input: {
+        driver: DriverKind
+        enabled: boolean
+      },
+      _view: ViewScope,
+    ): Promise<ComputerUseStatusView> => {
       this.host.setComputerUseDriverEnabled(input.driver, input.enabled)
       return await this.computerUse.status()
     },
@@ -1947,8 +3472,10 @@ export class CoreApi {
       return await this.computerUse.status()
     },
     /** Master switch. Turning on is a guarded mutation; turning off never is. */
-    setEnabled: async (enabled: boolean): Promise<ComputerUseStatusView> => {
-      if (enabled) this.assertMutation('computerUse', 'enable')
+    setEnabled: async (
+      enabled: boolean,
+      _view: ViewScope,
+    ): Promise<ComputerUseStatusView> => {
       this.host.setComputerUseEnabled(enabled)
       // The Computer Use plugin mirrors this switch (plugin contract §5).
       this.pluginsChanged()
@@ -1962,16 +3489,18 @@ export class CoreApi {
      * Create or rename a persistent profile (guarded mutations), or wipe /
      * delete one (never guarded: it only removes data and grants).
      */
-    manageProfile: async (input: {
-      action: 'create' | 'rename' | 'clear' | 'delete'
-      profileId?: string
-      name?: string
-    }): Promise<{ profile?: BrowserProfileView; revokedGrants?: number }> => {
+    manageProfile: async (
+      input: {
+        action: 'create' | 'rename' | 'clear' | 'delete'
+        profileId?: string
+        name?: string
+      },
+      _view: ViewScope,
+    ): Promise<{ profile?: BrowserProfileView; revokedGrants?: number }> => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
       if (input.action === 'create' || input.action === 'rename') {
-        this.assertMutation('computerUse', `${input.action}Profile`)
         if (input.name === undefined)
           throw new Error('a profile name is required')
         if (input.action === 'create')
@@ -1991,18 +3520,20 @@ export class CoreApi {
     listSitePermissions: (): SitePermission[] =>
       this.host.computerUse?.service.listSitePermissions() ?? [],
     /** Allow (guarded mutation) or revoke (never guarded) a site permission. */
-    setSitePermission: (input: {
-      profileId: string
-      origin: string
-      kind: SitePermissionKind
-      allow: boolean
-      minutes?: number
-    }): { permissions: SitePermission[] } => {
+    setSitePermission: (
+      input: {
+        profileId: string
+        origin: string
+        kind: SitePermissionKind
+        allow: boolean
+        minutes?: number
+      },
+      _view: ViewScope,
+    ): { permissions: SitePermission[] } => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
       if (input.allow) {
-        this.assertMutation('computerUse', 'allowSitePermission')
         service.allowSitePermission({
           profileId: input.profileId,
           origin: input.origin,
@@ -2033,14 +3564,11 @@ export class CoreApi {
      */
     setExternalBrowserSettings: (
       patch: ExternalBrowserSettingsPatch,
+      _view: ViewScope,
     ): ExternalBrowserSettingsView => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
-      const before = service.externalBrowserSettings()
-      const after = applyExternalBrowserSettingsPatch(before, patch)
-      if (widensExternalBrowserSettings(before, after))
-        this.assertMutation('computerUse', 'externalBrowserSettings')
       return externalBrowserSettingsView(
         service.setExternalBrowserSettings(patch),
       )
@@ -2049,8 +3577,8 @@ export class CoreApi {
 
   readonly desktopPet = {
     get: async () => this.desktopPetService.get(),
-    setEnabled: (enabled: boolean) =>
-      this.desktopPetService.setEnabled(enabled),
+    setEnabled: (enabled: boolean, view: ViewScope) =>
+      this.desktopPetService.setEnabled(enabled, view),
   }
 
   /** The user's own built-in browser (not the Agent's). */
@@ -2059,40 +3587,44 @@ export class CoreApi {
       this.browserPreferencesService.get(),
     setPreferences: async (
       change: Partial<BrowserPreferences>,
+      view: ViewScope,
     ): Promise<BrowserPreferences> =>
-      this.browserPreferencesService.update(change),
+      this.browserPreferencesService.update(change, view),
   }
 
   /** Task panel: background jobs and subagent sessions of a session tree. */
   readonly tasks = {
-    list: (opts: { sessionId?: string | null } = {}): CoreTaskRecord[] => {
-      const sessionId =
-        String(opts.sessionId ?? '').trim() || this.host.activeSessionId
-      return sessionId ? this.sessionTasks(sessionId) : []
-    },
-    get: (taskId: string): CoreTaskRecord | null => this.findTask(taskId),
+    /** Tasks of a named session (KRN-01: `SESSION_REQUIRED` without one). */
+    list: (opts: { sessionId?: string | null }): CoreTaskRecord[] =>
+      this.sessionTasks(this.requireSessionId(opts.sessionId, 'tasks.list')),
+    get: (
+      taskId: string,
+      opts: { sessionId?: string | null } = {},
+    ): CoreTaskRecord | null => this.findTask(taskId, opts.sessionId),
     transcript: (
       taskId: string,
-      opts: { offset?: number; limit?: number } = {},
+      opts: { offset?: number; limit?: number; sessionId?: string | null } = {},
     ) => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const offset = Math.max(0, Math.floor(Number(opts.offset ?? 0)) || 0)
       const limit = Math.max(
         1,
         Math.min(500, Math.floor(Number(opts.limit ?? 200)) || 200),
       )
       const entries =
-        task.kind === 'workflow'
-          ? this.workflowTranscript(task.id)
-          : task.kind === 'subagent'
-            ? this.subagentTranscript(task.id)
-            : [
-                {
-                  role: 'output',
-                  content: this.host.jobs.peek(task.id, this.jobOwner(task))
-                    .text,
-                },
-              ]
+        task.kind === 'external-agent'
+          ? this.delegationService.transcript(task.id, opts.sessionId)
+          : task.kind === 'workflow'
+            ? this.workflowTranscript(task.id)
+            : task.kind === 'subagent'
+              ? this.subagentTranscript(task.id)
+              : [
+                  {
+                    role: 'output',
+                    content: this.host.jobs.peek(task.id, this.jobOwner(task))
+                      .text,
+                  },
+                ]
       return {
         taskId: task.id,
         entries: entries.slice(offset, offset + limit),
@@ -2103,13 +3635,15 @@ export class CoreApi {
     },
     wait: async (
       taskId: string,
-      opts: { timeoutMs?: number } = {},
+      opts: { timeoutMs?: number; sessionId?: string | null } = {},
     ): Promise<Dict | null> => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const timeoutMs = Math.max(
         0,
         Math.min(600_000, Number(opts.timeoutMs ?? 30_000) || 30_000),
       )
+      if (task.kind === 'external-agent')
+        return this.delegationService.wait(task.id, timeoutMs, opts.sessionId)
       if (task.kind === 'workflow') {
         const deadline = Date.now() + timeoutMs
         let current = this.findTask(task.id)
@@ -2143,14 +3677,21 @@ export class CoreApi {
         clearTimeout(timer)
       }
     },
-    readOutput: async (taskId: string, _opts: { cursor?: string } = {}) => {
-      const task = this.requireTask(taskId)
+    readOutput: async (
+      taskId: string,
+      opts: { cursor?: string; sessionId?: string | null } = {},
+    ) => {
+      const task = this.requireTask(taskId, opts.sessionId)
       const content =
         task.kind === 'job'
           ? this.host.jobs.peek(task.id, this.jobOwner(task)).text
-          : (task.kind === 'workflow'
-              ? this.workflowTranscript(task.id)
-              : this.subagentTranscript(task.id)
+          : (task.kind === 'external-agent'
+              ? mergeExternalTranscript(
+                  this.delegationService.transcript(task.id, opts.sessionId),
+                )
+              : task.kind === 'workflow'
+                ? this.workflowTranscript(task.id)
+                : this.subagentTranscript(task.id)
             )
               .map((entry) => `${entry.role}: ${entry.content}`)
               .join('\n\n')
@@ -2164,63 +3705,219 @@ export class CoreApi {
     },
     cancel: async (
       taskId: string,
-      _opts: { reason?: string } = {},
+      opts: { reason?: string; sessionId?: string | null } = {},
     ): Promise<Dict> => {
-      this.assertMutation('tasks', 'cancel')
-      this.requireTask(taskId)
-      this.cancelTask(taskId)
-      return { ...this.findTask(taskId) }
+      const task = this.requireTask(taskId, opts.sessionId)
+      if (task.kind === 'external-agent')
+        await this.delegationService.interrupt({
+          id: task.delegation_id!,
+          runId: task.id,
+          sessionId: opts.sessionId ?? task.session_id,
+        })
+      else this.cancelTask(taskId, opts.sessionId ?? null)
+      return { ...this.findTask(taskId, opts.sessionId) }
     },
+    /** 设置 › 高级 › 任务预算 (KRN-03). */
+    budget: (): TaskBudgetSettings => this.taskBudgetService.get(),
+    setBudget: (
+      change: Partial<TaskBudgetSettings>,
+      view: ViewScope,
+    ): Promise<TaskBudgetSettings> =>
+      this.taskBudgetService.update(change, view),
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
       throw new OperationRetiredError(
-        '子代理任务不再支持从面板恢复；请在对话中让主代理用 send_message 继续该子代理。',
+        '子智能体任务不再支持从面板恢复；请在对话中让主智能体用 send_message 继续它。',
         'use_send_message',
       )
     },
   }
 
+  /** 设置 › 高级 › 存储 (KRN-12): what Emperor Home holds, and 「清理」. */
+  readonly storage = {
+    usage: (): Promise<StorageUsage> => this.retention.usage(),
+    clean: async (
+      _view: ViewScope,
+    ): Promise<{ report: RetentionReport; usage: StorageUsage }> => {
+      const report = await this.retention.sweep()
+      return { report, usage: await this.retention.usage() }
+    },
+    /** REL-03: the runs, the data version, files a newer Emperor wrote. */
+    versions: async (): Promise<DataVersionsReport> => {
+      const { dataVersionsReport } = await import('../storage/data-files')
+      return dataVersionsReport(this.paths.stateRoot, this.appVersion)
+    },
+  }
+
+  /**
+   * 设置 › 常规 › 更新 (REL-02): the switch, 立即检查, and downloading and
+   * verifying a newer release's DMG. Nothing is installed.
+   */
+  readonly updates = {
+    status: (): UpdateStatus => this.updateService.status(),
+    setEnabled: (enabled: boolean): Promise<UpdateStatus> =>
+      this.updateService.setEnabled(enabled),
+    check: (): Promise<UpdateStatus> => this.updateService.check(),
+    download: (): Promise<UpdateStatus> => this.updateService.download(),
+    cancelDownload: (): Promise<UpdateStatus> =>
+      this.updateService.cancelDownload(),
+    reveal: (): Promise<UpdateStatus> => this.updateService.reveal(),
+  }
+
   readonly tools = {
-    /** Full text of a spilled tool result (`ref` is the spill file path). */
-    readResult: (opts: { ref: string }) => {
-      const spillRoot = resolve(this.paths.stateRoot, 'spill')
-      const target = resolve(String(opts?.ref ?? ''))
-      const rel = relative(spillRoot, target)
-      if (
-        !rel ||
-        rel.startsWith('..') ||
-        isAbsolute(rel) ||
-        !existsSync(target)
-      )
+    /** 设置 › 高级 › 网络工具: the web_fetch / web_search switches and availability. */
+    networkSettings: (): WebToolsStatus => this.webToolsService.status(),
+    setNetworkSettings: (
+      change: Partial<WebToolPreferences>,
+      view: ViewScope,
+    ): Promise<WebToolsStatus> => this.webToolsService.update(change, view),
+    /**
+     * A spilled tool result (`ref` is the spill file path) in 256 KiB pages
+     * that end on a character boundary (KRN-12); `page` counts from 1. The
+     * real file (links resolved) must be a file inside the spill store.
+     */
+    readResult: (opts: { ref: string; page?: number }): ResultPage => {
+      let target: string | null = null
+      try {
+        const real = realpathSync(resolve(String(opts?.ref ?? '')))
+        const rel = relative(
+          realpathSync(resolve(this.paths.stateRoot, 'spill')),
+          real,
+        )
+        if (rel && !rel.startsWith('..') && !isAbsolute(rel))
+          target = statSync(real).isFile() ? real : null
+      } catch {
+        target = null
+      }
+      if (target === null)
         throw new CoreMutationGuardError(
           403,
           'tool result ref is outside the spill store',
         )
-      return { content: readFileSync(target, 'utf8') }
+      return readUtf8Page(target, opts?.page ?? 1)
     },
   }
 
   // ── helpers ─────────────────────────────────────────────────────────
 
-  private activeProjectRoot(): string | null {
-    const session = this.host.activeSession()
-    return session?.mode === 'build' ? (session.project_path ?? null) : null
-  }
-
-  /** Activate a session; the plugin list depends on its project, so say when that changes. */
+  /**
+   * The user switched to a session. It only decides what the UI shows
+   * (KRN-01): nothing runs differently. The plugin list the UI shows depends
+   * on the project, so say when that changes.
+   */
   private activateSession(sessionId: string) {
-    const before = this.activeProjectRoot()
-    const entry = this.host.activateSession(sessionId)
-    if (this.activeProjectRoot() !== before) {
-      // Project-scoped plugins follow the active session's project.
-      void this.syncPlugins()
+    const entry = this.host.kept.sessionStore.get(sessionId)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${sessionId}`, sessionId)
+    const previous =
+      this.focusedSessionId === null
+        ? null
+        : this.host.kept.sessionStore.get(this.focusedSessionId)
+    this.focusedSessionId = sessionId
+    if (this.host.projectRootFor(previous) !== this.host.projectRootFor(entry))
       this.emitPluginsChanged('project')
-    }
     return entry
   }
 
+  /** The view a caller passed (KRN-01); `SESSION_REQUIRED` when it passed none. */
+  private viewOf(view: ViewScope | undefined, operation: string): ViewScope {
+    if (view === undefined || view === null || typeof view !== 'object')
+      throw new SessionRequiredError(operation)
+    return view
+  }
+
+  /** The readable session a view shows; null for none, a draft, or an archived one. */
+  private viewedSession(view: ViewScope | undefined) {
+    const id = String(view?.sessionId ?? '').trim()
+    if (!id || id.startsWith(DRAFT_SESSION_PREFIX)) return null
+    const entry = this.host.kept.sessionStore.get(id)
+    return entry && !entry.archived_at ? entry : null
+  }
+
+  /** The Build project of the session a view shows (null: Chat or none). */
+  private viewProjectRoot(view: ViewScope | undefined): string | null {
+    return this.host.projectRootFor(this.viewedSession(view))
+  }
+
+  /** The scope of the session a view shows (null: none). */
+  private viewScopeOf(view: ViewScope | undefined) {
+    const entry = this.viewedSession(view)
+    return entry === null ? null : this.host.scopeFor(entry.id)
+  }
+
+  /** A session the caller named; `SESSION_REQUIRED` when it named none. */
+  private requireSessionId(
+    sessionId: string | null | undefined,
+    operation: string,
+  ): string {
+    const id = String(sessionId ?? '').trim()
+    if (!id) throw new SessionRequiredError(operation)
+    return id
+  }
+
+  private async readGitHubReferencePreview(
+    target: GitHubPreviewTarget,
+    signal: AbortSignal,
+  ): Promise<ReferencePreview> {
+    try {
+      this.requireGitHubPlugin()
+      const options = { signal }
+      let metadata: Pick<ReferencePreview, 'title' | 'description' | 'status'>
+      if (target.kind === 'pull_request') {
+        const pull = await this.pullRequests.view(
+          { repo: target.repo, number: target.number },
+          options,
+        )
+        metadata = {
+          title: pull.title,
+          description: `${pull.repo} #${pull.number} · ${pull.author}`,
+          status: pull.isDraft ? 'DRAFT' : pull.state,
+        }
+      } else if (target.kind === 'issue') {
+        const issue = await this.github.viewIssue(
+          { repo: target.repo, number: target.number },
+          options,
+        )
+        metadata = {
+          title: issue.title,
+          description: `${issue.repo} #${issue.number} · ${issue.author}`,
+          status: issue.state,
+        }
+      } else {
+        const { run } = await this.github.viewRun(
+          { repo: target.repo, runId: target.number },
+          options,
+        )
+        metadata = {
+          title: run.title || run.name,
+          description: `${target.repo} · ${run.name}`,
+          status: run.conclusion ?? run.status,
+        }
+      }
+      this.requireGitHubPlugin()
+      if (signal.aborted)
+        return { state: 'error', reason: 'cancelled', updatedAt: Date.now() }
+      return { state: 'ready', ...metadata, updatedAt: Date.now() }
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : ''
+      const reason =
+        code === 'github_plugin_disabled'
+          ? code
+          : code.endsWith('_not_found')
+            ? 'not_found'
+            : code === 'pull_request_gh_unauthenticated'
+              ? 'github_unauthenticated'
+              : 'github_unavailable'
+      return { state: 'unavailable', reason, updatedAt: Date.now() }
+    }
+  }
+
   private requireGitHubPlugin(): void {
+    // The GitHub package ships with Emperor: the same in every project.
     const on = this.pluginService
-      .list()
+      .list(null)
       .some(
         (plugin) =>
           plugin.pluginId === 'github' &&
@@ -2248,9 +3945,12 @@ export class CoreApi {
    * id and, when active, its members and whether each can be used (app
    * connections are checked first, as in the detail).
    */
-  private async pluginReference(id: string): Promise<PluginReference> {
+  private async pluginReference(
+    id: string,
+    projectRoot: string | null,
+  ): Promise<PluginReference> {
     const rows = this.pluginService
-      .list()
+      .list(projectRoot)
       .filter((plugin) => plugin.pluginId === id)
     if (rows.length === 0) return { status: 'missing', id, name: null }
     const row = rows.find((plugin) => plugin.effective) ?? rows[0]!
@@ -2266,10 +3966,10 @@ export class CoreApi {
         computerUseOff:
           row.scope === 'managed' && id === COMPUTER_USE_PLUGIN_ID,
       }
-    const detail = await this.plugins.getDetail({
-      pluginId: id,
-      scope: row.scope,
-    })
+    const detail = await this.pluginDetail(
+      { pluginId: id, scope: row.scope },
+      projectRoot,
+    )
     const members: PluginReferenceMember[] = []
     for (const component of detail.components) {
       if (
@@ -2290,8 +3990,12 @@ export class CoreApi {
         ...(component.kind === 'mcp'
           ? {
               tools:
-                this.pluginActivation.mcpServer(id, row.scope, component.id)
-                  ?.toolCount ?? 0,
+                this.pluginActivation.mcpServer(
+                  id,
+                  row.scope,
+                  component.id,
+                  projectRoot,
+                )?.toolCount ?? 0,
             }
           : {}),
       })
@@ -2305,30 +4009,60 @@ export class CoreApi {
     }
   }
 
-  private async syncPlugins(): Promise<void> {
+  /** A plugin's detail for one project (null: Chat); app connections are checked first. */
+  private async pluginDetail(
+    input: Parameters<PluginApplicationService['detail']>[0],
+    projectRoot: string | null,
+  ) {
+    const detail = this.pluginService.detail(input, projectRoot)
+    // Only an active package shows its members' own states, so nothing
+    // is checked otherwise (asking a Computer Use driver can launch the
+    // macOS Helper).
+    if (detail.activation !== 'active' || !detail.effective) return detail
+    const apps = detail.components
+      .filter((component) => component.kind === 'app')
+      .map((component) =>
+        appConnectionKey({
+          scope: detail.scope,
+          pluginId: detail.pluginId,
+          appId: component.id,
+        }),
+      )
+      .filter((key) => this.appConnections.has(key))
+    if (!apps.length) return detail
+    await this.appConnections.refresh(apps)
+    return this.pluginService.detail(input, projectRoot)
+  }
+
+  private async syncPlugins(
+    options: { waitForMcp?: boolean } = {},
+  ): Promise<void> {
     try {
-      await this.pluginActivation.sync()
+      await this.pluginActivation.sync(options)
     } catch (error) {
       logger.warn('plugin activation failed', { error: String(error) })
     }
   }
 
-  private emitPluginsChanged(reason: 'plugins' | 'project'): void {
+  private emitPluginsChanged(reason: 'plugins' | 'project' | 'hooks'): void {
     this.host.emitHost({ event: 'plugins_changed', reason })
   }
 
-  private controlSessionId(sessionId?: string | null): string | null {
+  private controlSessionId(
+    sessionId: string | null | undefined,
+  ): string | null {
     const id = String(sessionId ?? '').trim()
-    return id || this.host.activeSessionId
+    return id || null
   }
 
   private requireControlSession(
     sessionId: string | null | undefined,
     operation: string,
   ): string {
-    const id =
-      this.controlSessionId(sessionId) ?? this.host.ensureDefaultSession().id
-    return this.requireReadableSession(id, operation).id
+    return this.requireReadableSession(
+      this.requireSessionId(sessionId, operation),
+      operation,
+    ).id
   }
 
   /** Resolve a pending interaction; the blocked turn continues on its own. */
@@ -2379,8 +4113,10 @@ export class CoreApi {
   }
 
   private sessionTasks(sessionId: string): CoreTaskRecord[] {
+    if (this.host.kept.sessionStore.get(sessionId)?.archived_at)
+      return this.delegationService.tasks(sessionId)
     const root = this.rootAgentOf(sessionId)
-    if (root === null) return []
+    if (root === null) return this.delegationService.tasks(sessionId)
     const jobs = this.sessionJobs(sessionId).map((job) =>
       jobTask(job, sessionId),
     )
@@ -2394,20 +4130,30 @@ export class CoreApi {
           live: this.host.workflowRuns.isLive(record.runId),
         }) as CoreTaskRecord,
     )
-    return [...workflows, ...children, ...jobs].sort(
-      (left, right) => right.started_at - left.started_at,
-    )
+    return [
+      ...this.delegationService.tasks(sessionId),
+      ...workflows,
+      ...children,
+      ...jobs,
+    ].sort((left, right) => right.started_at - left.started_at)
   }
 
-  private allSubagents(): SubagentRecord[] {
-    const sessionId = this.host.activeSessionId
+  private allSubagents(view: ViewScope): SubagentRecord[] {
+    const sessionId = this.viewedSession(view)?.id ?? null
     const root = sessionId === null ? null : this.rootAgentOf(sessionId)
     return root === null ? [] : this.host.subagents.list(root, 'descendants')
   }
 
-  private findTask(taskId: string): CoreTaskRecord | null {
+  private findTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord | null {
     const id = String(taskId ?? '').trim()
     if (!id) return null
+    if (id.startsWith('dgr-')) {
+      const { state, run } = this.delegationService.run(id, sessionId)
+      return externalTask(state, run)
+    }
     for (const entry of this.host.kept.sessionStore.list({
       includeArchived: false,
     })) {
@@ -2417,8 +4163,11 @@ export class CoreApi {
     return null
   }
 
-  private requireTask(taskId: string): CoreTaskRecord {
-    const task = this.findTask(taskId)
+  private requireTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord {
+    const task = this.findTask(taskId, sessionId)
     if (task === null)
       throw new CoreMutationGuardError(
         403,
@@ -2427,9 +4176,19 @@ export class CoreApi {
     return task
   }
 
-  private cancelTask(taskId: string): boolean {
-    const task = this.findTask(taskId)
+  private cancelTask(taskId: string, sessionId: string | null): boolean {
+    const task = this.findTask(taskId, sessionId)
     if (task === null) return false
+    if (task.kind === 'external-agent') {
+      void this.delegationService
+        .interrupt({
+          id: task.delegation_id!,
+          runId: task.id,
+          sessionId: sessionId ?? task.session_id,
+        })
+        .catch(() => undefined)
+      return true
+    }
     if (task.kind === 'workflow')
       return this.host.workflowRuns.cancel(
         task.id,
@@ -2437,7 +4196,8 @@ export class CoreApi {
       )
     if (task.kind === 'job')
       return (
-        this.host.jobs.kill(task.id, this.jobOwner(task), 'user') ===
+        // The model is told the user stopped it (DSH-5).
+        this.host.jobs.kill(task.id, this.jobOwner(task), 'user', 'user') ===
         'requested'
       )
     try {
@@ -2592,7 +4352,7 @@ export class CoreApi {
       check('process-runtime', () =>
         Boolean(kept.processRuntime.capabilityReport()),
       ),
-      check('harness-kernel', () => this.host.tools.schemas().length > 0),
+      check('harness-kernel', () => this.host.toolCount() > 0),
       check(
         'mcp',
         () => kept.mcpClient.snapshot().initialized === true,
@@ -2633,15 +4393,21 @@ export class CoreApi {
       projectRoot,
     })
     const executable = environment.toolPaths.git
-    if (!executable) return null
     const status = await kept.environmentProbe.getStatus({
       projectRoot,
       skillRequirements: collectSkillEnvironmentRequirements(kept.skillManager),
     })
-    const git = status.tools.find(
-      (tool) => tool.id === 'git' && tool.status === 'ready',
-    )
-    if (!git?.detectedVersion || git.executablePath !== executable) return null
+    const git = status.tools.find((tool) => tool.id === 'git')
+    if (
+      !executable ||
+      git?.status !== 'ready' ||
+      !git.detectedVersion ||
+      git.executablePath !== executable
+    ) {
+      this.noteGitUnavailable(projectRoot, executable ?? null, git)
+      return null
+    }
+    this.gitUnavailable.delete(projectRoot)
     return {
       executable,
       gitVersion: git.detectedVersion,
@@ -2659,6 +4425,49 @@ export class CoreApi {
         ]),
       },
     }
+  }
+
+  /**
+   * Why Git is unavailable for a project (FIX-15): the error says it, and
+   * core.log gets the check's own state once per change, never per call.
+   */
+  private noteGitUnavailable(
+    projectRoot: string,
+    executable: string | null,
+    git:
+      | {
+          status: string
+          executablePath: string | null
+          detectedVersion: string | null
+          requiredVersion?: string | null
+          reason: string
+        }
+      | undefined,
+  ): void {
+    const reason =
+      git === undefined || git.status === 'missing'
+        ? '没有找到 Git'
+        : git.status === 'version_mismatch'
+          ? `Git ${git.detectedVersion ?? ''} 不满足 ${git.requiredVersion ?? ''}`.trim()
+          : git.status !== 'ready'
+            ? git.reason
+            : '两次检查找到的 Git 不一致'
+    const signature = JSON.stringify([executable, git ?? null])
+    if (this.gitUnavailable.get(projectRoot)?.signature !== signature)
+      logger.warn('git runtime unavailable', {
+        component: 'workspace',
+        projectRoot: sanitizeFailureMessage(projectRoot),
+        reason,
+        executable: executable && sanitizeFailureMessage(executable),
+        git: git && {
+          status: git.status,
+          executablePath:
+            git.executablePath && sanitizeFailureMessage(git.executablePath),
+          detectedVersion: git.detectedVersion,
+          reason: git.reason,
+        },
+      })
+    this.gitUnavailable.set(projectRoot, { reason, signature })
   }
 
   /**
@@ -2696,7 +4505,7 @@ export class CoreApi {
     if (this.host.pending.hasPending(sessionId))
       throw new CoreMutationGuardError(
         409,
-        '请先处理当前 Ask、Permission 或 Plan 审批，再创建新上下文。',
+        '请先处理当前的提问、权限或计划审批，再创建新上下文。',
       )
     if (this.host.queuedPrompts(sessionId).length)
       throw new CoreMutationGuardError(
@@ -2705,15 +4514,19 @@ export class CoreApi {
       )
   }
 
-  private assertMutation(area: string, action: string): void {
-    const control = this.host.controlPayload(this.host.activeSessionId)
-    assertCoreMutationAllowed(
-      {
-        pending: control.pending,
-        mode: control.plan === true ? 'plan' : control.preset,
-      },
-      { area, action },
-    )
+  /**
+   * Refuse a mutation while the session the caller shows has a pending
+   * Ask / Plan card or is in plan mode. The caller names that session
+   * (`view`); without one it is `SESSION_REQUIRED` (KRN-01).
+   */
+  private assertMutation(
+    area: string,
+    action: string,
+    view: ViewScope | undefined,
+  ): void {
+    const entry = this.viewedSession(this.viewOf(view, `${area}.${action}`))
+    const control = this.host.controlPayload(entry?.id ?? null)
+    assertCoreMutationAllowed(control, { area, action })
   }
 
   private async withWorkspaceGitMutation<T>(
@@ -2736,12 +4549,12 @@ export class CoreApi {
     )
   }
 
-  private assertProcessOwner(processId: string): void {
+  private assertProcessOwner(processId: string, sessionId: string): void {
     const receipt = this.host.kept.processRuntime.get(processId)
-    if (!receipt || receipt.owner.sessionId !== this.host.activeSessionId)
+    if (!receipt || receipt.owner.sessionId !== sessionId)
       throw new CoreMutationGuardError(
         403,
-        `Process is not owned by the active session: ${processId}`,
+        `Process is not owned by session ${sessionId}: ${processId}`,
       )
   }
 

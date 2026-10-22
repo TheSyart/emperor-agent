@@ -26,9 +26,9 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
     :title="TRAJECTORY_KIND_LABEL[kind]"
   >
     <span class="icon" aria-hidden="true">
-      <DsSettings v-if="kind === 'system'" :size="13" />
-      <DsUser v-else-if="kind === 'user'" :size="13" />
-      <DsSparkle v-else-if="kind === 'message'" :size="13" />
+      <DsSettings v-if="kind === 'system'" :size="14" />
+      <DsUser v-else-if="kind === 'user'" :size="14" />
+      <DsSparkle v-else-if="kind === 'message'" :size="14" />
       <svg
         v-else-if="kind === 'context'"
         width="14"
@@ -90,12 +90,12 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   padding: 0 calc(var(--space-1) + 1px);
   border: 1px solid transparent;
   border-radius: var(--space-1);
-  font: 650 10px / 16px var(--font-sans);
+  font: var(--weight-semibold) 10px / 16px var(--font-sans);
   letter-spacing: 0.035em;
   white-space: nowrap;
   user-select: none;
-  color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-2));
+  background: var(--surface-hover);
 }
 
 .icon {
@@ -136,12 +136,12 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
 }
 
 .traj-kind-tag[data-kind='user'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   background: rgb(var(--accent-soft));
 }
 
 .traj-kind-tag[data-kind='context'] {
-  color: color-mix(in srgb, rgb(var(--ok)) 68%, rgb(var(--label-secondary)));
+  color: color-mix(in srgb, rgb(var(--ok)) 68%, rgb(var(--text-2)));
   background: rgb(var(--ok-soft));
 }
 
@@ -150,25 +150,25 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   background: color-mix(
     in srgb,
     rgb(var(--tone-violet)) 15%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 }
 
 .traj-kind-tag[data-kind='tool'] {
   color: rgb(var(--approval-strong));
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
 }
 
 .traj-kind-tag[data-kind='subtool'] {
   color: color-mix(
     in srgb,
     rgb(var(--approval-strong)) 62%,
-    rgb(var(--label-tertiary))
+    rgb(var(--text-3))
   );
   background: color-mix(
     in srgb,
-    rgb(var(--approval-soft)) 58%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--attention-soft)) 58%,
+    rgb(var(--surface-base))
   );
 }
 </style>

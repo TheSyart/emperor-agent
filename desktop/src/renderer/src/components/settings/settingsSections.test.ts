@@ -1,39 +1,46 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SETTINGS_SECTION,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_PAGE_SECTIONS,
   SETTINGS_SECTIONS,
   isSettingsPageSection,
   isSettingsSection,
   modalSettingsSection,
   normalizeSettingsSection,
+  settingsAlias,
 } from './settingsSections'
-import { SETTINGS_SECTION_ICONS } from './settingsIcons'
 import { settingsPageKey, settingsQuery } from './useSettingsRoute'
 
 describe('settings sections', () => {
-  it('lists every section once, each with a nav icon', () => {
+  it('lists every section once, general first', () => {
     const keys = SETTINGS_SECTIONS.map((section) => section.key)
     expect(new Set(keys).size).toBe(keys.length)
     expect(keys[0]).toBe(DEFAULT_SETTINGS_SECTION)
-    for (const key of keys) expect(SETTINGS_SECTION_ICONS[key]).toBeTruthy()
-    expect(Object.keys(SETTINGS_SECTION_ICONS).sort()).toEqual([...keys].sort())
   })
 
-  it('keeps Hooks but moved the page sections out of the modal', () => {
+  it('lists nine sections in four groups (UI-S07)', () => {
     const keys: string[] = SETTINGS_SECTIONS.map((section) => section.key)
     expect(keys).toEqual([
       'general',
       'model',
-      'hooks',
+      'executors',
+      'memory',
       'computer',
       'browser',
       'voice',
-      'memory',
       'tokens',
-      'pet',
-      'diagnostics',
+      'advanced',
     ])
+    expect(
+      SETTINGS_NAV_GROUPS.map((group) => [group.label, group.sections]),
+    ).toEqual([
+      [null, ['general']],
+      ['智能', ['model', 'executors', 'memory']],
+      ['操控', ['computer', 'browser', 'voice']],
+      ['系统', ['tokens', 'advanced']],
+    ])
+    expect(SETTINGS_NAV_GROUPS.flatMap((group) => group.sections)).toEqual(keys)
     for (const key of SETTINGS_PAGE_SECTIONS) {
       expect(keys).not.toContain(key)
       expect(isSettingsSection(key)).toBe(false)
@@ -46,6 +53,36 @@ describe('settings sections', () => {
       'skills',
       'tools',
     ])
+  })
+
+  it('sends the folded sections to where they live now', () => {
+    expect(settingsAlias('hooks')).toEqual({
+      section: 'advanced',
+      page: 'hooks',
+    })
+    expect(settingsAlias(' diagnostics ')).toEqual({
+      section: 'advanced',
+      page: 'diagnostics',
+    })
+    expect(settingsAlias('pet')).toEqual({ section: 'general', page: null })
+    expect(settingsAlias('archived')).toEqual({
+      section: 'general',
+      page: 'archived',
+    })
+    expect(settingsAlias('model')).toBeNull()
+    expect(settingsAlias('nope')).toBeNull()
+    for (const folded of ['hooks', 'diagnostics', 'pet'])
+      expect(isSettingsSection(folded)).toBe(false)
+    expect(modalSettingsSection('hooks')).toBe('advanced')
+    expect(modalSettingsSection(['diagnostics'])).toBe('advanced')
+    expect(modalSettingsSection('pet')).toBe('general')
+  })
+
+  it('keeps the executors deep link under the unified label', () => {
+    expect(
+      SETTINGS_SECTIONS.find((section) => section.key === 'executors')?.label,
+    ).toBe('子智能体')
+    expect(modalSettingsSection('executors')).toBe('executors')
   })
 
   it('opens the retired 配置 section as 记忆', () => {
@@ -62,7 +99,7 @@ describe('settings sections', () => {
 
   it('normalizes known sections, arrays and whitespace', () => {
     expect(normalizeSettingsSection('model')).toBe('model')
-    expect(normalizeSettingsSection(' hooks ')).toBe('hooks')
+    expect(normalizeSettingsSection(' hooks ')).toBe('advanced')
     expect(normalizeSettingsSection(['tools', 'model'])).toBe('tools')
   })
 
@@ -89,7 +126,7 @@ describe('settings sections', () => {
 
   it('shows general in the modal for a page section or unknown value', () => {
     expect(modalSettingsSection('tokens')).toBe('tokens')
-    expect(modalSettingsSection(['diagnostics'])).toBe('diagnostics')
+    expect(modalSettingsSection(['advanced'])).toBe('advanced')
     for (const value of ['skills', 'mcp', 'integrations', 'nope', undefined])
       expect(modalSettingsSection(value)).toBe('general')
   })

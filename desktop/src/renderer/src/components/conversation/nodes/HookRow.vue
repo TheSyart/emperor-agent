@@ -8,7 +8,7 @@ import { computed } from 'vue'
 import type { HookChatNode } from '../../../conversation/types'
 import { DsCode } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 import { useExpansion } from '../chatContext'
 
 const props = defineProps<{ node: HookChatNode }>()
@@ -49,7 +49,7 @@ const summary = computed(() =>
 </script>
 
 <template>
-  <div class="hook-row">
+  <div class="hook-row" data-process-step>
     <DisclosureRow
       v-model:open="open"
       title="Hook"
@@ -58,7 +58,7 @@ const summary = computed(() =>
       :tone="blocked ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="blocked" state="error" />
+        <Dot v-if="blocked" state="error" />
         <DsCode v-else :size="14" />
       </template>
       <dl class="facts">
@@ -87,11 +87,11 @@ const summary = computed(() =>
   margin: var(--space-1) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 dt {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 dd {

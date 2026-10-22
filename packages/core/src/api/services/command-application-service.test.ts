@@ -37,6 +37,7 @@ function setup(overrides: Partial<CommandApplicationServiceDeps> = {}) {
     },
     getSession: vi.fn((id: string) => (id === 'missing' ? null : { id })),
     skillsForSession: vi.fn(() => []),
+    skillsForDraft: vi.fn(() => []),
     sessionBusy: vi.fn(() => false),
     compact: vi.fn(async () => ({ compacted: true, shadowedTokenCount: 42 })),
     stop: vi.fn(() => true),
@@ -132,14 +133,18 @@ describe('CoreCommandApplicationService', () => {
     await expect(
       service.executeBuiltin(context('/model model-a')),
     ).resolves.toMatchObject({ receipt: { code: 'model_activated' } })
-    expect(deps.activateModel).toHaveBeenCalledWith('entry-a')
+    expect(deps.activateModel).toHaveBeenCalledWith('entry-a', 's1')
     await expect(
       service.executeBuiltin(context('/model nope')),
     ).resolves.toMatchObject({ status: 'rejected', code: 'model_not_found' })
     await expect(
       service.executeBuiltin(context('/reasoning high')),
     ).resolves.toMatchObject({ receipt: { code: 'reasoning_updated' } })
-    expect(deps.setReasoningEffort).toHaveBeenCalledWith('entry-a', 'high')
+    expect(deps.setReasoningEffort).toHaveBeenCalledWith(
+      'entry-a',
+      'high',
+      's1',
+    )
   })
 
   it('/permissions switches the harness permission preset', async () => {

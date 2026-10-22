@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { contextMessage } from '../../llm/message'
 import type { Session } from '../../session-log/session'
-import type { RepairContributor } from '../../session-log/store'
+import type { RepairContributor, RepairStep } from '../../session-log/store'
 import type { SessionEvent } from '../../session-log/types'
 import type { Agent } from '../agent/agent'
 import type { SystemPromptAssembler } from '../prompt/assembler'
@@ -69,19 +69,24 @@ export function effectiveApprovalPolicy(
 }
 
 /** Crash repair: an ask without a decision is closed as `unavailable`. */
-export const approvalRepair: RepairContributor = (events) => {
-  const open = new Map<string, true>()
-  for (const event of events) {
-    if (event.type === 'approval/asked') open.set(event.data.id, true)
-    else if (event.type === 'approval/decided') open.delete(event.data.id)
-  }
-  return [...open.keys()].map(
-    (id) =>
-      ({
-        type: 'approval/decided',
-        data: { id, outcome: 'unavailable' },
-      }) as Omit<SessionEvent, 'seq' | 'time'>,
-  )
+export const approvalRepair: RepairContributor = {
+  id: 'approval',
+  pairs: [['approval/asked', 'approval/decided']],
+  repair(events) {
+    const open = new Map<string, number>()
+    for (const event of events) {
+      if (event.type === 'approval/asked') open.set(event.data.id, event.seq)
+      else if (event.type === 'approval/decided') open.delete(event.data.id)
+    }
+    return [...open].map(
+      ([id, openedAt]) =>
+        ({
+          type: 'approval/decided',
+          data: { id, outcome: 'unavailable' },
+          openedAt,
+        }) as RepairStep,
+    )
+  },
 }
 
 export class ApprovalService {

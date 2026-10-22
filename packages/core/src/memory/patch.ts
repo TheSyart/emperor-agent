@@ -213,11 +213,13 @@ function normalizeMemoryItem(value: string): string {
     .toLowerCase()
 }
 
-function containsSecret(text: string): boolean {
+/** Text that looks like a credential (API key, private key). */
+export function containsSecret(text: string): boolean {
   return SECRET_PATTERNS.some((pattern) => pattern.test(text))
 }
 
-function containsPromptInjection(text: string): boolean {
+/** Text that tries to override instructions or extract the system prompt. */
+export function containsPromptInjection(text: string): boolean {
   return PROMPT_INJECTION_PATTERNS.some((pattern) => pattern.test(text))
 }
 

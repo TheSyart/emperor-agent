@@ -1,6 +1,18 @@
 #!/usr/bin/env node
-
-import { createHash } from 'node:crypto'
+// Assembles the unsigned Stable release bundle (REL-05) from the macOS
+// candidates the release job downloaded (scripts/verify-macos-release.sh
+// wrote them): the DMG and ZIP of each architecture, their SHA256SUMS, the
+// candidate receipt and the packaged smoke receipt. Fails closed on anything
+// missing, extra, signed, from another commit or from Preview or Internal.
+//
+//   node scripts/assemble-release-bundle.mjs <input> <output> <tag> <commit> [--arches arm64,x64]
+//
+// Writes the artifacts, ARTIFACT-SHA256SUMS.txt, release-manifest.json and
+// RELEASE-NOTES.md (docs/release/stable-release-notes.md, rendered). The SBOM
+// and SHA256SUMS.txt come after (generate-release-sbom.sh, release-contract.mjs
+// checksums). --arches names fewer architectures for a local dry run
+// (release-dry-run.mjs); the manifest then says partial and publication
+// refuses the bundle.
 import {
   copyFileSync,
   lstatSync,
@@ -10,135 +22,225 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertPackagedSmokeReceipt } from './packaged-smoke-contract.mjs'
+import {
+  STABLE_ARCHES,
+  assertCommit,
+  bundledElectronVersion,
+  checksumText,
+  fileRecord,
+  notesProblems,
+  renderReleaseNotes,
+  stableArtifactNames,
+  stableVersion,
+  verifyChecksums,
+} from './release-contract.mjs'
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const [inputArg, outputArg, tag, commit] = process.argv.slice(2)
-if (!inputArg || !outputArg || !tag || !commit) {
-  fail('usage: assemble-release-bundle.mjs <input> <output> <tag> <commit>')
-}
-if (!/^[a-f0-9]{40}$/i.test(commit)) fail('release commit must be a full SHA')
+const APP_IDENTIFIER = 'com.emperor.agent.desktop'
 
-const packageMetadata = JSON.parse(
-  readFileSync(join(repoRoot, 'desktop', 'package.json'), 'utf8'),
-)
-if (tag !== `v${packageMetadata.version}`) {
-  fail(`tag ${tag} does not match desktop version ${packageMetadata.version}`)
-}
-
-const inputRoot = resolve(inputArg)
-const outputRoot = resolve(outputArg)
-const platformReceiptNames = {
-  macosArm64: 'macos-arm64.json',
-  macosX64: 'macos-x64.json',
-  windowsX64: 'windows-x64.json',
-  linuxX64: 'linux-x64-build.json',
-}
-const linuxLifecycleNames = {
-  22.04: '22.04-lifecycle.json',
-  24.04: '24.04-lifecycle.json',
-}
-const files = inventory(inputRoot)
-if ([...files.keys()].some((name) => name.includes('UNSIGNED-INTERNAL'))) {
-  fail('UNSIGNED-INTERNAL artifacts cannot enter a trusted release')
-}
-if ([...files.keys()].some((name) => name.includes('UNSIGNED-PREVIEW'))) {
-  fail('UNSIGNED-PREVIEW artifacts cannot enter a trusted release')
-}
-
-const version = escapeRegExp(packageMetadata.version)
-const artifactRules = [
-  ['macos-arm64-dmg', new RegExp(`^Emperor-Agent-${version}-mac-arm64\\.dmg$`)],
-  ['macos-arm64-zip', new RegExp(`^Emperor-Agent-${version}-mac-arm64\\.zip$`)],
-  ['macos-x64-dmg', new RegExp(`^Emperor-Agent-${version}-mac-x64\\.dmg$`)],
-  ['macos-x64-zip', new RegExp(`^Emperor-Agent-${version}-mac-x64\\.zip$`)],
-  ['windows-x64', new RegExp(`^Emperor-Agent-${version}-win-x64\\.exe$`)],
-  [
-    'linux-appimage',
-    new RegExp(`^Emperor-Agent-${version}-linux-x64\\.AppImage$`),
-  ],
-  ['linux-deb', new RegExp(`^Emperor-Agent-${version}-linux-x64\\.deb$`)],
-]
-const artifacts = artifactRules.map(([label, pattern]) => {
-  const matches = [...files.entries()].filter(([name]) => pattern.test(name))
-  if (matches.length !== 1)
-    fail(`expected exactly one ${label}, found ${matches.length}`)
-  return { name: matches[0][0], path: matches[0][1] }
-})
-
-const checksumGroups = [
-  ['SHA256SUMS-macos-arm64.txt', artifacts.slice(0, 2)],
-  ['SHA256SUMS-macos-x64.txt', artifacts.slice(2, 4)],
-  ['SHA256SUMS-windows-x64.txt', artifacts.slice(4, 5)],
-  ['SHA256SUMS-linux-x64.txt', artifacts.slice(5, 7)],
-]
-for (const [manifestName, group] of checksumGroups) {
-  verifyChecksumManifest(required(files, manifestName), group)
-}
-
-validatePlatformReceipts(files, commit.toLowerCase(), artifacts)
-for (const name of ['darwin-arm64.json', 'darwin-x64.json', 'win32-x64.json']) {
-  validateSmokeReceipt(
-    readJson(required(files, name)),
-    commit.toLowerCase(),
-    name,
-  )
-}
-for (const versionId of ['22.04', '24.04']) {
-  for (const kind of ['appimage', 'deb']) {
-    const name = `${versionId}-${kind}.json`
-    validateSmokeReceipt(
-      readJson(required(files, name)),
-      commit.toLowerCase(),
-      name,
-    )
+function parseArgs(argv) {
+  const positional = []
+  let arches = STABLE_ARCHES
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--arches') {
+      const value = String(argv[++index] ?? '')
+      arches = value.split(',').filter(Boolean)
+      const unknown = arches.filter((arch) => !STABLE_ARCHES.includes(arch))
+      if (!arches.length || unknown.length)
+        throw new Error(
+          `unknown architecture for a Stable release: ${unknown.join(', ') || value}`,
+        )
+      arches = STABLE_ARCHES.filter((arch) => arches.includes(arch))
+    } else positional.push(argv[index])
   }
-  validateLinuxLifecycle(
-    readJson(required(files, linuxLifecycleNames[versionId])),
-    commit.toLowerCase(),
-    versionId,
+  if (positional.length !== 4)
+    throw new Error(
+      'usage: assemble-release-bundle.mjs <input> <output> <tag> <commit> [--arches arm64,x64]',
+    )
+  return { positional, arches }
+}
+
+function main(argv) {
+  const { positional, arches } = parseArgs(argv)
+  const [inputArg, outputArg, tag, commit] = positional
+  const version = stableVersion(tag)
+  assertCommit(commit)
+  const packageVersion = JSON.parse(
+    readFileSync(join(repoRoot, 'desktop', 'package.json'), 'utf8'),
+  ).version
+  if (version !== packageVersion)
+    throw new Error(
+      `tag ${tag} does not match desktop version ${packageVersion}`,
+    )
+
+  const inputRoot = resolve(inputArg)
+  const outputRoot = resolve(outputArg)
+  const files = inventory(inputRoot)
+  const names = [...files.keys()]
+  if (names.some((name) => name.includes('UNSIGNED-INTERNAL')))
+    throw new Error('UNSIGNED-INTERNAL input cannot enter a Stable release')
+  if (names.some((name) => name.includes('UNSIGNED-PREVIEW')))
+    throw new Error('UNSIGNED-PREVIEW input cannot enter a Stable release')
+  if (names.includes('preview-release-manifest.json'))
+    throw new Error('Preview release input cannot enter a Stable release')
+
+  const groups = arches.map((arch) => ({
+    arch,
+    artifacts: stableArtifactNames(version, [`macos-${arch}`]),
+    checksums: `SHA256SUMS-macos-${arch}.txt`,
+    receipt: `macos-${arch}.json`,
+    smoke: `darwin-${arch}.json`,
+  }))
+  const expected = groups.flatMap((group) => [
+    ...group.artifacts,
+    group.checksums,
+    group.receipt,
+    group.smoke,
+  ])
+  const unexpected = names.filter((name) => !expected.includes(name))
+  if (unexpected.length)
+    throw new Error(`unexpected Stable input: ${unexpected.sort().join(', ')}`)
+  const missing = expected.filter((name) => !files.has(name))
+  if (missing.length)
+    throw new Error(`missing Stable input: ${missing.sort().join(', ')}`)
+
+  for (const group of groups) {
+    const dir = (name) => resolve(files.get(name), '..')
+    for (const name of group.artifacts)
+      if (dir(name) !== dir(group.artifacts[0]))
+        throw new Error(`macos-${group.arch} artifacts are not side by side`)
+    verifyChecksums(
+      files.get(group.checksums),
+      dir(group.artifacts[0]),
+      group.artifacts,
+      `macos-${group.arch}`,
+    )
+    checkCandidate(
+      readJson(files.get(group.receipt)),
+      group,
+      { tag, version, commit },
+      files,
+    )
+    try {
+      assertPackagedSmokeReceipt(readJson(files.get(group.smoke)), {
+        appVersion: version,
+        commit,
+        platform: 'darwin',
+        arch: group.arch,
+      })
+    } catch (error) {
+      throw new Error(
+        `invalid packaged smoke receipt ${group.smoke}: ${error.message}`,
+      )
+    }
+  }
+
+  const template = readFileSync(
+    join(repoRoot, 'docs', 'release', 'stable-release-notes.md'),
+    'utf8',
+  )
+  const notes = renderReleaseNotes(template, {
+    tag,
+    version,
+    electron: bundledElectronVersion(repoRoot),
+  })
+  const problems = notesProblems(notes, { version })
+  if (problems.length) throw new Error(problems.join('\n'))
+
+  const artifactNames = groups.flatMap((group) => group.artifacts).sort()
+  rmSync(outputRoot, { recursive: true, force: true })
+  mkdirSync(outputRoot, { recursive: true })
+  for (const name of artifactNames)
+    copyFileSync(files.get(name), join(outputRoot, name))
+  writeFileSync(
+    join(outputRoot, 'ARTIFACT-SHA256SUMS.txt'),
+    checksumText(outputRoot, artifactNames),
+  )
+  const platforms = arches.map((arch) => `macos-${arch}`)
+  const manifest = {
+    schemaVersion: 1,
+    channel: 'stable',
+    signingStatus: 'unsigned',
+    notarized: false,
+    seal: 'ad-hoc',
+    tag,
+    commit,
+    version,
+    platforms,
+    partial: arches.length < STABLE_ARCHES.length,
+    artifacts: artifactNames.map((name) => fileRecord(join(outputRoot, name))),
+    receipts: groups
+      .flatMap((group) => [group.receipt, group.smoke])
+      .sort()
+      .map((name) => fileRecord(files.get(name))),
+    verification: {
+      seal: platforms,
+      packagedSmoke: platforms,
+      checksumsVerified: true,
+      attestationMeaning:
+        'Build provenance and integrity only; no publisher signature or notarization.',
+    },
+  }
+  writeFileSync(
+    join(outputRoot, 'release-manifest.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  )
+  writeFileSync(join(outputRoot, 'RELEASE-NOTES.md'), notes)
+  console.log(
+    `assembled ${artifactNames.length} unsigned Stable artifacts for ${platforms.join(', ')}${manifest.partial ? ' (partial: a dry run only)' : ''}`,
   )
 }
 
-rmSync(outputRoot, { recursive: true, force: true })
-mkdirSync(outputRoot, { recursive: true })
-const manifestArtifacts = artifacts
-  .map((artifact) => {
-    copyFileSync(artifact.path, join(outputRoot, artifact.name))
-    return {
-      name: artifact.name,
-      sha256: sha256(artifact.path),
-      bytes: lstatSync(artifact.path).size,
-    }
-  })
-  .sort((left, right) => left.name.localeCompare(right.name))
-
-writeFileSync(
-  join(outputRoot, 'ARTIFACT-SHA256SUMS.txt'),
-  `${manifestArtifacts.map((item) => `${item.sha256} *${item.name}`).join('\n')}\n`,
-)
-writeFileSync(
-  join(outputRoot, 'release-manifest.json'),
-  `${JSON.stringify(
-    {
-      schemaVersion: 1,
-      tag,
-      commit: commit.toLowerCase(),
-      version: packageMetadata.version,
-      artifacts: manifestArtifacts,
-      verification: {
-        macos: ['arm64', 'x64'],
-        windows: ['x64'],
-        linux: ['ubuntu-22.04', 'ubuntu-24.04'],
-        receiptsValidated: true,
-      },
-    },
-    null,
-    2,
-  )}\n`,
-)
-console.log(`assembled ${manifestArtifacts.length} trusted release artifacts`)
+/** The candidate receipt says: unsigned, sealed ad hoc, this tag and commit. */
+function checkCandidate(receipt, group, { tag, version, commit }, files) {
+  const failed = (what) =>
+    new Error(
+      `macos/${group.arch} candidate is not an unsigned, ad-hoc sealed Stable build of ${tag} at ${commit}: ${what}`,
+    )
+  const seal = receipt?.seal
+  const checks = [
+    ['schemaVersion', receipt?.schemaVersion === 1],
+    ['channel', receipt?.channel === 'stable'],
+    ['signingStatus', receipt?.signingStatus === 'unsigned'],
+    ['notarized', receipt?.notarized === false],
+    [
+      'signing identity',
+      !['teamId', 'authority', 'signed', 'identity'].some(
+        (key) => receipt && key in receipt,
+      ),
+    ],
+    ['version', receipt?.version === version],
+    ['commit', receipt?.commit === commit],
+    ['platform', receipt?.platform === 'macos'],
+    ['arch', receipt?.arch === group.arch],
+    ['seal.adHoc', seal?.adHoc === true],
+    ['seal.codesignStrict', seal?.codesignStrict === true],
+    ['seal.identifier', seal?.identifier === APP_IDENTIFIER],
+    [
+      'seal.sealedCode',
+      Number.isSafeInteger(seal?.sealedCode) && seal.sealedCode > 0,
+    ],
+    ['seal.hardenedRuntime', seal?.hardenedRuntime === true],
+    ['seal.fusesVerified', seal?.fusesVerified === true],
+    ['dmgMounted', receipt?.dmgMounted === true],
+    ['zipExtracted', receipt?.zipExtracted === true],
+    ['packagedSmoke', receipt?.packagedSmoke === group.smoke],
+  ]
+  const wrong = checks.filter(([, ok]) => !ok).map(([name]) => name)
+  if (wrong.length) throw failed(wrong.join(', '))
+  const recorded = Array.isArray(receipt.artifacts) ? receipt.artifacts : []
+  const actual = group.artifacts.map((name) => fileRecord(files.get(name)))
+  const key = (items) =>
+    JSON.stringify(
+      items
+        .map(({ name, sha256, size }) => ({ name, sha256, size }))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name))),
+    )
+  if (key(recorded) !== key(actual)) throw failed('artifact records')
+}
 
 function inventory(root) {
   const found = new Map()
@@ -146,11 +248,12 @@ function inventory(root) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name)
       const stat = lstatSync(path)
-      if (stat.isSymbolicLink()) fail(`symbolic links are forbidden: ${path}`)
+      if (stat.isSymbolicLink())
+        throw new Error(`symbolic links are forbidden: ${path}`)
       if (stat.isDirectory()) visit(path)
       else if (stat.isFile()) {
         if (found.has(entry.name))
-          fail(`duplicate release input basename: ${entry.name}`)
+          throw new Error(`duplicate Stable input basename: ${entry.name}`)
         found.set(entry.name, path)
       }
     }
@@ -159,151 +262,17 @@ function inventory(root) {
   return found
 }
 
-function validatePlatformReceipts(
-  filesByName,
-  expectedCommit,
-  releaseArtifacts,
-) {
-  for (const arch of ['arm64', 'x64']) {
-    const receiptName =
-      arch === 'arm64'
-        ? platformReceiptNames.macosArm64
-        : platformReceiptNames.macosX64
-    const receipt = readJson(required(filesByName, receiptName))
-    assertReceiptBase(receipt, expectedCommit, 'macos', arch)
-    for (const key of ['signed', 'gatekeeper', 'notarized', 'dmgMounted']) {
-      if (receipt[key] !== true) fail(`macOS ${arch} receipt failed ${key}`)
-    }
-    if (typeof receipt.teamId !== 'string' || !receipt.teamId)
-      fail('missing macOS team ID')
-    assertArtifactSet(
-      receipt.artifacts,
-      releaseArtifacts.slice(
-        arch === 'arm64' ? 0 : 2,
-        arch === 'arm64' ? 2 : 4,
-      ),
-    )
-  }
-
-  const windows = readJson(
-    required(filesByName, platformReceiptNames.windowsX64),
-  )
-  assertReceiptBase(windows, expectedCommit, 'windows', 'x64')
-  for (const key of [
-    'authenticode',
-    'installedExecutableSigned',
-    'uninstallerSigned',
-  ]) {
-    if (windows[key] !== true) fail(`Windows receipt failed ${key}`)
-  }
-  for (const key of ['installExitCode', 'smokeExitCode', 'uninstallExitCode']) {
-    if (windows[key] !== 0) fail(`Windows receipt has non-zero ${key}`)
-  }
-  if (typeof windows.publisher !== 'string' || !windows.publisher)
-    fail('missing Windows publisher')
-  assertArtifactSet(windows.artifacts, releaseArtifacts.slice(4, 5))
-
-  const linux = readJson(required(filesByName, platformReceiptNames.linuxX64))
-  assertReceiptBase(linux, expectedCommit, 'linux', 'x64')
-  if (linux.metadataVerified !== true || linux.debArchitecture !== 'amd64') {
-    fail('Linux build receipt did not verify DEB metadata')
-  }
-  assertArtifactSet(linux.artifacts, releaseArtifacts.slice(5, 7))
-}
-
-function validateSmokeReceipt(receipt, expectedCommit, name) {
-  if (
-    receipt.schemaVersion !== 1 ||
-    receipt.commit !== expectedCommit ||
-    receipt.exitCode !== 0 ||
-    receipt.stateRoot !== '$TEMP/stateRoot' ||
-    !/^[a-f0-9]{64}$/.test(receipt.runtimeManifestHash || '') ||
-    !/^[a-f0-9]{64}$/.test(receipt.runtimeRevision || '') ||
-    receipt.installJobs?.before !== 0 ||
-    receipt.installJobs?.after !== 0
-  ) {
-    fail(`invalid packaged smoke receipt: ${name}`)
-  }
-  for (const operation of [
-    'bootstrap',
-    'diagnostics',
-    'environment',
-    'glob',
-    'grep',
-  ]) {
-    if (receipt.operations?.[operation]?.ok !== true)
-      fail(`${name} failed ${operation}`)
-  }
-}
-
-function validateLinuxLifecycle(receipt, expectedCommit, versionId) {
-  assertReceiptBase(receipt, expectedCommit, 'linux', 'x64')
-  if (receipt.ubuntuVersion !== versionId)
-    fail(`wrong Ubuntu lifecycle receipt: ${versionId}`)
-  for (const key of ['appImageSmoke', 'debInstall', 'debSmoke', 'debRemove']) {
-    if (receipt[key] !== true)
-      fail(`Ubuntu ${versionId} lifecycle failed ${key}`)
-  }
-}
-
-function assertReceiptBase(receipt, expectedCommit, platform, arch) {
-  if (
-    receipt.schemaVersion !== 1 ||
-    receipt.commit !== expectedCommit ||
-    receipt.platform !== platform ||
-    receipt.arch !== arch
-  ) {
-    fail(`invalid ${platform}/${arch} release receipt`)
-  }
-}
-
-function assertArtifactSet(names, expectedArtifacts) {
-  const expected = expectedArtifacts.map((item) => item.name).sort()
-  const actual = Array.isArray(names) ? [...names].sort() : []
-  if (JSON.stringify(actual) !== JSON.stringify(expected))
-    fail('release receipt artifact set mismatch')
-}
-
-function verifyChecksumManifest(path, expectedArtifacts) {
-  const expected = new Map(
-    expectedArtifacts.map((item) => [item.name, sha256(item.path)]),
-  )
-  const actual = new Map()
-  for (const line of readFileSync(path, 'utf8').trim().split(/\r?\n/)) {
-    const match = /^([a-f0-9]{64})\s+\*?(.+)$/i.exec(line.trim())
-    if (!match || actual.has(match[2]))
-      fail(`invalid checksum manifest: ${basename(path)}`)
-    actual.set(match[2], match[1].toLowerCase())
-  }
-  if (actual.size !== expected.size)
-    fail(`checksum coverage mismatch: ${basename(path)}`)
-  for (const [name, digest] of expected) {
-    if (actual.get(name) !== digest) fail(`checksum mismatch: ${name}`)
-  }
-}
-
-function required(filesByName, name) {
-  const path = filesByName.get(name)
-  if (!path) fail(`missing required release input: ${name}`)
-  return path
-}
-
 function readJson(path) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'))
   } catch {
-    fail(`invalid JSON receipt: ${basename(path)}`)
+    throw new Error(`invalid JSON receipt: ${path}`)
   }
 }
 
-function sha256(path) {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function fail(message) {
-  throw new Error(message)
+try {
+  main(process.argv.slice(2))
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
 }

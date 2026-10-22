@@ -1,15 +1,22 @@
 /**
- * Local process sandbox (ported from dsh-sandbox-local).
+ * The Shell's process sandbox (ported from dsh-sandbox-local), an adapter
+ * over the one containment backend (`sandbox/policy.ts`, SEC-08).
  *
  * Platform chain: macOS → Seatbelt (`sandbox-exec`), Linux → bubblewrap
- * (functionally probed once). Every other platform has no backend and fails
- * closed: confined modes throw SANDBOX_UNAVAILABLE and the command never
- * runs unconfined.
+ * (each functionally probed once). Every other platform has no backend and
+ * fails closed: confined modes throw SANDBOX_UNAVAILABLE and the command
+ * never runs unconfined.
  */
 
-import { spawnSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import {
+  bwrapArgs,
+  ContainmentBackend,
+  emperorSocketDirectories,
+  seatbeltProfile,
+  type ContainmentPolicy,
+  type ContainmentRunner,
+} from '../../sandbox/policy'
 import {
   canonicalPath,
   SandboxUnavailableError,
@@ -17,7 +24,10 @@ import {
   type ConfinedSandboxMode,
   type SandboxPolicy,
 } from './policy'
-import { protectedStateDirs } from './protected-state'
+import {
+  protectedPathSpellings,
+  type ProtectedPathScope,
+} from './protected-state'
 
 export type SandboxEnforcement = 'full' | 'partial'
 
@@ -33,105 +43,136 @@ export interface ConfinedArgv {
   denialSignatures: readonly string[]
   /** Runner-owned fatal diagnostics (the command did not run). */
   runnerFailureRules: readonly RunnerFailureRule[]
+  /**
+   * The full-access guard only: a denial counts when its stderr line also
+   * names one of these (lowercase) paths, so an unrelated "Operation not
+   * permitted" (privacy-protected folders, root-owned files) is not
+   * reported as a protected-path denial.
+   */
+  denialPaths?: readonly string[]
 }
 
 export interface SandboxBackend {
   /** Wrap argv for one confined policy; throws SANDBOX_UNAVAILABLE when no runner is usable. */
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv
+  /**
+   * danger-full-access: wrap argv so the protected paths (protected-state.ts)
+   * stay out of reach and nothing else is confined. Null: this host has no
+   * guard and the command runs unwrapped (tests, Linux, no protected root).
+   */
+  guard?(argv: readonly string[]): ConfinedArgv | null
 }
 
-type Runner = 'bwrap' | 'seatbelt'
-
-const PLATFORM_CHAINS: Record<string, readonly Runner[]> = {
-  linux: ['bwrap'],
-  darwin: ['seatbelt'],
-}
-
-const DENIAL_SIGNATURES: Record<Runner, readonly string[]> = {
+const DENIAL_SIGNATURES: Record<ContainmentRunner, readonly string[]> = {
   bwrap: ['read-only file system'],
   seatbelt: ['operation not permitted'],
 }
 
-const RUNNER_FAILURE_RULES: Record<Runner, readonly RunnerFailureRule[]> = {
+const RUNNER_FAILURE_RULES: Record<
+  ContainmentRunner,
+  readonly RunnerFailureRule[]
+> = {
   bwrap: [{ fatalSignatures: ['bwrap: '] }],
   seatbelt: [{ fatalSignatures: ['sandbox-exec: '] }],
 }
 
-/** bwrap mounts: read-only root; workspace-write binds the workspace and a private /tmp. */
-export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
-  const args = [
-    '--ro-bind',
-    '/',
-    '/',
-    '--dev',
-    '/dev',
-    '--unshare-pid',
-    '--proc',
-    '/proc',
-    '--die-with-parent',
-  ]
-  if (policy.mode === 'workspace-write') {
-    args.push('--tmpfs', '/tmp')
-    args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
+function protectedScope(
+  stateRoot: string | undefined,
+  home: string | undefined,
+): ProtectedPathScope | null {
+  return stateRoot === undefined ? null : { stateRoot, home: home ?? homedir() }
+}
+
+/**
+ * A confined Shell mode as a ContainmentPolicy: every file readable except
+ * the protected-path table, writes only under the mode's writable roots
+ * (and host-granted single files), no Apple Events or window server, none
+ * of Emperor's helper sockets. `protectedHome` defaults to the user's home.
+ */
+export function shellContainmentPolicy(
+  policy: SandboxPolicy,
+  protectedStateRoot?: string,
+  protectedHome?: string,
+): ContainmentPolicy {
+  const scope = protectedScope(protectedStateRoot, protectedHome)
+  return {
+    read: { allow: 'all', deny: [] },
+    write: {
+      allow: writableRoots(policy),
+      deny: (policy.readOnlyRoots ?? []).map(canonicalPath),
+    },
+    network: 'allow',
+    tempDir: policy.privateTempRoot ?? tmpdir(),
+    toolchainReadOnly: [],
+    ancestorsMetadata: true,
+    fallback: 'refuse',
+    protectedPaths:
+      scope === null ? null : { ...scope, credentialReads: 'deny' },
+    ...(policy.writableFiles?.length
+      ? { grantedFiles: policy.writableFiles.map(canonicalPath) }
+      : {}),
+    desktop: 'deny',
+    deniedSocketDirs: emperorSocketDirectories(protectedStateRoot),
+    ...(policy.processBoundaryTag
+      ? { boundaryTag: policy.processBoundaryTag }
+      : {}),
   }
-  return args
 }
 
-function sbplString(path: string): string {
-  return `"${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`
+/**
+ * danger-full-access Shell: nothing is confined except the protected-path
+ * table, so an approved escalation never opens Emperor's private state or
+ * config files, and no mode writes the user's credentials.
+ */
+export function shellGuardPolicy(
+  protectedStateRoot: string,
+  protectedHome?: string,
+): ContainmentPolicy {
+  return {
+    read: { allow: 'all', deny: [] },
+    write: { allow: 'all', deny: [] },
+    network: 'allow',
+    tempDir: tmpdir(),
+    toolchainReadOnly: [],
+    ancestorsMetadata: true,
+    fallback: 'refuse',
+    protectedPaths: {
+      ...protectedScope(protectedStateRoot, protectedHome)!,
+      credentialReads: 'allow',
+    },
+    desktop: 'allow',
+    deniedSocketDirs: [],
+  }
 }
 
-function canonicalChild(root: string, ...parts: string[]): string {
-  return parts.reduce(
-    (current, part) => canonicalPath(join(current, part)),
-    canonicalPath(root),
-  )
+/** bwrap arguments of one confined Shell mode (shared generator). */
+export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
+  return bwrapArgs(shellContainmentPolicy(policy))
 }
 
-function pathPrefixRegex(path: string): string {
-  return `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
-}
-
-/** Seatbelt SBPL profile: allow default, deny file writes except /dev/null and writable roots. */
+/** Seatbelt arguments of one confined Shell mode (shared generator). */
 export function seatbeltProfileArgs(
   policy: SandboxPolicy,
   protectedStateRoot?: string,
+  protectedHome?: string,
 ): string[] {
-  const forms = [
-    '(version 1)',
-    '(allow default)',
-    '(deny file-write*)',
-    `(allow file-write* (literal ${sbplString('/dev/null')}))`,
+  return [
+    '-p',
+    seatbeltProfile(
+      shellContainmentPolicy(policy, protectedStateRoot, protectedHome),
+    ),
   ]
-  const roots = writableRoots(policy)
-  if (roots.length > 0) {
-    forms.push(
-      `(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')})`,
-    )
-  }
-  // E-M13: these operations were checked against a real sandbox-exec child.
-  // They apply only to confined Shell modes, never danger-full-access.
-  forms.push(
-    '(deny appleevent-send)',
-    '(deny mach-lookup (global-name "com.apple.windowserver.active"))',
-    '(deny mach-lookup (global-name "com.apple.windowserver"))',
-  )
-  const socketDirectories = new Set([
-    canonicalChild(homedir(), '.emperor', 'run'),
-    canonicalChild(tmpdir(), `emperor-${process.getuid?.() ?? 0}`),
-  ])
-  for (const directory of socketDirectories)
-    forms.push(
-      `(deny network-outbound (remote unix-socket (path-regex ${sbplString(pathPrefixRegex(directory))})))`,
-    )
-  if (protectedStateRoot !== undefined) {
-    // Computer Use (grants, vault, local key, pairings) and browser state
-    // (profiles with cookies, the download inbox, remembered tabs, site
-    // permissions): the directories the file and search tools refuse too.
-    for (const directory of protectedStateDirs(protectedStateRoot))
-      forms.push(`(deny file-read* (subpath ${sbplString(directory)}))`)
-  }
-  return ['-p', forms.join(' ')]
+}
+
+/** Seatbelt arguments of the danger-full-access guard (shared generator). */
+export function seatbeltGuardArgs(
+  protectedStateRoot: string,
+  protectedHome?: string,
+): string[] {
+  return [
+    '-p',
+    seatbeltProfile(shellGuardPolicy(protectedStateRoot, protectedHome)),
+  ]
 }
 
 export interface LocalSandboxOptions {
@@ -141,64 +182,93 @@ export interface LocalSandboxOptions {
   probeBwrap?: () => boolean
   /** Test hook: replace the sandbox-exec executable. */
   seatbeltExec?: string
-  /** Emperor Home: Shell must not read its protected state (protected-state.ts). */
+  /** Emperor Home: Shell must not reach the protected-path table (protected-state.ts). */
   protectedStateRoot?: string
+  /** The home folder the credential paths hang off; defaults to the user's. */
+  protectedHome?: string
+  /** The shared containment backend (SEC-08); one is made from the options above when absent. */
+  backend?: ContainmentBackend
 }
 
+/**
+ * The Shell's adapter over the shared containment backend: it turns a
+ * sandbox mode into a ContainmentPolicy and keeps the Shell's own error
+ * vocabulary (SANDBOX_UNAVAILABLE, denial signatures, runner failures).
+ */
 export class LocalSandbox implements SandboxBackend {
-  private selected: Runner | 'unavailable' | undefined
+  private readonly backend: ContainmentBackend
 
-  constructor(private readonly options: LocalSandboxOptions = {}) {}
+  constructor(private readonly options: LocalSandboxOptions = {}) {
+    this.backend =
+      options.backend ??
+      new ContainmentBackend({
+        ...(options.platform === undefined
+          ? {}
+          : { platform: options.platform }),
+        ...(options.seatbeltExec === undefined
+          ? {}
+          : { seatbeltExec: options.seatbeltExec }),
+        ...(options.probeBwrap === undefined
+          ? {}
+          : { probeBwrap: options.probeBwrap }),
+        ...(options.probeTimeoutMs === undefined
+          ? {}
+          : { probeTimeoutMs: options.probeTimeoutMs }),
+      })
+  }
 
   /** Whether confined modes can run on this host. */
   available(): boolean {
-    this.selected ??= this.chainVerdict()
-    return this.selected !== 'unavailable'
+    return this.backend.capability().available
   }
 
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
     const runner = this.select(policy.mode)
-    const runnerArgv =
-      runner === 'bwrap'
-        ? ['bwrap', ...bwrapProfileArgs(policy)]
-        : [
-            this.options.seatbeltExec ?? 'sandbox-exec',
-            ...seatbeltProfileArgs(policy, this.options.protectedStateRoot),
-          ]
     return {
-      argv: [...runnerArgv, '--', ...argv],
+      argv: this.backend.wrap(
+        argv,
+        shellContainmentPolicy(
+          policy,
+          this.options.protectedStateRoot,
+          this.options.protectedHome,
+        ),
+        runner,
+      ),
       enforcement: 'full',
       denialSignatures: DENIAL_SIGNATURES[runner],
       runnerFailureRules: RUNNER_FAILURE_RULES[runner],
     }
   }
 
-  private select(mode: ConfinedSandboxMode): Runner {
-    this.selected ??= this.chainVerdict()
-    if (this.selected === 'unavailable') throw new SandboxUnavailableError(mode)
-    return this.selected
+  guard(argv: readonly string[]): ConfinedArgv | null {
+    const stateRoot = this.options.protectedStateRoot
+    if (stateRoot === undefined) return null
+    // Only Seatbelt has a guard; elsewhere full access runs unwrapped.
+    if (this.backend.platform !== 'darwin') return null
+    const capability = this.backend.capability()
+    if (!capability.available || capability.runner !== 'seatbelt')
+      throw new SandboxUnavailableError('danger-full-access', capability.reason)
+    return {
+      argv: this.backend.wrap(
+        argv,
+        shellGuardPolicy(stateRoot, this.options.protectedHome),
+        'seatbelt',
+      ),
+      enforcement: 'partial',
+      denialSignatures: DENIAL_SIGNATURES.seatbelt,
+      runnerFailureRules: RUNNER_FAILURE_RULES.seatbelt,
+      denialPaths: protectedPathSpellings({
+        stateRoot,
+        home: this.options.protectedHome ?? homedir(),
+      }),
+    }
   }
 
-  private chainVerdict(): Runner | 'unavailable' {
-    const chain =
-      PLATFORM_CHAINS[this.options.platform ?? process.platform] ?? []
-    for (const runner of chain) {
-      if (runner === 'seatbelt') return runner
-      const probe =
-        this.options.probeBwrap ??
-        (() =>
-          spawnSync(
-            'bwrap',
-            [
-              ...bwrapProfileArgs({ mode: 'read-only', workspaceRoot: '/' }),
-              '--',
-              'true',
-            ],
-            { timeout: this.options.probeTimeoutMs ?? 5_000, stdio: 'ignore' },
-          ).status === 0)
-      if (probe()) return runner
-    }
-    return 'unavailable'
+  private select(mode: ConfinedSandboxMode): ContainmentRunner {
+    const capability = this.backend.capability()
+    if (!capability.available || capability.runner === null)
+      throw new SandboxUnavailableError(mode)
+    return capability.runner
   }
 }
 
@@ -209,9 +279,18 @@ export function classifyConfinedStderr(
   exitCode: number | null,
 ): { denied: boolean; runnerFailed: boolean } {
   const lower = stderr.toLowerCase()
-  const denied = confined.denialSignatures.some((signature) =>
-    lower.includes(signature),
-  )
+  const paths = confined.denialPaths
+  const denied =
+    paths === undefined
+      ? confined.denialSignatures.some((signature) => lower.includes(signature))
+      : lower
+          .split('\n')
+          .some(
+            (line) =>
+              confined.denialSignatures.some((signature) =>
+                line.includes(signature),
+              ) && paths.some((path) => line.includes(path)),
+          )
   const runnerFailed = confined.runnerFailureRules.some(
     (rule) =>
       (rule.allowedExitCodes === undefined ||

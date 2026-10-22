@@ -32,6 +32,152 @@ export interface PromptPreferences {
 }
 
 /**
+ * 设置 › 高级 › 网络工具: whether the Agent gets `web_fetch` and (where the
+ * provider offers it) `web_search`. Both default on.
+ */
+export interface WebToolPreferences {
+  webFetch: boolean
+  webSearch: boolean
+}
+
+/**
+ * 设置 › 高级 › 任务预算 (KRN-03): what one task — a user's message and all
+ * the work it starts — may take. Steps are per turn; the other three count
+ * subagents of the whole task tree. The cost cap is the model policy's.
+ */
+export interface TaskBudgetSettings {
+  /** Steps one turn of a conversation may take. */
+  maxSteps: number
+  /** Steps one turn of a scheduled run or a goal round may take. */
+  maxBackgroundSteps: number
+  /** Subagents running at once (more wait for a free slot). */
+  maxActiveAgents: number
+  /** Subagents one task may start (more are refused). */
+  maxTotalAgents: number
+  /** Times subagent results may wake their idle parent in one task. */
+  maxNoticeWakes: number
+}
+
+/** Each budget's accepted range (whole numbers). */
+export const TASK_BUDGET_LIMITS: Record<
+  keyof TaskBudgetSettings,
+  { min: number; max: number }
+> = {
+  maxSteps: { min: 1, max: 10_000 },
+  maxBackgroundSteps: { min: 1, max: 10_000 },
+  maxActiveAgents: { min: 1, max: 64 },
+  maxTotalAgents: { min: 1, max: 1_000 },
+  maxNoticeWakes: { min: 0, max: 1_000 },
+}
+
+export function defaultTaskBudgetSettings(): TaskBudgetSettings {
+  return {
+    maxSteps: 400,
+    maxBackgroundSteps: 120,
+    maxActiveAgents: 8,
+    maxTotalAgents: 64,
+    maxNoticeWakes: 32,
+  }
+}
+
+/** Whether `value` is an accepted value of budget `key`. */
+export function validTaskBudgetValue(
+  key: keyof TaskBudgetSettings,
+  value: unknown,
+): value is number {
+  const range = TASK_BUDGET_LIMITS[key]
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= range.min &&
+    value <= range.max
+  )
+}
+
+/** Each budget falls back to its default when missing or out of range. */
+export function normalizeTaskBudgetSettings(
+  value: unknown,
+): TaskBudgetSettings {
+  const data = objectOrEmpty(value)
+  const defaults = defaultTaskBudgetSettings()
+  const pick = (key: keyof TaskBudgetSettings): number =>
+    validTaskBudgetValue(key, data[key]) ? data[key] : defaults[key]
+  return {
+    maxSteps: pick('maxSteps'),
+    maxBackgroundSteps: pick('maxBackgroundSteps'),
+    maxActiveAgents: pick('maxActiveAgents'),
+    maxTotalAgents: pick('maxTotalAgents'),
+    maxNoticeWakes: pick('maxNoticeWakes'),
+  }
+}
+
+/** The permission presets a session can start in (harness/approval/presets). */
+export const SESSION_PERMISSIONS = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const
+
+export type SessionPermission = (typeof SESSION_PERMISSIONS)[number]
+
+/**
+ * 设置 › 常规 › 会话 › 新会话的权限: the preset a session starts in. Sessions
+ * that already have a log keep theirs.
+ */
+export interface SessionPreferences {
+  defaultPermission: SessionPermission
+}
+
+export function defaultSessionPreferences(): SessionPreferences {
+  return { defaultPermission: 'workspace-write' }
+}
+
+export function isSessionPermission(
+  value: unknown,
+): value is SessionPermission {
+  return (
+    typeof value === 'string' &&
+    (SESSION_PERMISSIONS as readonly string[]).includes(value)
+  )
+}
+
+/** An unknown preset falls back to the default. */
+export function normalizeSessionPreferences(
+  value: unknown,
+): SessionPreferences {
+  const data = objectOrEmpty(value)
+  return {
+    defaultPermission: isSessionPermission(data.defaultPermission)
+      ? data.defaultPermission
+      : defaultSessionPreferences().defaultPermission,
+  }
+}
+
+/**
+ * 设置 › 常规 › 更新 › 检查更新 (REL-02): look for a newer Emperor on
+ * GitHub 30 s after start and every 24 hours. Default on; off makes no
+ * request at all.
+ */
+export interface UpdatePreferences {
+  check: boolean
+}
+
+export function defaultUpdatePreferences(): UpdatePreferences {
+  return { check: true }
+}
+
+/** Anything but `false` keeps the default (on). */
+export function normalizeUpdatePreferences(value: unknown): UpdatePreferences {
+  const data = objectOrEmpty(value)
+  return {
+    check:
+      typeof data.check === 'boolean'
+        ? data.check
+        : defaultUpdatePreferences().check,
+  }
+}
+
+/**
  * `settings.json` preferences. Retired keys from the old kernel
  * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
  * `memory.hybridMemory`, `codeIntelligence`) are ignored when reading so old
@@ -42,11 +188,43 @@ export interface LocalConfig {
   desktopPet: DesktopPetPreferences
   prompt: PromptPreferences
   browser: BrowserPreferences
+  webTools: WebToolPreferences
+  sessions: SessionPreferences
+  taskBudget: TaskBudgetSettings
+  updates: UpdatePreferences
 }
 
-/** What a save takes: a missing `browser` keeps its defaults. */
-export type LocalConfigInput = Omit<LocalConfig, 'browser'> & {
+/**
+ * What a save takes: a missing `browser`, `webTools`, `sessions`,
+ * `taskBudget` or `updates` writes its defaults.
+ */
+export type LocalConfigInput = Omit<
+  LocalConfig,
+  'browser' | 'webTools' | 'sessions' | 'taskBudget' | 'updates'
+> & {
   browser?: BrowserPreferences
+  webTools?: WebToolPreferences
+  sessions?: SessionPreferences
+  taskBudget?: TaskBudgetSettings
+  updates?: UpdatePreferences
+}
+
+export function defaultWebToolPreferences(): WebToolPreferences {
+  return { webFetch: true, webSearch: true }
+}
+
+/** Each switch falls back to its default when missing or not a boolean. */
+export function normalizeWebToolPreferences(
+  value: unknown,
+): WebToolPreferences {
+  const data = objectOrEmpty(value)
+  const defaults = defaultWebToolPreferences()
+  return {
+    webFetch:
+      typeof data.webFetch === 'boolean' ? data.webFetch : defaults.webFetch,
+    webSearch:
+      typeof data.webSearch === 'boolean' ? data.webSearch : defaults.webSearch,
+  }
 }
 
 export function defaultBrowserPreferences(): BrowserPreferences {
@@ -100,6 +278,10 @@ function defaultLocalConfig(): LocalConfig {
     desktopPet: { enabled: false, autoStartWithWebui: true },
     prompt: { profile: 'technical' },
     browser: defaultBrowserPreferences(),
+    webTools: defaultWebToolPreferences(),
+    sessions: defaultSessionPreferences(),
+    taskBudget: defaultTaskBudgetSettings(),
+    updates: defaultUpdatePreferences(),
   }
 }
 
@@ -145,6 +327,10 @@ export function parseLocalConfig(
       profile: normalizePromptProfile(prompt.profile),
     },
     browser,
+    webTools: normalizeWebToolPreferences(data.webTools),
+    sessions: normalizeSessionPreferences(data.sessions),
+    taskBudget: normalizeTaskBudgetSettings(data.taskBudget),
+    updates: normalizeUpdatePreferences(data.updates),
   }
 }
 
@@ -225,6 +411,10 @@ export async function saveLocalConfig(
       profile: normalizePromptProfile(config.prompt?.profile),
     },
     browser: normalizeBrowserPreferences(config.browser),
+    webTools: normalizeWebToolPreferences(config.webTools),
+    sessions: normalizeSessionPreferences(config.sessions),
+    taskBudget: normalizeTaskBudgetSettings(config.taskBudget),
+    updates: normalizeUpdatePreferences(config.updates),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({
@@ -261,8 +451,9 @@ async function sharedSettings(
 
 const LOCAL_CONFIG_CODEC: SnapshotCodec<LocalConfig> = {
   schemaVersion: 1,
+  versionKey: 'version',
   encode(value) {
-    return value
+    return { version: 1, ...value }
   },
   decode(input) {
     return {

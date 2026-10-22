@@ -9,6 +9,8 @@
  * in its detail; the lead-in links there. Refresh reloads the list from
  * Core (`skills.tools`) into the bootstrap state.
  */
+import Badge from '../ui/Badge.vue'
+import LinkButton from '../ui/LinkButton.vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { core } from '../../api/http'
@@ -67,21 +69,10 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   <SettingsSection>
     <template #intro>
       这里是 Emperor 内建的工具；MCP 服务器的工具见
-      <button
-        type="button"
-        class="inline-link"
-        data-link="mcp"
-        @click="openTab('mcp')"
-      >
-        MCP</button
+      <LinkButton data-link="mcp" @click="openTab('mcp')">MCP</LinkButton
       >，插件的工具见
-      <button
-        type="button"
-        class="inline-link"
-        data-link="plugins"
-        @click="openTab('plugins')"
-      >
-        插件</button
+      <LinkButton data-link="plugins" @click="openTab('plugins')"
+        >插件</LinkButton
       >。
     </template>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -106,21 +97,26 @@ function openTab(tab: 'mcp' | 'plugins'): void {
       v-if="!tools.length"
       title="还没有注册的工具"
       description="Agent 启动后会在这里列出内建工具。"
+      framed
     />
     <EmptyState
       v-else-if="!filtered.length"
       title="没有匹配的工具"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <SettingsGroup
       v-for="group in groups"
       :key="group.id"
+      plain
       :data-group="group.id"
     >
       <template #title>
         {{ group.title }}
-        <span class="group-count">{{ group.tools.length }}</span>
+        <Badge
+          class="group-count"
+          variant="count"
+          :label="group.tools.length"
+        />
       </template>
       <ul class="tool-list">
         <ToolRow
@@ -136,25 +132,6 @@ function openTab(tab: 'mcp' | 'plugins'): void {
 </template>
 
 <style scoped>
-.inline-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: rgb(var(--accent-strong));
-  cursor: pointer;
-}
-
-.inline-link:hover {
-  text-decoration: underline;
-}
-
-.inline-link:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 1px;
-  border-radius: var(--radius-xs);
-}
-
 .error {
   margin: 0 0 var(--space-3);
   font-size: var(--fs-xxs);
@@ -167,12 +144,11 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   margin-top: var(--space-1);
 }
 
-.count,
-.group-count {
+.count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -187,7 +163,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   margin: var(--space-2) 0 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
 }

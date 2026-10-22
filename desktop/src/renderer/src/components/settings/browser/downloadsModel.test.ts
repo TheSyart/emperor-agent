@@ -25,6 +25,16 @@ describe('Emperor’s downloads (下载历史记录)', () => {
     )
   })
 
+  it('says when the source mark could not be set on an inbox file (SEC-10)', () => {
+    expect(agentDownloadDescription(view({ unmarked: true }), now)).toBe(
+      'files.example · 10月1日 14:05 · 2.0 KB · 未能标记来源',
+    )
+    // Gone from the inbox: nothing left to mark.
+    expect(
+      agentDownloadDescription(view({ unmarked: true, exists: false }), now),
+    ).toBe('files.example · 10月1日 14:05 · 文件已移走或删除')
+  })
+
   it('says which browser a Chrome/Edge download was in, and how it ended (RV-09)', () => {
     const external = { exists: false, sessionId: null }
     expect(

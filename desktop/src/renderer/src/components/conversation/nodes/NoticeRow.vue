@@ -6,7 +6,7 @@
  *
  * Props: state ('error' | 'warn'), title, message, code?.
  */
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 
 defineProps<{
   state: 'error' | 'warn'
@@ -18,7 +18,7 @@ defineProps<{
 
 <template>
   <div class="notice" role="status" :data-state="state">
-    <StateDot :state="state" class="notice-dot" />
+    <Dot :state="state" class="notice-dot" />
     <div class="copy">
       <span class="title">{{ title }}</span>
       <span class="message">{{ message }}</span>
@@ -50,11 +50,11 @@ defineProps<{
 
 .title {
   margin-right: var(--space-1-5);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 [data-state='error'] .title {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 [data-state='warn'] .title {
@@ -62,11 +62,11 @@ defineProps<{
 }
 
 .message {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

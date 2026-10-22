@@ -5,7 +5,9 @@
  */
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useNotifications } from '../../composables/useNotifications'
-import Tooltip from '../ui/Tooltip.vue'
+import Dot from '../ui/Dot.vue'
+import IconButton from '../ui/IconButton.vue'
+import { elementOf } from '../ui/elementOf'
 import { SIDEBAR_ICONS } from './sidebarNav'
 
 const NotificationsPopover = defineAsyncComponent(
@@ -23,26 +25,20 @@ const label = computed(() =>
 </script>
 
 <template>
-  <Tooltip
-    label="通知"
+  <IconButton
+    :ref="(c) => (anchor = elementOf(c))"
+    class="bell"
+    :data-rail="rail || undefined"
+    :label="label"
+    :tooltip="open ? false : '通知'"
     :side="rail ? 'right' : 'bottom'"
-    :delay-ms="500"
-    :disabled="open"
+    aria-haspopup="dialog"
+    :aria-expanded="open"
+    @click="open = !open"
   >
-    <button
-      ref="anchor"
-      type="button"
-      class="bell"
-      :data-rail="rail || undefined"
-      :aria-label="label"
-      aria-haspopup="dialog"
-      :aria-expanded="open"
-      @click="open = !open"
-    >
-      <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
-      <span v-if="unreadCount" class="dot" aria-hidden="true" />
-    </button>
-  </Tooltip>
+    <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
+    <Dot v-if="unreadCount" class="dot" state="error" size="sm" />
+  </IconButton>
   <NotificationsPopover v-if="open" v-model:open="open" :anchor="anchor" />
 </template>
 
@@ -58,7 +54,7 @@ const label = computed(() =>
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -66,13 +62,13 @@ const label = computed(() =>
   width: calc(var(--space-8) + var(--space-1));
   height: calc(var(--space-8) + var(--space-1));
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bell:hover,
 .bell[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .bell:focus-visible {
@@ -84,10 +80,6 @@ const label = computed(() =>
   position: absolute;
   top: 22%;
   right: 22%;
-  width: var(--space-1-5);
-  height: var(--space-1-5);
-  border: 1px solid rgb(var(--sidebar-fill));
-  border-radius: var(--radius-pill);
-  background: rgb(var(--danger));
+  box-shadow: 0 0 0 1px rgb(var(--sidebar-fill));
 }
 </style>

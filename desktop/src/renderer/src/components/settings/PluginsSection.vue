@@ -15,7 +15,13 @@
  *
  * A plugin can bring Skills, Hooks and MCP servers, so every change
  * refreshes the whole workbench (ctx.refreshAll). Core's `plugins_changed`
- * (installs, toggles, a different active project) re-reads the list.
+ * (installs, toggles, a different active project, a hook that starts or
+ * stops failing) re-reads the list.
+ *
+ * SEC-07: a project's `.emperor/settings.json` only suggests. Above the
+ * lists, one Notice per suggested project plugin — 「该项目建议启用 X」
+ * with 启用 / 忽略; either answer is the user's choice for this project
+ * (`plugins.setEnabled`, kept in Emperor), and the suggestion goes away.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onCoreEvent } from '../../api/backend'
@@ -23,13 +29,21 @@ import { core } from '../../api/http'
 import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
 import { DsDownload, DsFolderOpen, DsLink, DsPlus } from '../icons/ds'
+import Button from '../ui/Button.vue'
+import Notice from '../ui/Notice.vue'
 import PluginDetail from './plugins/PluginDetail.vue'
 import PluginInstallDialog from './plugins/PluginInstallDialog.vue'
 import PluginRow from './plugins/PluginRow.vue'
 import { usePluginInstall, type PluginSummary } from './plugins/pluginInstall'
-import { filterPlugins, groupPlugins, pluginKey } from './plugins/pluginsModel'
+import {
+  filterPlugins,
+  groupPlugins,
+  pluginKey,
+  pluginMembersText,
+  pluginSuggestions,
+} from './plugins/pluginsModel'
 import { usePluginSelection } from './plugins/usePluginSelection'
-import { refreshAction, useSettingsHeader } from './settingsHeader'
+import { useSettingsHeader } from './settingsHeader'
 import { EmptyState, SearchField, SettingsSection } from './ui'
 
 const ctx = useAppContext()
@@ -47,6 +61,7 @@ const install = usePluginInstall({
   },
 })
 
+const suggestions = computed(() => pluginSuggestions(plugins.value))
 const filtered = computed(() => filterPlugins(plugins.value, query.value))
 const groups = computed(() => groupPlugins(filtered.value))
 const selected = selection.selected
@@ -89,9 +104,10 @@ onBeforeUnmount(() => {
   if (pending !== null) clearTimeout(pending)
 })
 
+// No refresh action: the list follows plugins_changed and reloads when the
+// page is shown again.
 useSettingsHeader({
   actions: () => [
-    refreshAction(() => ctx.refreshAll(), { title: '刷新插件列表' }),
     {
       id: 'install-plugin',
       label: '安装',
@@ -143,6 +159,37 @@ async function startLocal(kind: 'folder' | 'zip'): Promise<void> {
   }
 }
 
+const deciding = ref<string | null>(null)
+
+/** 启用 / 忽略 a project's suggestion: the user's choice for this project. */
+async function decide(plugin: PluginSummary, enabled: boolean): Promise<void> {
+  if (deciding.value !== null) return
+  deciding.value = pluginKey(plugin)
+  notice.value = ''
+  error.value = ''
+  try {
+    await core('plugins.setEnabled', {
+      pluginId: plugin.pluginId,
+      scope: 'project',
+      enabled,
+    })
+    await reloadList()
+    if (enabled) {
+      notice.value = `已在这个项目启用「${plugin.displayName}」`
+      await ctx.refreshAll()
+    }
+  } catch (cause) {
+    error.value = messageOf(cause)
+  } finally {
+    deciding.value = null
+  }
+}
+
+function suggestionText(plugin: PluginSummary): string {
+  const members = pluginMembersText(plugin.capabilities)
+  return members ? `（带 ${members}）` : ''
+}
+
 function open(plugin: PluginSummary): void {
   notice.value = ''
   void selection.select({ pluginId: plugin.pluginId, scope: plugin.scope })
@@ -164,6 +211,38 @@ async function onUninstalled(): Promise<void> {
   <SettingsSection
     intro="插件打包 Skill、MCP、Hook 等能力；单个 Skill 请在 Skills 标签页添加。"
   >
+    <div v-if="!selected && suggestions.length" class="suggestions">
+      <Notice
+        v-for="plugin in suggestions"
+        :key="pluginKey(plugin)"
+        tone="info"
+        :title="`该项目建议启用 ${plugin.displayName}`"
+        :data-plugin-suggestion="plugin.pluginId"
+      >
+        仓库的 <code>.emperor/settings.json</code> 建议在这个项目里启用它{{
+          suggestionText(plugin)
+        }}。确认后才会启用，选择记在 Emperor 里，仓库文件改不了它。
+        <template #actions>
+          <Button
+            size="sm"
+            variant="secondary"
+            :loading="deciding === pluginKey(plugin)"
+            :disabled="deciding !== null"
+            @click="decide(plugin, true)"
+          >
+            启用
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            :disabled="deciding !== null"
+            @click="decide(plugin, false)"
+          >
+            忽略
+          </Button>
+        </template>
+      </Notice>
+    </div>
     <p v-if="notice && !selected" class="notice" role="status">{{ notice }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
@@ -181,6 +260,7 @@ async function onUninstalled(): Promise<void> {
       v-else-if="!plugins.length"
       title="尚未安装插件"
       description="从右上角「安装」选择本地文件夹、zip 文件或 HTTPS 地址。"
+      framed
     />
     <div v-else class="catalog">
       <SearchField v-model="query" placeholder="搜索插件">
@@ -193,8 +273,7 @@ async function onUninstalled(): Promise<void> {
       <EmptyState
         v-if="!filtered.length"
         title="没有匹配的插件"
-        variant="plain"
-        compact
+        variant="inline"
       />
       <template
         v-for="group in ['installed', 'preinstalled'] as const"
@@ -241,6 +320,18 @@ async function onUninstalled(): Promise<void> {
   color: rgb(var(--state-error-label));
 }
 
+.suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  min-width: 0;
+}
+
+.suggestions code {
+  font-family: var(--font-mono);
+}
+
 .catalog {
   display: flex;
   flex-direction: column;
@@ -251,7 +342,7 @@ async function onUninstalled(): Promise<void> {
 .count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -267,14 +358,14 @@ async function onUninstalled(): Promise<void> {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .catalog-heading span {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -292,8 +383,8 @@ async function onUninstalled(): Promise<void> {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 </style>

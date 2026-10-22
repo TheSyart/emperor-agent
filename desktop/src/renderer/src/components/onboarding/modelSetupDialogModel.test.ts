@@ -10,7 +10,7 @@ describe('model setup dialog content', () => {
     const content =
       buildModelSetupDialogContent('还没有可用模型，请先配置模型。')
 
-    expect(content.brandAlt).toBe('emperoragent')
+    expect(content.brand).toBe('Emperor Agent')
     expect(content.title).toBe('把任务交给本地 Agent。')
     expect(content.subtitle).toContain('接入一个可用模型')
     expect(content.status).toBe('还没有可用模型，请先配置模型。')

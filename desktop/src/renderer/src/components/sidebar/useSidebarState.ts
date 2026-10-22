@@ -4,6 +4,10 @@
  * the grouped session list derived from it. Patches are optimistic; every
  * patch carries the pinned list so a Core state written by an older shape
  * can never drop the pins.
+ *
+ * Nothing is written before the saved layout has been read (`status`
+ * 'unloaded' or 'failed'): a patch built on the defaults would overwrite
+ * the user's pins and orders. A refused change says so and retries the read.
  */
 import { computed, ref, type Ref } from 'vue'
 import { core } from '../../api/http'
@@ -25,12 +29,15 @@ import type {
   SidebarState,
 } from '../../types'
 
+export type SidebarStateStatus = 'unloaded' | 'loaded' | 'failed'
+
 export function useSidebarState(input: {
   sessions: Ref<SessionInfo[]>
   projects: Ref<ProjectInfo[]>
   showToast: (message: string) => void
 }) {
   const state = ref<SidebarState>({ ...defaultSidebarState })
+  const status = ref<SidebarStateStatus>('unloaded')
   const grouped = computed(() =>
     buildSidebarGroups(input.sessions.value, state.value, input.projects.value),
   )
@@ -38,12 +45,21 @@ export function useSidebarState(input: {
   async function load(): Promise<void> {
     try {
       state.value = normalizeSidebarState(await core('sidebar.get'))
+      status.value = 'loaded'
     } catch {
-      state.value = { ...defaultSidebarState }
+      if (status.value !== 'loaded') {
+        state.value = { ...defaultSidebarState }
+        status.value = 'failed'
+      }
     }
   }
 
   async function patch(update: Partial<SidebarState>): Promise<void> {
+    if (status.value !== 'loaded') {
+      input.showToast('侧栏布局还没有读取成功，稍后再试')
+      if (status.value === 'failed') void load()
+      return
+    }
     const next = normalizeSidebarState({ ...state.value, ...update })
     state.value = next
     try {
@@ -145,6 +161,7 @@ export function useSidebarState(input: {
 
   return {
     state,
+    status,
     grouped,
     load,
     patch,

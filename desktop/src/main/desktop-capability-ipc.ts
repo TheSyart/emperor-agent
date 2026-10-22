@@ -104,6 +104,8 @@ interface InboxDownloadLike {
   readonly time: number
   readonly bytes: number
   readonly exists: boolean
+  /** The quarantine mark could not be set on the inbox file (SEC-10). */
+  readonly unmarked?: boolean
   /** From the user's own Chrome or Edge (RV-09): browser and outcome. */
   readonly browser?: string
   readonly state?: string
@@ -714,6 +716,7 @@ function agentDownloadView(entry: InboxDownloadLike): AgentDownloadView {
     time: entry.time,
     bytes: entry.bytes,
     exists: entry.exists,
+    ...(entry.unmarked === true ? { unmarked: true as const } : {}),
     ...externalDownloadFacts(entry),
   }
 }
@@ -1032,10 +1035,22 @@ function requiredIdentity(value: unknown, kind: string): string {
   return result
 }
 
+/**
+ * What the renderer may hand to the system: a non-local http(s) address, or
+ * a mailto: / tel: link from a reply (SEC-05). Other schemes (sms:,
+ * facetime:, x-apple.systempreferences: …) are refused.
+ */
 function eligibleExternalUrl(value: unknown): string {
+  const raw = typeof value === 'string' ? value : ''
+  if (/^(?:mailto|tel):/i.test(raw)) {
+    // eslint-disable-next-line no-control-regex
+    if (raw.length > 2048 || /[\u0000-\u001f\u007f]/.test(raw))
+      throw new Error('invalid external url')
+    return raw
+  }
   let url: URL
   try {
-    url = new URL(typeof value === 'string' ? value : '')
+    url = new URL(raw)
   } catch {
     throw new Error('invalid external url')
   }

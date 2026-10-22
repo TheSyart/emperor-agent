@@ -12,6 +12,7 @@
  * Models: filter, search (raw text), clientFilters, grouping.
  * Emits: select (item), retry.
  */
+import Badge from '../../ui/Badge.vue'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import type {
   PullRequestErrorInfo,
@@ -23,8 +24,8 @@ import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Tabs from '../../ui/Tabs.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
-import SearchField from '../../settings/ui/SearchField.vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import SearchField from '../../ui/SearchField.vue'
 import PullRequestRow from './PullRequestRow.vue'
 import { pullIcons } from './pullIcons'
 import {
@@ -241,11 +242,10 @@ const showFooter = computed(
 
       <EmptyState
         v-else-if="error && !groups.length"
-        variant="plain"
         title="无法读取 Pull Request"
         :description="error.message"
       >
-        <Button size="sm" variant="outline" @click="emit('retry')">
+        <Button size="sm" variant="secondary" @click="emit('retry')">
           重试
         </Button>
       </EmptyState>
@@ -253,7 +253,6 @@ const showFooter = computed(
       <EmptyState
         v-else-if="!groups.length"
         class="list-empty"
-        variant="plain"
         :title="emptyMessage"
       />
 
@@ -286,7 +285,11 @@ const showFooter = computed(
               class="group-chevron"
               aria-hidden="true"
             />
-            <span class="group-count">{{ group.items.length }}</span>
+            <Badge
+              class="group-count"
+              variant="count"
+              :label="group.items.length"
+            />
           </button>
           <div v-if="!collapsed.has(group.key)" class="group-rows" role="list">
             <div
@@ -328,7 +331,7 @@ const showFooter = computed(
   gap: var(--space-3);
   min-width: 0;
   padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .list-tabs {
@@ -340,7 +343,7 @@ const showFooter = computed(
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   text-overflow: ellipsis;
@@ -371,7 +374,7 @@ const showFooter = computed(
   width: var(--space-1-5);
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .list-body {
@@ -397,16 +400,16 @@ const showFooter = computed(
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
 }
 
 .group-head:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .group-label {
@@ -422,7 +425,7 @@ const showFooter = computed(
 
 .group-count {
   margin-left: auto;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -435,7 +438,7 @@ const showFooter = computed(
 .list-foot {
   margin: var(--space-3) 0 0;
   padding: 0 var(--space-2-5);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -461,7 +464,7 @@ const showFooter = computed(
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   cursor: pointer;
 }

@@ -1,31 +1,25 @@
 <script setup lang="ts">
 /**
- * ConversationHeader — dsh conversation header (padding 12 28 0 20, l2
- * hairline): breadcrumb row (project / ancestors / current title; ancestor
- * crumbs navigate) with the right-hand toggles — 环境信息 (the chat
+ * ConversationHeader — dsh conversation header (l2 hairline). Its first row
+ * is a 46px bar (its bottom meets the workspace header's): the
+ * breadcrumb (project / ancestors / current title; ancestor crumbs
+ * navigate) with the right-hand toggles — 环境信息 (the chat
  * environment card, Chat tab only; a floating-card glyph so it does not read
- * as "about") and 工作台 (the right workspace column) — then the 对话 | 轨迹
- * tab strip (13/16 medium, gap 36, 2px gold bar).
+ * as "about") and 工作台 (the right workspace column) — then, only while
+ * 显示轨迹 is on (`trajectory`, UI-S09), the 对话 | 轨迹 tab strip (13/16
+ * medium, gap 36, 2px gold bar); off, the header is that one row.
  * `slim` (the empty hero phase) renders the 工作台 toggle only, so a new chat
  * can still open the workspace (the browser works for a draft); the
  * environment card has nothing to show before the first message and stays
  * hidden there, so its toggle does too.
  */
+import { computed } from 'vue'
 import { PanelRight, PictureInPicture2 } from 'lucide-vue-next'
+import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
+import Tabs from '../ui/Tabs.vue'
 import type { HeaderCrumb } from './conversationModel'
-
-withDefaults(
-  defineProps<{
-    crumbs: HeaderCrumb[]
-    tab: 'chat' | 'trajectory'
-    workspaceOpen: boolean
-    envCardOpen: boolean
-    tabsDisabled?: boolean
-    slim?: boolean
-  }>(),
-  { tabsDisabled: false, slim: false },
-)
+import { DsChevronLeft } from '../icons/ds'
 
 const emit = defineEmits<{
   navigate: [sessionId: string]
@@ -34,18 +28,61 @@ const emit = defineEmits<{
   'toggle-env-card': []
 }>()
 
-const tabs = [
-  { id: 'chat', label: '对话' },
-  { id: 'trajectory', label: '轨迹' },
-] as const
+const props = defineProps<{
+  crumbs: HeaderCrumb[]
+  tab: 'chat' | 'trajectory'
+  workspaceOpen: boolean
+  envCardOpen: boolean
+  tabsDisabled?: boolean
+  slim?: boolean
+  /** The 轨迹 tab is available (设置 › 常规 › 开发者 › 显示轨迹). */
+  trajectory?: boolean
+}>()
+
+const tabs = computed(() =>
+  (
+    [
+      { id: 'chat', label: '对话' },
+      { id: 'trajectory', label: '轨迹' },
+    ] as const
+  ).map((item) => ({
+    ...item,
+    disabled: Boolean(props.tabsDisabled) && item.id !== props.tab,
+  })),
+)
+
+/** A subagent's page goes back one level: 「← 主会话 / 子智能体名」 (AGT-10). */
+const parentCrumb = computed(() => {
+  if (props.crumbs.length < 2 || !props.crumbs.at(-1)?.current) return null
+  const parent = props.crumbs.at(-2)
+  return parent?.sessionId ? parent : null
+})
+
+function onTab(id: string) {
+  if (id === 'chat' || id === 'trajectory') emit('tab', id)
+}
 </script>
 
 <template>
   <header class="conversation-header" :data-slim="slim || undefined">
     <div class="title-row">
+      <IconButton
+        v-if="!slim && parentCrumb"
+        :label="`返回「${parentCrumb.label}」`"
+        size="sm"
+        data-crumb-back
+        @click="emit('navigate', parentCrumb.sessionId!)"
+        ><DsChevronLeft :size="16"
+      /></IconButton>
       <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>
+          <Avatar
+            kind="sprite"
+            v-if="crumb.nativeSessionId"
+            :id="crumb.nativeSessionId"
+            :size="24"
+          />
           <button
             v-if="crumb.sessionId && !crumb.current"
             type="button"
@@ -65,6 +102,9 @@ const tabs = [
             :aria-current="crumb.current ? 'page' : undefined"
             >{{ crumb.label }}</span
           >
+          <span v-if="crumb.source" class="source-badge">{{
+            crumb.source
+          }}</span>
         </template>
       </nav>
       <div class="actions">
@@ -88,28 +128,27 @@ const tabs = [
         </IconButton>
       </div>
     </div>
-    <div v-if="!slim" class="tabs" role="tablist" aria-label="会话视图">
-      <button
-        v-for="item in tabs"
-        :key="item.id"
-        type="button"
-        role="tab"
-        class="tab"
-        :aria-selected="tab === item.id"
-        :disabled="tabsDisabled && item.id !== tab"
-        @click="emit('tab', item.id)"
-      >
-        {{ item.label }}
-      </button>
-    </div>
+    <Tabs
+      v-if="trajectory && !slim"
+      class="tabs"
+      aria-label="会话视图"
+      :tabs="tabs"
+      :model-value="tab"
+      @update:model-value="onTab"
+    />
   </header>
 </template>
 
 <style scoped>
+.source-badge {
+  color: rgb(var(--text-3));
+  font-size: var(--fs-xxs);
+}
+
 .conversation-header {
   position: relative;
   flex: none;
-  padding: var(--space-3) var(--space-7) 0 var(--space-5);
+  padding: 0 var(--space-3) 0 var(--space-5);
 }
 
 .conversation-header::after {
@@ -119,7 +158,7 @@ const tabs = [
   bottom: 0;
   left: 0;
   height: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
   pointer-events: none;
 }
 
@@ -146,7 +185,8 @@ const tabs = [
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--space-8);
+  box-sizing: border-box;
+  height: var(--shell-bar-h);
 }
 
 .crumbs {
@@ -161,7 +201,7 @@ const tabs = [
 
 .sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: var(--space-5);
 }
@@ -174,7 +214,7 @@ const tabs = [
   border: none;
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: var(--space-5);
   text-overflow: ellipsis;
@@ -186,8 +226,8 @@ button.crumb {
 }
 
 button.crumb:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .crumb[data-subagent] {
@@ -198,8 +238,8 @@ button.crumb:hover {
 .crumb[data-current] {
   flex: 0 1 auto;
   max-width: none;
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .actions {
@@ -213,55 +253,13 @@ button.crumb:hover {
 .tabs {
   position: relative;
   z-index: var(--z-raised);
-  display: flex;
   gap: calc(var(--space-8) + var(--space-1));
   margin-top: var(--space-1);
   padding-left: var(--space-2);
 }
 
-.tab {
-  position: relative;
-  padding: 0 0 11px;
-  border: none;
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--space-4);
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.tab:hover:not(:disabled) {
-  color: rgb(var(--label-secondary));
-}
-
-.tab:disabled {
-  color: rgb(var(--label-dimmed));
-  cursor: default;
-}
-
-.tab::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-.tab[aria-selected='true'] {
-  color: rgb(var(--accent-strong));
-}
-
-.tab[aria-selected='true']::after {
-  background: rgb(var(--accent-fill));
-}
-
-.tab:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-  border-radius: var(--radius-xs);
+/* The header keeps its compact 28px strip. */
+.tabs :deep(.tab) {
+  height: var(--space-7);
 }
 </style>

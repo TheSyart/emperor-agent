@@ -1,0 +1,164 @@
+/* ── L3 component tokens (DS-01) ──
+   Tokens owned by one component family (sidebar, menus, code, toasts,
+   avatars, backdrops). They reference L2 where the meaning matches; the
+   per-theme literals are target values with no L2 equivalent (syntax and
+   avatar colours, inverted toast, scrollbars). */
+:root {
+  /* Sidebar and lists */
+  --sidebar-fill: var(--surface-canvas);
+  --sidebar-item-active: var(--surface-selected);
+  --menu-fill: var(--surface-overlay);
+  --selector-fill: var(--surface-raised);
+  --tip-fill: var(--surface-overlay);
+  --ghost-active-fill: var(--surface-selected);
+
+  /* The chat composer card (UI-S04): raised in both themes */
+  --composer-fill: var(--surface-raised);
+
+  /* The environment card (UI-S05): raised on dark, the panel fill lifted by
+     the popover shadow on light */
+  --env-card-fill: var(--surface-raised);
+  --env-card-edge: var(--elev-2);
+
+  /* Settings cards sit on the panel; their controls one step down */
+  --settings-card-fill: var(--surface-raised);
+  --settings-card-control-fill: var(--surface-base);
+
+  /* Code (fills set per theme below: visible on the canvas and on panels) */
+  --code-fg: var(--text-1);
+
+  /* Primary (neutral) button: inverted fill; gold is reserved for send */
+  --button-primary-fill: var(--text-1);
+
+  /* Accent family */
+  --caret: var(--accent);
+
+  /* Attention (approvals, plans) */
+  --approval-strong: var(--attention);
+
+  /* Display, input and surface components (DS-04) */
+  --badge-h: 18px;
+  --dot-sm: 6px;
+  --dot-md: 8px;
+  --field-h: var(--control-md);
+  --field-h-sm: var(--control-sm);
+  --field-fill: var(--surface-overlay);
+  --list-row-sm: var(--row-h);
+  --list-row-md: var(--control-lg);
+  --list-row-lg: var(--row-h-lg);
+  --list-inset: var(--space-4);
+  --pane-header-h: 48px;
+  --switch-thumb: 255 255 255;
+  --icon-button-lg: 36px;
+  /* Column top bars: the conversation header row and the workspace header
+     end on the same line. */
+  --shell-bar-h: 46px;
+
+  /* Backdrops: the blur behind scrims, the lightbox and floating menus */
+  --mask-blur: 2px;
+  --backdrop-blur: 12px;
+  --backdrop-blur-strong: 24px;
+
+  /* Theme-invariant fills: the white plate behind site icons and favicons,
+     and the computer-use pointer drawn over screenshots */
+  --site-icon-plate: 255 255 255;
+  --pointer-ink: 15 17 21;
+}
+
+:root,
+:root[data-theme='dark'] {
+  --sidebar-item-hover: 33 33 32;
+  --input-major: var(--surface-raised);
+  --code-block-bg: var(--surface-raised);
+  --code-banner-bg: var(--surface-overlay);
+  --inline-code-bg: var(--surface-raised);
+  --tooltip-bg: 48 48 46;
+  --tooltip-fg: 236 236 234;
+  --toast-bg: 236 236 234;
+  --toast-fg: 26 26 25;
+  --button-primary-hover: 250 250 249;
+  --button-primary-fg: 26 26 25;
+  --ghost-active-border: 82 81 77;
+  --scrollbar-thumb: 48 48 46;
+  --scrollbar-thumb-hover: 58 58 55;
+  --skeleton-bg: rgb(255 255 255 / 0.06);
+  --accent-soft-strong: 63 55 39;
+  --accent-glare: 230 200 142;
+  --approval-line: 200 112 52;
+  --state-ok-soft: var(--ok-soft);
+  --state-ok-label: 118 214 166;
+  --state-warn-soft: var(--warn-soft);
+  --state-warn-label: 240 184 96;
+  --state-error-soft: var(--error-soft);
+  --state-error-label: 248 150 150;
+  --avatar-1: 96 165 250;
+  --avatar-2: 74 222 128;
+  --avatar-3: 251 146 60;
+  --avatar-4: 192 132 252;
+  --avatar-5: 244 114 182;
+  --avatar-6: 45 212 191;
+  --code-constant: 122 167 247;
+  --code-string: 128 200 140;
+  --code-comment: 138 135 128;
+  --code-keyword: 232 150 176;
+  --code-parameter: 236 170 102;
+  --code-function: 176 156 240;
+  --code-string-expression: 150 216 160;
+  --code-punctuation: 168 166 161;
+  --code-link: 122 167 247;
+  --tone-cyan: 103 232 249;
+  --tone-violet: 196 181 253;
+  --tone-blue: 147 197 253;
+  --shadow-color: 0 0 0;
+  /* The composer's edge: the shadow carries it on dark */
+  --composer-edge: var(--elev-1);
+}
+
+:root[data-theme='light'] {
+  --sidebar-item-hover: 239 238 234;
+  --input-major: var(--surface-base);
+  --code-block-bg: 239 238 234;
+  --code-banner-bg: 231 229 224;
+  --inline-code-bg: 239 238 234;
+  --tooltip-bg: 28 27 25;
+  --tooltip-fg: 250 250 249;
+  --toast-bg: 33 33 32;
+  --toast-fg: 236 236 234;
+  --button-primary-hover: 48 48 46;
+  --button-primary-fg: 255 255 255;
+  --ghost-active-border: 179 177 171;
+  --scrollbar-thumb: 214 212 207;
+  --scrollbar-thumb-hover: 190 188 183;
+  --skeleton-bg: rgb(0 0 0 / 0.05);
+  --accent-soft-strong: 239 232 220;
+  --accent-glare: 221 184 120;
+  --approval-line: 194 87 12;
+  --state-ok-soft: var(--ok-soft);
+  --state-ok-label: 22 120 64;
+  --state-warn-soft: var(--warn-soft);
+  --state-warn-label: 150 78 8;
+  --state-error-soft: var(--error-soft);
+  --state-error-label: 180 36 36;
+  --avatar-1: 37 99 235;
+  --avatar-2: 22 163 74;
+  --avatar-3: 234 88 12;
+  --avatar-4: 147 51 234;
+  --avatar-5: 219 39 119;
+  --avatar-6: 13 148 136;
+  --code-constant: 47 111 224;
+  --code-string: 40 140 70;
+  --code-comment: 117 115 109;
+  --code-keyword: 196 50 104;
+  --code-parameter: 200 90 20;
+  --code-function: 104 70 210;
+  --code-string-expression: 40 128 60;
+  --code-punctuation: 95 93 88;
+  --code-link: 47 111 224;
+  --tone-cyan: 8 145 178;
+  --tone-violet: 124 58 237;
+  --tone-blue: 37 99 235;
+  --shadow-color: 28 27 25;
+  /* A hairline ring as well on light */
+  --composer-edge: 0 0 0 0.5px var(--hairline), var(--elev-1);
+  --env-card-fill: var(--surface-base);
+}

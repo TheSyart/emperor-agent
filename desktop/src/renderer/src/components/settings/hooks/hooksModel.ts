@@ -47,7 +47,7 @@ export function hookMatchQueryLabel(
     return '工具名（例如 bash、write、mcp_docs_search）'
   if (matcher === 'source')
     return 'SessionStart 来源（startup / resume / clear）'
-  if (matcher === 'agent_type') return '子代理类型（例如 general-purpose）'
+  if (matcher === 'agent_type') return '子智能体类型（例如 general-purpose）'
   return '该事件不使用 matcher'
 }
 

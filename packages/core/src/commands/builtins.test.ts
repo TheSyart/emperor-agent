@@ -47,7 +47,7 @@ describe('builtin slash command catalog', () => {
     ])
   })
 
-  it('uses plain English product copy instead of developer categories', () => {
+  it('uses plain Chinese product copy instead of developer categories', () => {
     const commands = builtinCommandDescriptors()
 
     expect(
@@ -59,49 +59,58 @@ describe('builtin slash command catalog', () => {
     ).toEqual([
       {
         name: 'new',
-        category: 'Commands',
-        description: 'Start a blank chat in this workspace',
+        category: '命令',
+        description: '在这个工作区开一个新对话',
       },
       {
         name: 'compact',
-        category: 'Commands',
-        description: 'Free up context while keeping a summary',
+        category: '命令',
+        description: '压缩上下文，保留一份摘要',
       },
       {
         name: 'model',
-        category: 'Commands',
-        description: 'Choose the model for this chat',
+        category: '命令',
+        description: '选择这个对话用的模型',
       },
       {
         name: 'reasoning',
-        category: 'Commands',
-        description: 'Choose how deeply the model thinks',
+        category: '命令',
+        description: '选择模型思考的深度',
       },
       {
         name: 'permissions',
-        category: 'Commands',
-        description: 'Choose what Emperor may do',
+        category: '命令',
+        description: '选择 Emperor 能做什么',
       },
       {
         name: 'plan',
-        category: 'Commands',
-        description: 'Plan before making changes',
+        category: '命令',
+        description: '先做计划，再动手改',
       },
       {
         name: 'goal',
-        category: 'Commands',
-        description: 'Keep working toward an outcome',
+        category: '命令',
+        description: '朝一个目标持续工作',
       },
       {
         name: 'stop',
-        category: 'Commands',
-        description: 'Stop the current task',
+        category: '命令',
+        description: '停止当前任务',
       },
       {
         name: 'continue',
-        category: 'Commands',
-        description: 'Resume the paused task',
+        category: '命令',
+        description: '继续已暂停的任务',
       },
     ])
+  })
+
+  it('FIX-09 · 3 · descriptions and the category are Chinese: the / palette shows them', () => {
+    for (const command of builtinCommandDescriptors()) {
+      const english = `${command.category} ${command.description}`
+        .replace(/Emperor/g, '')
+        .match(/[A-Za-z]{2,}/g)
+      expect(english, command.name).toBeNull()
+    }
   })
 })

@@ -9,6 +9,14 @@ import {
   type SettingsHeaderHost,
 } from './settingsHeader'
 import ComputerUseSection from './ComputerUseSection.vue'
+import { answerConfirmsForTest } from '../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const { core, helperStatus, requestPermission, resetPermission, reconnect } =
   vi.hoisted(() => ({
@@ -19,7 +27,10 @@ const { core, helperStatus, requestPermission, resetPermission, reconnect } =
     reconnect: vi.fn(),
   }))
 
-vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/http', async (original) => ({
+  ...(await original<typeof import('../../api/http')>()),
+  core,
+}))
 vi.mock('../../api/backend', () => ({
   macHelperStatus: helperStatus,
   macHelperRequestPermission: requestPermission,
@@ -133,6 +144,7 @@ function button(root: ParentNode, text: string): HTMLButtonElement {
 }
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   app = null
   container?.remove()
@@ -148,7 +160,7 @@ afterEach(() => {
 })
 
 function notices(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>('.ds-settings-notice')]
+  return [...root.querySelectorAll<HTMLElement>('.ds-notice')]
 }
 
 function rowText(root: HTMLElement, title: string): string {
@@ -223,7 +235,7 @@ describe('ComputerUseSection main page', () => {
     const root = await mount()
     const badge = (driver: string) =>
       root
-        .querySelector(`[data-driver="${driver}"] .ds-status-badge`)
+        .querySelector(`[data-driver="${driver}"] .ds-badge`)
         ?.textContent?.trim()
     expect(badge('desktop')).toBe('实验')
     expect(badge('external-browser')).toBeUndefined()
@@ -263,7 +275,7 @@ describe('ComputerUseSection main page', () => {
   it('requires a second confirmation before resetting a denied grant', async () => {
     resetPermission.mockResolvedValue({ reset: true })
     requestPermission.mockResolvedValue({ opened: true })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     const root = await mount({}, accessibilityOff)
     const reset = button(root, '重置授权')
     reset.click()
@@ -281,7 +293,7 @@ describe('ComputerUseSection main page', () => {
   it('registers the current recording helper after reset and preserves working Accessibility', async () => {
     resetPermission.mockResolvedValue({ reset: true })
     requestPermission.mockResolvedValue({ opened: true })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockConfirm().mockReturnValue(true)
     const root = await mount(
       {},
       {
@@ -374,6 +386,58 @@ describe('ComputerUseSection main page', () => {
     expect(reconnect).toHaveBeenCalledOnce()
   })
 
+  const stopped = {
+    available: true,
+    connected: false,
+    autoRestartSuspended: true,
+    reason: 'Helper 在一分钟内崩溃超过 3 次，已停止自动重启',
+    permissions: { accessibility: 'unknown', 'screen-recording': 'unknown' },
+  }
+
+  it('keeps the master switch usable while 重新连接 hangs, and turns off at once (FIX-06 2, 7)', async () => {
+    reconnect.mockReturnValue(new Promise(() => undefined))
+    const root = await mount({}, stopped)
+    root
+      .querySelector<HTMLButtonElement>('[data-testid="mac-helper-reconnect"]')!
+      .click()
+    await settle()
+    const master = root.querySelector<HTMLButtonElement>(
+      '#computer-use-enabled',
+    )!
+    expect(master.disabled).toBe(false)
+    core.mockClear()
+    master.click()
+    await settle()
+    expect(core).toHaveBeenCalledWith('computerUse.setEnabled', false)
+  })
+
+  it('stops waiting for a stuck action after 30 s and says so in Chinese (FIX-06 3, 8)', async () => {
+    reconnect.mockReturnValue(new Promise(() => undefined))
+    const root = await mount({}, stopped)
+    vi.useFakeTimers()
+    try {
+      root
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="mac-helper-reconnect"]',
+        )!
+        .click()
+      await vi.advanceTimersByTimeAsync(30_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    await settle()
+    const error = notices(root).find(
+      (notice) => notice.getAttribute('data-tone') === 'error',
+    )
+    expect(error?.textContent).toContain('30 秒')
+    // The section is usable again.
+    expect(
+      root.querySelector<HTMLButtonElement>(
+        '[data-testid="mac-helper-reconnect"]',
+      )?.disabled,
+    ).toBe(false)
+  })
+
   it('turns computer use on, and one driver off', async () => {
     const root = await mount({ enabled: false })
     expect(
@@ -393,6 +457,49 @@ describe('ComputerUseSection main page', () => {
       driver: 'desktop',
       enabled: false,
     })
+  })
+
+  // FIX-08: the switch waited for a full reload after Core answered, and a
+  // reload waits for the Helper's status (a launch that may take seconds or
+  // never connect): the switch stayed off and the Helper on 「检查中」.
+  it('shows the new state as soon as Core answers, while the Helper is still checked', async () => {
+    const root = await mount({ enabled: false })
+    helperStatus.mockReturnValue(new Promise(() => undefined))
+    let enabledNow = false
+    core.mockImplementation(async (op: string, value?: unknown) => {
+      if (op === 'computerUse.setEnabled') enabledNow = value === true
+      return { ...status, enabled: enabledNow }
+    })
+    const master = root.querySelector<HTMLButtonElement>(
+      '#computer-use-enabled',
+    )!
+    master.click()
+    await settle()
+    expect(master.getAttribute('aria-checked')).toBe('true')
+    expect(master.disabled).toBe(false)
+  })
+
+  it('a status read that started before the switch does not undo it', async () => {
+    const root = await mount({ enabled: false })
+    // Every status read from now on waits until the test answers it.
+    const reads: Array<(value: ComputerUseStatusView) => void> = []
+    core.mockImplementation((op: string, value?: unknown) =>
+      op === 'computerUse.setEnabled'
+        ? Promise.resolve({ ...status, enabled: value === true })
+        : new Promise((resolve) => reads.push(resolve)),
+    )
+    // Coming back to the window starts a reload whose read is slow.
+    window.dispatchEvent(new Event('focus'))
+    await settle()
+    root.querySelector<HTMLButtonElement>('#computer-use-enabled')!.click()
+    await settle()
+    // The slow read answers with what Core said before the switch.
+    expect(reads.length).toBeGreaterThan(0)
+    reads[0]!({ ...status, enabled: false })
+    await settle()
+    expect(
+      root.querySelector('#computer-use-enabled')?.getAttribute('aria-checked'),
+    ).toBe('true')
   })
 
   it('reports an action that failed', async () => {
@@ -431,7 +538,7 @@ describe('ComputerUseSection main page', () => {
   })
 
   it('clears saved screenshots after a confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     const root = await mount()
     const clear = root.querySelector<HTMLButtonElement>(
       '[data-testid="computer-use-clear-screenshots"]',

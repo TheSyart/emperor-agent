@@ -13,10 +13,19 @@ import type {
   GoalOperationResult as CoreGoalOperationResult,
   MemoryScope as CoreMemoryScope,
   CoreOperationResult,
+  ModelEntryDetected,
+  ModelEntryLifecycle,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  ModelMetadataField,
+  ModelTestRecord,
+  RejectedModelEntryPayload,
 } from '@emperor/core/api'
 import type {
   RuntimeEvent as CoreRuntimeEvent,
   RuntimeGoalView as CoreRuntimeGoalView,
+  UpdateDiagnostics,
 } from '@emperor/core/runtime-contract'
 
 /** What a builtin tool is for (Core's `category`; 能力 › 工具 groups by it). */
@@ -115,6 +124,16 @@ export interface McpStatusPayload {
 }
 
 // Hooks: Claude Code `hooks.json` payloads owned by Core `hooks.*`.
+export type {
+  ModelEntryDetected,
+  ModelEntryLifecycle,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  ModelMetadataField,
+  ModelTestRecord,
+  RejectedModelEntryPayload,
+}
 export type HooksConfigPayload = CoreHooksConfigPayload
 export type HooksValidationPayload = CoreHooksValidationPayload
 export type HooksMetadataPayload = CoreHooksMetadataPayload
@@ -177,6 +196,8 @@ export interface TokenStatsRow {
   output?: number
   cache_read?: number
   cache_create?: number
+  /** Reasoning tokens, counted apart from `output` by Core (KRN-05). */
+  reasoning?: number
   total?: number
   calls?: number
   provider?: string
@@ -392,6 +413,7 @@ export interface TokenUsageRecord {
   output: number
   cache_read: number
   cache_create: number
+  reasoning?: number
   total: number
 }
 
@@ -426,10 +448,18 @@ export interface ModelEntry {
   entryId: string
   provider: string
   protocol: 'openai' | 'anthropic'
+  /**
+   * KRN-07: a DeepSeek entry on the official host travels over Anthropic
+   * Messages unless this keeps it on chat-completions.
+   */
+  transport?: 'chat-completions'
   modelId: string
   displayName?: string
   effectiveDisplayName: string
+  /** `***` + the last 4 characters of the saved key, or ''; never the key. */
   apiKey: string
+  /** The saved key cannot be opened (the local key is gone): ask for it again. */
+  credentialState?: 'needs_reentry'
   apiBase: string
   capabilityOverrides?: ModelCapabilityOverrides
   contextWindowTokens: number
@@ -437,6 +467,17 @@ export interface ModelEntry {
   reasoningEffort: string | null
   pricing?: ModelPricing
   resolvedProfile: ResolvedModelProfile
+  /** Entries on one connection share it (MOD-03). */
+  connectionId?: string
+  limits?: ModelEntryLimits
+  detected?: ModelEntryDetected
+  /** Where the facts came from; old entries read as manual and locked. */
+  metadata?: ModelEntryMetadata
+  sampling?: ModelEntrySampling
+  /** Saved or catalog lifecycle: a retired model offers its replacement. */
+  lifecycle?: ModelEntryLifecycle
+  /** The last connection test of this entry (MOD-05). */
+  lastTest?: ModelTestRecord
 }
 
 export interface ModelPricing {
@@ -463,7 +504,7 @@ export interface ModelCapabilityOverrides {
   reasoning?: boolean
 }
 
-export type CapabilitySource = 'override' | 'inferred' | 'default'
+export type CapabilitySource = 'override' | 'detected' | 'inferred' | 'default'
 
 export interface ResolvedModelProfile {
   toolCall: boolean
@@ -493,8 +534,14 @@ export interface ModelEntrySaveInput {
   maxTokens?: number
   reasoningEffort?: string | null
   pricing?: ModelPricing | null
+  /** KRN-07: keep a DeepSeek entry on chat-completions; null clears it. */
+  transport?: 'chat-completions' | null
   /** New entries only: reuse this saved entry's key (same endpoint). */
   credentialsFrom?: string
+  /** The editor's temperature (高级); null removes it (MOD-05). */
+  sampling?: { temperature?: number | null }
+  /** Fields the user changed: metadata refreshes leave them alone. */
+  lockFields?: ModelMetadataField[]
 }
 
 export interface ModelProfilePreviewInput {
@@ -526,11 +573,6 @@ export interface ChatSendPayload {
   /** Chips in `content` (the rich composer). */
   references?: MessageReference[]
   delivery?: 'queue' | 'interject'
-}
-
-export interface QueueDraftRecovery {
-  sessionId: string
-  payload: ChatSendPayload
 }
 
 export interface ModelTestResult {
@@ -620,6 +662,8 @@ export interface ModelConfigPayload {
   availability: ModelAvailability
   providerOptions: ProviderOption[]
   profileOnboarding?: ProfileOnboardingActionResult
+  /** Entries in model_config.json that do not validate (MOD-03). */
+  rejectedEntries?: RejectedModelEntryPayload[]
 }
 
 export interface DesktopPetPayload {
@@ -654,6 +698,16 @@ export interface SchedulerDiagnosticsPayload {
   actionFile?: string
   lastActionErrors?: unknown[]
   corruptActionFiles?: DiagnosticsFileInfo[]
+  /** Why the scheduler did not start (KRN-10), e.g. another process holds it. */
+  startError?: string | null
+  /** Job entries that could not be read, set aside here (KRN-10). */
+  rejectedFile?: string
+  rejectedJobs?: Array<{
+    id: string | null
+    name: string | null
+    error: string
+    rejectedAtMs?: number | null
+  }>
 }
 
 export interface DiagnosticsDependencyPayload {
@@ -705,6 +759,23 @@ export interface ProcessRuntimeDiagnosticsPayload {
     maximumBytes?: number
     defaultStrategy?: string
   }
+  /** SEC-08: the newest containment decisions (processes/receipts.v1.json). */
+  containment?: {
+    backend?: string
+    available?: boolean
+    recent?: ContainmentReceiptDiagnosticsPayload[]
+  }
+}
+
+export interface ContainmentReceiptDiagnosticsPayload {
+  owner?: string
+  id?: string
+  decision?: 'contained' | 'refused' | 'user-allowed-unsandboxed' | string
+  backend?: string
+  policyHash?: string
+  status?: string
+  reason?: string
+  at?: string
 }
 
 export interface LifecycleServiceDiagnosticsPayload {
@@ -743,6 +814,8 @@ export interface DiagnosticsRuntimePaths {
   mcpConfigPath?: string
   runtimeManifestPath?: string
   legacyRuntimeSkillsReceiptPath?: string
+  /** The desktop's log folder (REL-01). */
+  logsRoot?: string
 }
 
 export interface LegacyStateRootInfo {
@@ -971,6 +1044,8 @@ export interface DiagnosticsPayload {
   environment?: DiagnosticsEnvironmentSummary
   dependencies?: DiagnosticsDependencyPayload
   computerUse?: ComputerUseDiagnosticsPayload
+  /** 检查更新 (REL-02): the switch, a test feed, Electron's age. */
+  updates?: UpdateDiagnostics | null
 }
 
 /** Core diagnostics summary of computer use (no URLs, no grants). */
@@ -1190,7 +1265,10 @@ export interface QueuedPromptItem {
   clientMessageId: string
   content: string
   delivery: 'queue' | 'interject'
-  status: 'queued' | 'interjecting'
+  /** `failed-previous`: not run (the turn before it failed or was stopped); waits for 发送 / 丢弃. */
+  status: 'queued' | 'interjecting' | 'failed-previous'
+  /** Why a `failed-previous` prompt waits (Core `QueuedPromptRecord.reason`). */
+  holdReason?: 'previous-turn-failed' | 'previous-turn-stopped' | 'interrupted'
   supportsInterjection: boolean
   createdOrder: number
   attachmentCount: number
@@ -1198,6 +1276,8 @@ export interface QueuedPromptItem {
   hasCapabilityRefs: boolean
   /** Chips in `content`, when it was sent from the rich composer. */
   references?: MessageReference[]
+  /** The whole message as this window sent it (attachments included), for 编辑. */
+  payload?: ChatSendPayload
 }
 
 export interface PendingState {
@@ -1298,6 +1378,10 @@ export interface SchedulerStatusPayload {
   enabled: number
   nextRunAtMs?: number | null
   lastError?: string | null
+  /** Why the last start failed (KRN-10); null once it runs. */
+  startError?: string | null
+  /** Job entries this run set aside in `jobs.rejected.json`. */
+  rejectedJobs?: number
   active?: number
   queued?: number
   maxConcurrentRuns?: number
@@ -1330,6 +1414,11 @@ type RendererRuntimePayloadProjection = {
 /** `task_*` / `workflow_*` event payload: a Core job or workflow-run record projected from the session log. */
 export interface RuntimeTaskEventRecord {
   id: string
+  delegation_id?: string
+  backend?: string
+  acceptance?: string
+  receipt_id?: string
+  revision?: number
   kind?: string
   label?: string
   command?: string
@@ -1358,6 +1447,16 @@ export type GitOperationCompletedEvent = Extract<
 
 export type GitOperationAction = GitOperationCompletedEvent['action']
 
+/** A deleted session in 最近删除 (Core sessions.listDeleted, FIX-01). */
+export interface DeletedSessionInfo {
+  id: string
+  title: string
+  mode: 'chat' | 'build'
+  project_name: string | null
+  project_path: string | null
+  deleted_at: string
+}
+
 export interface SessionInfo {
   id: string
   title: string
@@ -1379,6 +1478,12 @@ export interface SessionInfo {
   transitioned_at?: string | null
   version: number
   draft?: boolean
+  /**
+   * A draft's own plan mode and permission preset (FIX-13); unset, the
+   * global defaults (`control.get(null)`). They go with its first message.
+   */
+  plan?: boolean
+  preset?: PermissionPreset
 }
 
 export interface SessionControlPending {

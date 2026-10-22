@@ -1,7 +1,7 @@
 import type { BootstrapPayload } from '../../types'
 
 export interface ModelSetupDialogContent {
-  brandAlt: string
+  brand: string
   title: string
   subtitle: string
   status: string
@@ -23,7 +23,7 @@ export function buildModelSetupDialogContent(
   message?: string | null,
 ): ModelSetupDialogContent {
   return {
-    brandAlt: 'emperoragent',
+    brand: 'Emperor Agent',
     title: '把任务交给本地 Agent。',
     subtitle:
       '先接入一个可用模型，Emperor Agent 才能在本机会话中对话、调用工具、保存记忆并执行任务。',

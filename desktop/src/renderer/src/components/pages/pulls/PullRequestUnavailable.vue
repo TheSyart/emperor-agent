@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import type { PullRequestBrowserStatus } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import { pullIcons } from './pullIcons'
 
 const props = withDefaults(
@@ -45,9 +45,9 @@ const title = computed(() =>
 
 <template>
   <div class="pr-unavailable" :data-reason="reason" role="status">
-    <EmptyState variant="plain" :title="title">
+    <EmptyState :title="title">
       <template #icon>
-        <span class="icon-well"><component :is="icon" :size="22" /></span>
+        <span class="icon-well"><component :is="icon" :size="20" /></span>
       </template>
       <template #description>
         <span v-if="reason === 'gh_missing'" class="lines">
@@ -78,7 +78,7 @@ const title = computed(() =>
       </Button>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="busy"
         @click="emit('retry')"
       >
@@ -102,10 +102,10 @@ const title = computed(() =>
 }
 
 .pr-unavailable :deep(.ds-empty-state .title) {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .icon-well {
@@ -115,8 +115,8 @@ const title = computed(() =>
   height: calc(var(--space-8) + var(--space-3));
   margin-bottom: var(--space-1);
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .lines {
@@ -133,21 +133,21 @@ const title = computed(() =>
   flex-direction: column;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: nowrap;
 }
 
 .version {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 code {
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  border-radius: var(--r-sm);
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
   font: var(--font-code-small);
 }
 </style>

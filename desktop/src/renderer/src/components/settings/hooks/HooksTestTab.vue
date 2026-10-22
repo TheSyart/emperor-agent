@@ -15,7 +15,7 @@ import {
   Select,
   SettingsGroup,
   SettingsRow,
-  StatusBadge,
+  Badge,
   TextField,
   type SelectOption,
 } from '../ui'
@@ -110,13 +110,15 @@ const resultJson = computed(() =>
         class="result-empty"
         title="尚未运行"
         description="选择事件并填写匹配查询后点「匹配」。"
-        compact
+        variant="inline"
+        framed
       />
       <EmptyState
         v-else-if="!matchResult.items.length"
         class="result-empty"
         title="无匹配命令"
-        compact
+        variant="inline"
+        framed
       />
       <template v-else>
         <SettingsRow
@@ -137,7 +139,7 @@ const resultJson = computed(() =>
           </template>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :title="`执行 ${item.command}`"
             :disabled="testing"
             @click="requestRun(item)"
@@ -188,13 +190,16 @@ const resultJson = computed(() =>
     >
       <div class="result">
         <div class="result-badges">
-          <StatusBadge :tone="hookOutcomeTone(testResult.decision)" dot>
-            decision {{ testResult.decision || '—' }}
-          </StatusBadge>
-          <StatusBadge :tone="hookExitTone(testResult.exitCode)" mono>
-            exit {{ testResult.exitCode ?? '—' }}
-          </StatusBadge>
-          <StatusBadge mono>{{ testResult.durationMs }}ms</StatusBadge>
+          <Badge
+            :tone="hookOutcomeTone(testResult.decision)"
+            variant="dot-label"
+          >
+            决定 {{ testResult.decision || '—' }}
+          </Badge>
+          <Badge :tone="hookExitTone(testResult.exitCode)" mono>
+            退出码 {{ testResult.exitCode ?? '—' }}
+          </Badge>
+          <Badge mono>{{ testResult.durationMs }}ms</Badge>
         </div>
         <pre class="result-json">{{ resultJson }}</pre>
       </div>
@@ -220,7 +225,7 @@ const resultJson = computed(() =>
 
 .command {
   font: var(--font-code-small);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -241,7 +246,7 @@ const resultJson = computed(() =>
   gap: var(--space-2-5);
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid rgb(var(--state-warn) / 0.4);
+  border: 1px solid rgb(var(--warn) / 0.4);
   border-radius: var(--radius-card);
   background: rgb(var(--state-warn-soft));
 }
@@ -294,7 +299,7 @@ const resultJson = computed(() =>
   margin: 0;
   overflow: auto;
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);

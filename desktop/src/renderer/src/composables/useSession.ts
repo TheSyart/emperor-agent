@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { core } from '../api/http'
 import type {
   ControlInteraction,
+  DeletedSessionInfo,
   ProjectInfo,
   SessionControlPending,
   SessionInfo,
@@ -116,8 +117,7 @@ export function useSession() {
       if (!sessions.value.length) await create()
       return true
     } catch (error) {
-      sessionActionError.value =
-        error instanceof Error ? error.message : String(error)
+      sessionActionError.value = errorText(error)
       return false
     }
   }
@@ -128,12 +128,14 @@ export function useSession() {
       if (hit) hit.title = title
       return true
     }
+    sessionActionError.value = ''
     try {
       await core('sessions.rename', id, { title })
       const hit = sessions.value.find((s) => s.id === id)
       if (hit) hit.title = title
       return true
-    } catch {
+    } catch (error) {
+      sessionActionError.value = errorText(error)
       return false
     }
   }
@@ -146,6 +148,7 @@ export function useSession() {
       }
       return true
     }
+    sessionActionError.value = ''
     try {
       const updated = await core('sessions.rename', id, {
         archived,
@@ -160,7 +163,42 @@ export function useSession() {
         else sessions.value.unshift(updated)
       }
       return true
-    } catch {
+    } catch (error) {
+      sessionActionError.value = errorText(error)
+      return false
+    }
+  }
+
+  /** Undo a delete (FIX-01): the session comes back from 最近删除. */
+  async function restoreDeleted(id: string): Promise<SessionInfo | null> {
+    sessionActionError.value = ''
+    try {
+      const restored = await core('sessions.restoreDeleted', id)
+      sessions.value = [
+        restored,
+        ...sessions.value.filter((s) => s.id !== restored.id),
+      ]
+      return restored
+    } catch (error) {
+      sessionActionError.value = errorText(error)
+      return null
+    }
+  }
+
+  /** Sessions in 最近删除, most recent first. */
+  async function listDeleted(): Promise<DeletedSessionInfo[]> {
+    const listed = await core('sessions.listDeleted')
+    return Array.isArray(listed) ? listed : []
+  }
+
+  /** Delete a session in 最近删除 for good. */
+  async function purgeDeleted(id: string): Promise<boolean> {
+    sessionActionError.value = ''
+    try {
+      await core('sessions.purgeDeleted', id)
+      return true
+    } catch (error) {
+      sessionActionError.value = errorText(error)
       return false
     }
   }
@@ -184,6 +222,15 @@ export function useSession() {
     ) {
       activeId.value = event.session.id
     }
+  }
+
+  /** A draft's own plan mode or preset (FIX-13): local until it is sent. */
+  function updateDraft(
+    id: string,
+    patch: Pick<SessionInfo, 'plan'> | Pick<SessionInfo, 'preset'>,
+  ) {
+    const hit = sessions.value.find((s) => s.id === id && s.draft)
+    if (hit) Object.assign(hit, patch)
   }
 
   /** Promote a draft locally (slash commands create the session themselves). */
@@ -237,10 +284,14 @@ export function useSession() {
     create,
     resolveProject,
     remove,
+    restoreDeleted,
+    listDeleted,
+    purgeDeleted,
     rename,
     archive,
     activate,
     applySessionCreatedEvent,
+    updateDraft,
     promoteDraft,
     applySessionTitleUpdatedEvent,
     applySessionControlPending,
@@ -345,4 +396,8 @@ function sessionControlPendingFromInteraction(
     }
   }
   return null
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

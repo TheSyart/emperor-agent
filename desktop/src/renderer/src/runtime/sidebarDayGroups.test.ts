@@ -43,11 +43,15 @@ describe('sidebar day groups', () => {
     expect(groups[0]!.sessions.map((item) => item.id)).toEqual(['a', 'b'])
   })
 
-  it('formats compact relative times', () => {
+  it('formats compact relative times, never an ISO date (UI-S11 6)', () => {
     expect(sidebarRelativeTime('2026-09-22T14:59:40', NOW)).toBe('刚刚')
     expect(sidebarRelativeTime('2026-09-22T14:30:00', NOW)).toBe('30 分钟')
     expect(sidebarRelativeTime('2026-09-22T12:00:00', NOW)).toBe('3 小时')
+    expect(sidebarRelativeTime('2026-09-22T01:00:00', NOW)).toBe('14 小时')
+    expect(sidebarRelativeTime('2026-09-21T23:00:00', NOW)).toBe('昨天')
     expect(sidebarRelativeTime('2026-09-20T15:00:00', NOW)).toBe('2 天')
-    expect(sidebarRelativeTime('2025-01-02T15:00:00', NOW)).toBe('2025-01-02')
+    expect(sidebarRelativeTime('2026-09-16T15:00:00', NOW)).toBe('6 天')
+    expect(sidebarRelativeTime('2026-09-10T15:00:00', NOW)).toBe('9月10日')
+    expect(sidebarRelativeTime('2025-12-31T15:00:00', NOW)).toBe('2025/12/31')
   })
 })

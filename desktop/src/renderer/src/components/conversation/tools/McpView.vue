@@ -2,7 +2,7 @@
 /** McpView — MCP server badge over the IN/OUT JsonTree card. */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import Pill from '../../ui/Pill.vue'
+import Badge from '../../ui/Badge.vue'
 import GenericToolCard from './GenericToolCard.vue'
 import { mcpIdentity } from './toolModel'
 
@@ -13,7 +13,7 @@ const identity = computed(() => mcpIdentity(props.data))
 <template>
   <div class="mcp-view">
     <div v-if="identity" class="badges">
-      <Pill>MCP · {{ identity.server }}</Pill>
+      <Badge>MCP · {{ identity.server }}</Badge>
       <span class="tool">{{ identity.tool }}</span>
     </div>
     <GenericToolCard :data="data" />
@@ -35,6 +35,6 @@ const identity = computed(() => mcpIdentity(props.data))
 
 .tool {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

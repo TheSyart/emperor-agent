@@ -37,7 +37,7 @@ const items = computed(() => todoItems(props.data))
   gap: var(--space-0-5);
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
   list-style: none;
@@ -50,7 +50,7 @@ const items = computed(() => todoItems(props.data))
   min-height: var(--lh-base);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .mark {
@@ -60,29 +60,29 @@ const items = computed(() => todoItems(props.data))
   justify-content: center;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-l4);
-  border-radius: var(--radius-xs);
-  color: rgb(var(--label-inverted));
+  border: 1px solid var(--stroke-4);
+  border-radius: var(--r-xs);
+  color: rgb(var(--text-inverted));
 }
 
 [data-status='completed'] .mark {
-  border-color: rgb(var(--label-tertiary));
-  background: rgb(var(--label-tertiary));
+  border-color: rgb(var(--text-3));
+  background: rgb(var(--text-3));
 }
 
 [data-status='in_progress'] .mark {
-  border-color: rgb(var(--accent-fill));
-  box-shadow: inset 0 0 0 3px rgb(var(--bg-base));
-  background: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
+  box-shadow: inset 0 0 0 3px rgb(var(--surface-base));
+  background: rgb(var(--accent));
 }
 
 [data-status='completed'] .content {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 
 [data-status='in_progress'] .content {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .content {
@@ -95,6 +95,6 @@ const items = computed(() => todoItems(props.data))
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

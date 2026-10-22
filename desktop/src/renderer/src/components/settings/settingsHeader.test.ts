@@ -112,7 +112,7 @@ describe('SettingsHeaderBar', () => {
     await nextTick()
     expect(onRefresh).toHaveBeenCalledTimes(1)
     expect(refresh.disabled).toBe(true)
-    expect(refresh.querySelector('.spinning')).not.toBeNull()
+    expect(refresh.querySelector('.ds-spinner')).not.toBeNull()
     resolve()
     await new Promise((done) => setTimeout(done, 0))
     await nextTick()

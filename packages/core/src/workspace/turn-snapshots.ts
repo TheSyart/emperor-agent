@@ -313,28 +313,69 @@ export class TurnSnapshots {
     }
   }
 
-  /** Keep a recorded turn's snapshots; drop the session's oldest turns. */
+  /**
+   * Keep a recorded turn's (or task's) snapshots; drop the session's oldest
+   * turns. `held`: the turn whose before snapshot was held while the task
+   * ran (`hold`), released now that the record has its own pair.
+   */
   async keep(
     place: TurnRepository,
     sessionId: string,
     turn: number,
     before: TurnSnapshot,
     after: TurnSnapshot,
+    held?: number,
   ): Promise<void> {
     const base = refBase(sessionId)
     const existing = await this.sessionRefs(place, sessionId)
+    if (held !== undefined && held !== turn) existing.delete(held)
     const turns = new Set([...existing.keys(), turn])
-    const dropped = [...turns]
-      .sort((a, b) => b - a)
-      .slice(this.keepTurns)
-      .flatMap((old) => existing.get(old) ?? [])
+    const kept = new Set([`${base}/${turn}/before`, `${base}/${turn}/after`])
+    const dropped = new Set(
+      [...turns]
+        .sort((a, b) => b - a)
+        .slice(this.keepTurns)
+        .flatMap((old) => existing.get(old) ?? []),
+    )
+    if (held !== undefined && held !== turn)
+      dropped.add(`${base}/${held}/before`)
     const commands = [
       `update ${base}/${turn}/before ${before.commit}`,
       `update ${base}/${turn}/after ${after.commit}`,
-      ...dropped.map((ref) => `delete ${ref}`),
+      ...[...dropped]
+        .filter((ref) => !kept.has(ref))
+        .map((ref) => `delete ${ref}`),
     ]
     await this.exec(place.worktreeRoot, ['update-ref', '--stdin'], {
       stdin: `${commands.join('\n')}\n`,
+    })
+  }
+
+  /**
+   * Hold a running task's before snapshot under its first turn, so it
+   * outlives a crash (UI-S15); `keep` or `release` lets it go.
+   */
+  async hold(
+    place: TurnRepository,
+    sessionId: string,
+    turn: number,
+    before: TurnSnapshot,
+  ): Promise<void> {
+    await this.exec(place.worktreeRoot, [
+      'update-ref',
+      `${refBase(sessionId)}/${turn}/before`,
+      before.commit,
+    ])
+  }
+
+  /** Let a held before snapshot go (the task recorded nothing). */
+  async release(
+    place: TurnRepository,
+    sessionId: string,
+    turn: number,
+  ): Promise<void> {
+    await this.exec(place.worktreeRoot, ['update-ref', '--stdin'], {
+      stdin: `delete ${refBase(sessionId)}/${turn}/before\n`,
     })
   }
 
@@ -361,9 +402,14 @@ export class TurnSnapshots {
     return before && after ? { before, after } : null
   }
 
-  /** Delete every recorded turn of a session. */
+  /** Delete every recorded turn of a session (and its applied results). */
   async dropSession(place: TurnRepository, sessionId: string): Promise<void> {
-    const refs = [...(await this.sessionRefs(place, sessionId)).values()].flat()
+    const listed = await this.exec(place.worktreeRoot, [
+      'for-each-ref',
+      '--format=%(refname)',
+      `${refBase(sessionId)}/`,
+    ])
+    const refs = listed.stdout.split(/\r?\n/).filter(Boolean)
     if (refs.length === 0) return
     await this.exec(place.worktreeRoot, ['update-ref', '--stdin'], {
       stdin: `${refs.map((ref) => `delete ${ref}`).join('\n')}\n`,
@@ -556,10 +602,15 @@ export class TurnSnapshots {
   }
 }
 
-function refBase(sessionId: string): string {
+/**
+ * Where a session's change records live: its turns, and the undo record of
+ * each subagent result applied in it (`applied/<run>`, AGT-06).
+ */
+export function turnRefBase(sessionId: string): string {
   const segment = sessionId.replace(/[^A-Za-z0-9_-]/g, '_') || '_'
   return `refs/emperor/turns/${segment}`
 }
+const refBase = turnRefBase
 
 function parseNameStatus(output: string): Array<{
   path: string

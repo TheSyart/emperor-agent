@@ -3,7 +3,7 @@
  * TrajectoryGroupHeader — the Step / Compaction group boundary of the
  * ledger. dsh folds the legacy "Step N · 1.2 s" header row into a 5px
  * request dot sitting on the boundary line of the group's first record;
- * hover reveals `Request #N`, click opens the request inspector (Summary /
+ * hover reveals `请求 #N`, click opens the request inspector (Summary /
  * Options / Usage / Timing). Coincident markers (request-only separators)
  * fan out 8px apart.
  *
@@ -66,12 +66,12 @@ const title = computed(() =>
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgb(var(--label-caption));
-  box-shadow: 0 0 0 2px rgb(var(--bg-layer-1));
+  background: rgb(var(--text-3));
+  box-shadow: 0 0 0 2px rgb(var(--surface-base));
   content: '';
   transition:
-    background-color var(--duration-fast) var(--ease-in-out),
-    box-shadow var(--duration-fast) var(--ease-in-out);
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .traj-request-marker::after {
@@ -80,10 +80,10 @@ const title = computed(() =>
   left: calc(var(--space-4) + 1px);
   width: max-content;
   padding: 0 var(--space-1);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: 2px;
-  color: rgb(var(--label-secondary));
-  background: rgb(var(--bg-layer-1));
+  color: rgb(var(--text-2));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   content: attr(data-label);
   font: 9px / 12px var(--font-mono);
@@ -91,28 +91,28 @@ const title = computed(() =>
   pointer-events: none;
   transform: translateX(-2px);
   transition:
-    opacity var(--duration-fast) var(--ease-in-out),
-    transform var(--duration-fast) var(--ease-in-out);
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
   user-select: none;
   white-space: nowrap;
 }
 
 .traj-request-marker:hover::before,
 .traj-request-marker:focus-visible::before {
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .traj-request-marker[aria-pressed='true']::before {
   background: color-mix(
     in srgb,
-    rgb(var(--accent-fill)) 18%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--accent)) 18%,
+    rgb(var(--surface-base))
   );
-  box-shadow: 0 0 0 1.5px rgb(var(--accent-fill));
+  box-shadow: 0 0 0 1.5px rgb(var(--accent));
 }
 
 .traj-request-marker[data-request-status='error']::before {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .traj-request-marker:hover::after,

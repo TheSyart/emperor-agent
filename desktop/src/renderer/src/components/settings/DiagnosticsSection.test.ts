@@ -6,12 +6,19 @@ import type { DiagnosticsPayload } from '../../types'
 import DiagnosticsSection from './DiagnosticsSection.vue'
 import { createSettingsHeader, SETTINGS_HEADER_KEY } from './settingsHeader'
 
-const { core, openPath } = vi.hoisted(() => ({
+const { core, openPath, bundle } = vi.hoisted(() => ({
   core: vi.fn(),
   openPath: vi.fn(),
+  bundle: {
+    prepareDiagnosticsBundle: vi.fn(),
+    exportDiagnosticsBundle: vi.fn(),
+    revealDiagnosticsBundle: vi.fn(),
+    discardDiagnosticsBundle: vi.fn(),
+  },
 }))
 vi.mock('../../api/http', () => ({ core }))
 vi.mock('../../api/backend', () => ({ openPath }))
+vi.mock('../../api/diagnosticsBundle', () => bundle)
 
 let app: App | null = null
 let container: HTMLDivElement | null = null
@@ -72,15 +79,19 @@ async function settle(): Promise<void> {
   await nextTick()
 }
 
+let header: ReturnType<typeof createSettingsHeader> | null = null
+
 async function mount(): Promise<HTMLDivElement> {
   container = document.createElement('div')
   document.body.append(container)
   app = createApp({ render: () => h(DiagnosticsSection) })
   app.provide(APP_CONTEXT_KEY, {
-    boot: ref(null),
+    boot: ref({ model: 'deepseek-flash', projects: [{}, {}] }),
+    runtimeText: () => '在线',
     runSafely: async (task: () => Promise<void>) => task(),
   } as never)
-  app.provide(SETTINGS_HEADER_KEY, createSettingsHeader())
+  header = createSettingsHeader()
+  app.provide(SETTINGS_HEADER_KEY, header)
   app.mount(container)
   await settle()
   return container
@@ -121,6 +132,7 @@ afterEach(() => {
   app = null
   container?.remove()
   container = null
+  document.body.innerHTML = ''
   vi.clearAllMocks()
 })
 
@@ -135,7 +147,7 @@ describe('诊断', () => {
     // No lead-in: the runtime root moved into 存储路径.
     expect(root.querySelector('.ds-settings-section .intro')).toBeNull()
     expect(
-      [...overview.querySelectorAll('.summary .ds-status-badge')].map((badge) =>
+      [...overview.querySelectorAll('.summary .ds-badge')].map((badge) =>
         badge.textContent?.trim(),
       ),
     ).toEqual(['2 项需要关注'])
@@ -183,8 +195,8 @@ describe('诊断', () => {
       ),
     ).toEqual(['runtime', 'environment', 'desktop', 'paths', 'config'])
     const badges = (id: string) =>
-      [...card(root, id).querySelectorAll('.head .ds-status-badge')].map(
-        (badge) => badge.textContent?.trim(),
+      [...card(root, id).querySelectorAll('.head .ds-badge')].map((badge) =>
+        badge.textContent?.trim(),
       )
     expect(badges('runtime')).toEqual(['1 项需要关注'])
     expect(badges('environment')).toEqual(['1 项需要关注'])
@@ -215,7 +227,7 @@ describe('诊断', () => {
   it('shows a normal row as its value, and says why on a row that needs attention', async () => {
     const root = await mount()
     const runtime = await open(root, 'runtime')
-    expect(runtime.querySelector('.ds-status-badge.value')).toBeNull()
+    expect(runtime.querySelector('.ds-badge.value')).toBeNull()
     const fine = rowOf(runtime, 'scheduler-store')
     expect(fine.querySelector('.value')?.textContent?.trim()).toBe('正常')
     expect(fine.querySelector('.description')).toBeNull()
@@ -261,9 +273,7 @@ describe('诊断', () => {
       return undefined
     })
     const root = await mount()
-    const notices = [
-      ...root.querySelectorAll<HTMLElement>('.ds-settings-notice'),
-    ]
+    const notices = [...root.querySelectorAll<HTMLElement>('.ds-notice')]
     expect(notices.map((notice) => notice.dataset.tone)).toEqual([
       'error',
       'error',
@@ -276,5 +286,156 @@ describe('诊断', () => {
       root.querySelector('.ds-settings-section > .body')?.firstElementChild,
     ).toBe(notices[0])
     expect(root.querySelector('.diag-alert, .env-alert')).toBeNull()
+  })
+})
+
+describe('诊断 › 导出诊断包 (REL-01)', () => {
+  const BUNDLE = {
+    id: 'b_0123456789ab',
+    name: 'emperor-diagnostics-20261020-163000',
+    entries: [
+      { path: 'README.txt', title: '说明', bytes: 900 },
+      {
+        path: 'diagnostics.json',
+        title: 'Core 诊断（diagnostics.get）',
+        bytes: 20480,
+      },
+      { path: 'logs/main.log', title: '主进程日志（脱敏）', bytes: 2_200_000 },
+    ],
+    excluded: ['会话与消息内容', '记忆', 'API Key、令牌等密钥'],
+  }
+
+  beforeEach(() => {
+    bundle.prepareDiagnosticsBundle.mockResolvedValue(BUNDLE)
+    bundle.exportDiagnosticsBundle.mockResolvedValue({
+      ok: true,
+      name: `${BUNDLE.name}.zip`,
+      location: '~/Desktop',
+    })
+    bundle.revealDiagnosticsBundle.mockResolvedValue(undefined)
+    bundle.discardDiagnosticsBundle.mockResolvedValue(undefined)
+  })
+
+  function exportAction() {
+    const action = header!.actions.value.find(
+      (item) => item.id === 'export-bundle',
+    )
+    if (!action) throw new Error('no 导出诊断包 action')
+    return action
+  }
+
+  function dialog(): HTMLElement {
+    const found = document.querySelector<HTMLElement>(
+      '[data-testid="diagnostics-export-dialog"]',
+    )
+    if (!found) throw new Error('no export dialog')
+    return found
+  }
+
+  it('sits in the header beside 复制报告', async () => {
+    await mount()
+    expect(header!.actions.value.map((item) => item.id)).toEqual([
+      'export-bundle',
+      'copy-report',
+      'refresh',
+    ])
+    expect(exportAction().label).toBe('导出诊断包')
+  })
+
+  it('lists what goes into the zip, and what does not, before anything is written', async () => {
+    await mount()
+    await exportAction().onClick?.()
+    await settle()
+    expect(bundle.prepareDiagnosticsBundle).toHaveBeenCalledOnce()
+    expect(bundle.exportDiagnosticsBundle).not.toHaveBeenCalled()
+    const rows = [...dialog().querySelectorAll<HTMLElement>('[data-entry]')]
+    expect(rows.map((row) => row.dataset.entry)).toEqual([
+      'README.txt',
+      'diagnostics.json',
+      'logs/main.log',
+    ])
+    expect(rows[2]!.textContent).toContain('主进程日志（脱敏）')
+    expect(rows[2]!.textContent).toContain('2.1 MB')
+    const excluded = dialog().querySelector('[data-testid="bundle-excluded"]')!
+    expect(excluded.textContent).toContain('会话与消息内容')
+    expect(excluded.textContent).toContain('API Key、令牌等密钥')
+  })
+
+  it('exports on 导出…, then offers 在访达中显示', async () => {
+    await mount()
+    await exportAction().onClick?.()
+    await settle()
+    dialog().querySelector<HTMLButtonElement>('[data-action="export"]')!.click()
+    await settle()
+    expect(bundle.exportDiagnosticsBundle).toHaveBeenCalledWith(BUNDLE.id)
+    expect(dialog().textContent).toContain(`已导出 ${BUNDLE.name}.zip`)
+    expect(dialog().textContent).toContain('~/Desktop')
+    dialog().querySelector<HTMLButtonElement>('[data-action="reveal"]')!.click()
+    await settle()
+    expect(bundle.revealDiagnosticsBundle).toHaveBeenCalledWith(BUNDLE.id)
+    // Closing after an export keeps nothing to throw away in main.
+    dialog().querySelector<HTMLButtonElement>('[data-action="done"]')!.click()
+    await settle()
+    expect(bundle.discardDiagnosticsBundle).not.toHaveBeenCalled()
+    expect(
+      document.querySelector('[data-testid="diagnostics-export-dialog"]'),
+    ).toBeNull()
+  })
+
+  it('stays on the list when the save dialog is cancelled, and discards on 取消', async () => {
+    bundle.exportDiagnosticsBundle.mockResolvedValueOnce({
+      ok: false,
+      canceled: true,
+    })
+    await mount()
+    await exportAction().onClick?.()
+    await settle()
+    dialog().querySelector<HTMLButtonElement>('[data-action="export"]')!.click()
+    await settle()
+    expect(dialog().querySelectorAll('[data-entry]')).toHaveLength(3)
+    expect(dialog().querySelector('[role="alert"]')).toBeNull()
+    dialog().querySelector<HTMLButtonElement>('[data-action="cancel"]')!.click()
+    await settle()
+    expect(bundle.discardDiagnosticsBundle).toHaveBeenCalledWith(BUNDLE.id)
+  })
+
+  it('says why preparing or exporting failed', async () => {
+    bundle.prepareDiagnosticsBundle.mockRejectedValueOnce(
+      new Error('没能整理诊断包：disk full'),
+    )
+    await mount()
+    await exportAction().onClick?.()
+    await settle()
+    expect(dialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'disk full',
+    )
+  })
+
+  it('opens the log folder from 存储路径', async () => {
+    core.mockImplementation(async (key: string) => {
+      if (key === 'diagnostics.get')
+        return {
+          ...payload,
+          paths: {
+            ...payload.paths,
+            logsRoot: '/Users/me/Library/Logs/Emperor Agent',
+          },
+        }
+      if (key === 'environment.getStatus') return environment
+      return undefined
+    })
+    const root = await mount()
+    const paths = await open(root, 'paths')
+    const row = rowOf(paths, 'logs-path')
+    expect(row.querySelector('.value')?.textContent?.trim()).toBe(
+      '~/Library/Logs/Emperor Agent',
+    )
+    row.querySelector<HTMLButtonElement>('button')!.click()
+    await settle()
+    expect(openPath).toHaveBeenCalledWith({
+      kind: 'diagnostic',
+      rowId: 'logs-path',
+      sessionId: null,
+    })
   })
 })

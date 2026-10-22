@@ -1,6 +1,7 @@
 /** Delegation tools (ported from dsh tool-subagent, tool-subagent-control, tool-subagent-report). */
 
 import { z } from 'zod'
+import { SUBAGENT_HANDOFF, INTERNAL_REPORT_TRANSPORT } from './contract'
 import type { SystemPromptAssembler } from '../prompt/assembler'
 import {
   defineTool,
@@ -64,33 +65,80 @@ function stopReasonError(settlement: SubagentSettlement): string | undefined {
       return 'subagent declined the task'
     case 'interrupted':
       return 'subagent run was interrupted'
+    case 'budget':
+      return 'subagent run stopped at the task budget'
   }
 }
+
+/** The local start tools' parameters (shared with the external backends' composite tools). */
+export function subagentInput(mode: SubagentMode) {
+  return z.object({
+    description: z
+      .string()
+      .describe(
+        'A short (3-5 word) description of the delegated task, for display.',
+      ),
+    prompt: z.string().describe(wording(mode).promptDescription),
+    run_in_background: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.',
+      ),
+  })
+}
+
+export function subagentDescription(mode: SubagentMode): string {
+  return wording(mode).description + CONTINUABLE_NOTE
+}
+
+export const SEND_MESSAGE_DESCRIPTION =
+  'Send a message to a background subagent by its subagent id, continuing the same conversation. It ' +
+  "becomes the subagent's next turn: if it is still working, the message waits until its current turn " +
+  'finishes, so it cannot redirect work already underway. This call returns no answer from the ' +
+  'subagent — only confirmation that the message was delivered — so use it to give it more work. A ' +
+  'failure means the message was NOT delivered.'
+
+export const SEND_MESSAGE_INPUT = z.object({
+  subagent_id: z
+    .string()
+    .describe(
+      'The subagent id returned when the background subagent was started.',
+    ),
+  message: z.string().describe('The message to deliver to the subagent.'),
+})
+
+export const INTERRUPT_AGENT_DESCRIPTION =
+  "Request cancellation of a background agent's current turn by its agent id. The target may be your " +
+  'direct child or a deeper agent created under you. Only the current turn stops: messages already ' +
+  'queued for the agent stay parked until a later send_message, agents it started keep running, and ' +
+  'the agent itself stays available for follow-ups. This call returns as soon as the stop request is ' +
+  'accepted, so the target may keep running briefly; interrupting an agent that already finished is ' +
+  'an accepted no-op.'
+
+export const INTERRUPT_AGENT_INPUT = z.object({
+  agent_id: z
+    .string()
+    .describe('The agent id of the running agent to interrupt.'),
+})
+
+export const LIST_AGENTS_DESCRIPTION =
+  'List the background agents you started (children) or every agent under you (descendants), with their status.'
+
+export const LIST_AGENTS_INPUT = z.object({
+  scope: z.enum(['children', 'descendants']).optional(),
+})
 
 function delegationTool(
   manager: SubagentManager,
   mode: SubagentMode,
   name: string,
 ): ToolDefinition {
-  const words = wording(mode)
   return defineTool({
     name,
     category: 'agents',
-    description: words.description + CONTINUABLE_NOTE,
-    input: z.object({
-      description: z
-        .string()
-        .describe(
-          'A short (3-5 word) description of the delegated task, for display.',
-        ),
-      prompt: z.string().describe(words.promptDescription),
-      run_in_background: z
-        .boolean()
-        .optional()
-        .describe(
-          'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.',
-        ),
-    }),
+    description: subagentDescription(mode),
+    input: subagentInput(mode),
     isConcurrencySafe: () => true,
     async execute(args, context) {
       const parent = context.agent
@@ -156,20 +204,8 @@ export function createSubagentTools(
     defineTool({
       name: 'send_message',
       category: 'agents',
-      description:
-        'Send a message to a background subagent by its subagent id, continuing the same conversation. It ' +
-        "becomes the subagent's next turn: if it is still working, the message waits until its current turn " +
-        'finishes, so it cannot redirect work already underway. This call returns no answer from the ' +
-        'subagent — only confirmation that the message was delivered — so use it to give it more work. A ' +
-        'failure means the message was NOT delivered.',
-      input: z.object({
-        subagent_id: z
-          .string()
-          .describe(
-            'The subagent id returned when the background subagent was started.',
-          ),
-        message: z.string().describe('The message to deliver to the subagent.'),
-      }),
+      description: SEND_MESSAGE_DESCRIPTION,
+      input: SEND_MESSAGE_INPUT,
       async execute(args, context) {
         if (context.agent === undefined)
           throw new ToolError('send_message requires a calling agent')
@@ -187,18 +223,8 @@ export function createSubagentTools(
     defineTool({
       name: 'interrupt_agent',
       category: 'agents',
-      description:
-        "Request cancellation of a background agent's current turn by its agent id. The target may be your " +
-        'direct child or a deeper agent created under you. Only the current turn stops: messages already ' +
-        'queued for the agent stay parked until a later send_message, agents it started keep running, and ' +
-        'the agent itself stays available for follow-ups. This call returns as soon as the stop request is ' +
-        'accepted, so the target may keep running briefly; interrupting an agent that already finished is ' +
-        'an accepted no-op.',
-      input: z.object({
-        agent_id: z
-          .string()
-          .describe('The agent id of the running agent to interrupt.'),
-      }),
+      description: INTERRUPT_AGENT_DESCRIPTION,
+      input: INTERRUPT_AGENT_INPUT,
       async execute(args, context) {
         if (context.agent === undefined)
           throw new ToolError('interrupt_agent requires a calling agent')
@@ -215,11 +241,8 @@ export function createSubagentTools(
     defineTool({
       name: 'list_agents',
       category: 'agents',
-      description:
-        'List the background agents you started (children) or every agent under you (descendants), with their status.',
-      input: z.object({
-        scope: z.enum(['children', 'descendants']).optional(),
-      }),
+      description: LIST_AGENTS_DESCRIPTION,
+      input: LIST_AGENTS_INPUT,
       isConcurrencySafe: () => true,
       async execute(args, context) {
         if (context.agent === undefined)
@@ -328,9 +351,10 @@ export function installSubagents(
   manager: SubagentManager,
   tools: ToolRegistry,
   prompt: SystemPromptAssembler,
+  delegationTools?: ToolDefinition[],
 ): () => void {
   const disposers: Array<() => void> = []
-  for (const tool of createSubagentTools(manager))
+  for (const tool of delegationTools ?? createSubagentTools(manager))
     disposers.push(tools.register(tool))
   disposers.push(
     tools.register(createReportTool(manager), {
@@ -381,7 +405,7 @@ export function installSubagents(
     prompt.section({
       name: 'tool:subagent',
       order: 116.5,
-      text: "Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.",
+      text: "Give each child a clear scoped task, relevant constraints and paths, expected deliverables and checks when known. Do not assume a fresh child can see your conversation. Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.",
     }),
   )
   disposers.push(
@@ -391,11 +415,7 @@ export function installSubagents(
       text: ({ agent }) =>
         agent?.owner === undefined
           ? ''
-          : 'Deliver your result with the report tool before you finish: call it once with a self-contained ' +
-            'answer. The agent that started you shares your workspace but does not automatically receive your ' +
-            'transcript, tool output, or reasoning, so a closing remark such as "done" leaves it nothing it can ' +
-            'use. Report earlier as well whenever a partial finding changes what that agent should do next; ' +
-            'reporting never ends your turn.',
+          : SUBAGENT_HANDOFF + '\n\n' + INTERNAL_REPORT_TRANSPORT,
     }),
   )
   return () => {

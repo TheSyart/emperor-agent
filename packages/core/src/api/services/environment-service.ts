@@ -177,12 +177,13 @@ export class CoreEnvironmentService {
     return recovered
   }
 
+  /** `projectRoot`: the project of the session in view (default: the runtime root). */
   async getStatus(
-    input: { forceRefresh?: boolean } = {},
+    input: { forceRefresh?: boolean; projectRoot?: string | null } = {},
   ): Promise<CoreEnvironmentStatusPayload> {
     const status = await this.probeStatus({
       forceRefresh: Boolean(input.forceRefresh),
-      projectRoot: this.projectRoot(),
+      projectRoot: input.projectRoot ?? this.projectRoot(),
     })
     const jobs = await this.orchestrator.store.listJobs()
     const recentJobs = jobs

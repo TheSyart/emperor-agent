@@ -121,7 +121,12 @@ describe('computer use crash repair', () => {
       type: event.type,
       data: event.data,
     }))
+    // Closers follow the order the facts were opened (the target first).
     expect(repaired).toEqual([
+      {
+        type: 'ui/target-closed',
+        data: { targetId: 't-open', reason: 'shutdown' },
+      },
       {
         type: 'ui/action-settled',
         data: {
@@ -142,10 +147,6 @@ describe('computer use crash repair', () => {
         type: 'ui/grant-decided',
         data: { requestId: 'g-open', decision: 'denied', cause: 'repair' },
       },
-      {
-        type: 'ui/target-closed',
-        data: { targetId: 't-open', reason: 'shutdown' },
-      },
     ])
 
     // A second reopen finds a balanced log: repair is idempotent.
@@ -155,6 +156,6 @@ describe('computer use crash repair', () => {
   })
 
   it('leaves a balanced log alone', () => {
-    expect(computerUseRepair([])).toEqual([])
+    expect(computerUseRepair.repair([])).toEqual([])
   })
 })

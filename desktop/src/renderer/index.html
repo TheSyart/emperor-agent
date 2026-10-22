@@ -5,6 +5,12 @@
          when a history-mode route such as /chat/:id is reloaded. -->
     <base href="/" />
     <meta charset="UTF-8" />
+    <!-- The production policy (src/shared/content-security-policy.ts); main
+         sends the same one as a header, the dev server adds HMR to it. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: app:; font-src 'self' data:; connect-src 'self' app: blob:; media-src 'self' blob: app:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Emperor Agent</title>

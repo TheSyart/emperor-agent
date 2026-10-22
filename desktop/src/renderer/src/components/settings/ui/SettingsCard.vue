@@ -18,14 +18,14 @@
  * - master?: a page's master switch (电脑操作, 浏览器), its first card: the
  *   leading glyph (18px) sits on a 36px gold tile and the title is
  *   semibold.
- * Slots: `leading` (16px glyph / StateDot), `title`, `description`, `meta`
+ * Slots: `leading` (16px glyph / Dot), `title`, `description`, `meta`
  * (badges after the title), `actions` (buttons / Switch; never toggles),
  * default (body), `footer` (right-aligned buttons, e.g. 取消 / 保存).
  * Emits: toggle(open).
  */
 import { useSlots } from 'vue'
 import { DsChevronDown } from '../../icons/ds'
-import { settingsId } from './fieldContext'
+import { settingsId } from '../../ui/fieldContext'
 import { provideSurface } from '../../ui/surface'
 
 const props = withDefaults(
@@ -143,12 +143,12 @@ function onHeaderClick(event: MouseEvent) {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--settings-card-fill));
   transition:
-    border-color var(--duration-ds-fast) ease,
-    background-color var(--duration-ds-fast) ease;
+    border-color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
 }
 
 .ds-settings-card[data-variant='outline'] {
@@ -161,7 +161,7 @@ function onHeaderClick(event: MouseEvent) {
 }
 
 .ds-settings-card[data-expandable]:not([data-disabled]):hover {
-  border-color: rgb(var(--label-dimmed));
+  border-color: rgb(var(--text-disabled));
 }
 
 .ds-settings-card[data-variant='filled'][data-expandable]:hover {
@@ -170,8 +170,8 @@ function onHeaderClick(event: MouseEvent) {
 
 /* An open card reads as the one being worked on, not merely taller. */
 .ds-settings-card[data-open] {
-  border-color: rgb(var(--label-dimmed));
-  background: rgb(var(--bg-layer-2));
+  border-color: rgb(var(--text-disabled));
+  background: rgb(var(--surface-raised));
 }
 
 .ds-settings-card[data-variant='filled'][data-open] {
@@ -201,7 +201,7 @@ function onHeaderClick(event: MouseEvent) {
   flex: none;
   align-items: center;
   justify-content: center;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* A page's master switch: the glyph on a gold tile, a semibold title. */
@@ -214,11 +214,11 @@ function onHeaderClick(event: MouseEvent) {
   height: calc(var(--space-8) + var(--space-1));
   border-radius: var(--radius-cell);
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .ds-settings-card[data-master] .title {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .head-text {
@@ -258,8 +258,8 @@ button.head-text:focus-visible {
   overflow: hidden;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -267,7 +267,7 @@ button.head-text:focus-visible {
 .description {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -281,8 +281,8 @@ button.head-text:focus-visible {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  color: rgb(var(--text-3));
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .ds-settings-card[data-open] .chevron {
@@ -300,7 +300,7 @@ button.head-text:focus-visible {
 .body[data-after-head] {
   margin: 0 var(--space-4);
   padding: var(--space-3) 0 var(--space-4);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .footer {
@@ -311,6 +311,6 @@ button.head-text:focus-visible {
   gap: var(--space-2);
   margin: 0 var(--space-4);
   padding: var(--space-3) 0;
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 </style>

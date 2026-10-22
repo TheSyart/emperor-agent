@@ -1,6 +1,6 @@
 {
   "name": "emperor-agent-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Emperor Agent desktop application (Electron + Vue) that hosts CoreApi in process.",
@@ -18,12 +18,15 @@
     "test": "vitest run && node --test tests/chrome-debugger-probe/worker.test.js",
     "lint": "eslint src tests --max-warnings=0",
     "screenshots": "playwright test -c playwright.config.ts",
+    "visual:baselines": "node scripts/visual-baselines.mjs",
+    "visual:baselines:update": "node scripts/visual-baselines.mjs --update",
     "e2e:cu": "node scripts/e2e-cu.mjs --mode=smoke && node scripts/e2e-cu.mjs --mode=contract",
     "typecheck:test": "tsc --noEmit -p tsconfig.test-web.json && tsc --noEmit -p tsconfig.test-node.json",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "package:dir": "electron-builder --dir --publish never --config electron-builder.preview.cjs",
     "package:smoke": "node scripts/run-packaged-smoke.cjs",
     "package:verify": "npm run package:dir && npm run package:smoke",
+    "package:probe": "node scripts/probe-packaged-hardening.cjs",
     "terminal:smoke": "node scripts/fix-node-pty-permissions.cjs && node scripts/smoke-node-pty.cjs",
     "dist:mac": "cd .. && scripts/build_desktop_release.sh",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
@@ -31,6 +34,7 @@
     "dist": "npm run dist:mac"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.281",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",
@@ -39,6 +43,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "@electron/fuses": "1.8.0",
     "@emperor/core": "file:../packages/core",
     "@playwright/test": "^1.61.0",
     "@types/markdown-it": "^14.1.2",
@@ -63,7 +68,6 @@
     "prosemirror-state": "^1.4.4",
     "prosemirror-transform": "^1.12.2",
     "prosemirror-view": "^1.42.6",
-    "tailwindcss": "^3.4.17",
     "typescript-eslint": "^8.62.1",
     "vite": "^6.0.7",
     "vitest": "^2.1.8",

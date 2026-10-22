@@ -19,8 +19,20 @@ import {
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   BROWSER_STATE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL,
+  DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL,
+  DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  HOME_BACKUP_DISCARD_CHANNEL,
+  HOME_BACKUP_EXPORT_CHANNEL,
+  HOME_BACKUP_OPEN_CHANNEL,
+  HOME_BACKUP_PLAN_CHANNEL,
+  HOME_BACKUP_RESTORE_CHANNEL,
+  HOME_BACKUP_REVEAL_CHANNEL,
   LINK_OPEN_CHANNEL,
+  MARKDOWN_REMOTE_IMAGE_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
@@ -34,8 +46,13 @@ import {
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_MASTER_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
@@ -114,7 +131,12 @@ describe('desktop capability preload bridge', () => {
       'chooseDownloadFolder',
       'clearBrowserData',
       'denyBrowserPairing',
+      'discardDiagnosticsBundle',
+      'discardHomeBackup',
+      'exportDiagnosticsBundle',
+      'exportHomeBackup',
       'installBrowserExtension',
+      'loadRemoteImage',
       'macHelperReconnect',
       'macHelperRequestPermission',
       'macHelperResetPermission',
@@ -125,28 +147,71 @@ describe('desktop capability preload bridge', () => {
       'onBrowserPairingRequest',
       'onBrowserReveal',
       'onBrowserState',
+      'onMenuCommand',
       'openBrowserDownload',
       'openBrowserHistory',
       'openBrowserUrl',
       'openExternal',
+      'openHomeBackup',
       'openLink',
       'openSkillsFolder',
+      'planHomeBackup',
+      'prepareDiagnosticsBundle',
       'removeBrowserDownload',
       'removeBrowserExtension',
+      'restoreHomeBackup',
       'revealBrowserDownload',
       'revealBrowserExtension',
+      'revealDiagnosticsBundle',
+      'revealHomeBackup',
       'revealReference',
       'revokeBrowserPairing',
       'runBrowserImport',
       'selectFile',
+      'vaultExport',
+      'vaultImport',
+      'vaultImportPick',
       'vaultLock',
+      'vaultMaster',
       'vaultRemove',
+      'vaultRepairKey',
       'vaultReset',
       'vaultReveal',
       'vaultSave',
-      'vaultSetMaster',
+      'vaultStartOver',
       'vaultStatus',
       'vaultUnlock',
+    ])
+  })
+
+  it('asks main for 备份与恢复 by id, forwarding only known fields (REL-03)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.planHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_PLAN_CHANNEL, undefined])
+    await bridge.exportHomeBackup({
+      includeSessions: true,
+      passphrase: 'p',
+      confirmation: 'p',
+      path: '/etc/x',
+    } as never)
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_EXPORT_CHANNEL,
+      { includeSessions: true, passphrase: 'p', confirmation: 'p' },
+    ])
+    await bridge.revealHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_REVEAL_CHANNEL, undefined])
+    await bridge.openHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_OPEN_CHANNEL, undefined])
+    await bridge.restoreHomeBackup('r_0123456789ab', 'secret phrase')
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_RESTORE_CHANNEL,
+      { id: 'r_0123456789ab', passphrase: 'secret phrase' },
+    ])
+    await bridge.discardHomeBackup('r_0123456789ab')
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_DISCARD_CHANNEL,
+      { id: 'r_0123456789ab' },
     ])
   })
 
@@ -165,6 +230,28 @@ describe('desktop capability preload bridge', () => {
     dispose()
     ipc.emit(BROWSER_REVEAL_CHANNEL, { url: 'https://late.example/' })
     expect(listener.mock.calls).toEqual([[{ url: 'http://localhost:5173/' }]])
+  })
+
+  it('asks main for a remote markdown image (UI-38)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.loadRemoteImage('https://example.com/a.png')
+    expect(ipc.invoked.at(-1)).toEqual([
+      MARKDOWN_REMOTE_IMAGE_CHANNEL,
+      { url: 'https://example.com/a.png' },
+    ])
+  })
+
+  it('relays only known app menu commands (MAIN-20)', () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    const listener = vi.fn()
+    const dispose = bridge.onMenuCommand(listener)
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'open-settings')
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'reload')
+    dispose()
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'open-settings')
+    expect(listener.mock.calls).toEqual([['open-settings']])
   })
 
   it('routes browser pairing only through fixed channels', async () => {
@@ -190,14 +277,59 @@ describe('desktop capability preload bridge', () => {
       (...args: unknown[]) => Promise<unknown>
     >
     await bridge.vaultUnlock!('correct horse battery', true)
-    await bridge.vaultSetMaster!('correct horse battery', true)
-    await bridge.vaultSetMaster!(null)
+    await bridge.vaultMaster!({
+      action: 'change',
+      currentPassword: 'correct horse battery',
+      password: 'another passphrase',
+      confirmPassword: 'another passphrase',
+      biometric: true,
+    })
+    await bridge.vaultMaster!({ action: 'remove', currentPassword: 'x' })
     await bridge.vaultReset!('ignored')
     expect(ipc.invoked).toEqual([
       [VAULT_UNLOCK_CHANNEL, { password: 'correct horse battery' }],
-      [VAULT_MASTER_CHANNEL, { password: 'correct horse battery' }],
-      [VAULT_MASTER_CHANNEL, { password: null }],
+      [
+        VAULT_MASTER_CHANNEL,
+        {
+          action: 'change',
+          currentPassword: 'correct horse battery',
+          password: 'another passphrase',
+          confirmPassword: 'another passphrase',
+        },
+      ],
+      [VAULT_MASTER_CHANNEL, { action: 'remove', currentPassword: 'x' }],
       [VAULT_RESET_CHANNEL, undefined],
+    ])
+  })
+
+  it('repairs, starts over, exports and imports through fixed vault channels (SEC-09)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc) as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >
+    await bridge.vaultRepairKey!('ignored')
+    await bridge.vaultStartOver!('ignored')
+    await bridge.vaultExport!(
+      'backup passphrase 1',
+      'backup passphrase 1',
+      '/x',
+    )
+    await bridge.vaultImportPick!('/etc/passwd')
+    await bridge.vaultImport!('backup passphrase 1', '/x')
+    expect(ipc.invoked).toEqual([
+      [VAULT_REPAIR_KEY_CHANNEL, undefined],
+      [VAULT_START_OVER_CHANNEL, undefined],
+      [
+        VAULT_EXPORT_CHANNEL,
+        {
+          passphrase: 'backup passphrase 1',
+          confirmPassphrase: 'backup passphrase 1',
+        },
+      ],
+      // The file is chosen in main's own dialog; no path crosses IPC.
+      [VAULT_IMPORT_PICK_CHANNEL, undefined],
+      [VAULT_IMPORT_CHANNEL, { passphrase: 'backup passphrase 1' }],
     ])
   })
 
@@ -327,6 +459,21 @@ describe('desktop capability preload bridge', () => {
     ipc.emit(BROWSER_DOWNLOAD_EVENT_CHANNEL, view)
     expect(listener.mock.calls).toEqual([[view]])
     expect(ipc.removed).toHaveLength(1)
+  })
+
+  it('reaches the diagnostics bundle by id only (REL-01)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.prepareDiagnosticsBundle()
+    await bridge.exportDiagnosticsBundle('b_0123456789ab')
+    await bridge.revealDiagnosticsBundle('b_0123456789ab')
+    await bridge.discardDiagnosticsBundle('b_0123456789ab')
+    expect(ipc.invoked).toEqual([
+      [DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL, undefined],
+      [DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL, { id: 'b_0123456789ab' }],
+      [DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL, { id: 'b_0123456789ab' }],
+      [DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL, { id: 'b_0123456789ab' }],
+    ])
   })
 
   it('reconnects the macOS Helper through a fixed channel without payload', async () => {

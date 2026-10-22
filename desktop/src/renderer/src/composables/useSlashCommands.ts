@@ -24,6 +24,12 @@ import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureStatus } from './goalCapture'
 import { createComposerLifecycleController } from './composerLifecycle'
 
+/** Whether a submit was accepted (the composer restores the draft on `false`). */
+export type SendOutcome = boolean | Promise<boolean>
+
+/** How long a typed `/word` waits for a command list that has not loaded. */
+export const COMMAND_LOAD_WAIT_MS = 2000
+
 export interface SlashCommandDeps {
   boot: Ref<BootstrapPayload | null>
   busy: Ref<boolean>
@@ -31,8 +37,23 @@ export interface SlashCommandDeps {
   resolveSessionId: () => Promise<string>
   /** Backend session that control changes apply to (null for drafts). */
   controlSessionId?: () => string | null
-  sendMessage: (payload: string | ChatSendPayload) => boolean
+  /**
+   * The draft on screen, null on a real session (FIX-13): its plan mode and
+   * preset are its own until its first message, so Core is not asked.
+   */
+  draftId?: () => string | null
+  /** Change a draft's own plan mode or preset. */
+  updateDraft?: (
+    id: string,
+    patch: { plan: boolean } | { preset: PermissionPreset },
+  ) => void
+  /** `true` once the host took the message; `false` if it was refused. */
+  sendMessage: (payload: string | ChatSendPayload) => SendOutcome
+  /** Load the command list when it is still empty, waiting at most `timeoutMs`. */
+  ensureCommands?: (timeoutMs: number) => Promise<void>
   showToast: (message: string) => void
+  /** Sticky error toast with 「复制详情」 (App: showError); else showToast. */
+  showError?: (error: unknown) => void
   refreshAll: () => Promise<void>
   openCommandSurface: (
     surface: CommandSurface,
@@ -70,7 +91,15 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     startCapturedGoal: deps.startCapturedGoal,
   })
 
-  function submitFromComposer(payload: string | ChatSendPayload): void {
+  /**
+   * Send the composer's message or run its slash command. A `/word` that
+   * names no command goes out as an ordinary message (the composer said so
+   * while it was typed); while the command list is still empty it first
+   * waits for it, at most COMMAND_LOAD_WAIT_MS.
+   */
+  async function submitFromComposer(
+    payload: string | ChatSendPayload,
+  ): Promise<boolean> {
     const normalized: ChatSendPayload =
       typeof payload === 'string'
         ? { content: payload, attachments: [] }
@@ -79,29 +108,32 @@ export function useSlashCommands(deps: SlashCommandDeps) {
             content: String(payload.content ?? ''),
             attachments: payload.attachments ?? [],
           }
-    if (normalized.delivery) {
-      deps.sendMessage(normalized)
-      return
-    }
-    const invocation = resolveSlashInvocation(
+    if (normalized.delivery) return await deps.sendMessage(normalized)
+    let invocation = resolveSlashInvocation(
       normalized.content,
       deps.commandDescriptors.value,
     )
-    if (!invocation) {
-      deps.sendMessage(normalized)
-      return
+    if (
+      invocation &&
+      !invocation.descriptor &&
+      deps.commandDescriptors.value.length === 0 &&
+      deps.ensureCommands
+    ) {
+      await deps.ensureCommands(COMMAND_LOAD_WAIT_MS).catch(() => undefined)
+      invocation = resolveSlashInvocation(
+        normalized.content,
+        deps.commandDescriptors.value,
+      )
     }
-    if (!invocation.descriptor) {
-      showUnknownCommand(invocation.name)
-      return
-    }
-    void executeSlashCommand(
+    if (!invocation?.descriptor) return await deps.sendMessage(normalized)
+    const result = await executeSlashCommand(
       invocation.raw,
       invocation.descriptor,
       (normalized.attachments ?? []).map((attachment) => attachment.id),
       // Chip offsets hold for the raw input only when it is the same text.
       invocation.raw === normalized.content ? normalized.references : undefined,
     )
+    return result !== null
   }
 
   async function executeSlashCommand(
@@ -134,7 +166,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       if (result.status === 'queued') scheduleQueuedResultPoll(request)
       return result
     } catch (error) {
-      deps.showToast(displayError(error))
+      reportError(deps, error)
       return null
     }
   }
@@ -162,7 +194,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         await projectInvocationResult(result)
       } catch (error) {
         queuedPolls.delete(request.invocationId)
-        deps.showToast(displayError(error))
+        reportError(deps, error)
       }
     }
     queuedPolls.set(request.invocationId, globalThis.setTimeout(poll, 750))
@@ -234,12 +266,18 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     preset: PermissionPreset,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const data = await core(
-        'control.setPermissionMode',
-        preset,
-        deps.controlSessionId?.() ?? null,
-      )
-      applyControl(data)
+      const draft = deps.draftId?.()
+      if (draft) {
+        deps.updateDraft?.(draft, { preset })
+        applyControl({ ...deps.boot.value?.control, preset, mode: preset })
+      } else
+        applyControl(
+          await core(
+            'control.setPermissionMode',
+            preset,
+            deps.controlSessionId?.() ?? null,
+          ),
+        )
       deps.showToast(`执行权限已切换为${permissionLabel(preset)}`)
       return { ok: true }
     } catch (error) {
@@ -251,14 +289,17 @@ export function useSlashCommands(deps: SlashCommandDeps) {
 
   /** Plan mode is a toggle separate from the permission preset. */
   async function writeControlMode(mode: 'plan' | 'default') {
-    const data = await core(
-      'control.setMode',
-      mode,
-      deps.controlSessionId?.() ?? null,
-    )
-    applyControl(data.control)
-    deps.showToast(mode === 'plan' ? '已进入计划模式' : '已退出计划模式')
-    return data
+    const plan = mode === 'plan'
+    const draft = deps.draftId?.()
+    if (draft) {
+      deps.updateDraft?.(draft, { plan })
+      applyControl({ ...deps.boot.value?.control, plan })
+    } else
+      applyControl(
+        (await core('control.setMode', mode, deps.controlSessionId?.() ?? null))
+          .control,
+      )
+    deps.showToast(plan ? '已进入计划模式' : '已退出计划模式')
   }
 
   async function setControlMode(
@@ -310,6 +351,14 @@ function permissionLabel(preset: PermissionPreset): string {
   if (preset === 'danger-full-access') return '完全访问'
   if (preset === 'read-only') return '只读'
   return '工作区可写'
+}
+
+function reportError(
+  deps: Pick<SlashCommandDeps, 'showToast' | 'showError'>,
+  error: unknown,
+): void {
+  if (deps.showError) deps.showError(error)
+  else deps.showToast(displayError(error))
 }
 
 function displayError(error: unknown): string {

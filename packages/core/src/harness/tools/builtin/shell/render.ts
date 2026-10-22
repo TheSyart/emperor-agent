@@ -6,6 +6,7 @@
 import type { SandboxMode } from '../../../sandbox/policy'
 import {
   escalationHintMarker,
+  PROTECTED_PATH_DENIAL_MARKER,
   sandboxDenialMarker,
 } from '../../../sandbox/policy'
 import type { CollectedOutput } from './output'
@@ -17,6 +18,18 @@ export interface ShellSandboxInfo {
   denied: boolean
   /** Whether the sandbox runner failed before the command ran (background only). */
   runnerFailed?: boolean
+}
+
+/** Full access was denied only by the protected-path guard: nothing to escalate to. */
+function denialMarkers(
+  sandbox: ShellSandboxInfo,
+  escalation: boolean,
+): string[] {
+  if (sandbox.mode === 'danger-full-access')
+    return [PROTECTED_PATH_DENIAL_MARKER]
+  return escalation
+    ? [sandboxDenialMarker(sandbox.mode), escalationHintMarker('command')]
+    : [sandboxDenialMarker(sandbox.mode)]
 }
 
 export interface ShellRunResult {
@@ -54,10 +67,8 @@ export function renderResult(
   if (body.length === 0) body = '(no output)'
 
   const markers: string[] = []
-  if (result.sandbox?.denied) {
-    markers.push(sandboxDenialMarker(result.sandbox.mode))
-    if (escalation) markers.push(escalationHintMarker('command'))
-  }
+  if (result.sandbox?.denied)
+    markers.push(...denialMarkers(result.sandbox, escalation))
   // A command may trap SIGTERM and exit 0 after timeout; still report interruption.
   if (result.timedOut) markers.push(`[timed out after ${result.timeoutMs}ms]`)
   if (result.signal !== null) {
@@ -97,8 +108,7 @@ export function renderProcessRead(
       `[sandbox: the sandbox runner itself failed under ${sandbox.mode} mode — the command did not run; this is a sandbox problem, not a command failure]`,
     )
   } else if (sandbox?.denied) {
-    notices.push(sandboxDenialMarker(sandbox.mode))
-    if (escalation) notices.push(escalationHintMarker('command'))
+    notices.push(...denialMarkers(sandbox, escalation))
   }
   if (notices.length === 0) return read.delta
   return `${read.delta}${read.delta.length > 0 && !read.delta.endsWith('\n') ? '\n' : ''}${notices.join('\n')}`

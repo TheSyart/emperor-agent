@@ -155,13 +155,14 @@ describe('model config execution policy', () => {
     },
   )
 
-  it('fails closed when a cost cap references an entry without complete prices', () => {
-    expect(() =>
-      parseModelConfig({
-        ...configured(),
-        models: [entry('primary', { pricing }), entry('fallback')],
-      }),
-    ).toThrow(/pricing/i)
+  // MOD-05: the cap does not apply to a model without prices (Settings says
+  // so); saving it is no longer refused.
+  it('keeps a cost cap when a referenced entry has no prices', () => {
+    const config = parseModelConfig({
+      ...configured(),
+      models: [entry('primary'), entry('fallback')],
+    })
+    expect(config.policy.cost.maxUsdPerAgentTurn).toBe(0.25)
   })
 
   it('preserves policy and pricing through entry updates', () => {

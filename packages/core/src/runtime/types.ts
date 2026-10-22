@@ -9,6 +9,14 @@
  * Browser-safe: type-only, no imports from kernel modules.
  */
 
+import type { UpdateStatus } from '../updates/types'
+import type {
+  ClaudeSignInView,
+  ExecutorProbe,
+  ExecutorUpgradeView,
+  ExecutorVersionsView,
+} from '../harness/delegation/types'
+
 export type RuntimeEventPayload = Record<string, unknown>
 
 export interface RuntimeEventEnvelope {
@@ -99,6 +107,14 @@ export interface SchedulerRunEventFields {
   task_id?: string
 }
 
+export interface DelegationRuntimeFields {
+  delegation_id: string
+  run_id?: string
+  journal_seq: number
+  task?: RuntimeEventPayload
+  output?: { role: string; content: string }[]
+}
+
 export type RuntimeEvent = RuntimeEventEnvelope &
   (
     | {
@@ -124,7 +140,18 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         target_turn_id?: string | null
         content?: string
       }
+    | { event: 'agent_tree_changed'; rootSessionId: string; revision: number }
+    | ({ event: 'delegation_created' } & DelegationRuntimeFields)
+    | ({ event: 'delegation_run_changed' } & DelegationRuntimeFields)
+    | ({ event: 'delegation_output' } & DelegationRuntimeFields)
+    | ({ event: 'delegation_interaction' } & DelegationRuntimeFields)
+    | ({ event: 'delegation_receipt' } & DelegationRuntimeFields)
     | { event: 'message_delta'; delta?: string }
+    /**
+     * A failed request attempt was re-requested: drop the text streamed since
+     * the attempt began. `content` is the turn's assistant text so far.
+     */
+    | { event: 'assistant_reset'; content: string }
     | {
         event: 'agent_thought'
         /** Stable id: running/done updates of one thought share it. */
@@ -254,6 +281,25 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         prompt_id: string
       }
     | {
+        /**
+         * A queued user prompt changed state (host-only, KRN-02): `sending`
+         * (a step reserved it), `queued` (back in line, or sent again),
+         * `failed-previous` (held: the turn before it failed or was stopped,
+         * or the app restarted; it waits for 发送 / 丢弃), `discarded`.
+         */
+        event: 'queue_item_state'
+        prompt_id: string
+        state: 'queued' | 'sending' | 'failed-previous' | 'discarded'
+        reason?:
+          | 'previous-turn-failed'
+          | 'previous-turn-stopped'
+          | 'interrupted'
+          | 'user'
+          | 'cancelled'
+          | 'stopped'
+          | 'dropped'
+      }
+    | {
         event: 'profile_onboarding_status_changed'
         profile_onboarding?: RuntimeEventPayload
         reason?: string
@@ -278,13 +324,70 @@ export type RuntimeEvent = RuntimeEventEnvelope &
     | { event: 'skill_catalog_changed'; catalog_version?: number }
     | { event: 'browser_preferences_changed'; preferences: BrowserPreferences }
     | {
-        /** Installed plugins, their toggles, or the active project changed. */
+        /** 检查更新 (REL-02): the check, the offer or the download changed. */
+        event: 'update_status'
+        status: UpdateStatus
+      }
+    | {
+        /** A check found a newer release (once per version and launch). */
+        event: 'update_available'
+        version: string
+        tag: string
+        notesUrl: string
+      }
+    | {
+        /**
+         * 登录 Claude Code (FIX-11) started, ended or was cancelled; after a
+         * sign-in, the new probe (what `claude auth status` now says).
+         */
+        event: 'executor_sign_in'
+        signIn: ClaudeSignInView
+        probe?: ExecutorProbe
+      }
+    | {
+        /**
+         * 子智能体 › 版本 (AGT-13): an upgrade changed (waiting, running
+         * with output, ended — then with the probe that followed), or the
+         * versions did (a check, the end of an upgrade, 稍后).
+         */
+        event: 'executor_upgrade'
+        upgrade?: ExecutorUpgradeView
+        probe?: ExecutorProbe
+        versions?: ExecutorVersionsView
+      }
+    | {
+        /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */
+        event: 'web_tools_changed'
+        settings: {
+          webFetch: { enabled: boolean; available: boolean }
+          webSearch: {
+            enabled: boolean
+            available: boolean
+            provider: 'deepseek' | 'host' | null
+            model: string | null
+          }
+        }
+      }
+    | {
+        /** Installed plugins, their toggles, the active project, or a plugin hook's failure changed. */
         event: 'plugins_changed'
-        reason: 'plugins' | 'project'
+        reason: 'plugins' | 'project' | 'hooks'
       }
     | {
         event: 'computer_use_changed'
         reason: 'state' | 'targets' | 'grants'
+      }
+    | {
+        /** A session log was repaired, cannot be read, or stopped/resumed writing (host-only). */
+        event: 'session_log_state'
+        state: 'repaired' | 'unrecoverable' | 'write_paused' | 'write_resumed'
+        kind?: 'tail' | 'corrupt'
+        dropped_bytes?: number
+        line?: number
+        backup_path?: string
+        reason?: string
+        error?: string
+        pending_events?: number
       }
     | (EnvironmentRuntimeEventFields & {
         event: 'environment_install_started'
@@ -327,6 +430,9 @@ export type RuntimeEvent = RuntimeEventEnvelope &
     | (SchedulerRunEventFields & {
         event: 'scheduler_run_error'
         error?: string
+        /** `error`, or `blocked` when an approval was rejected for the run. */
+        status?: 'error' | 'blocked'
+        code?: string
       })
     | (SchedulerRunEventFields & {
         event:

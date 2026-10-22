@@ -17,26 +17,63 @@ export interface VaultBadge {
 export const LOCAL_KEY_LABEL =
   'Emperor 本地密钥（保存在这台 Mac 的 Emperor 目录）'
 
-/** The notice 密码管理器 shows while the local key cannot be used (清空). */
-export interface VaultProblem {
+/** What the problem notice offers, in order; the first is the way out. */
+export type VaultProblemAction = 'repair' | 'restore' | 'start-over' | 'reset'
+
+/**
+ * The notice 密码管理器 shows while the vault cannot be used: vault.json
+ * unreadable or newer (从备份恢复 / 重新开始（先备份）), the local key lost or
+ * failing its checks (清空, or 从备份恢复 when it is lost), or open to other
+ * users (修复权限 first).
+ */
+export interface VaultProblemNotice {
   readonly title: string
   readonly description: string
+  readonly actions: readonly VaultProblemAction[]
 }
 
-export function vaultProblem(status: VaultStatus | null): VaultProblem | null {
-  if (status?.problem === 'key-missing')
-    return {
-      title: '已保存的密码无法解密',
-      description:
-        '本地密钥文件不见了，没有它就打不开这些密码。清空后可以重新添加或导入；清空无法撤销。',
-    }
-  if (status?.problem === 'key-invalid')
-    return {
-      title: '已保存的密码无法解密',
-      description:
-        '本地密钥文件的权限或属主不对，Emperor 不会读取它。清空后会换一把新的本地密钥，再重新添加或导入密码；清空无法撤销。',
-    }
-  return null
+export function vaultProblem(
+  status: VaultStatus | null,
+): VaultProblemNotice | null {
+  switch (status?.problem) {
+    case 'vault-unreadable':
+      return {
+        title: '凭据库无法读取',
+        description:
+          '凭据库文件已损坏或无法解析。Emperor 照常运行，只是暂时不能代填账号密码；原文件保持不变。可以从导出的凭据备份恢复，或另存原文件后重新开始。',
+        actions: ['restore', 'start-over'],
+      }
+    case 'vault-newer':
+      return {
+        title: '凭据库由更新版本的 Emperor 写入',
+        description:
+          '这个版本读不懂它，只列出名称，不会修改原文件。请改用更新的 Emperor，或从凭据备份恢复，或另存原文件后重新开始。',
+        actions: ['restore', 'start-over'],
+      }
+    case 'key-permissions':
+      return {
+        title: '本地密钥的权限过宽',
+        description:
+          '本地密钥文件可以被这台 Mac 上的其他用户读取，Emperor 暂停使用它。修复权限后（只限你自己读写）即可继续使用，已保存的密码不受影响。',
+        actions: ['repair', 'reset'],
+      }
+    case 'key-missing':
+      return {
+        title: '已保存的密码无法解密',
+        description:
+          '本地密钥文件不见了，没有它就打不开这些密码。可以从凭据备份恢复（备份里带着本地密钥）；清空后可以重新添加或导入，清空无法撤销。',
+        actions: ['restore', 'reset'],
+      }
+    case 'key-invalid':
+      return {
+        title: '已保存的密码无法解密',
+        description:
+          '本地密钥文件的属主或内容不对，Emperor 不会读取它。清空后会换一把新的本地密钥，再重新添加或导入密码；清空无法撤销。',
+        actions: ['reset'],
+      }
+    default:
+      return null
+  }
 }
 
 export function vaultAvailability(status: VaultStatus | null): VaultBadge {
@@ -45,6 +82,18 @@ export function vaultAvailability(status: VaultStatus | null): VaultBadge {
       tone: 'neutral',
       badge: '读取中',
       description: '正在读取密码管理器状态…',
+    }
+  if (status.problem === 'vault-unreadable' || status.problem === 'vault-newer')
+    return {
+      tone: 'error',
+      badge: '无法读取',
+      description: '凭据库文件不可用，见上方提示',
+    }
+  if (status.problem === 'key-permissions')
+    return {
+      tone: 'error',
+      badge: '已暂停',
+      description: '本地密钥权限过宽，修复后即可继续使用',
     }
   if (status.problem)
     return {
@@ -253,8 +302,14 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'vault-key-missing':
     '本地密钥文件不见了，已保存的密码无法解密。可以在密码管理器里清空后重新开始。',
   'vault-key-invalid':
-    '本地密钥文件的权限或属主不对，Emperor 不会读取它。可以在密码管理器里清空后重新开始。',
+    '本地密钥文件的属主或内容不对，Emperor 不会读取它。可以在密码管理器里清空后重新开始。',
+  'vault-key-permissions':
+    '本地密钥文件可以被其他用户读取，请先在密码管理器里修复权限。',
+  'vault-unreadable':
+    '凭据库文件无法读取，原文件保持不变。可以从凭据备份恢复，或另存原文件后重新开始。',
+  'vault-newer': '凭据库由更新版本的 Emperor 写入，这个版本不会修改它。',
   'vault-locked': '凭据库已锁定，请先用主密码解锁。',
+  'vault-backoff': '主密码错误次数过多，请稍后再试。',
   'vault-kdf-unavailable':
     '这个凭据库的主密码用 Argon2id 派生，当前运行环境不支持，无法解锁。',
   'vault-file-invalid': '凭据库文件无法识别，可能已损坏。',
@@ -269,6 +324,12 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
     '绑定无效：网站 origin 只能包含协议、主机和端口（如 https://example.com）；App 绑定须填写 Bundle ID，以及 Team ID 或绝对路径。',
   'invalid-totp': 'TOTP 密钥无效，应为至少 16 位的 Base32 字符。',
   'master-password-too-short': '主密码至少需要 12 个字符。',
+  'master-password-mismatch': '两次输入的主密码不一致。',
+  'master-password-wrong': '当前主密码不正确。',
+  'passphrase-too-short': '备份口令至少需要 12 个字符。',
+  'passphrase-mismatch': '两次输入的口令不一致。',
+  'backup-invalid': '这个文件不是 Emperor 凭据备份，或已经损坏。',
+  'backup-passphrase-wrong': '备份口令不正确，或文件被改动过。',
   'invalid-request': '请求格式无效。',
   'reveal-unverified': '系统身份验证已取消或不可用。',
   internal: '凭据库操作失败。',
@@ -276,6 +337,11 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
 
 export function vaultErrorText(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause)
-  const reason = /\[credential-vault:([a-z-]+)\]/.exec(message)?.[1]
+  const reason = /\[credential-vault:([a-z0-9-]+)\]/.exec(message)?.[1]
+  if (reason === 'vault-backoff') {
+    // Main says how long: `… retry in 40 s`.
+    const seconds = /retry in (\d+) s/.exec(message)?.[1]
+    if (seconds) return `主密码错误次数过多，请 ${seconds} 秒后再试。`
+  }
   return (reason && REASON_TEXT[reason]) || message
 }

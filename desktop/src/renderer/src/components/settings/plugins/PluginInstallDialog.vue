@@ -22,7 +22,7 @@ import {
   EmptyState,
   Field,
   Select,
-  StatusBadge,
+  Badge,
   TextField,
   type DefinitionItem,
 } from '../ui'
@@ -115,8 +115,7 @@ const url = computed({
           v-if="state.busy"
           title="正在检查 Plugin…"
           description="读取清单并计算内容摘要。"
-          variant="plain"
-          compact
+          variant="inline"
         />
         <p v-else-if="state.error" class="error" role="alert">
           {{ state.error }}
@@ -126,9 +125,9 @@ const url = computed({
       <template v-else>
         <DefinitionList :items="facts" />
         <div v-if="chips.length" class="chips" aria-label="包含的能力">
-          <StatusBadge v-for="chip in chips" :key="chip" mono>
+          <Badge v-for="chip in chips" :key="chip" mono>
             {{ chip }}
-          </StatusBadge>
+          </Badge>
         </div>
         <Field label="安装范围">
           <Select v-model="scope" :options="PLUGIN_SCOPE_OPTIONS" block />
@@ -146,7 +145,9 @@ const url = computed({
 
     <template #footer>
       <template v-if="state.step === 'url'">
-        <Button variant="outline" size="sm" @click="flow.close()">取消</Button>
+        <Button variant="secondary" size="sm" @click="flow.close()"
+          >取消</Button
+        >
         <Button
           variant="primary"
           size="sm"
@@ -158,12 +159,14 @@ const url = computed({
         </Button>
       </template>
       <template v-else-if="!preview">
-        <Button variant="outline" size="sm" @click="flow.close()">
+        <Button variant="secondary" size="sm" @click="flow.close()">
           {{ state.busy ? '取消' : '关闭' }}
         </Button>
       </template>
       <template v-else>
-        <Button variant="outline" size="sm" @click="flow.close()">取消</Button>
+        <Button variant="secondary" size="sm" @click="flow.close()"
+          >取消</Button
+        >
         <Button
           variant="primary"
           size="sm"

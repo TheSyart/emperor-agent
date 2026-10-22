@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * One project folder row of the 项目 section (34px): folder glyph (a
+ * One project folder row of the 项目 section (32px, UI-S11): folder glyph (a
  * chevron on hover), name, session count, and a hover 新建该项目会话 button.
  * Clicking the row folds / unfolds its sessions.
  */
@@ -58,17 +58,17 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   align-items: center;
   gap: var(--space-1-5);
   box-sizing: border-box;
-  height: 34px;
+  height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   user-select: none;
   outline: none;
 }
 
 .project-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .project-row:focus-visible {
@@ -82,13 +82,13 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   justify-content: center;
   width: var(--space-4);
   height: var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .slot .chevron {
   display: none;
-  color: rgb(var(--label-caption));
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  color: rgb(var(--text-3));
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 
 .slot .chevron[data-open] {
@@ -113,13 +113,6 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   white-space: nowrap;
 }
 
-.project-count {
-  flex: none;
-  font-size: var(--fs-xxs);
-  line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
-}
-
 .row-action {
   display: none;
   flex: none;
@@ -129,19 +122,29 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   height: var(--space-5);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .row-action:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .project-row:hover .row-action,
 .project-row:focus-within .row-action {
   display: inline-flex;
+}
+
+.project-count {
+  flex: none;
+  min-width: var(--space-4);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--text-3));
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-row:hover .project-count {

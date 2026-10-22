@@ -1,0 +1,135 @@
+{
+  "vendor": "openrouter",
+  "source": "Shape: openrouter.ai/docs/api/api-reference/models/get-models (data, total_count, links.next; pricing in USD per token as strings) and api-keys/get-current-key (GET /key), checked 2026-10-19. Values from the public list (2026-10-18). Split into two pages to exercise links.next.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://openrouter.ai/api/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "moonshotai/kimi-k3",
+              "canonical_slug": "moonshotai/kimi-k3-20260601",
+              "name": "MoonshotAI: Kimi K3",
+              "created": 1780272000,
+              "context_length": 1048576,
+              "architecture": {
+                "modality": "text+image->text",
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"],
+                "tokenizer": "Other",
+                "instruct_type": null
+              },
+              "pricing": {
+                "prompt": "0.0000006",
+                "completion": "0.0000025",
+                "input_cache_read": "0.00000015"
+              },
+              "top_provider": {
+                "context_length": 1048576,
+                "max_completion_tokens": 943718,
+                "is_moderated": false
+              },
+              "supported_parameters": [
+                "include_reasoning",
+                "max_tokens",
+                "reasoning",
+                "response_format",
+                "structured_outputs",
+                "tool_choice",
+                "tools"
+              ],
+              "reasoning": {
+                "mandatory": true,
+                "default_effort": "max",
+                "supported_efforts": ["low", "high", "max"]
+              },
+              "expiration_date": null
+            },
+            {
+              "id": "meta-llama/llama-4-maverick",
+              "canonical_slug": "meta-llama/llama-4-maverick-17b-128e-instruct",
+              "name": "Meta: Llama 4 Maverick",
+              "created": 1743881822,
+              "context_length": 1048576,
+              "architecture": {
+                "modality": "text+image->text",
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"],
+                "tokenizer": "Llama4"
+              },
+              "pricing": { "prompt": "0.00000015", "completion": "0.0000006" },
+              "top_provider": {
+                "context_length": 1048576,
+                "max_completion_tokens": 16384,
+                "is_moderated": false
+              },
+              "supported_parameters": [
+                "max_tokens",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_p"
+              ],
+              "expiration_date": "2026-12-31"
+            }
+          ],
+          "total_count": 3,
+          "links": {
+            "next": "https://openrouter.ai/api/v1/models?offset=2&limit=2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://openrouter.ai/api/v1/models?offset=2&limit=2"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "openrouter/auto",
+              "name": "Auto Router",
+              "created": 1699401600,
+              "context_length": 2000000,
+              "architecture": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"]
+              },
+              "pricing": { "prompt": "-1", "completion": "-1" },
+              "top_provider": {
+                "context_length": null,
+                "max_completion_tokens": null,
+                "is_moderated": false
+              },
+              "supported_parameters": []
+            }
+          ],
+          "total_count": 3,
+          "links": { "next": null }
+        }
+      }
+    },
+    {
+      "request": { "method": "GET", "url": "https://openrouter.ai/api/v1/key" },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "label": "emperor-test",
+            "limit": null,
+            "usage": 0,
+            "is_free_tier": false
+          }
+        }
+      }
+    }
+  ]
+}

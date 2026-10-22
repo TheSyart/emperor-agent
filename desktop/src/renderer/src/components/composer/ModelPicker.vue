@@ -10,6 +10,8 @@
  * back through the composer controller (switch-model /
  * set-reasoning-effort).
  */
+import EmptyState from '../ui/EmptyState.vue'
+import IconButton from '../ui/IconButton.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ModelEntry, ProviderOption } from '../../types'
 import { DsChevronLeft, DsChevronRight, DsThink } from '../icons/ds'
@@ -17,7 +19,8 @@ import { groupEntriesByProvider } from '../../model/providerGroups'
 import Chip from '../ui/Chip.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
+import SearchField from '../ui/SearchField.vue'
 
 /** Entries above this count get a search box in the model list. */
 const SEARCH_THRESHOLD = 6
@@ -28,7 +31,11 @@ const props = defineProps<{
   label: string
   reasoningLabel: string
   reasoningValue: string
-  reasoningOptions: Array<{ value: string | null; label: string }>
+  reasoningOptions: Array<{
+    value: string | null
+    label: string
+    description?: string
+  }>
   providerOptions: readonly ProviderOption[]
   disabled?: boolean
   title?: string
@@ -37,6 +44,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'select-model': [entryId: string]
   'select-reasoning': [value: string | null]
+  /** 添加模型… at the bottom of the model pane (MOD-04). */
+  'add-model': []
 }>()
 
 type Pane = 'root' | 'model' | 'effort'
@@ -133,10 +142,11 @@ function onKeydown(event: KeyboardEvent): void {
       @click="open = !open"
     >
       <template v-if="activeGroup" #icon>
-        <ProviderLogo
+        <Avatar
+          kind="logo"
           :icon-id="activeGroup.iconId"
           :label="activeGroup.label"
-          size="xs"
+          :size="16"
         />
       </template>
       <span class="name">{{ label }}</span>
@@ -148,11 +158,12 @@ function onKeydown(event: KeyboardEvent): void {
       <template v-if="pane === 'root'">
         <MenuItem keep-open @select="show('model')">
           <template #icon>
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               v-if="activeGroup"
               :icon-id="activeGroup.iconId"
               :label="activeGroup.label"
-              size="xs"
+              :size="16"
             />
           </template>
           模型
@@ -173,26 +184,23 @@ function onKeydown(event: KeyboardEvent): void {
 
       <template v-else-if="pane === 'model'">
         <div class="pane-head">
-          <button
+          <IconButton
             v-if="hasEffort"
-            type="button"
             class="back"
             data-pane-back
-            aria-label="返回"
+            label="返回"
+            size="xs"
             @click="show('root')"
           >
             <DsChevronLeft :size="14" />
-          </button>
+          </IconButton>
           <span class="pane-title">模型 · 下一轮生效</span>
         </div>
-        <input
+        <SearchField
           v-if="searchable"
           v-model="query"
           class="search"
-          type="search"
           placeholder="搜索模型"
-          aria-label="搜索模型"
-          spellcheck="false"
         />
         <section
           v-for="group in groups"
@@ -202,10 +210,11 @@ function onKeydown(event: KeyboardEvent): void {
           :aria-label="group.label"
         >
           <div class="group-title">
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               :icon-id="group.iconId"
               :label="group.label"
-              size="xs"
+              :size="16"
             />
             <span>{{ group.label }}</span>
           </div>
@@ -220,26 +229,35 @@ function onKeydown(event: KeyboardEvent): void {
             {{ entryLabel(entry) }}
           </MenuItem>
         </section>
-        <p v-if="!groups.length" class="empty">没有匹配的模型</p>
+        <EmptyState
+          v-if="!groups.length"
+          class="empty"
+          variant="inline"
+          title="没有匹配的模型"
+        />
+        <MenuItem data-add-model @select="emit('add-model')">
+          添加模型…
+        </MenuItem>
       </template>
 
       <template v-else>
         <div class="pane-head">
-          <button
-            type="button"
+          <IconButton
             class="back"
             data-pane-back
-            aria-label="返回"
+            label="返回"
+            size="xs"
             @click="show('root')"
           >
             <DsChevronLeft :size="14" />
-          </button>
+          </IconButton>
           <span class="pane-title">思考强度</span>
         </div>
         <div role="group" aria-label="思考强度">
           <MenuItem
             v-for="option in reasoningOptions"
             :key="option.label"
+            :description="option.description"
             :selected="effortSelected(option.value)"
             :disabled="disabled"
             @select="emit('select-reasoning', option.value)"
@@ -271,7 +289,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 .effort {
   margin-left: var(--space-1);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .panes {
@@ -285,14 +303,14 @@ function onKeydown(event: KeyboardEvent): void {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cell-chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .pane-head {
@@ -306,8 +324,8 @@ function onKeydown(event: KeyboardEvent): void {
 .pane-title {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-3));
 }
 
 .back {
@@ -318,32 +336,24 @@ function onKeydown(event: KeyboardEvent): void {
   height: var(--space-6);
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
 .back:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
-.back:focus-visible,
-.search:focus-visible {
+.back:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
 .search {
-  height: var(--space-8);
+  width: auto;
   margin: 0 var(--space-1) var(--space-1);
-  padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 
 .group + .group {
@@ -360,15 +370,11 @@ function onKeydown(event: KeyboardEvent): void {
   background: rgb(var(--menu-fill));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-3));
 }
 
 .empty {
-  margin: 0;
-  padding: var(--space-3) var(--space-2-5);
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  margin: 0 var(--space-2-5);
 }
 </style>

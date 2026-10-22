@@ -8,7 +8,11 @@ import type {
   TrajectoryRequestView,
   TrajectoryToolCallBlock,
 } from './contract'
-import { appendTrajectoryPartialLayout, deriveTrajectoryLayout } from './layout'
+import {
+  appendTrajectoryPartialLayout,
+  deriveTrajectoryLayout,
+  safeImageSource,
+} from './layout'
 
 const nodesOf = (nodes: unknown[]): TrajectoryEventNode[] =>
   nodes as unknown as TrajectoryEventNode[]
@@ -96,7 +100,7 @@ describe('deriveTrajectoryLayout', () => {
         },
       ],
     })
-    expect(turns[0]?.groups.map((g) => g.title)).toEqual(['Step 2'])
+    expect(turns[0]?.groups.map((g) => g.title)).toEqual(['第 2 步'])
     expect(turns[0]?.groups[0]?.cells[0]).toMatchObject({
       kind: 'tool',
       text: 'bash',
@@ -219,7 +223,7 @@ describe('deriveTrajectoryLayout', () => {
     const cells = turns[0]?.groups.flatMap((g) => g.cells) ?? []
     expect(cells.find((c) => c.kind === 'message')?.timeSeconds).toBeNull()
     expect(
-      turns[0]?.groups.find((g) => g.title === 'Step 1')?.description,
+      turns[0]?.groups.find((g) => g.title === '第 1 步')?.description,
     ).toBeUndefined()
   })
 
@@ -361,9 +365,9 @@ describe('deriveTrajectoryLayout', () => {
 
     expect(turns).toHaveLength(1)
     expect(turns[0]?.groups.map((group) => group.title)).toEqual([
-      'Message',
-      'Step 1',
-      'Step 2',
+      '消息',
+      '第 1 步',
+      '第 2 步',
     ])
     expect(turns[0]?.groups[2]?.cells).toMatchObject([
       { kind: 'user', previewMarkdown: 'change direction', sourceSeq: 3 },
@@ -441,7 +445,7 @@ describe('deriveTrajectoryLayout', () => {
       turn: 2,
       groups: [
         {
-          title: 'Step 3',
+          title: '第 3 步',
           cells: [
             { kind: 'user', previewMarkdown: 'change direction' },
             { kind: 'message', previewMarkdown: 'continued' },
@@ -507,7 +511,7 @@ describe('deriveTrajectoryLayout', () => {
     expect(turns.map((turn) => turn.turn)).toEqual([1, null, 2])
     expect(turns[1]?.groups).toMatchObject([
       {
-        title: 'Compaction 3',
+        title: '压缩 #3',
         cells: [
           {
             kind: 'compacted',
@@ -750,10 +754,10 @@ describe('deriveTrajectoryLayout', () => {
         group.cells.map((cell) => cell.text || cell.kind),
       ]),
     ).toEqual([
-      ['Message', ['Initial System Prompt', 'user']],
-      ['Step 1', ['message']],
-      ['Message', ['System Prompt Updated']],
-      ['Step 2', ['message']],
+      ['消息', ['初始系统提示词', 'user']],
+      ['第 1 步', ['message']],
+      ['消息', ['系统提示词已更新']],
+      ['第 2 步', ['message']],
     ])
     const update = turns[0]?.groups[2]?.cells[0]
     expect(update?.promptDetail?.system).toBe('b')
@@ -922,5 +926,17 @@ describe('child call cells (jobs, workflow members)', () => {
       'p1:member:1:member:1',
     ])
     expect(cells.map((cell) => cell.index)).toEqual([1, 2, 3, 4])
+  })
+})
+
+describe('trajectory image sources (UI-38)', () => {
+  it('shows only images that are already on this machine', () => {
+    expect(safeImageSource('data:image/png;base64,iVBORw0KGgo=')).toBe(
+      'data:image/png;base64,iVBORw0KGgo=',
+    )
+    expect(safeImageSource('blob:app://bundle/1')).toBe('blob:app://bundle/1')
+    expect(safeImageSource('https://tracker.example/p.png')).toBeUndefined()
+    expect(safeImageSource('http://192.168.1.1/a.png')).toBeUndefined()
+    expect(safeImageSource('javascript:alert(1)')).toBeUndefined()
   })
 })

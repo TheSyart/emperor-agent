@@ -141,7 +141,7 @@ describe('网站设置', () => {
       .find((button) => button.textContent?.trim() === '撤销')!
       .click()
     await settle()
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(notice?.textContent).toContain('网站权限没有保存')
     expect(

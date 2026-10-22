@@ -7,7 +7,6 @@ import type {
   ControlInteraction,
   MessageReference,
   PendingState,
-  QueueDraftRecovery,
   QueuedPromptItem,
   RequestedSkill,
   RuntimeEventEnvelope,
@@ -26,13 +25,20 @@ import {
 } from '../runtime/handlers/goals'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
 import { isGitOperationCompletedEvent } from '../runtime/handlers/git'
+import { sessionLogNotice } from '../runtime/handlers/sessionLog'
 import {
   runtimeNoticeFromEvent,
   type RuntimeNotice,
 } from '../runtime/notifications'
 import type { TaskProjection } from '../runtime/handlers/tasks'
-import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
-import { isDraftSessionId } from '../runtime/sessionDrafts'
+import {
+  CORE_BRIDGE_UNAVAILABLE_MESSAGE,
+  hasCoreBridge,
+  invokeCore,
+  onCoreEvent,
+  setViewingSession,
+} from '../api/backend'
+import { draftSessionOf, isDraftSessionId } from '../runtime/sessionDrafts'
 import { core } from '../api/http'
 import { ActionEffectStore } from '../runtime/actionEffect'
 import {
@@ -75,6 +81,13 @@ import {
 } from '../runtime/rendererProjection'
 import { RuntimeControllerManager } from '../runtime/runtimeController'
 
+/** Transient per-session run state (sidebar marks, background pending). */
+interface SessionRuntimeState {
+  running: boolean
+  attention: boolean
+  pending: PendingState
+}
+
 function nextId(prefix: string) {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -102,6 +115,8 @@ export function useRuntime(options: {
   refreshMemory: (shouldToast?: boolean) => Promise<void>
   refreshCommands: () => Promise<void>
   showToast: (message: string) => void
+  /** Sticky error toast with 「复制详情」 (App: showError); else showToast. */
+  showError?: (error: unknown) => void
   resolveDraftSession?: (id: string) => SessionInfo | undefined
   onSessionCreated?: (
     event: Extract<WsEvent, { event: 'session_created' }>,
@@ -114,8 +129,10 @@ export function useRuntime(options: {
     interaction?: ControlInteraction | null,
   ) => void
   refreshSessions?: () => Promise<void>
-  /** Live subagent_* event of a session (sidebar child counts refresh). */
-  onSubagentEvent?: (sessionId: string) => void
+  /** Root-scoped topology/state invalidation, including inactive roots. */
+  onAgentTreeChanged?: (
+    event: Extract<WsEvent, { event: 'agent_tree_changed' }>,
+  ) => void
   /**
    * A live event worth a bell notification (scheduler run done / failed,
    * a waiting question / approval / plan, a finished turn, a finished git
@@ -125,7 +142,18 @@ export function useRuntime(options: {
   onNotify?: (notice: RuntimeNotice) => void
 }) {
   const queuedPrompts = ref<QueuedPromptItem[]>([])
-  const queueDraftRecovery = ref<QueueDraftRecovery | null>(null)
+  /** Sends waiting for the host to take them, by client message id. */
+  const admissions = new Map<string, (accepted: boolean) => void>()
+  /**
+   * Drafts whose first message is on its way (FIX-13): draft id → the
+   * session Core creates for it, named by `session_created` (null: the
+   * submit failed first). A stop or another message sent meanwhile waits
+   * for it instead of reaching Core without a session.
+   */
+  const promotions = new Map<
+    string,
+    { session: Promise<string | null>; settle: (id: string | null) => void }
+  >()
   const pendingInteractionsBySession = reactive<
     Record<string, ControlInteraction>
   >({})
@@ -137,19 +165,12 @@ export function useRuntime(options: {
   const goalProjection = reactive<GoalProjectionState>(
     createGoalProjectionState(),
   )
-  // P1-7：per-session 瞬态运行/提醒状态，不落盘
-  const sessionRuntimeStates = reactive<
-    Record<
-      string,
-      {
-        running: boolean
-        attention: boolean
-        lastSeq: number
-        pending: PendingState
-      }
-    >
-  >({})
-  const lastSeq = ref(0)
+  // P1-7：per-session 瞬态运行/提醒状态，不落盘。An entry is replaced only
+  // when one of its values changes (FIX-04): a streaming delta leaves every
+  // entry, and so the sidebar that reads them, untouched.
+  const sessionRuntimeStates = reactive<Record<string, SessionRuntimeState>>({})
+  /** Last session told to main as the one on screen. */
+  let viewingSession: string | null | undefined
   let rehydrating = false
   /** Message of the latest turn `error` event (submit-rejection dedupe). */
   let lastTurnErrorMessage = ''
@@ -198,9 +219,9 @@ export function useRuntime(options: {
   const sessionEffectExecutor = new SessionEffectExecutor({
     isAvailable: hasCoreBridge,
     subscribe: onCoreEvent,
+    // IPC already hands each listener its own structured clone.
     onEvent: (event) => {
-      if (event && typeof event === 'object')
-        handleSocketEvent(JSON.stringify(event))
+      if (event && typeof event === 'object') handleCoreEvent(event)
     },
   })
   const sessionStore = new ActionEffectStore<
@@ -261,17 +282,25 @@ export function useRuntime(options: {
     status.value = 'error'
     busy.value = false
     updatePending(
-      '桌面 IPC 不可用',
-      '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      '无法连接 Emperor 核心',
+      '请在 Emperor 桌面窗口中使用；普通浏览器连不上 Emperor 核心。',
       'error',
     )
     if (showToast && !bridgeUnavailableToastShown) {
       bridgeUnavailableToastShown = true
-      options.showToast('桌面 IPC 不可用，请在 Electron 桌面窗口中使用')
+      options.showToast(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
     }
   }
 
-  function sendMessage(payload: string | ChatSendPayload) {
+  /**
+   * Submit one message. `false` when it was refused here; otherwise a
+   * promise that turns `true` once the host takes it (its user message or
+   * interjection arrives, or the submit resolves) and `false` if the submit
+   * fails first. The composer restores the draft on `false`.
+   */
+  function sendMessage(
+    payload: string | ChatSendPayload,
+  ): boolean | Promise<boolean> {
     const normalized =
       typeof payload === 'string'
         ? {
@@ -349,6 +378,7 @@ export function useRuntime(options: {
     requestedSkills: RequestedSkill[],
     hasCapabilityRefs: boolean,
     references: MessageReference[] = [],
+    payload?: ChatSendPayload,
   ): QueuedPromptItem {
     const id = nextId('prompt')
     const prompt: QueuedPromptItem = {
@@ -367,29 +397,42 @@ export function useRuntime(options: {
       requestedSkillNames: requestedSkills.map((skill) => skill.name),
       hasCapabilityRefs: hasCapabilityRefs || references.length > 0,
       ...(references.length ? { references } : {}),
+      ...(payload ? { payload } : {}),
     }
     queuedPrompts.value.push(prompt)
     return prompt
   }
 
-  function sendMessageViaCore(opts: {
-    text: string
-    displayText: string
-    attachments: AttachmentRef[]
-    requestedSkills: RequestedSkill[]
-    references: MessageReference[]
-    delivery?: 'queue' | 'interject'
-  }) {
-    const activeSessionId = sessionId.value
+  function sendMessageViaCore(
+    opts: {
+      text: string
+      displayText: string
+      attachments: AttachmentRef[]
+      requestedSkills: RequestedSkill[]
+      references: MessageReference[]
+      delivery?: 'queue' | 'interject'
+    },
+    activeSessionId = sessionId.value,
+  ): boolean | Promise<boolean> {
     if (!activeSessionId) {
       updatePending('尚无会话', '请先创建会话', 'running', 3000)
       return false
     }
+    // FIX-13: the draft's first message is creating its session; this one
+    // goes there once it exists, not into a second new session.
+    const promoting = promotions.get(activeSessionId)?.session
+    if (promoting)
+      return promoting.then((id) => (id ? sendMessageViaCore(opts, id) : false))
     // P1-6：draft 首条提交带上 client_draft_id 与项目元数据，由 Core 创建真实 session
     const draftPayload = isDraftSessionId(activeSessionId)
       ? draftSubmitPayload(activeSessionId)
       : null
-    const userMsg = opts.delivery
+    if (draftPayload) {
+      let settle!: (id: string | null) => void
+      const session = new Promise<string | null>((done) => (settle = done))
+      promotions.set(activeSessionId, { session, settle })
+    }
+    const userMsg: { id: string } = opts.delivery
       ? enqueueLocalPrompt(
           opts.displayText || opts.text,
           opts.delivery,
@@ -397,9 +440,21 @@ export function useRuntime(options: {
           opts.requestedSkills,
           opts.displayText !== opts.text,
           opts.references,
+          {
+            content: opts.text,
+            displayContent: opts.displayText || opts.text,
+            attachments: [...opts.attachments],
+            requestedSkills: [...opts.requestedSkills],
+            ...(opts.references.length
+              ? { references: [...opts.references] }
+              : {}),
+          },
         )
       : beginLocalTurn()
     status.value = 'ready'
+    const admitted = new Promise<boolean>((resolve) => {
+      admissions.set(userMsg.id, resolve)
+    })
     void invokeCore('chat.submit', {
       content: opts.text,
       displayContent: opts.displayText || opts.text,
@@ -410,51 +465,54 @@ export function useRuntime(options: {
       sessionId: activeSessionId,
       ...(opts.delivery ? { delivery: opts.delivery } : {}),
       ...(draftPayload ?? {}),
-    }).catch((err) => {
-      if (opts.delivery) {
-        queuedPrompts.value = queuedPrompts.value.filter(
-          (prompt) => prompt.id !== userMsg.id,
-        )
-        if (queuedPromptCancellationCode(err)) return
-        if (promptQueueFullCode(err)) {
-          queueDraftRecovery.value = {
-            sessionId: activeSessionId,
-            payload: {
-              content: opts.text,
-              displayContent: opts.displayText,
-              delivery: opts.delivery,
-              requestedSkills: [...opts.requestedSkills],
-              attachments: [...opts.attachments],
-              ...(opts.references.length
-                ? { references: [...opts.references] }
-                : {}),
-            },
+    })
+      .then((result) => {
+        settlePromotion(activeSessionId, result?.activeSessionId ?? null)
+        settleAdmission(userMsg.id, true)
+      })
+      .catch((err) => {
+        settlePromotion(activeSessionId, null)
+        if (opts.delivery) {
+          queuedPrompts.value = queuedPrompts.value.filter(
+            (prompt) => prompt.id !== userMsg.id,
+          )
+          // The user cancelled (or took back to edit) a prompt the queue had
+          // already taken: nothing to restore.
+          if (queuedPromptCancellationCode(err)) {
+            settleAdmission(userMsg.id, true)
+            return
           }
-          options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
-          void refreshQueuedPrompts(activeSessionId)
+          settleAdmission(userMsg.id, false)
+          if (promptQueueFullCode(err)) {
+            options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
+            void refreshQueuedPrompts(activeSessionId)
+            return
+          }
+          reportError(err)
           return
         }
-        options.showToast(displayError(err))
-        return
-      }
-      handleChatSubmitError(err)
-    })
-    return true
+        // A turn that failed after its message was taken stays sent.
+        settleAdmission(userMsg.id, false)
+        handleChatSubmitError(err)
+      })
+    return admitted
   }
 
   function draftSubmitPayload(draftId: string): Record<string, unknown> {
-    const draft = options.resolveDraftSession?.(draftId)
     return {
       clientDraftId: draftId,
-      draftSession: {
-        mode: draft?.mode === 'build' ? 'build' : 'chat',
-        project: {
-          project_id: draft?.project_id ?? null,
-          project_path: draft?.project_path ?? null,
-          project_name: draft?.project_name ?? null,
-        },
-      },
+      draftSession: draftSessionOf(options.resolveDraftSession?.(draftId)),
     }
+  }
+
+  function settlePromotion(draftId: string, id: string | null): void {
+    promotions.get(draftId)?.settle(id)
+    promotions.delete(draftId)
+  }
+
+  /** The session a draft's first message is creating, once Core names it (null: none). */
+  async function draftSession(draftId: string): Promise<string | null> {
+    return (await promotions.get(draftId)?.session) ?? null
   }
 
   async function refreshQueuedPrompts(ownerSessionId = sessionId.value) {
@@ -471,13 +529,29 @@ export function useRuntime(options: {
         sessionId: ownerSessionId,
       })
       if (ownerSessionId !== sessionId.value) return
+      // Keep the full message this window sent, so 编辑 brings its files back.
+      const sent = new Map(
+        queuedPrompts.value.flatMap((prompt) =>
+          prompt.payload
+            ? [[prompt.clientMessageId, prompt.payload] as const]
+            : [],
+        ),
+      )
       queuedPrompts.value = records.map((record) => ({
         id: record.id,
         turnId: record.turnId,
         clientMessageId: record.clientMessageId,
         content: record.displayContent || '',
         delivery: record.delivery,
-        status: record.delivery === 'interject' ? 'interjecting' : 'queued',
+        status:
+          record.state === 'failed-previous'
+            ? 'failed-previous'
+            : record.delivery === 'interject'
+              ? 'interjecting'
+              : 'queued',
+        ...(record.state === 'failed-previous' && record.reason
+          ? { holdReason: record.reason }
+          : {}),
         supportsInterjection: record.supportsInterjection,
         createdOrder: record.createdOrder,
         attachmentCount: record.attachmentIds.length,
@@ -488,15 +562,19 @@ export function useRuntime(options: {
           (Boolean(record.displayContent) &&
             record.displayContent !== record.content),
         ...(record.references?.length ? { references: record.references } : {}),
+        ...(sent.has(record.clientMessageId)
+          ? { payload: sent.get(record.clientMessageId) }
+          : {}),
       }))
     } catch (error) {
-      options.showToast(displayError(error))
+      reportError(error)
     }
   }
 
+  /** `send` runs a held prompt (发送); the queue is re-read, it may still wait its turn. */
   async function manageQueuedPrompt(
     promptId: string,
-    action: 'cancel' | 'interject',
+    action: 'cancel' | 'interject' | 'send',
   ): Promise<boolean> {
     if (!sessionId.value || isDraftSessionId(sessionId.value)) return false
     try {
@@ -515,12 +593,16 @@ export function useRuntime(options: {
         await refreshQueuedPrompts()
         return false
       }
+      if (action === 'send') {
+        await refreshQueuedPrompts()
+        return true
+      }
       queuedPrompts.value = queuedPrompts.value.filter(
         (prompt) => prompt.id !== promptId,
       )
       return true
     } catch (error) {
-      options.showToast(displayError(error))
+      reportError(error)
       await refreshQueuedPrompts()
       return false
     }
@@ -562,7 +644,15 @@ export function useRuntime(options: {
   async function stopActive() {
     updatePending('正在停止当前任务...', '', 'running')
     try {
-      const data = await core('chat.stopRuntime', {})
+      // Stop the session on screen, named (KRN-01: Core has no default). A
+      // draft is stopped in the session its first message is creating, as
+      // soon as Core names it; with nothing sent there is nothing to stop
+      // (FIX-13).
+      const target = sessionId.value
+      const draft = isDraftSessionId(target)
+      const named = draft ? await draftSession(target) : target || null
+      if (draft && !named) return handleStopResult({ cancelled: 0 })
+      const data = await core('chat.stopRuntime', { sessionId: named })
       return handleStopResult(data)
     } catch (err) {
       updatePending(
@@ -656,7 +746,7 @@ export function useRuntime(options: {
 
   async function handleControlPayloadError(error: unknown) {
     updatePending()
-    options.showToast(displayError(error))
+    reportError(error)
     await refreshControlAndSessions()
   }
 
@@ -673,6 +763,11 @@ export function useRuntime(options: {
       // Keep the original control error as the visible failure; refresh is best-effort.
     }
     await options.refreshSessions?.().catch(() => undefined)
+  }
+
+  function reportError(error: unknown): void {
+    if (options.showError) options.showError(error)
+    else options.showToast(displayError(error))
   }
 
   function displayError(error: unknown) {
@@ -723,42 +818,68 @@ export function useRuntime(options: {
     )
   }
 
-  function clearQueueDraftRecovery(ownerSessionId?: string): void {
-    const recovery = queueDraftRecovery.value
-    if (!recovery) return
-    if (ownerSessionId && recovery.sessionId !== ownerSessionId) return
-    queueDraftRecovery.value = null
+  function settleAdmission(clientMessageId: string, accepted: boolean): void {
+    const resolve = admissions.get(clientMessageId)
+    if (!resolve) return
+    admissions.delete(clientMessageId)
+    resolve(accepted)
   }
 
   function syncSessionProjection(state: SessionProjectionState): void {
     sessionId.value = state.activeSessionId
-    lastSeq.value = state.activeLastSeq
-    status.value = state.transport
-    for (const [id, value] of Object.entries(state.sessions)) {
-      sessionRuntimeStates[id] = {
-        running: value.running,
-        attention: value.attention,
-        lastSeq: value.lastSeq,
-        pending:
-          sessionRuntimeStates[id]?.pending ??
-          createPendingProjectionState().pending,
-      }
+    const viewing =
+      state.activeSessionId && !isDraftSessionId(state.activeSessionId)
+        ? state.activeSessionId
+        : null
+    if (viewing !== viewingSession) {
+      viewingSession = viewing
+      setViewingSession(viewing)
     }
+    status.value = state.transport
+    // A session with a runtime controller takes the controller's state
+    // (written right below), so its projection values are not written first.
+    const controlled = runtimeControllers.states()
+    for (const [id, value] of Object.entries(state.sessions))
+      if (!(id in controlled))
+        writeSessionRuntimeState(
+          id,
+          value.running,
+          value.attention,
+          sessionRuntimeStates[id]?.pending ??
+            createPendingProjectionState().pending,
+        )
     syncRuntimeControllerStates()
   }
 
   function syncRuntimeControllerStates(): void {
     const states = runtimeControllers.states()
-    for (const [id, value] of Object.entries(states)) {
-      sessionRuntimeStates[id] = {
-        running: value.running,
-        attention: value.attention,
-        lastSeq: value.lastSeq,
-        pending: { ...value.pending },
-      }
-    }
-    const selected = runtimeControllers.selected()
-    if (selected) lastSeq.value = selected.state.lastSeq
+    for (const [id, value] of Object.entries(states))
+      writeSessionRuntimeState(
+        id,
+        value.running,
+        value.attention,
+        value.pending,
+      )
+  }
+
+  /** Replace one session's entry, only when a value really changed. */
+  function writeSessionRuntimeState(
+    id: string,
+    running: boolean,
+    attention: boolean,
+    pending: PendingState,
+  ): void {
+    const current = sessionRuntimeStates[id]
+    if (
+      current !== undefined &&
+      current.running === running &&
+      current.attention === attention &&
+      current.pending.label === pending.label &&
+      current.pending.detail === pending.detail &&
+      current.pending.tone === pending.tone
+    )
+      return
+    sessionRuntimeStates[id] = { running, attention, pending: { ...pending } }
   }
 
   function settleSessionRuntime(
@@ -899,11 +1020,16 @@ export function useRuntime(options: {
   }
 
   function restoreFromRuntimeEvents(events: RuntimeEventEnvelope[]) {
-    busy.value = false
-    updatePending()
     const scope = String(
       sessionId.value || options.boot.value?.runtime?.sessionId || '',
     )
+    // A bootstrap taken before live events already handled for this session
+    // (the turn ended during the round trip) must not bring busy back: the
+    // live state is newer (FIX-03, UI-20).
+    const liveSeq = runtimeControllers.controller(scope).state.lastSeq
+    const stale = Number(options.boot.value?.runtime?.latestSeq ?? 0) < liveSeq
+    busy.value = false
+    updatePending()
     rehydrating = true
     try {
       const adaptedEvents = events as WsEvent[]
@@ -935,12 +1061,13 @@ export function useRuntime(options: {
       rehydrating = false
     }
     const runtime = options.boot.value?.runtime
+    const liveRunning = runtimeControllers.controller(scope).state.running
+    if (stale) {
+      busy.value = liveRunning
+      return
+    }
     busy.value =
-      runtime?.busy === false
-        ? false
-        : Boolean(
-            runtime?.busy || runtimeControllers.controller(scope).state.running,
-          )
+      runtime?.busy === false ? false : Boolean(runtime?.busy || liveRunning)
     if (runtime?.busy === false) clearAllSessionRunning()
   }
 
@@ -956,19 +1083,25 @@ export function useRuntime(options: {
     boot.invalidSkills = catalog.invalid
   }
 
-  function handleSocketEvent(raw: string) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      handleChatError('事件通道返回了无法解析的数据', { transport: true })
-      return
-    }
-    if (!isRuntimeEventWire(parsed)) {
+  function handleCoreEvent(input: object) {
+    if (!isRuntimeEventWire(input)) {
       handleChatError('事件通道返回了未注册的事件', { transport: true })
       return
     }
-    const data = parsed as WsEvent
+    const data = input as WsEvent
+    const admittedId =
+      data.event === 'user_message'
+        ? data.client_message_id
+        : data.event === 'prompt_interjected'
+          ? data.prompt_id
+          : undefined
+    if (admittedId) settleAdmission(String(admittedId), true)
+    if (data.event === 'agent_tree_changed') options.onAgentTreeChanged?.(data)
+    if (data.event === 'session_log_state') {
+      const notice = sessionLogNotice(data)
+      if (notice) options.showToast(notice)
+      return
+    }
 
     const sessionTransition = sessionStore.dispatch({
       type: 'runtime_event_received',
@@ -1024,6 +1157,8 @@ export function useRuntime(options: {
     origin: 'live' | 'replay',
   ): void {
     if (data.event === 'session_created') {
+      if (data.client_draft_id && data.session?.id)
+        settlePromotion(data.client_draft_id, data.session.id)
       if (
         data.client_draft_id &&
         data.client_draft_id === sessionId.value &&
@@ -1049,6 +1184,22 @@ export function useRuntime(options: {
       // The queue tray lists the host inbox; re-read it on every change.
       if (origin === 'live')
         void refreshQueuedPrompts(eventOwnerSessionId(data) || sessionId.value)
+      return
+    }
+
+    if (data.event === 'queue_item_state') {
+      if (origin !== 'live') return
+      const owner = eventOwnerSessionId(data) || sessionId.value
+      // A step took it (sending) or it was discarded: it leaves the tray.
+      if (data.state === 'sending' || data.state === 'discarded') {
+        if (owner === sessionId.value)
+          queuedPrompts.value = queuedPrompts.value.filter(
+            (prompt) => prompt.id !== data.prompt_id,
+          )
+        return
+      }
+      // Held (待发送) or back in line: re-read for the row and its reason.
+      void refreshQueuedPrompts(owner)
       return
     }
 
@@ -1121,9 +1272,6 @@ export function useRuntime(options: {
     // Git receipts carry no view state: they only reach the bell
     // (notifyRuntimeEvent), whichever session they belong to.
     if (isGitOperationCompletedEvent(data)) return
-
-    if (origin === 'live' && data.event.startsWith('subagent_'))
-      options.onSubagentEvent?.(eventOwnerSessionId(data) || sessionId.value)
   }
 
   /**
@@ -1155,7 +1303,10 @@ export function useRuntime(options: {
       case 'turn_phase':
         if (data.phase === 'started') busy.value = true
         return true
+      // assistant_reset: a retried request dropped its partial reply; the
+      // transcript already discards it from the raw log (nodes/assistant.ts).
       case 'message_delta':
+      case 'assistant_reset':
       case 'agent_thought':
       case 'tool_call':
       case 'tool_run_started':
@@ -1201,15 +1352,12 @@ export function useRuntime(options: {
   function handleSchedulerEvent(data: WsEvent) {
     updateSchedulerBootstrap(data)
     if (data.event === 'scheduler_run_start') {
-      updatePending(
-        'Scheduler 正在执行任务',
-        data.job?.name || data.job?.id || '',
-      )
+      updatePending('定时任务正在运行', data.job?.name || data.job?.id || '')
       return
     }
     if (data.event === 'scheduler_run_done') {
       updatePending(
-        'Scheduler 任务已完成',
+        '定时任务已完成',
         data.job?.name || data.job?.id || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1218,7 +1366,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_error') {
       updatePending(
-        'Scheduler 任务失败',
+        '定时任务失败',
         data.error || data.job?.state?.lastError || '',
         'error',
       )
@@ -1226,7 +1374,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_cancelled') {
       updatePending(
-        'Scheduler 任务已停止',
+        '定时任务已停止',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1235,7 +1383,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_skipped') {
       updatePending(
-        'Scheduler 任务已跳过',
+        '定时任务已跳过',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1244,7 +1392,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_interrupted') {
       updatePending(
-        'Scheduler 任务已中断',
+        '定时任务已中断',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1331,8 +1479,6 @@ export function useRuntime(options: {
 
   return {
     queuedPrompts,
-    queueDraftRecovery,
-    clearQueueDraftRecovery,
     pendingInteractionsBySession,
     busy,
     status,
@@ -1381,6 +1527,7 @@ export function useRuntime(options: {
     approvePlan,
     cancelInteraction,
     stopActive,
+    draftSession,
     restoreRuntimeState,
   }
 }

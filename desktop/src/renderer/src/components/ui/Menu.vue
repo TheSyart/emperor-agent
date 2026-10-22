@@ -13,6 +13,8 @@
  * - label?: aria-label for the menu.
  * - placement?: preferred side, 'top' (default, composer menus) or
  *   'bottom' (dropdowns such as the settings Select); flips when cramped.
+ * - align?: 'end' (default: right edges line up) or 'start' (left edges,
+ *   for a trigger at the start of a pane).
  * Slots: default (MenuItem children), `footer` (hairline-separated block).
  */
 import {
@@ -34,8 +36,15 @@ const props = withDefaults(
     dense?: boolean
     label?: string
     placement?: 'top' | 'bottom'
+    align?: 'start' | 'end'
   }>(),
-  { width: 218, dense: false, label: undefined, placement: 'top' },
+  {
+    width: 218,
+    dense: false,
+    label: undefined,
+    placement: 'top',
+    align: 'end',
+  },
 )
 
 const open = defineModel<boolean>('open', { default: false })
@@ -53,6 +62,7 @@ const floating = useFloatingMenu({
   fallbackHeight: 240,
   onClose: close,
   prefer: () => props.placement,
+  align: () => props.align,
 })
 
 provide(MENU_CONTEXT, reactive({ close, dense: toRef(props, 'dense') }))
@@ -128,7 +138,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   max-width: 360px;
   padding: var(--space-1);
-  border: 1px solid var(--border-inverted);
+  border: 1px solid var(--stroke-inverted);
   border-radius: var(--radius-card);
   background: rgb(var(--menu-fill));
   box-shadow: var(--shadow-lv3);
@@ -147,6 +157,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   margin-top: var(--space-1);
   padding-top: var(--space-1);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 </style>

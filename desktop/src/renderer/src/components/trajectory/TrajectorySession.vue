@@ -31,7 +31,7 @@ import TrajectoryTable from './TrajectoryTable.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import TrajectoryToolbar from './TrajectoryToolbar.vue'
 import InspectorPanel from './inspector/InspectorPanel.vue'
-import { focusCallStep } from './focusCallRetry'
+import { focusCallStep } from '../../conversation/focusCallRetry'
 import { useTrajectory } from './useTrajectory'
 import {
   INSPECTOR_DEFAULT,
@@ -334,8 +334,8 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
-  background: rgb(var(--bg-layer-1));
+  color: rgb(var(--text-1));
+  background: rgb(var(--surface-base));
 }
 
 .split {
@@ -358,8 +358,8 @@ onBeforeUnmount(() => {
   width: var(--inspector-width);
   max-width: calc(100% - 280px);
   min-height: 0;
-  border-left: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
+  border-left: 1px solid var(--stroke-2);
+  background: rgb(var(--surface-base));
 }
 
 .resize-handle {

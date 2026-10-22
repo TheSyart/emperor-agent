@@ -36,6 +36,9 @@ import { FakeComputerUsePort } from '../testing/fake-port'
 import { createExternalTools } from './external-tools'
 import type { ToolRuntime } from './runtime'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const NOW = Date.parse('2026-10-01T12:00:00Z')
 
 function kit(
@@ -296,9 +299,12 @@ describe('the history setting decides whether the tool is offered', () => {
         .schemas()
         .some((schema) => schema.name === 'external_history_search')
     expect(offered()).toBe(true)
-    fixture.api.computerUse.setExternalBrowserSettings({ history: 'never' })
+    fixture.api.computerUse.setExternalBrowserSettings(
+      { history: 'never' },
+      VIEW,
+    )
     expect(offered()).toBe(false)
-    fixture.api.computerUse.setExternalBrowserSettings({ history: 'ask' })
+    fixture.api.computerUse.setExternalBrowserSettings({ history: 'ask' }, VIEW)
     expect(offered()).toBe(true)
   })
 })

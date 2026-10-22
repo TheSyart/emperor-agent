@@ -32,7 +32,7 @@ import {
 } from '../../../api/skills'
 import { useAppContext } from '../../../composables/useAppContext'
 import type { SkillInfo } from '../../../types'
-import { CodeEditor, DefinitionList, EmptyState, StatusBadge } from '../ui'
+import { CodeEditor, DefinitionList, EmptyState, Badge } from '../ui'
 import SkillConfirmDialog from './SkillConfirmDialog.vue'
 import SkillIssues from './SkillIssues.vue'
 import {
@@ -218,7 +218,11 @@ async function remove() {
 async function revealFolder() {
   if (!skill.value) return
   try {
-    await openPath(skillFolder(skill.value))
+    await openPath({
+      kind: 'skill',
+      name: skill.value.name,
+      sessionId: props.sessionId,
+    })
   } catch (error) {
     ctx.showToast(skillErrorInfo(error).message)
   }
@@ -278,19 +282,20 @@ defineExpose({ reload: () => load(false), dirty })
       v-if="loadError && !detail"
       title="无法打开这个 Skill"
       :description="loadError"
+      framed
     >
-      <Button size="sm" variant="outline" @click="load()">重试</Button>
+      <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>
 
     <template v-else-if="skill">
       <header class="head">
         <div class="title-line">
           <h3 class="name">{{ name }}</h3>
-          <StatusBadge :tone="skillSourceTone(skill)">
+          <Badge :tone="skillSourceTone(skill)">
             {{ skillSourceLabel(skill) }}
-          </StatusBadge>
-          <StatusBadge v-if="readOnly">只读</StatusBadge>
-          <StatusBadge v-if="dirty" tone="accent">未保存</StatusBadge>
+          </Badge>
+          <Badge v-if="readOnly">只读</Badge>
+          <Badge v-if="dirty" tone="accent">未保存</Badge>
         </div>
         <p class="description">{{ skill.description || '没有描述' }}</p>
       </header>
@@ -305,14 +310,14 @@ defineExpose({ reload: () => load(false), dirty })
       <div class="skill-editor">
         <div class="skill-editor-head">
           <h4 class="skill-editor-title">SKILL.md</h4>
-          <StatusBadge
+          <Badge
             v-if="badge"
             :tone="badge.tone"
-            dot
+            variant="dot-label"
             data-testid="skill-validation"
           >
             {{ badge.label }}
-          </StatusBadge>
+          </Badge>
           <Button
             v-if="dirty"
             size="sm"
@@ -412,8 +417,8 @@ defineExpose({ reload: () => load(false), dirty })
   min-width: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -421,7 +426,7 @@ defineExpose({ reload: () => load(false), dirty })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -433,7 +438,7 @@ defineExpose({ reload: () => load(false), dirty })
   background: rgb(var(--selector-fill));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-wrap: pretty;
 }
 
@@ -456,8 +461,8 @@ defineExpose({ reload: () => load(false), dirty })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .revert {

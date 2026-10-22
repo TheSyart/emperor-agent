@@ -9,7 +9,7 @@
  * `security` command; tests always pass a stand-in so no authorization prompt
  * is ever raised.
  */
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { createDecipheriv, pbkdf2Sync } from 'node:crypto'
 import type { BrowserId, SecurityRunner } from './types'
 
@@ -65,14 +65,27 @@ export function safeStorageService(browser: BrowserId): {
     : { service: 'Chrome Safe Storage', account: 'Chrome' }
 }
 
-/** The default runner — the only place the real Keychain prompt can appear.
- *  Never called under test: every caller there injects a stand-in. */
-function runSecurity(service: string, account: string): string {
-  return execFileSync(
-    'security',
-    ['find-generic-password', '-w', '-s', service, '-a', account],
-    { encoding: 'utf8' },
-  )
+/** How the browser's Safe Storage password is read (absolute path, bounded wait). */
+export const SECURITY_COMMAND = {
+  executable: '/usr/bin/security',
+  timeoutMs: 60_000,
+} as const
+
+/**
+ * The default runner — the only place the real Keychain prompt can appear.
+ * Asynchronous so the main process keeps running while the user answers
+ * the prompt (MAIN-7); a prompt left open gives up after a minute. Never
+ * called under test: every caller there injects a stand-in.
+ */
+function runSecurity(service: string, account: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      SECURITY_COMMAND.executable,
+      ['find-generic-password', '-w', '-s', service, '-a', account],
+      { encoding: 'utf8', timeout: SECURITY_COMMAND.timeoutMs },
+      (error, stdout) => (error ? reject(error) : resolve(stdout)),
+    )
+  })
 }
 
 /**
@@ -80,10 +93,10 @@ function runSecurity(service: string, account: string): string {
  * Keychain, which raises an authorization prompt — so tests always pass a
  * stand-in `run`, and automation never reaches the real `security` command.
  */
-export function readSafeStoragePassword(
+export async function readSafeStoragePassword(
   browser: BrowserId,
   run: SecurityRunner = runSecurity,
-): string {
+): Promise<string> {
   const { service, account } = safeStorageService(browser)
-  return run(service, account).trim()
+  return (await run(service, account)).trim()
 }

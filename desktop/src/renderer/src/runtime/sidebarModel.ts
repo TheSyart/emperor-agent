@@ -27,6 +27,8 @@ export interface SidebarSearchResult {
   subtitle: string
   mode: 'chat' | 'build'
   projectName?: string | null
+  /** A title match, or a session found by what was said in it (UI-S11). */
+  group?: 'title' | 'content'
 }
 
 export interface SessionControlPendingTag {
@@ -303,12 +305,12 @@ export function searchSidebarSessions(
     .map((session) => ({
       id: session.id,
       title: session.title || '新会话',
-      subtitle:
-        session.mode === 'build'
-          ? [session.project_name, session.project_path]
-              .filter(Boolean)
-              .join(' · ')
-          : (session.updated_at || '').slice(0, 10),
+      subtitle: [
+        session.mode === 'build' ? session.project_name : '',
+        sidebarRelativeTime(session.updated_at),
+      ]
+        .filter(Boolean)
+        .join(' · '),
       mode: session.mode === 'build' ? 'build' : 'chat',
       projectName: session.project_name,
     }))
@@ -505,7 +507,11 @@ export function groupSessionsByDay(
   return groups
 }
 
-/** Compact relative time for a sidebar row (刚刚 / 5 分钟 / 3 小时 / 2 天 / 2026-01-02). */
+/**
+ * Compact relative time for a sidebar row, never an ISO date (UI-S11):
+ * 刚刚 / 5 分钟 / 3 小时 (today) / 昨天 / 2 天 (within a week) / 9月10日
+ * (this year) / 2025/12/31 (earlier years).
+ */
 export function sidebarRelativeTime(
   iso: string | undefined,
   now: number = Date.now(),
@@ -516,8 +522,14 @@ export function sidebarRelativeTime(
   const minute = 60 * 1000
   if (diff < minute) return '刚刚'
   if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟`
-  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时`
-  if (diff < 30 * 24 * 60 * minute)
-    return `${Math.floor(diff / (24 * 60 * minute))} 天`
-  return (iso || '').slice(0, 10)
+  const today = startOfDay(now)
+  const day = 24 * 60 * minute
+  if (time >= today) return `${Math.floor(diff / (60 * minute))} 小时`
+  if (time >= today - day) return '昨天'
+  const days = Math.round((today - startOfDay(time)) / day)
+  if (days < 7) return `${days} 天`
+  const date = new Date(time)
+  if (date.getFullYear() === new Date(now).getFullYear())
+    return `${date.getMonth() + 1}月${date.getDate()}日`
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
 }

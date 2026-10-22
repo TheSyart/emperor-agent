@@ -30,11 +30,11 @@ const rows = computed((): readonly InspectorRow[] =>
     ? assistantTimingRows(metrics.value)
     : [
         {
-          label: 'Duration',
+          label: '时长',
           value: formatElapsedSeconds(props.record.cell.timeSeconds),
         },
         {
-          label: 'Timing source',
+          label: '计时来源',
           value:
             props.record.cell.timeSeconds === null
               ? 'Not available'

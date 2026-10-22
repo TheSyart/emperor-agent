@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real|references|references-real|plugins|userbrowser-app|settings]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security|diagnostics|updates]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
@@ -11,6 +11,16 @@
 // `userbrowser-app` runs the C-track acceptance (设置 › 浏览器, link routing,
 // the browsing history and your own downloads in the real app). `settings`
 // opens every settings section and sub page in the real app (F track).
+// `renderer-security` checks the main window's CSP, permissions, link and
+// remote image handling in the real app (SEC-05). `browser-security` checks
+// imported cookies, typing next to cross-origin frames and the inbox
+// quarantine mark in real Electron (SEC-10). `diagnostics` checks main.log
+// and core.log, redaction, uncaught errors in main, a renderer minidump,
+// the 诊断包 export in 设置 and on the recovery page (REL-01); its logs stay
+// in the temporary Emperor Home (`<home>/logs`). `updates` checks 检查更新
+// against a fake GitHub feed on 127.0.0.1 (scripts/test-update-feed.mjs):
+// the first check, the offer, a verified and a refused download into a
+// temporary Downloads folder, the headers sent, and silence when off (REL-02).
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -26,7 +36,8 @@ const mode =
   process.argv.find((arg) => arg.startsWith('--mode=')) ?? '--mode=smoke'
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
-// fullstack / real / references / plugins / userbrowser-app / settings: the dev app
+// fullstack / real / references / plugins / userbrowser-app / settings /
+// renderer-security: the dev app
 // (out/, run `npm run build` first) driven by Playwright from plain Node;
 // the other modes run the harness in Electron.
 const references =
@@ -34,6 +45,9 @@ const references =
 const plugins = mode === '--mode=plugins'
 const userBrowserApp = mode === '--mode=userbrowser-app'
 const settingsApp = mode === '--mode=settings'
+const rendererSecurity = mode === '--mode=renderer-security'
+const diagnosticsApp = mode === '--mode=diagnostics'
+const updatesApp = mode === '--mode=updates'
 const realModel = mode === '--mode=real' || mode === '--mode=references-real'
 const appMode =
   mode === '--mode=fullstack' ||
@@ -41,7 +55,10 @@ const appMode =
   references ||
   plugins ||
   userBrowserApp ||
-  settingsApp
+  settingsApp ||
+  rendererSecurity ||
+  diagnosticsApp ||
+  updatesApp
 const entry = references
   ? 'tests/electron/references/run.ts'
   : plugins
@@ -50,9 +67,15 @@ const entry = references
       ? 'tests/electron/user-browser-app/run.ts'
       : settingsApp
         ? 'tests/electron/settings/run.ts'
-        : appMode
-          ? 'tests/electron/fullstack/run.ts'
-          : 'tests/electron/harness/main.ts'
+        : rendererSecurity
+          ? 'tests/electron/renderer-security/run.ts'
+          : diagnosticsApp
+            ? 'tests/electron/diagnostics/run.ts'
+            : updatesApp
+              ? 'tests/electron/updates/run.ts'
+              : appMode
+                ? 'tests/electron/fullstack/run.ts'
+                : 'tests/electron/harness/main.ts'
 const bundle = references
   ? join(desktop, 'out-e2e', 'references.cjs')
   : plugins
@@ -61,9 +84,15 @@ const bundle = references
       ? join(desktop, 'out-e2e', 'user-browser-app.cjs')
       : settingsApp
         ? join(desktop, 'out-e2e', 'settings.cjs')
-        : appMode
-          ? join(desktop, 'out-e2e', 'fullstack.cjs')
-          : outfile
+        : rendererSecurity
+          ? join(desktop, 'out-e2e', 'renderer-security.cjs')
+          : diagnosticsApp
+            ? join(desktop, 'out-e2e', 'diagnostics.cjs')
+            : updatesApp
+              ? join(desktop, 'out-e2e', 'updates.cjs')
+              : appMode
+                ? join(desktop, 'out-e2e', 'fullstack.cjs')
+                : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],
@@ -72,7 +101,9 @@ await build({
   format: 'cjs',
   target: 'node22',
   outfile: bundle,
-  external: ['electron', 'playwright-core'],
+  // The Claude Agent SDK is ESM-only and reads import.meta at load; the app
+  // loads it unbundled too (app.asar.unpacked), so keep it external here.
+  external: ['electron', 'playwright-core', '@anthropic-ai/claude-agent-sdk'],
   sourcemap: 'inline',
   logLevel: 'warning',
 })

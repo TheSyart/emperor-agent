@@ -4,7 +4,9 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -14,9 +16,26 @@ import {
   type JournalCodec,
   type SnapshotCodec,
   type SyncPersistenceAdapter,
+  DataFileNewerError,
 } from '../store/persistence'
+import { SESSION_TRASH_DIR } from '../session-log/store'
 
 const VERSION = 1
+/** A session's meta.jsonl is compacted to its latest snapshot past this. */
+const META_COMPACT_LINES = 1000
+
+/**
+ * The session index in memory (KRN-12, CORE-36): built once from the session
+ * directories, then kept current by this store's own writes. `stamp` is
+ * index.json's identity after our last read or write; another process
+ * rewriting index.json changes it and the next call rebuilds.
+ */
+interface SessionIndexCache {
+  byId: Map<string, SessionEntry>
+  sorted: SessionEntry[] | null
+  stamp: string | null
+  dirty: boolean
+}
 
 export interface SessionControlPending {
   kind: 'ask' | 'plan'
@@ -58,6 +77,19 @@ export interface SessionCreateOptions {
   transitionReason?: 'clear' | null
 }
 
+/** A deleted session waiting in `sessions/.trash/<id>` (FIX-01). */
+export interface TrashedSession {
+  id: string
+  title: string
+  mode: 'chat' | 'build'
+  project_name: string | null
+  project_path: string | null
+  deleted_at: string
+}
+
+const TRASH_DIR = SESSION_TRASH_DIR
+const TRASH_RECORD = 'trash.json'
+
 export type SessionIndexSource = 'cache' | 'rebuilt'
 
 export interface SessionStoreDiagnostics {
@@ -82,6 +114,10 @@ export class SessionStore {
     rebuildReasons: [],
     legacyBackupPath: null,
   }
+  private cache: SessionIndexCache | null = null
+  private indexReadOnly = false
+  /** meta.jsonl records per session, to know when to compact. */
+  private readonly metaLines = new Map<string, number>()
 
   constructor(
     root: string,
@@ -151,7 +187,7 @@ export class SessionStore {
   }
 
   get(sessionId: string): SessionEntry | null {
-    const found = this.load().find((item) => item.id === sessionId) ?? null
+    const found = this.fresh().byId.get(sessionId) ?? null
     return found ? cloneSession(found) : null
   }
 
@@ -166,18 +202,101 @@ export class SessionStore {
     return true
   }
 
-  rename(sessionId: string, title: string): boolean {
+  /**
+   * Soft delete: drop the session from the index and move its directory
+   * (meta, log, attachments) to `sessions/.trash/<id>` with a trash
+   * record. The last session is kept. Returns the entry, or null.
+   */
+  trash(sessionId: string, deletedAt = stamp()): SessionEntry | null {
     const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
-      item.title = title.trim()
-      item.updated_at = stamp()
-      item.title_status = 'manual'
-      this.appendSnapshot(item)
-      this.load()
-      return true
+    if (items.length <= 1) return null
+    const idx = items.findIndex((item) => item.id === sessionId)
+    if (idx < 0) return null
+    const [entry] = items.splice(idx, 1)
+    const target = this.trashDir(sessionId)
+    mkdirSync(join(this.sessionsDir, TRASH_DIR), { recursive: true })
+    rmSync(target, { recursive: true, force: true })
+    // Index first: load() would otherwise re-materialize the moved session.
+    this.save(items)
+    renameSync(this.sessionDir(sessionId), target)
+    const record: TrashedSession = {
+      id: entry!.id,
+      title: entry!.title,
+      mode: entry!.mode,
+      project_name: entry!.project_name,
+      project_path: entry!.project_path,
+      deleted_at: deletedAt,
     }
-    return false
+    writeFileSync(join(target, TRASH_RECORD), JSON.stringify(record), {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+    return cloneSession(entry!)
+  }
+
+  /** Undo a soft delete; the entry comes back exactly as it was. */
+  restoreTrashed(sessionId: string): SessionEntry | null {
+    const source = this.trashDir(sessionId)
+    if (!this.isTrashId(sessionId) || !existsSync(source)) return null
+    if (existsSync(this.sessionDir(sessionId))) return null
+    rmSync(join(source, TRASH_RECORD), { force: true })
+    renameSync(source, this.sessionDir(sessionId))
+    this.adopt(sessionId)
+    return this.get(sessionId)
+  }
+
+  /** A session directory that came back (restore): add it to the index. */
+  private adopt(sessionId: string): void {
+    const cache = this.fresh()
+    const entry = this.readLatestMeta(sessionId, {
+      sessionIndexSource: 'cache',
+      repairedSessions: 0,
+      rebuildReasons: [],
+      legacyBackupPath: null,
+    })
+    if (entry === null) return
+    cache.byId.set(sessionId, entry)
+    cache.sorted = null
+    cache.dirty = true
+  }
+
+  /** Deleted sessions in the trash, most recent first. */
+  listTrashed(): TrashedSession[] {
+    const root = join(this.sessionsDir, TRASH_DIR)
+    if (!existsSync(root)) return []
+    const out: TrashedSession[] = []
+    for (const dirent of readdirSync(root, { withFileTypes: true })) {
+      if (!dirent.isDirectory()) continue
+      const record = this.readTrashRecord(dirent.name)
+      if (record) out.push(record)
+    }
+    return out.sort((a, b) => b.deleted_at.localeCompare(a.deleted_at))
+  }
+
+  /** Ids of trashed sessions deleted before `cutoffMs` (epoch ms). */
+  trashedBefore(cutoffMs: number): string[] {
+    return this.listTrashed()
+      .filter((item) => Date.parse(item.deleted_at) < cutoffMs)
+      .map((item) => item.id)
+  }
+
+  /** Remove a trashed session for good; returns its record, or null. */
+  purgeTrashed(sessionId: string): TrashedSession | null {
+    if (!this.isTrashId(sessionId)) return null
+    const record = this.readTrashRecord(sessionId)
+    if (!record) return null
+    rmSync(this.trashDir(sessionId), { recursive: true, force: true })
+    return record
+  }
+
+  rename(sessionId: string, title: string): boolean {
+    return (
+      this.update(sessionId, (item) => {
+        item.title = title.trim()
+        item.updated_at = stamp()
+        item.title_status = 'manual'
+      }) !== null
+    )
   }
 
   archive(sessionId: string): SessionEntry | null {
@@ -189,17 +308,11 @@ export class SessionStore {
   }
 
   setGeneratedTitle(sessionId: string, title: string): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.title = title.trim()
       item.title_status = 'generated'
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   touch(
@@ -207,18 +320,12 @@ export class SessionStore {
     preview: string,
     opts: { incrementMessages?: boolean } = {},
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.preview = preview.slice(0, 280)
       if (opts.incrementMessages)
         item.message_count = Number(item.message_count || 0) + 1
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   setControlPending(
@@ -227,29 +334,17 @@ export class SessionStore {
   ): SessionEntry | null {
     const normalized = normalizeControlPending(pending)
     if (!normalized) return null
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.control_pending = normalized
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   clearControlPending(sessionId: string): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.control_pending = null
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   reconcileSessionControlPending(
@@ -269,17 +364,11 @@ export class SessionStore {
     sessionId: string,
     targetSessionId: string,
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.transitioned_to_session_id = targetSessionId
       item.transitioned_at = stamp()
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   reconcileControlPending(
@@ -288,7 +377,7 @@ export class SessionStore {
   ): void {
     const normalized = normalizeControlPending(pending)
     const items = this.load()
-    let changed = false
+    const changed = new Set<SessionEntry>()
     let matched = false
 
     for (const item of items) {
@@ -296,7 +385,7 @@ export class SessionStore {
         if (item.control_pending !== null) {
           item.control_pending = null
           item.updated_at = stamp()
-          changed = true
+          changed.add(item)
         }
         continue
       }
@@ -308,7 +397,7 @@ export class SessionStore {
         ) {
           item.control_pending = normalized
           item.updated_at = stamp()
-          changed = true
+          changed.add(item)
         }
         continue
       }
@@ -316,7 +405,7 @@ export class SessionStore {
       if (item.control_pending !== null) {
         item.control_pending = null
         item.updated_at = stamp()
-        changed = true
+        changed.add(item)
       }
     }
 
@@ -325,18 +414,67 @@ export class SessionStore {
         if (item.id !== fallbackSessionId) continue
         item.control_pending = normalized
         item.updated_at = stamp()
-        changed = true
+        changed.add(item)
         break
       }
     }
 
-    if (changed) {
-      for (const item of items) this.appendSnapshot(item)
+    if (changed.size > 0) {
+      // Only the sessions that changed get a snapshot (KRN-12).
+      for (const item of changed) this.appendSnapshot(item)
       this.load()
     }
   }
 
+  /** The sessions, newest first (copies the caller may change). */
   private load(): SessionEntry[] {
+    const cache = this.fresh()
+    cache.sorted ??= sortByUpdated([...cache.byId.values()])
+    return cache.sorted.map(cloneSession)
+  }
+
+  /**
+   * Change one session: `mutate` edits a copy, the copy is appended to its
+   * meta.jsonl, and only then does the index in memory take it. Returns the
+   * new entry, or null when the session is not in the index.
+   */
+  private update(
+    sessionId: string,
+    mutate: (item: SessionEntry) => void,
+  ): SessionEntry | null {
+    const current = this.fresh().byId.get(sessionId)
+    if (current === undefined) return null
+    const item = cloneSession(current)
+    mutate(item)
+    this.appendSnapshot(item)
+    this.fresh()
+    return cloneSession(item)
+  }
+
+  /** The index in memory: rebuilt when missing or stale, saved when dirty. */
+  private fresh(): SessionIndexCache {
+    const cache = this.cache
+    if (cache === null || cache.stamp !== this.indexStamp()) {
+      this.rebuild()
+      return this.cache!
+    }
+    if (cache.dirty)
+      this.save(cache.sorted ?? sortByUpdated([...cache.byId.values()]))
+    return this.cache!
+  }
+
+  /** index.json's identity; nanosecond mtime, since a rewrite is a rename. */
+  private indexStamp(): string | null {
+    try {
+      const st = statSync(this.indexPath, { bigint: true })
+      return `${st.ino}:${st.size}:${st.mtimeNs}`
+    } catch {
+      return null
+    }
+  }
+
+  /** Scan every session directory and write index.json (startup, staleness). */
+  private rebuild(): SessionEntry[] {
     mkdirSync(this.sessionsDir, { recursive: true })
     const diagnostics: SessionStoreDiagnostics = {
       sessionIndexSource: existsSync(this.indexPath) ? 'cache' : 'rebuilt',
@@ -364,9 +502,7 @@ export class SessionStore {
       byId.set(item.id, item)
     }
 
-    const items = [...byId.values()].sort((a, b) =>
-      String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')),
-    )
+    const items = sortByUpdated([...byId.values()])
     this.save(items)
     this.lastDiagnostics = diagnostics
     return items
@@ -382,7 +518,21 @@ export class SessionStore {
   }
 
   private save(items: SessionEntry[]): void {
-    this.indexSnapshot().write(items)
+    // A newer Emperor's index.json (REL-03) stays as it is: this run keeps
+    // its index in memory (it is rebuilt from the session folders anyway).
+    if (!this.indexReadOnly)
+      try {
+        this.indexSnapshot().write(items)
+      } catch (error) {
+        if (!(error instanceof DataFileNewerError)) throw error
+        this.indexReadOnly = true
+      }
+    this.cache = {
+      byId: new Map(items.map((item) => [item.id, item])),
+      sorted: sortByUpdated([...items]),
+      stamp: this.indexStamp(),
+      dirty: false,
+    }
   }
 
   private indexSnapshot(
@@ -425,20 +575,54 @@ export class SessionStore {
     }
   }
 
+  /** A deleted session's directory in the trash; null when it is not there. */
+  trashedDir(sessionId: string): string | null {
+    if (!this.isTrashId(sessionId)) return null
+    const dir = this.trashDir(sessionId)
+    return existsSync(dir) ? dir : null
+  }
+
+  private trashDir(sessionId: string): string {
+    return join(this.sessionsDir, TRASH_DIR, sessionId)
+  }
+
+  /** Session ids are single path segments; refuse anything else. */
+  private isTrashId(sessionId: string): boolean {
+    return (
+      Boolean(sessionId) &&
+      !sessionId.startsWith('.') &&
+      !/[\\/]/.test(sessionId)
+    )
+  }
+
+  private readTrashRecord(sessionId: string): TrashedSession | null {
+    try {
+      const raw = JSON.parse(
+        readFileSync(join(this.trashDir(sessionId), TRASH_RECORD), 'utf8'),
+      ) as Partial<TrashedSession>
+      if (raw.id !== sessionId || typeof raw.deleted_at !== 'string')
+        return null
+      return {
+        id: raw.id,
+        title: String(raw.title ?? ''),
+        mode: raw.mode === 'build' ? 'build' : 'chat',
+        project_name: raw.project_name ?? null,
+        project_path: raw.project_path ?? null,
+        deleted_at: raw.deleted_at,
+      }
+    } catch {
+      return null
+    }
+  }
+
   private setArchived(
     sessionId: string,
     archived: boolean,
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.archived_at = archived ? stamp() : null
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   private appendSnapshot(session: SessionEntry): void {
@@ -451,7 +635,19 @@ export class SessionStore {
       ts: stamp(),
       session: clean,
     }
-    this.metaJournal(clean.id).append(event)
+    const journal = this.metaJournal(clean.id)
+    journal.append(event)
+    const count = (this.metaLines.get(clean.id) ?? 0) + 1
+    // Only the latest snapshot counts: drop the rest past the limit.
+    this.metaLines.set(
+      clean.id,
+      count > META_COMPACT_LINES ? journal.compact(1) : count,
+    )
+    if (this.cache) {
+      this.cache.byId.set(clean.id, clean)
+      this.cache.sorted = null
+      this.cache.dirty = true
+    }
   }
 
   private scanSessionDirectories(
@@ -462,7 +658,8 @@ export class SessionStore {
     for (const dirent of readdirSync(this.sessionsDir, {
       withFileTypes: true,
     })) {
-      if (!dirent.isDirectory()) continue
+      // `.trash` (and any other dot directory) holds no live session.
+      if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue
       const id = dirent.name
       const sessionDir = this.sessionDir(id)
       const fromMeta = this.readLatestMeta(id, diagnostics)
@@ -489,6 +686,7 @@ export class SessionStore {
     let latest: SessionEntry | null = null
     let deleted = false
     const replay = this.metaJournal(sessionId).replay({ repairTail: true })
+    this.metaLines.set(sessionId, replay.entries.length)
     if (replay.receipt.recoveryAction !== 'none')
       diagnostics.rebuildReasons.push(`meta_line_invalid:${sessionId}`)
     for (const entry of replay.entries) {
@@ -645,6 +843,7 @@ function sessionIndexCodec(
 ): SnapshotCodec<SessionEntry[]> {
   return {
     schemaVersion: VERSION,
+    versionKey: 'version',
     encode(items) {
       return items
         .map((item) =>
@@ -784,6 +983,12 @@ function truncateText(value: unknown, max: number): string {
   return String(value ?? '')
     .trim()
     .slice(0, max)
+}
+
+function sortByUpdated(items: SessionEntry[]): SessionEntry[] {
+  return items.sort((a, b) =>
+    String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')),
+  )
 }
 
 function stamp(): string {

@@ -1,46 +1,67 @@
 <script setup lang="ts">
 /**
- * SettingsNav — the settings modal's 188px nav rail (dsh .Setting-nav):
- * 16/24 medium title, then a 4px-gap stack of 40px cells (16px glyph + 14/22
- * label, r12; hover / active fills from the sidebar item tokens). Inside a
- * `settings-panel` container narrower than 640px the rail folds into a top
- * strip: title + a horizontally scrolling row of 32px cells.
+ * SettingsNav — the settings modal's 200px nav on the canvas color (UI-S07):
+ * the 16/600 「设置」 title, then four groups (SETTINGS_NAV_GROUPS): 常规
+ * alone, then 智能, 操控 and 系统 under 12/500 tertiary labels. A cell is a
+ * 32px text row (14/22, r8); the open section takes the selected fill.
+ * Inside a `settings-panel` container narrower than 640px the nav folds
+ * into a top strip: title + one horizontally scrolling row of cells, the
+ * group labels dropped.
  *
- * Props: active (current section), titleId (id for aria-labelledby).
+ * Props: active (current section), titleId (id for aria-labelledby),
+ * marks? (sections with something new: a 6px gold dot at the cell's end,
+ * read out as 「有新版本」 — 子智能体 when Claude Code or Codex can be
+ * upgraded, AGT-13).
  * Emits: select(section).
  */
 import {
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SECTIONS,
   type SettingsModalSection,
 } from './settingsSections'
-import { SETTINGS_SECTION_ICONS } from './settingsIcons'
 
-defineProps<{ active: SettingsModalSection; titleId: string }>()
+defineProps<{
+  active: SettingsModalSection
+  titleId: string
+  marks?: Partial<Record<SettingsModalSection, boolean>>
+}>()
 const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
+
+const LABELS = Object.fromEntries(
+  SETTINGS_SECTIONS.map((section) => [section.key, section.label]),
+) as Record<SettingsModalSection, string>
 </script>
 
 <template>
   <nav class="settings-nav" aria-label="设置分区">
     <div :id="titleId" class="nav-title">设置</div>
     <div class="nav-list">
-      <button
-        v-for="item in SETTINGS_SECTIONS"
-        :key="item.key"
-        type="button"
-        class="nav-cell"
-        :class="{ active: item.key === active }"
-        :data-section="item.key"
-        :aria-current="item.key === active ? 'page' : undefined"
-        @click="emit('select', item.key)"
+      <div
+        v-for="group in SETTINGS_NAV_GROUPS"
+        :key="group.label ?? 'general'"
+        class="nav-group"
+        role="group"
+        :aria-label="group.label ?? undefined"
       >
-        <component
-          :is="SETTINGS_SECTION_ICONS[item.key]"
-          class="nav-icon"
-          :size="16"
-          :stroke-width="1.6"
-        />
-        <span class="nav-label">{{ item.label }}</span>
-      </button>
+        <div v-if="group.label" class="nav-group-label" aria-hidden="true">
+          {{ group.label }}
+        </div>
+        <button
+          v-for="key in group.sections"
+          :key="key"
+          type="button"
+          class="nav-cell"
+          :class="{ active: key === active }"
+          :data-section="key"
+          :aria-current="key === active ? 'page' : undefined"
+          @click="emit('select', key)"
+        >
+          <span class="nav-label">{{ LABELS[key] }}</span>
+          <span v-if="marks?.[key]" class="nav-mark" data-nav-mark
+            ><span class="nav-mark-text">，有新版本</span></span
+          >
+        </button>
+      </div>
     </div>
   </nav>
 </template>
@@ -50,64 +71,73 @@ const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--space-4) + 2px);
-  width: 188px;
+  gap: var(--space-2-5);
+  width: 200px;
   min-height: 0;
-  padding: calc(var(--space-5) + 2px) var(--space-3) 0;
+  padding: var(--space-5) var(--space-2) 0;
   box-sizing: border-box;
   overflow-y: auto;
+  background: rgb(var(--surface-canvas));
 }
 
 .nav-title {
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2-5);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
   padding-bottom: var(--space-3);
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-group-label {
+  padding: var(--space-3) var(--space-2-5) var(--space-1);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-3));
 }
 
 .nav-cell {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  height: 40px;
-  padding: calc(var(--space-2) + 1px) var(--space-4) calc(var(--space-2) + 1px)
-    var(--space-3);
+  height: var(--space-8);
+  padding: 0 var(--space-2-5);
   box-sizing: border-box;
   border: none;
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-row);
   background: transparent;
   cursor: pointer;
   font-family: inherit;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 400;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-1));
   text-align: left;
 }
 
 .nav-cell:hover:not(.active) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .nav-cell.active {
-  background: rgb(var(--sidebar-item-active));
+  background: rgb(var(--surface-selected));
+  font-weight: var(--weight-medium);
 }
 
 .nav-cell:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));
   outline-offset: -2px;
-}
-
-.nav-icon {
-  flex: none;
 }
 
 .nav-label {
@@ -116,6 +146,25 @@ const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.nav-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-2);
+  border-radius: 50%;
+  background: rgb(var(--accent));
+}
+
+/* Read out, not shown. */
+.nav-mark-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @container settings-panel (max-width: 639px) {
@@ -134,16 +183,20 @@ const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
     padding: 0 var(--space-2) 0 var(--space-1-5);
   }
 
-  .nav-list {
+  .nav-list,
+  .nav-group {
     flex-direction: row;
+    gap: var(--space-1);
     padding-bottom: 0;
+  }
+
+  .nav-group-label {
+    display: none;
   }
 
   .nav-cell {
     flex: none;
-    gap: var(--space-1-5);
-    height: var(--space-8);
-    padding: 0 var(--space-3) 0 var(--space-2-5);
+    padding: 0 var(--space-3);
   }
 
   .nav-label {

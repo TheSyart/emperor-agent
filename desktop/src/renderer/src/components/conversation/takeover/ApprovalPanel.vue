@@ -6,12 +6,15 @@
  * right-aligned action row derived from the permission question's options
  * (deny = danger, last allow = primary). The body scrolls; the action row
  * stays reachable. One-shot: buttons latch after a click until the
- * interaction resolves (re-armed if the send is rejected). Esc cancels.
+ * interaction resolves (re-armed if the send is rejected). Esc folds the
+ * card to one line (takeoverModel); it never cancels.
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import {
   approvalActions,
   approvalAnswer,
@@ -49,10 +52,6 @@ function decide(action: ApprovalAction) {
   )
   if (!ok) answered.value = false
 }
-
-function cancel() {
-  ctx.cancelInteraction(props.interaction.id)
-}
 </script>
 
 <template>
@@ -62,10 +61,10 @@ function cancel() {
       class="card"
       tabindex="-1"
       aria-label="需要你的授权"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span>需要你的授权</span>
         <span v-if="presentation.count > 1" class="count"
           >· {{ presentation.count }} 项操作</span
@@ -129,11 +128,11 @@ function cancel() {
 .card {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -143,18 +142,10 @@ function cancel() {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .body {
@@ -170,9 +161,9 @@ function cancel() {
 }
 
 .headline {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: calc(var(--fs-s) + 1px);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 24px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -185,20 +176,20 @@ function cancel() {
 }
 
 .meta {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: 20px;
 }
 
 .reason {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: 22px;
   white-space: pre-wrap;
 }
 
 .command {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 20px;

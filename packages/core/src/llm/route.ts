@@ -6,10 +6,20 @@
 
 import type { ModelEntry } from '../config/model-config'
 import { resolveModelProfile } from '../model/profile'
+import {
+  ANTHROPIC_BASE_PATH,
+  DEEPSEEK_OFFICIAL_HOST,
+  DEEPSEEK_ORIGIN,
+} from './adapters/deepseek-messages/constants'
 import { resolveRetryPolicy, type ResolvedRetryPolicy } from './retry-policy'
 
-/** Which transport implementation serves a route. */
-export type RouteAdapterKind = 'deepseek' | 'pi-ai'
+/**
+ * Which transport implementation serves a route: `deepseek-messages` (the
+ * official DeepSeek host over the Anthropic Messages API, KRN-07),
+ * `deepseek` (DeepSeek-style chat-completions: gateways, and entries that
+ * keep it), `pi-ai` (everything else).
+ */
+export type RouteAdapterKind = 'deepseek' | 'deepseek-messages' | 'pi-ai'
 
 export interface RouteSpec {
   /** Route key: the model entry id. */
@@ -38,24 +48,78 @@ export interface RouteSpec {
   retryPolicy: ResolvedRetryPolicy
   /** Maximum provider idle time while one stream read is outstanding. */
   streamIdleTimeoutMs: number
+  /** Inline image budget per request in base64 bytes (default 20 MiB). */
+  maxRequestImageBytes?: number
 }
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
-const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const DEEPSEEK_EFFORTS = ['off', 'low', 'high', 'max'] as const
 
-/** Whether an entry should use the direct DeepSeek adapter. */
-function isDeepSeekRoute(entry: ModelEntry): boolean {
-  if (entry.protocol === 'anthropic') return false
-  if (entry.provider === 'deepseek') return true
+/**
+ * Whether an API base is DeepSeek's official host (`https://api.deepseek.com`
+ * under any path). No base means the provider default, which is that host.
+ */
+export function isOfficialDeepSeekHost(
+  apiBase: string | null | undefined,
+): boolean {
+  if (apiBase === null || apiBase === undefined || apiBase.trim() === '')
+    return true
   try {
-    return (
-      entry.apiBase !== null &&
-      new URL(entry.apiBase).hostname.endsWith('deepseek.com')
-    )
+    const url = new URL(apiBase.trim())
+    return url.protocol === 'https:' && url.hostname === DEEPSEEK_OFFICIAL_HOST
   } catch {
     return false
   }
+}
+
+/** Whether a route speaks DeepSeek's effort vocabulary (off/low/high/max). */
+export function usesDeepSeekEfforts(
+  route: Pick<RouteSpec, 'adapter'>,
+): boolean {
+  return route.adapter === 'deepseek' || route.adapter === 'deepseek-messages'
+}
+
+/**
+ * Which adapter serves an entry. DeepSeek on its official host goes over
+ * Messages unless the entry keeps chat-completions; DeepSeek elsewhere (and
+ * OpenAI-protocol entries pointing at a deepseek.com host) use the direct
+ * chat-completions adapter; the rest go to pi-ai.
+ */
+function adapterFor(entry: ModelEntry): RouteAdapterKind {
+  if (entry.provider === 'deepseek' && isOfficialDeepSeekHost(entry.apiBase))
+    return entry.transport === 'chat-completions'
+      ? 'deepseek'
+      : 'deepseek-messages'
+  if (entry.protocol === 'anthropic') return 'pi-ai'
+  if (entry.provider === 'deepseek') return 'deepseek'
+  try {
+    return entry.apiBase !== null &&
+      new URL(entry.apiBase).hostname.endsWith('deepseek.com')
+      ? 'deepseek'
+      : 'pi-ai'
+  } catch {
+    return 'pi-ai'
+  }
+}
+
+/** The base URL an adapter is given (no trailing slash). */
+function baseUrlFor(entry: ModelEntry, adapter: RouteAdapterKind): string {
+  const configured = (entry.apiBase ?? '').trim().replace(/\/+$/, '')
+  if (adapter === 'deepseek-messages')
+    return `${DEEPSEEK_ORIGIN}${ANTHROPIC_BASE_PATH}`
+  if (adapter === 'deepseek') {
+    // An official Anthropic-protocol entry that keeps chat-completions talks
+    // to the OpenAI-compatible origin instead of /anthropic.
+    if (
+      configured === '' ||
+      (entry.provider === 'deepseek' &&
+        isOfficialDeepSeekHost(configured) &&
+        new URL(configured).pathname.replace(/\/+$/, '') ===
+          ANTHROPIC_BASE_PATH)
+    )
+      return DEEPSEEK_ORIGIN
+  }
+  return configured
 }
 
 /** Map Emperor's effort vocabulary onto DeepSeek's off/low/high/max. */
@@ -101,12 +165,14 @@ export function routeFromEntry(entry: ModelEntry): RouteSpec {
     ...(entry.capabilityOverrides === undefined
       ? {}
       : { capabilityOverrides: entry.capabilityOverrides }),
+    ...(entry.detected === undefined ? {} : { detected: entry.detected }),
     ...(entry.contextWindowTokens === null
       ? {}
       : { contextWindowTokens: entry.contextWindowTokens }),
     ...(entry.maxTokens === null ? {} : { maxTokens: entry.maxTokens }),
   })
-  const deepseek = isDeepSeekRoute(entry)
+  const adapter = adapterFor(entry)
+  const deepseek = adapter !== 'pi-ai'
   let reasoningEfforts: readonly string[]
   let defaultReasoningEffort: string | undefined
   if (deepseek) {
@@ -125,15 +191,19 @@ export function routeFromEntry(entry: ModelEntry): RouteSpec {
     reasoningEfforts = []
     defaultReasoningEffort = undefined
   }
-  const baseURL = (
-    entry.apiBase ?? (deepseek ? DEFAULT_DEEPSEEK_BASE_URL : '')
-  ).replace(/\/+$/, '')
+  const baseURL = baseUrlFor(entry, adapter)
   return Object.freeze({
     id,
     catalogProvider: entry.provider,
     displayName: entry.displayName || entry.label || modelId,
-    protocol,
-    adapter: deepseek ? 'deepseek' : 'pi-ai',
+    // The wire each adapter speaks, whatever the entry was saved with.
+    protocol:
+      adapter === 'deepseek-messages'
+        ? 'anthropic'
+        : adapter === 'deepseek'
+          ? 'openai'
+          : protocol,
+    adapter,
     modelId,
     baseURL,
     apiKey: entry.apiKey,

@@ -1,6 +1,7 @@
 /**
- * Right workspace pane catalogue (launcher rows, header segmented control):
- * label, shortcut action and the availability rule of each pane. Pure.
+ * Right workspace pane catalogue (the header's segmented pane switch, the
+ * no-history empty state): label, shortcut action and the availability rule
+ * of each pane. Pure.
  */
 import type { WorkspacePane } from '../shell/frameState'
 import type { ShortcutAction } from '../../shortcuts'
@@ -36,7 +37,7 @@ export function workspacePaneDisabledReason(
   pane: WorkspaceContentPane,
   availability: WorkspaceAvailability,
 ): string {
-  if (pane === 'browser') return ''
+  if (pane === 'browser' || pane === 'files') return ''
   if (!availability.hasProject) return NO_PROJECT_REASON
   // Unknown until the first snapshot lands: keep review reachable meanwhile.
   if (pane === 'review' && availability.snapshotLoaded && !availability.hasGit)

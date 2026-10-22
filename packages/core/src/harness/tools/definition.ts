@@ -21,11 +21,20 @@ export interface ToolRunContext {
   readonly agent?: Agent
   /** Aborts on turn cancellation or tool timeout. */
   readonly signal: AbortSignal
+  /** Retain the actual execution lease for a background producer until it settles. */
+  readonly retainWorkspaceLease?: () => { release(): void }
   /** Queue a context message to enter the very next step. */
   deferContext(context: UserMessage): void
-  /** End the turn after this step's tool results are committed. */
-  concludeTurn(): void
+  /**
+   * End the turn after this step's tool results are committed (only when
+   * this call succeeds). `reason` names a conclusion other than a plain
+   * completion; the turn ends with that `turn/end` reason.
+   */
+  concludeTurn(reason?: ToolTurnConclusion): void
 }
+
+/** A non-default way a tool can conclude the turn. */
+export type ToolTurnConclusion = 'plan-dismissed'
 
 /** What a tool body returns: plain text, blocks, or a full result. */
 export type ToolReturn =
@@ -63,6 +72,11 @@ export interface ToolDefinition<A = unknown> {
    * schema); falls back to {@link parameters} when absent or undefined.
    */
   parametersFor?(agent: Agent | undefined): Record<string, unknown> | undefined
+  /**
+   * Per-agent description (an MCP tool whose server differs per project);
+   * falls back to {@link description} when absent or undefined.
+   */
+  descriptionFor?(agent: Agent | undefined): string | undefined
   /** Validate raw arguments; throw {@link ToolArgsError} on mismatch. */
   parse(raw: unknown): A
   execute(args: A, context: ToolRunContext): Promise<ToolReturn>
@@ -94,6 +108,8 @@ export interface ToolExecutionResult {
   readonly error?: ToolFailure
   readonly additionalContexts?: UserMessage[]
   readonly concludesTurn?: true
+  /** Set with `concludesTurn` when the tool named a non-default conclusion. */
+  readonly turnConclusion?: ToolTurnConclusion
 }
 
 export const TOOL_ABORTED = 'ABORTED'

@@ -146,7 +146,7 @@ async function submit() {
     </div>
 
     <template #footer>
-      <Button variant="outline" @click="open = false">取消</Button>
+      <Button variant="secondary" @click="open = false">取消</Button>
       <Button
         variant="primary"
         data-testid="mcp-import-submit"
@@ -170,13 +170,13 @@ async function submit() {
 
 .mcp-add-dialog > :first-child {
   margin-top: calc(var(--space-3) * -1);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .preview {
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .submit-error {

@@ -23,6 +23,9 @@ export class NodePtyHost implements PtyHost {
       write: (data) => process.write(data),
       resize: (cols, rows) => process.resize(cols, rows),
       kill: () => process.kill(),
+      // node-pty names the foreground process (zsh while idle, node while
+      // a dev server runs): a busy tab asks before it is closed (FIX-01).
+      foregroundProcess: () => process.process,
       onData: (listener) => {
         const subscription = process.onData(listener)
         return () => subscription.dispose()

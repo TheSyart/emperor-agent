@@ -1,0 +1,81 @@
+{
+  "generatedAt": "2026-10-20T17:10:25.712Z",
+  "runtimeRoot": "__PREVIEW4_RUNTIME__",
+  "stateRoot": "__EMPEROR_HOME__",
+  "copied": 0,
+  "skipped": 0,
+  "logPath": "__EMPEROR_HOME__/migration-log.jsonl",
+  "legacyStateRoots": [
+    {
+      "path": "__PREVIEW4_RUNTIME__/memory",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/sessions",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/.team",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/control",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/scheduler",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/tasks",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/tokens",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/memory/control",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/memory/scheduler",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/memory/tasks",
+      "kind": "ancient-bare-runtime-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/.emperor",
+      "kind": "previous-dotemperor-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/.emperor/memory/control",
+      "kind": "previous-dotemperor-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/.emperor/memory/scheduler",
+      "kind": "previous-dotemperor-root",
+      "existed": false
+    },
+    {
+      "path": "__PREVIEW4_RUNTIME__/.emperor/memory/tasks",
+      "kind": "previous-dotemperor-root",
+      "existed": false
+    }
+  ],
+  "entries": []
+}

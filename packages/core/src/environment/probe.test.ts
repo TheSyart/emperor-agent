@@ -328,6 +328,219 @@ describe('EnvironmentProbe', () => {
     expect(runner.requests.length).toBeGreaterThan(projectCalls)
   })
 
+  // FIX-08: the execution environment (managed bin on PATH, no Skills) and
+  // the Git / gh runtime check (process PATH, every Skill) asked one after
+  // the other for every Git command; a one-entry cache made each of them
+  // probe the whole catalog again (about 400 `--version` runs per 审查
+  // refresh).
+  it('keeps a result per question: two callers taking turns probe once each', async () => {
+    const root = project()
+    const { probe, runner } = createProbe()
+    const skill: SkillEnvironmentRequirement = {
+      skillName: 'needs-gh',
+      skillStatus: 'active',
+      requirements: { bins: ['gh'], runtimes: [], env: [] },
+    }
+    const environment = () =>
+      probe.getStatus({
+        projectRoot: root,
+        envOverride: { PATH: '/managed/bin:/fake', HOME: '/Users/tester' },
+      })
+    const runtime = () =>
+      probe.getStatus({ projectRoot: root, skillRequirements: [skill] })
+
+    const a = await environment()
+    const b = await runtime()
+    expect(a.cacheKey).not.toBe(b.cacheKey)
+    const probed = runner.requests.length
+    for (let turn = 0; turn < 5; turn += 1) {
+      expect((await environment()).cacheKey).toBe(a.cacheKey)
+      expect((await runtime()).cacheKey).toBe(b.cacheKey)
+    }
+    expect(runner.requests).toHaveLength(probed)
+
+    // invalidate() still forgets every answer.
+    probe.invalidate()
+    await environment()
+    expect(runner.requests.length).toBeGreaterThan(probed)
+  })
+
+  // FIX-15: macOS holds a new build's first processes in a Desktop project
+  // until the user answers the folder-access prompt. The version checks ran
+  // into their 5 s limit, and that non-answer was kept for the whole session:
+  // Git stayed "unavailable" for the project until Emperor was restarted.
+  it('FIX-15 · 6 · keeps a check that did not finish only briefly, then asks again', async () => {
+    const root = project()
+    let held = true
+    let clock = 1_000_000
+    const runner = new FakeRunner()
+    const run = runner.run.bind(runner)
+    runner.run = async (request) => {
+      if (!held) return run(request)
+      runner.requests.push(request)
+      return {
+        status: 'timeout',
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 5_000,
+        error: null,
+      }
+    }
+    const probe = new EnvironmentProbe({
+      catalog: loadBundledToolCatalog,
+      platform: 'darwin',
+      arch: 'arm64',
+      env: { PATH: '/fake', HOME: '/Users/tester' },
+      homeDir: '/Users/tester',
+      runner,
+      resolveExecutable: resolver(),
+      now: () => clock,
+    })
+    const git = (status: EnvironmentProbeStatus) =>
+      status.tools.find((tool) => tool.id === 'git')
+    const first = await probe.getStatus({ projectRoot: root })
+    expect(git(first)).toMatchObject({
+      status: 'failed',
+      reason: '探测失败：timeout',
+    })
+    // The user allows the folder; a moment later the answer is still the
+    // remembered one (no probe storm while the prompt is up)…
+    held = false
+    const probed = runner.requests.length
+    clock += 1_000
+    expect(git(await probe.getStatus({ projectRoot: root }))?.status).toBe(
+      'failed',
+    )
+    expect(runner.requests).toHaveLength(probed)
+    // …and once it has expired, the next question probes again: Git is ready.
+    clock += 60_000
+    const again = await probe.getStatus({ projectRoot: root })
+    expect(git(again)).toMatchObject({ status: 'ready' })
+    expect(runner.requests.length).toBeGreaterThan(probed)
+    // A complete answer is remembered for the session, as before (FIX-08).
+    const complete = runner.requests.length
+    clock += 24 * 60 * 60_000
+    await probe.getStatus({ projectRoot: root })
+    expect(runner.requests).toHaveLength(complete)
+  })
+
+  it('FIX-15 · 6 · a tool that could not start counts as unfinished; one that answered with an error does not', async () => {
+    const root = project()
+    let clock = 1_000_000
+    let mode: 'spawn' | 'exit' = 'spawn'
+    const runner = new FakeRunner()
+    const run = runner.run.bind(runner)
+    runner.run = async (request) => {
+      if (!request.executable.endsWith('/git')) return run(request)
+      runner.requests.push(request)
+      if (mode === 'spawn') throw new Error('spawn EAGAIN')
+      return {
+        status: 'completed',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'broken',
+        durationMs: 1,
+        error: null,
+      }
+    }
+    const probe = new EnvironmentProbe({
+      catalog: loadBundledToolCatalog,
+      platform: 'darwin',
+      arch: 'arm64',
+      env: { PATH: '/fake', HOME: '/Users/tester' },
+      homeDir: '/Users/tester',
+      runner,
+      resolveExecutable: resolver(),
+      now: () => clock,
+    })
+    await probe.getStatus({ projectRoot: root })
+    const afterSpawnFailure = runner.requests.length
+    mode = 'exit'
+    clock += 60_000
+    await probe.getStatus({ projectRoot: root })
+    expect(runner.requests.length).toBeGreaterThan(afterSpawnFailure)
+    const afterExit = runner.requests.length
+    clock += 60_000
+    await probe.getStatus({ projectRoot: root })
+    expect(runner.requests).toHaveLength(afterExit)
+  })
+
+  it('FIX-15 · asks a check that keeps not finishing less and less often', async () => {
+    const root = project()
+    let clock = 1_000_000
+    const runner = new FakeRunner()
+    const run = runner.run.bind(runner)
+    // A tool that hangs on every run (its limit always hits).
+    runner.run = async (request) => {
+      if (!request.executable.endsWith('/go')) return run(request)
+      runner.requests.push(request)
+      return {
+        status: 'timeout',
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 5_000,
+        error: null,
+      }
+    }
+    const probe = new EnvironmentProbe({
+      catalog: loadBundledToolCatalog,
+      platform: 'darwin',
+      arch: 'arm64',
+      env: { PATH: '/fake', HOME: '/Users/tester' },
+      homeDir: '/Users/tester',
+      runner,
+      resolveExecutable: resolver(),
+      now: () => clock,
+    })
+    const probes = () =>
+      runner.requests.filter((r) => r.executable.endsWith('/go')).length
+    await probe.getStatus({ projectRoot: root })
+    expect(probes()).toBe(1)
+    const after = async (ms: number) => {
+      clock += ms
+      await probe.getStatus({ projectRoot: root })
+      return probes()
+    }
+    expect(await after(30_001)).toBe(2) // kept 30 s
+    expect(await after(30_001)).toBe(2) // now kept 60 s
+    expect(await after(30_000)).toBe(3)
+    expect(await after(119_999)).toBe(3) // now kept 120 s
+    expect(await after(2)).toBe(4)
+    for (let n = 0; n < 6; n++) await after(5 * 60_000 + 1)
+    const capped = probes()
+    expect(await after(5 * 60_000 + 1)).toBe(capped + 1) // at most 5 min
+  })
+
+  it('runs one probe for callers asking the same question at once', async () => {
+    const root = project()
+    const { probe, runner } = createProbe()
+    await probe.getStatus({ projectRoot: project() })
+    const perProbe = runner.requests.length
+    runner.requests.length = 0
+
+    const answers = await Promise.all(
+      [1, 2, 3, 4].map(() => probe.getStatus({ projectRoot: root })),
+    )
+    expect(new Set(answers.map((answer) => answer.cacheKey)).size).toBe(1)
+    expect(runner.requests).toHaveLength(perProbe)
+    // Each caller gets its own copy.
+    answers[0]!.tools.length = 0
+    expect(answers[1]!.tools.length).toBeGreaterThan(0)
+  })
+
+  it('remembers a bounded number of answers', async () => {
+    const { probe, runner } = createProbe()
+    const first = project()
+    await probe.getStatus({ projectRoot: first })
+    for (let index = 0; index < 40; index += 1)
+      await probe.getStatus({ projectRoot: project() })
+    const before = runner.requests.length
+    await probe.getStatus({ projectRoot: first })
+    expect(runner.requests.length).toBeGreaterThan(before)
+  })
+
   it('invalidates naturally when the effective process PATH changes', async () => {
     const root = project()
     const runner = new FakeRunner()

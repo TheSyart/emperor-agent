@@ -6,9 +6,10 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { userText } from '../../../../llm/message'
 import { ApprovalService } from '../../../approval/service'
@@ -26,6 +27,7 @@ import {
 import { createTestHarness, type ScriptedReply } from '../../../testing'
 import { textOf, type ToolExecutionResult } from '../../definition'
 import { ToolRegistry } from '../../registry'
+import { spillSessionDir } from '../../spill'
 import type { ToolServices } from '../../services'
 import { buildShellEnv } from './env'
 import { parseExitStatus } from './render'
@@ -209,6 +211,30 @@ describe.skipIf(!posix)('bash tool', () => {
     expect(full.startsWith('HEAD')).toBe(true)
   })
 
+  it('spills a session’s output into that session’s spill folder (KRN-12)', async () => {
+    const tools = new ToolRegistry()
+    tools.register(
+      createShellTool(services('danger-full-access'), {
+        platform: 'linux',
+        maxOutputBytes: 1000,
+      }) as never,
+    )
+    const agent = { session: { header: { id: 'chat-1' }, events: [] } }
+    const result = await tools.execute({
+      callId: 'c1',
+      name: 'bash',
+      arguments: {
+        description: 'Print a lot',
+        command: 'head -c 5000 /dev/zero | tr "\\0" a',
+      },
+      signal: new AbortController().signal,
+      agent: agent as never,
+    })
+    const spillPath = meta(result)['spillPath'] as string
+    expect(dirname(spillPath)).toBe(spillSessionDir(spillRoot, 'chat-1'))
+    expect(readFileSync(spillPath, 'utf8')).toHaveLength(5000)
+  })
+
   it('resolves workdir against the session workspace and rejects missing directories', async () => {
     mkdirSync(join(workspace, 'sub'))
     expect(textOf((await run({ command: 'pwd' })).content)).toBe(
@@ -328,13 +354,53 @@ describe.skipIf(!posix)('bash tool', () => {
     )
   })
 
-  it('installs the order-105 prompt section', () => {
+  it('installs the order-105 prompt section without repeating the tool description', () => {
     const prompt = new SystemPromptAssembler()
     installShellPromptSection(prompt, { platform: 'linux' })
     const section = prompt.assemble().sections[0]!
     expect(section.name).toBe('tool:bash')
     expect(section.text).toContain('[exit code: N] marker on every bash result')
-    expect(section.text).toContain('`workdir`')
+    const tool = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+      jobs: {} as never,
+    })
+    // Each fact is stated once: the fresh-shell rule lives in the description.
+    const combined = `${tool.description}\n${section.text}`
+    expect(combined.split('fresh shell').length - 1).toBe(1)
+    expect(combined.split('job_output').length - 1).toBeLessThanOrEqual(1)
+  })
+
+  it('asks for description before command, in properties and required alike', () => {
+    const tool = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+    })
+    const parameters = tool.parameters as {
+      properties: Record<string, unknown>
+      required: string[]
+    }
+    expect(Object.keys(parameters.properties).slice(0, 2)).toEqual([
+      'description',
+      'command',
+    ])
+    expect(parameters.required.slice(0, 2)).toEqual(['description', 'command'])
+    expect(tool.description).toContain(
+      'Provide `description` before `command` in the arguments.',
+    )
+  })
+
+  it('tells the model to check the absolute path before deleting or moving', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const tool = createShellTool(services('danger-full-access'), {
+        platform,
+      })
+      expect(tool.description).toContain(
+        'Before any delete or move, verify that the resolved absolute target path is the intended one',
+      )
+    }
+    const bash = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+    })
+    expect(bash.description).toContain('`${VAR:?}`')
   })
 
   it('names the tool pwsh on win32', () => {
@@ -486,6 +552,141 @@ describe.skipIf(!new LocalSandbox().available())(
       } finally {
         rmSync(outside, { recursive: true, force: true })
       }
+    })
+  },
+)
+
+describe.skipIf(process.platform !== 'darwin')(
+  'bash and protected paths under the real sandbox (SEC-06)',
+  () => {
+    function protectedFixture(answer: 'rejected' | 'allowed-once') {
+      const home = join(root, 'home')
+      const state = join(home, '.emperor')
+      mkdirSync(join(home, '.ssh'), { recursive: true })
+      mkdirSync(state, { recursive: true })
+      writeFileSync(join(home, '.ssh', 'id_rsa'), 'SSH-KEY-FIXTURE')
+      writeFileSync(join(state, 'model_config.json'), 'MODEL-CONFIG-FIXTURE')
+      const asked: string[] = []
+      const approval = new ApprovalService()
+      approval.setAnswerer(async (request) => {
+        asked.push(request.reason ?? '')
+        return answer
+      })
+      const svc: ToolServices = {
+        ...services(
+          'workspace-write',
+          new LocalSandbox({ protectedStateRoot: state, protectedHome: home }),
+          approval,
+        ),
+        protectedStateRoot: state,
+        protectedHome: home,
+        // `~` in the command is the fixture home, never the real one.
+        shellEnv: () => ({ ...process.env, HOME: home }),
+      }
+      return { home, state, asked, svc }
+    }
+
+    function results(agent: { session: { events: readonly any[] } }) {
+      return agent.session.events
+        .filter((event) => event.type === 'tool/result')
+        .map((event) => textOf(event.data.message.content[0].content))
+    }
+
+    function harnessWith(svc: ToolServices, replies: ScriptedReply[]) {
+      const h = createTestHarness({ replies })
+      h.tools.register(createShellTool(svc, { platform: 'linux' }) as never)
+      h.sessions.create({ id: 's1', cwd: workspace })
+      return h.agent('s1')
+    }
+
+    it('cat ~/.ssh/id_rsa is denied, the escalation names the file, and a rejection is an error (card 7)', async () => {
+      const f = protectedFixture('rejected')
+      const agent = harnessWith(f.svc, [
+        {
+          tools: [
+            {
+              id: 'c1',
+              name: 'bash',
+              args: { command: 'cat ~/.ssh/id_rsa', description: 'Show key' },
+            },
+          ],
+        },
+        {
+          tools: [
+            {
+              id: 'c2',
+              name: 'bash',
+              args: {
+                command: 'cat ~/.ssh/id_rsa',
+                description: 'Show key',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Need the deploy key.',
+              },
+            },
+          ],
+        },
+        { text: 'stopped' },
+      ])
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      const [denied, rejected] = results(agent)
+      expect(denied).toContain(
+        '[sandbox: file access denied under workspace-write mode]',
+      )
+      expect(denied).toContain('[sandbox: escalation available')
+      expect(denied).not.toContain('SSH-KEY-FIXTURE')
+      expect(f.asked).toEqual([
+        'escalate sandbox to danger-full-access to read credentials (~/.ssh/id_rsa): Need the deploy key.',
+      ])
+      expect(rejected).toContain(
+        'the user rejected escalating this command to "danger-full-access"',
+      )
+      expect(rejected).not.toContain('SSH-KEY-FIXTURE')
+    })
+
+    it('an approved escalation reads the credential but never Emperor config', async () => {
+      const f = protectedFixture('allowed-once')
+      const config = join(f.state, 'model_config.json')
+      const agent = harnessWith(f.svc, [
+        {
+          tools: [
+            {
+              id: 'c1',
+              name: 'bash',
+              args: {
+                command: 'cat ~/.ssh/id_rsa',
+                description: 'Show key',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Need the deploy key.',
+              },
+            },
+          ],
+        },
+        {
+          tools: [
+            {
+              id: 'c2',
+              name: 'bash',
+              args: {
+                command: `cat ${config}`,
+                description: 'Show model config',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Look at the model settings.',
+              },
+            },
+          ],
+        },
+        { text: 'done' },
+      ])
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      const [key, refused] = results(agent)
+      expect(key).toBe('SSH-KEY-FIXTURE')
+      expect(refused).not.toContain('MODEL-CONFIG-FIXTURE')
+      expect(refused).toContain('Operation not permitted')
+      expect(refused).toContain("[sandbox: Emperor's protected paths")
+      // No wider mode exists: no escalation hint after a full-access denial.
+      expect(refused).not.toContain('[sandbox: escalation available')
     })
   },
 )

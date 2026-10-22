@@ -22,9 +22,24 @@ import { logger as defaultLogger, type Logger } from '../util/log'
 import { pidIsAlive } from '../util/stable-process-identity'
 import type { StateRootSource } from './paths'
 import { migrateSkillPluginSemantics } from './migrate-skill-plugin-semantics'
+import {
+  CURRENT_DATA_VERSION,
+  compareAppVersions,
+  dataVersionOf,
+} from './data-version'
 
 export const CURRENT_STATE_LAYOUT_VERSION = 1 as const
 export type StateLayoutVersion = typeof CURRENT_STATE_LAYOUT_VERSION
+export {
+  CURRENT_DATA_VERSION,
+  compareAppVersions,
+  readInstalledDataVersion,
+} from './data-version'
+export {
+  applyPendingHomeRestore,
+  loadHomeBackupModule,
+  runPendingDataMigrations,
+} from './data-startup'
 
 export interface InstallationStateV1 {
   schemaVersion: 1
@@ -35,6 +50,10 @@ export interface InstallationStateV1 {
   updatedAt: string
   emperorHomeSource: StateRootSource
   migration: 'fresh' | 'existing' | 'renamed_legacy' | 'legacy_conflict'
+  /** The release that ran last (this run), and the one before it. */
+  lastRunVersion: string | null
+  previousRunVersion: string | null
+  dataVersion: number
 }
 
 export type InstallationBootstrapErrorCode =
@@ -78,6 +97,8 @@ export interface BootstrapEmperorHomeResult {
   legacyHome: string | null
   migration: InstallationStateV1['migration']
   installation: InstallationStateV1
+  /** The newer release that ran last time, when this one is older. */
+  downgradedFrom: string | null
 }
 
 const PRIVATE_DIRS = [
@@ -472,20 +493,31 @@ function bootstrapWhileLocked(
 
   const timestamp = opts.now()
   const existing = readInstallationState(opts.emperorHome)
+  const previous = text(existing?.lastRunVersion) ?? text(existing?.appVersion)
+  const release = compareAppVersions(opts.appVersion, opts.appVersion) === 0
   const installation: InstallationStateV1 = {
     schemaVersion: 1,
     stateLayoutVersion: CURRENT_STATE_LAYOUT_VERSION,
     appVersion: opts.appVersion,
     runtimeRevision: opts.runtimeRevision,
-    initializedAt: existing?.initializedAt || timestamp,
+    initializedAt: text(existing?.initializedAt) ?? timestamp,
     updatedAt: timestamp,
     emperorHomeSource: opts.source,
     migration,
+    lastRunVersion: release ? opts.appVersion : text(existing?.lastRunVersion),
+    previousRunVersion: release ? previous : text(existing?.previousRunVersion),
+    dataVersion: existing
+      ? dataVersionOf(existing)
+      : migration === 'fresh'
+        ? CURRENT_DATA_VERSION
+        : 0,
   }
-  writePrivateJsonAtomic(
-    join(opts.emperorHome, 'installation.json'),
-    installation,
-  )
+  // A newer schema is a newer Emperor's file: read, never rewritten.
+  if (!(Number(existing?.schemaVersion) > 1))
+    writePrivateJsonAtomic(
+      join(opts.emperorHome, 'installation.json'),
+      installation,
+    )
   normalizeBootstrapPermissions(opts.emperorHome)
   return {
     status: 'ready',
@@ -493,6 +525,12 @@ function bootstrapWhileLocked(
     legacyHome: hadLegacyRoot ? opts.legacyHome : null,
     migration,
     installation,
+    downgradedFrom:
+      release &&
+      previous &&
+      (compareAppVersions(opts.appVersion, previous) ?? 0) < 0
+        ? previous
+        : null,
   }
 }
 
@@ -576,21 +614,28 @@ function assertWritableLayout(emperorHome: string): void {
 
 function readInstallationState(
   emperorHome: string,
-): InstallationStateV1 | null {
+): Partial<Record<keyof InstallationStateV1, unknown>> | null {
   const file = join(emperorHome, 'installation.json')
   if (!existsSync(file)) return null
   try {
-    const value = JSON.parse(readFileSync(file, 'utf8')) as InstallationStateV1
+    const value = JSON.parse(readFileSync(file, 'utf8')) as Record<
+      string,
+      unknown
+    >
     return typeof value.initializedAt === 'string' ? value : null
   } catch {
     return null
   }
 }
 
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null
+}
+
 function createBootstrapSkeleton(emperorHome: string): void {
   mkdirPrivate(emperorHome)
   for (const relative of PRIVATE_DIRS) mkdirPrivate(join(emperorHome, relative))
-  ensurePrivateJson(join(emperorHome, 'settings.json'), {})
+  ensurePrivateJson(join(emperorHome, 'settings.json'), { version: 1 })
   ensurePrivateJson(join(emperorHome, 'environment', 'registry.v1.json'), {
     schemaVersion: 1,
     tools: {},

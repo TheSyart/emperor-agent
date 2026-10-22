@@ -2,12 +2,12 @@
 /**
  * Settings › 浏览器 — everything about Emperor's built-in browser, laid out
  * like Codex's 浏览器 settings, one card per group (no lead-in paragraph):
- * - a SettingsNotice first, only while a computer use call failed;
+ * - a Notice first, only while a computer use call failed;
  * - the control card: whether Emperor may operate the built-in browser
  *   (computer use's embedded-browser driver; greyed out, with a way there,
  *   while 电脑操作 is off);
- * - 常规: where a clicked web link and a link to this machine open, the
- *   address bar, clearing the browsing data (its outcome is a badge in the
+ * - 常规: where a link to this machine opens (a clicked web link: 设置 ›
+ *   常规 › 会话 › 网页链接), the address bar, clearing the browsing data (its outcome is a badge in the
  *   row) and the temporary history of the user's own browsing (the
  *   workspace 浏览器 pane, a memory-only session);
  * - 自动填充和密码: 密码管理器 and 登录状态 (sub pages), with 导入… beside
@@ -49,10 +49,10 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
   type SelectOption,
 } from './ui'
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
   <DownloadsPage v-else-if="page === 'downloads'" />
   <SiteSettingsPage v-else-if="page === 'sites'" />
   <SettingsSection v-else>
-    <SettingsNotice v-if="error" tone="error" :title="error" />
+    <Notice v-if="error" tone="error" :title="error" />
     <SettingsCard
       class="agent-card"
       data-testid="browser-agent-card"
@@ -245,15 +245,13 @@ onBeforeUnmount(() => {
     >
       <template #leading><Globe :size="18" /></template>
       <template v-if="agentStage" #meta>
-        <StatusBadge :tone="agentStage.tone">{{
-          agentStage.stage
-        }}</StatusBadge>
+        <Badge :tone="agentStage.tone">{{ agentStage.stage }}</Badge>
       </template>
       <template #actions>
         <Button
           v-if="status?.supported && !masterOn"
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="openComputerUse"
           >打开电脑操作</Button
         >
@@ -268,22 +266,6 @@ onBeforeUnmount(() => {
     </SettingsCard>
 
     <SettingsGroup title="常规">
-      <SettingsRow
-        title="网页 URL 和链接打开位置"
-        description="在会话、Pull Request 等界面点击的网页链接"
-        label-for="browser-link-target"
-      >
-        <Select
-          id="browser-link-target"
-          size="sm"
-          :model-value="preferences.linkTarget"
-          :options="LINK_TARGETS"
-          :disabled="saving"
-          @update:model-value="
-            (value?: Target) => value && save({ linkTarget: value })
-          "
-        />
-      </SettingsRow>
       <SettingsRow title="本地 URL 打开位置" label-for="browser-local-target">
         <template #description>
           <span>localhost 等本机开发站点</span>
@@ -323,23 +305,23 @@ onBeforeUnmount(() => {
             >清除 Cookie、网站数据、缓存、浏览历史和下载记录</template
           >
         </template>
-        <StatusBadge
+        <Badge
           v-if="clearing === 'done'"
           tone="ok"
-          dot
+          variant="dot-label"
           data-clear-status
           role="status"
-          >已清除</StatusBadge
+          >已清除</Badge
         >
-        <StatusBadge
+        <Badge
           v-else-if="clearing === 'failed'"
           tone="error"
-          dot
+          variant="dot-label"
           data-clear-status
-          >清除失败</StatusBadge
+          >清除失败</Badge
         >
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="clear-browser-data"
           :disabled="clearing === 'running'"
@@ -366,7 +348,7 @@ onBeforeUnmount(() => {
       <template #actions>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-testid="open-import"
           @click="importOpen = true"
           >导入…</Button
@@ -378,7 +360,7 @@ onBeforeUnmount(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-passwords"
           @click="openPage('passwords')"
           >管理</Button
@@ -386,11 +368,11 @@ onBeforeUnmount(() => {
       </SettingsRow>
       <SettingsRow
         title="登录状态"
-        description="Emperor 操作网页时保留登录的 profile"
+        description="Emperor 操作网页时使用的登录档案"
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-profiles"
           @click="openPage('profiles')"
           >管理</Button
@@ -410,7 +392,7 @@ onBeforeUnmount(() => {
         </template>
         <Button
           v-if="preferences.downloadDirectory"
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="reset-download-folder"
           :disabled="saving"
@@ -418,7 +400,7 @@ onBeforeUnmount(() => {
           >恢复默认</Button
         >
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="change-download-folder"
           :disabled="saving || choosingFolder"
@@ -443,7 +425,7 @@ onBeforeUnmount(() => {
       <SettingsRow title="下载历史记录" description="你的下载和 Emperor 的下载">
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-downloads"
           @click="openPage('downloads')"
           >管理</Button
@@ -473,7 +455,7 @@ onBeforeUnmount(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-sites"
           @click="openPage('sites')"
           >管理</Button

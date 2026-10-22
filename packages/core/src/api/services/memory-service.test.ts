@@ -81,8 +81,9 @@ interface Harness {
   deps: CoreMemoryServiceDeps
   service: CoreMemoryService
   logs: Map<string, Session>
-  refreshes: () => number
+  /** The session the caller names (what the UI shows: KRN-01 passes it explicitly). */
   setActive: (id: string | null) => void
+  active: () => string | null
   compactCalls: string[]
   setCompact: (fn: CoreMemoryServiceDeps['compactNow']) => void
   setMeasure: (value: CoreContextMeasurement | null) => void
@@ -106,7 +107,6 @@ function makeService(): Harness {
   })
   const logs = new Map<string, Session>()
   let active: string | null = null
-  let refreshCount = 0
   const compactCalls: string[] = []
   let compactImpl: CoreMemoryServiceDeps['compactNow'] = async () => ({
     compacted: false,
@@ -119,26 +119,22 @@ function makeService(): Harness {
     tokenTracker,
     watchlist,
     sessionStore,
-    activeSessionId: () => active,
     sessionLog: (id) => logs.get(id),
     compactNow: async (id) => {
       compactCalls.push(id)
       return await compactImpl(id)
     },
     measureContext: () => measurement,
-    refreshRuntimeContext: () => {
-      refreshCount += 1
-    },
   }
   return {
     root,
     deps,
     service: new CoreMemoryService(deps),
     logs,
-    refreshes: () => refreshCount,
     setActive: (id) => {
       active = id
     },
+    active: () => active,
     compactCalls,
     setCompact: (fn) => {
       compactImpl = fn
@@ -177,7 +173,7 @@ describe('CoreMemoryService (harness kernel)', () => {
     )
     service.saveWatchlist('- [ ] check later')
 
-    const payload = service.getMemory()
+    const payload = service.getMemory(h.active())
 
     expect(payload.long_term).toContain('Keep this fact')
     expect(payload.episodes).toContain('memory/2026-05-01.md')
@@ -233,7 +229,7 @@ describe('CoreMemoryService (harness kernel)', () => {
 
   it('returns neutral per-session keys when no session is active', () => {
     const { service } = makeService()
-    const payload = service.getMemory()
+    const payload = service.getMemory(null)
     expect(payload.compaction).toBeNull()
     expect(payload.history).toMatchObject({ active_lines: 0, latest_seq: 0 })
     expect(payload.runtime).toMatchObject({ events: 0, path: '' })
@@ -254,7 +250,7 @@ describe('CoreMemoryService (harness kernel)', () => {
       '## Architecture Notes\n\n- Build context belongs to this project.',
     )
 
-    const payload = service.getMemory()
+    const payload = service.getMemory(h.active())
 
     expect(payload.context).toMatchObject({
       mode: 'build',
@@ -301,15 +297,15 @@ describe('CoreMemoryService (harness kernel)', () => {
       relPath: `projects/${project.project_id}/AGENTS.local.md`,
     })
 
-    service.restoreVersion(String(versions[0]!.id))
+    service.restoreVersion(String(versions[0]!.id), null)
 
     expect(deps.projectStore.readManagedMemory(project.project_id)).toContain(
       'first version',
     )
   })
 
-  it('saves global memory through section patches, restores versions, checks the watchlist, and refreshes runtime context', async () => {
-    const { root, deps, service, refreshes } = makeService()
+  it('saves global memory through section patches, restores versions, checks the watchlist', async () => {
+    const { root, deps, service } = makeService()
     deps.sharedMemory.writeMemory(
       '# Global Long-Term Memory\n\n## Cross-Project Decisions\n- keep this\n\n## Open Questions\n- old question\n',
     )
@@ -327,12 +323,10 @@ describe('CoreMemoryService (harness kernel)', () => {
     expect(
       readFileSync(join(root, 'memory', 'patch-ledger.jsonl'), 'utf8'),
     ).toContain('save_global_memory')
-    expect(refreshes()).toBe(1)
 
     expect(() => service.saveMemory('plain memory text')).toThrow(
       'save_memory requires at least one ## section',
     )
-    expect(refreshes()).toBe(1)
 
     expect(() => service.getEpisode('bad-date')).toThrow(
       'episode date must be YYYY-MM-DD',
@@ -359,12 +353,11 @@ describe('CoreMemoryService (harness kernel)', () => {
     }).versions
     expect(versions.length).toBeGreaterThanOrEqual(1)
     expect(service.getVersion(String(versions[0]!.id))).toBeTruthy()
-    const restored = service.restoreVersion(String(versions[0]!.id))
+    const restored = service.restoreVersion(String(versions[0]!.id), null)
     expect(restored).toMatchObject({
       restored: { path: 'memory/MEMORY.local.md', content: initial },
       memory: { long_term: initial },
     })
-    expect(refreshes()).toBe(2)
 
     service.saveWatchlist('- [ ] active item')
     expect(service.getWatchlist()).toMatchObject({
@@ -391,13 +384,13 @@ describe('CoreMemoryService (harness kernel)', () => {
       { provider: 'openai', usageType: 'main_agent' },
     )
 
-    expect(service.tokens().messages).toBe(0)
+    expect(service.tokens(h.active()).messages).toBe(0)
     const session = chatSession(h, 2)
     session.append('user/message', contextMessage('runtime-context', 'ctx'), {
       surfaceOp: 'append',
     })
 
-    const payload = service.tokens()
+    const payload = service.tokens(h.active())
 
     expect(
       payload.byDateModel[Object.keys(payload.byDateModel)[0]!]![
@@ -422,12 +415,12 @@ describe('CoreMemoryService (harness kernel)', () => {
 
   it('requires a session for manual compaction and skips short sessions', async () => {
     const h = makeService()
-    await expect(h.service.compact()).rejects.toThrow(
+    await expect(h.service.compact({ sessionId: h.active() })).rejects.toThrow(
       'session is required for compaction',
     )
 
     chatSession(h, 0)
-    const skipped = await h.service.compact()
+    const skipped = await h.service.compact({ sessionId: h.active() })
     expect(skipped).toMatchObject({
       status: 'skipped',
       count: 0,
@@ -446,10 +439,12 @@ describe('CoreMemoryService (harness kernel)', () => {
       return { compacted: true, shadowedTokenCount: 120 }
     })
 
-    const payload = await h.service.compact({ force: true })
+    const payload = await h.service.compact({
+      force: true,
+      sessionId: h.active(),
+    })
 
     expect(h.compactCalls).toEqual([session.id])
-    expect(h.refreshes()).toBe(1)
     expect(payload).toMatchObject({
       status: 'compacted',
       count: 6,
@@ -482,7 +477,7 @@ describe('CoreMemoryService (harness kernel)', () => {
     const session = chatSession(h, 2)
     const before = session.seq
 
-    const skipped = await h.service.compact()
+    const skipped = await h.service.compact({ sessionId: h.active() })
     expect(skipped).toMatchObject({ status: 'skipped', count: 4 })
     expect(skipped.message).toContain('没有可压缩的范围')
 
@@ -501,7 +496,7 @@ describe('CoreMemoryService (harness kernel)', () => {
 
   it('explains the context of a session from its log', () => {
     const h = makeService()
-    expect(h.service.explainContext()).toMatchObject({
+    expect(h.service.explainContext({ sessionId: h.active() })).toMatchObject({
       status: 'missing_session',
       sessionId: null,
     })
@@ -547,7 +542,7 @@ describe('CoreMemoryService (harness kernel)', () => {
     appendCompaction(session, 'cmp_fail', [], 'not smaller')
     h.setMeasure({ totalTokens: 2048, contextWindow: 128000 })
 
-    const explained = h.service.explainContext()
+    const explained = h.service.explainContext({ sessionId: h.active() })
 
     expect(explained).toMatchObject({
       status: 'ok',

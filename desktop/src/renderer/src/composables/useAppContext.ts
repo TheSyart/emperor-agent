@@ -13,7 +13,6 @@ import type {
   MemoryVersionDetail,
   DesktopPetPayload,
   PendingState,
-  QueueDraftRecovery,
   QueuedPromptItem,
   RuntimeStatus,
   GoalProjectionState,
@@ -27,6 +26,7 @@ import type { CommandCompletion } from '@emperor/core/api'
 import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
 import type { LifecycleTransitionResult } from './composerLifecycle'
+import type { ToastOptions } from '../components/ui/toasts'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -35,8 +35,6 @@ export interface AppContext {
   configContent: Ref<string>
 
   queuedPrompts: Ref<QueuedPromptItem[]>
-  queueDraftRecovery: Ref<QueueDraftRecovery | null>
-  clearQueueDraftRecovery: (sessionId?: string) => void
   pendingInteractionsBySession: Record<string, ControlInteraction>
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>
@@ -85,10 +83,10 @@ export interface AppContext {
   activateGoalCapture: () => Promise<LifecycleTransitionResult>
   startGoalWithLifecycle: (outcome: string) => Promise<GoalOperationResult>
   dismissLifecycle: () => Promise<LifecycleTransitionResult>
-  sendMessage: (payload: string | ChatSendPayload) => boolean
+  sendMessage: (payload: string | ChatSendPayload) => boolean | Promise<boolean>
   manageQueuedPrompt: (
     promptId: string,
-    action: 'cancel' | 'interject',
+    action: 'cancel' | 'interject' | 'send',
   ) => Promise<boolean>
   sendInteractionAnswer: (
     interactionId: string,
@@ -104,9 +102,16 @@ export interface AppContext {
     reason?: string,
   ) => Promise<GoalOperationResult>
   startGoal: (outcome: string) => Promise<GoalOperationResult>
-  submitFromComposer: (payload: string | ChatSendPayload) => void
+  /** Resolves `true` once the message or command was accepted. */
+  submitFromComposer: (payload: string | ChatSendPayload) => Promise<boolean>
 
-  showToast: (message: string) => void
+  /** Queue a toast (ui/toasts): info by default, 4 s, at most 3 shown. */
+  showToast: (message: string, options?: ToastOptions) => void
+  /**
+   * Show a failure as a sticky error toast with 「复制详情」; `context`
+   * names what failed (「保存记忆失败」). Keeps a Core error's errorId.
+   */
+  showError: (error: unknown, context?: string) => void
   runSafely: (task: () => Promise<void>) => Promise<void>
 
   tokens: Ref<TokensPayload | null>

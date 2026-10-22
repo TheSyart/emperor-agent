@@ -57,7 +57,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <div class="retry" :data-active="active || undefined">
+  <div class="retry" data-process-step :data-active="active || undefined">
     <button
       type="button"
       class="summary"
@@ -93,7 +93,7 @@ const label = computed(() => {
 .retry {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .summary {
@@ -109,13 +109,13 @@ const label = computed(() => {
 }
 
 .summary:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .summary:focus-visible {
   outline: 1.5px solid rgb(var(--focus-ring));
   outline-offset: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 
 .chevron {
@@ -144,12 +144,12 @@ const label = computed(() => {
 
 .label {
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   margin-left: var(--space-1-5);
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -15,6 +15,7 @@ import type {
   ProjectLegacyPrivateDataPayload,
   PromptSnapshotsDiagnosticsPayload,
   ProcessRuntimeDiagnosticsPayload,
+  ContainmentReceiptDiagnosticsPayload,
   RuntimeStats,
   SchedulerDiagnosticsPayload,
   SandboxCapabilityDiagnosticsPayload,
@@ -134,6 +135,9 @@ export function diagnosticRows(
         workspacePolicyRow(diagnostics.workspacePolicy),
         sandboxCapabilityRow(diagnostics.sandbox),
         processRuntimeRow(diagnostics.processRuntime),
+        ...(diagnostics.processRuntime?.containment
+          ? [containmentReceiptsRow(diagnostics.processRuntime.containment)]
+          : []),
         lifecycleRow(diagnostics.lifecycle),
         subagentSupervisorRow(diagnostics.subagents),
         agentDefinitionsRow(diagnostics.agentDefinitions),
@@ -149,6 +153,7 @@ export function diagnosticRows(
       rows: [
         desktopPetRow(diagnostics.desktopPet),
         computerUseRow(diagnostics.computerUse),
+        ...updateRows(diagnostics.updates),
       ],
     },
     {
@@ -190,6 +195,7 @@ export const DIAGNOSTIC_SECTION_TITLES: Readonly<
  */
 export function diagnosticSections(
   payload: DiagnosticsPayload | null | undefined,
+  options: { app?: DiagnosticAppFacts } = {},
 ): DiagnosticSection[] {
   const diagnostics = payload || {}
   const groups = diagnosticRows(diagnostics)
@@ -199,7 +205,7 @@ export function diagnosticSections(
     {
       id: 'runtime',
       title: DIAGNOSTIC_SECTION_TITLES.runtime,
-      rows: rows('runtime'),
+      rows: [...appRows(options.app), ...rows('runtime')],
     },
     {
       id: 'desktop',
@@ -239,6 +245,49 @@ export function diagnosticSections(
       hidden: section.rows.length - visible.length,
     }
   })
+}
+
+/**
+ * What the renderer knows about the app (UI-S07: these rows used to open
+ * 设置 › 常规): the local service state (ctx.runtimeText), the current
+ * model and the number of bound projects.
+ */
+export interface DiagnosticAppFacts {
+  service: string
+  model: string
+  projects: number
+}
+
+function appRows(app: DiagnosticAppFacts | undefined): DiagnosticRow[] {
+  if (!app) return []
+  const tone: DiagnosticTone = /不可用|异常|失败/.test(app.service)
+    ? 'error'
+    : /在线|运行|办差/.test(app.service)
+      ? 'ok'
+      : 'warn'
+  return [
+    {
+      id: 'app-service',
+      label: '服务状态',
+      value: app.service || '未知',
+      detail: tone === 'ok' ? '' : '本地 Agent 服务没有就绪',
+      tone,
+    },
+    {
+      id: 'app-model',
+      label: '当前模型',
+      value: app.model || '未配置',
+      detail: app.model ? '' : '在 设置 › 模型 添加一个模型',
+      tone: app.model ? 'ok' : 'warn',
+    },
+    {
+      id: 'app-projects',
+      label: '已绑定项目',
+      value: `${app.projects} 个`,
+      detail: '',
+      tone: 'ok',
+    },
+  ]
 }
 
 function notReturned(row: DiagnosticRow): boolean {
@@ -488,6 +537,7 @@ export function diagnosticReportText(input: {
 export const OPENABLE_DIAGNOSTIC_PATHS: ReadonlySet<string> = new Set([
   'global-state-root',
   'active-project-path',
+  'logs-path',
 ])
 
 function commandCatalogRow(
@@ -638,7 +688,7 @@ function contextExplanationGroup(
       rows: [
         {
           id: 'context-mode',
-          label: 'Context Plan',
+          label: '上下文计划',
           value: String(explanation.mode || status),
           detail: contextModeDetail(explanation),
           tone: status === 'ok' ? 'ok' : diagnosticStatusTone(status),
@@ -668,7 +718,7 @@ function contextExplanationGroup(
                   `${String(item.kind || 'unknown')}: ${String(item.reason || '')}`.trim(),
                 )
                 .join(' · ')
-            : '当前 ContextPlan 没有记录被策略排除的上下文',
+            : '当前上下文计划没有记录被策略排除的上下文',
           tone: omitted.length ? 'warn' : 'ok',
         },
         {
@@ -702,7 +752,7 @@ function contextExplanationGroup(
         },
         {
           id: 'context-checkpoint',
-          label: 'Turn Checkpoint',
+          label: '回合检查点',
           value: diagnosticStatusText(
             recordValue(explanation.checkpoint).status,
           ),
@@ -763,6 +813,17 @@ function storagePathRows(
       modelConfig?.path || paths?.stateRoot,
     ),
     pathRow('mcp-config-path', 'MCP 配置文件', paths?.mcpConfigPath),
+    // REL-01: only a host that keeps logs (the desktop app) names the folder.
+    ...(paths?.logsRoot
+      ? [
+          pathRow(
+            'logs-path',
+            '日志',
+            paths.logsRoot,
+            '主进程 main.log、Core 的 core.log（各按 5 MB 轮转、保留 5 份，已脱敏）与崩溃转储 Crashpad；只在本机',
+          ),
+        ]
+      : []),
   ]
 }
 
@@ -861,15 +922,38 @@ function schedulerRow(
   const errorCount = count(summary?.lastActionErrors)
   const corruptCount = count(summary?.corruptActionFiles)
   const hasError = errorCount > 0 || corruptCount > 0
+  const startError = summary?.startError || ''
+  const rejected = summary?.rejectedJobs ?? []
+  const problems = [
+    errorCount ? `${errorCount} 个坏 action 行` : '',
+    corruptCount ? `${corruptCount} 个隔离文件` : '',
+  ]
+  if (startError)
+    return {
+      id: 'scheduler-store',
+      label: '定时任务存储',
+      value: '未启动',
+      detail: joinParts([startError, ...problems]),
+      tone: 'error',
+      path: summary?.jobsFile,
+    }
+  if (!hasError && rejected.length)
+    return {
+      id: 'scheduler-store',
+      label: '定时任务存储',
+      value: `${rejected.length} 个任务无法读取`,
+      detail: joinParts([
+        rejected.map((job) => job.name || job.id || '未命名').join('、'),
+        '已移到 jobs.rejected.json，其余任务照常运行',
+      ]),
+      tone: 'warn',
+      path: summary?.rejectedFile ?? summary?.jobsFile,
+    }
   return {
     id: 'scheduler-store',
     label: '定时任务存储',
     value: hasError ? '异常' : summary ? '正常' : '未返回',
-    detail: joinParts([
-      errorCount ? `${errorCount} 个坏 action 行` : '',
-      corruptCount ? `${corruptCount} 个隔离文件` : '',
-      !hasError ? summary?.jobsFile : '',
-    ]),
+    detail: joinParts([...problems, !hasError ? summary?.jobsFile : '']),
     tone: hasError ? 'error' : summary ? 'ok' : 'muted',
     path: summary?.jobsFile,
   }
@@ -1089,6 +1173,59 @@ function processRuntimeRow(
   }
 }
 
+const CONTAINMENT_OWNERS: Record<string, string> = {
+  mcp: 'MCP',
+  hook: 'Hook',
+  environment: '环境安装',
+}
+
+const CONTAINMENT_DECISIONS: Record<string, string> = {
+  contained: '已隔离',
+  refused: '已拒绝',
+  'user-allowed-unsandboxed': '经同意未隔离',
+}
+
+/**
+ * SEC-08: the newest process containment receipts — who ran, whether it ran
+ * in the sandbox, was refused or ran outside it with the user's consent,
+ * and the policy hash. Anything not contained makes the row a warning.
+ */
+function containmentReceiptsRow(
+  containment: NonNullable<ProcessRuntimeDiagnosticsPayload['containment']>,
+): DiagnosticRow {
+  const recent = containment.recent ?? []
+  const count = (decision: string) =>
+    recent.filter((item) => item.decision === decision).length
+  const contained = count('contained')
+  const refused = count('refused')
+  const allowed = count('user-allowed-unsandboxed')
+  const describe = (item: ContainmentReceiptDiagnosticsPayload) => {
+    const owner =
+      CONTAINMENT_OWNERS[String(item.owner)] ?? String(item.owner || '进程')
+    const decision =
+      CONTAINMENT_DECISIONS[String(item.decision)] ??
+      String(item.decision || 'unknown')
+    const facts = `${owner} ${String(item.id || '')} ${decision} (${String(item.backend || 'none')} · ${String(item.policyHash || '')})`
+    return item.decision === 'refused' && item.reason
+      ? `${facts}：${item.reason}`
+      : facts
+  }
+  return {
+    id: 'process-containment',
+    label: '进程隔离回执',
+    value: recent.length
+      ? joinParts([
+          `${recent.length} 条`,
+          contained ? `${contained} 隔离` : '',
+          refused ? `${refused} 拒绝` : '',
+          allowed ? `${allowed} 经同意未隔离` : '',
+        ])
+      : '暂无',
+    detail: recent.slice(0, 5).map(describe).join(' · '),
+    tone: !recent.length ? 'muted' : refused || allowed ? 'warn' : 'ok',
+  }
+}
+
 function lifecycleRow(
   lifecycle: LifecycleDiagnosticsPayload | undefined,
 ): DiagnosticRow {
@@ -1137,9 +1274,9 @@ function subagentSupervisorRow(
     ).length
     return {
       id: 'subagent-supervisor',
-      label: '子代理',
+      label: '子智能体',
       value: `${running} 个运行中 · 共 ${value.length} 个`,
-      detail: '当前会话树中的子代理',
+      detail: '当前会话树中的子智能体',
       tone: 'ok',
     }
   }
@@ -1155,7 +1292,7 @@ function subagentSupervisorRow(
     sessions.some(([, count]) => maxPerSession > 0 && count >= maxPerSession)
   return {
     id: 'subagent-supervisor',
-    label: '子代理',
+    label: '子智能体',
     value: supervisor
       ? `${active} active · ${active}/${maxGlobal} capacity`
       : '未返回',
@@ -1317,6 +1454,70 @@ function computerUseRow(
     ]),
     tone: drivers.length === 0 ? 'warn' : 'ok',
   }
+}
+
+/**
+ * 检查更新 (REL-02): the switch, a test feed in effect (always a warning:
+ * it is for testing only), and the running Electron against the newest one
+ * an Emperor release records — more than 2 majors behind is a reminder.
+ * The reference comes with the update check; nothing else goes online.
+ */
+function updateRows(
+  updates: DiagnosticsPayload['updates'] | undefined,
+): DiagnosticRow[] {
+  if (!updates) return []
+  const rows: DiagnosticRow[] = []
+  const check: DiagnosticRow = !updates.automatic
+    ? {
+        id: 'update-check',
+        label: '检查更新',
+        value:
+          updates.disabledReason === 'development' ? '开发版不检查' : '不检查',
+        detail: '',
+        tone: 'muted',
+      }
+    : !updates.enabled
+      ? {
+          id: 'update-check',
+          label: '检查更新',
+          value: '已关闭',
+          detail: '在 设置 › 常规 › 更新 打开',
+          tone: 'muted',
+        }
+      : {
+          id: 'update-check',
+          label: '检查更新',
+          value: '已开启',
+          detail: updates.lastError
+            ? `上次检查没有成功：${updates.lastError.message}，稍后自动重试`
+            : updates.available
+              ? `Emperor ${updates.available} 可用`
+              : '',
+          tone: updates.lastError ? 'muted' : 'ok',
+        }
+  rows.push(check)
+  if (updates.feedOverride)
+    rows.push({
+      id: 'update-feed',
+      label: '测试更新源',
+      value: '已生效',
+      detail: `${updates.feedOverride}：由环境变量 EMPEROR_UPDATE_FEED_URL 指定，只用于测试；从这里下载的安装包不核验 GitHub 来源证明`,
+      tone: 'warn',
+    })
+  const electron = updates.electron
+  if (electron?.current)
+    rows.push({
+      id: 'electron',
+      label: 'Electron 版本',
+      value: electron.current,
+      detail: electron.outdated
+        ? `比最新发布的 Emperor 内置的 Electron ${electron.latest} 落后 ${electron.behind} 个主版本，内置浏览器可能缺少安全修复；请更新 Emperor`
+        : electron.latest
+          ? `最新发布的 Emperor 内置 ${electron.latest}`
+          : '检查更新后才能和最新发布的 Emperor 比较',
+      tone: electron.outdated ? 'warn' : 'ok',
+    })
+  return rows
 }
 
 function dependencyRows(

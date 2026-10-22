@@ -4,9 +4,10 @@
  * 36px collapsed row): checklist glyph, progress summary with the current
  * in-progress item, expandable item list with status glyphs.
  */
+import Spinner from '../ui/Spinner.vue'
 import { computed, ref } from 'vue'
 import type { TodoItem } from '../../types'
-import { DsCheck, DsChecklist, DsChevronDown, DsLoading } from '../icons/ds'
+import { DsCheck, DsChecklist, DsChevronDown } from '../icons/ds'
 
 const props = defineProps<{ todos: TodoItem[] }>()
 
@@ -51,12 +52,8 @@ const summary = computed(() => {
         >
           <span class="glyph" aria-hidden="true">
             <DsCheck v-if="item.status === 'completed'" :size="14" />
-            <DsLoading
-              v-else-if="item.status === 'in_progress'"
-              :size="14"
-              class="spin"
-            />
-            <span v-else class="ring" />
+            <Spinner v-else-if="item.status === 'in_progress'" size="sm" />
+            <span v-else class="pending-marker" />
           </span>
           <span class="content" :title="item.content">{{ item.content }}</span>
         </li>
@@ -73,7 +70,7 @@ const summary = computed(() => {
   max-width: calc(var(--composer-card-max) - 4 * var(--dock-inset));
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--tip-fill));
 }
@@ -101,11 +98,11 @@ const summary = computed(() => {
 .lead,
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .chevron {
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .chevron[data-open] {
@@ -116,8 +113,8 @@ const summary = computed(() => {
   flex: none;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .progress {
@@ -126,7 +123,7 @@ const summary = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -149,11 +146,11 @@ const summary = computed(() => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .item[data-status='completed'] .content {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 
@@ -163,7 +160,7 @@ const summary = computed(() => {
   place-items: center;
   width: var(--space-4);
   height: var(--space-4);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .item[data-status='completed'] .glyph {
@@ -171,25 +168,15 @@ const summary = computed(() => {
 }
 
 .item[data-status='in_progress'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
-.ring {
+.pending-marker {
   box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-3);
   border: 1.5px solid currentColor;
   border-radius: var(--radius-pill);
-}
-
-.spin {
-  animation: todo-spin 1s linear infinite;
-}
-
-@keyframes todo-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .content {

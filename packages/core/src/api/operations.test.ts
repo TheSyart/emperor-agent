@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(182)
+    expect(coreOperationKeys()).toHaveLength(245)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -52,18 +52,33 @@ describe('Core operation registry', () => {
         'files.list',
         'files.search',
         'files.read',
+        'files.stat',
         'terminals.list',
         'terminals.create',
         'terminals.read',
         'terminals.write',
         'terminals.resize',
         'terminals.close',
+        'references.preview',
         'references.resolve',
+        'references.siteIcon',
         'sessions.history',
         'sessions.event',
         'sessions.lineage',
         'sessions.children',
         'sessions.watch',
+        'tools.networkSettings',
+        'tools.setNetworkSettings',
+        'sessions.defaults',
+        'sessions.setDefaults',
+        'model.replaceEntry',
+        'sessions.search',
+        'updates.status',
+        'updates.setEnabled',
+        'updates.check',
+        'updates.download',
+        'updates.cancelDownload',
+        'updates.reveal',
       ]),
     )
     for (const retired of [
@@ -124,6 +139,54 @@ describe('Core operation registry', () => {
       expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
   })
 
+  it('validates the new-session permission change (UI-S07)', () => {
+    const args = CORE_OPERATION_REGISTRY['sessions.setDefaults'].args
+    for (const permission of [
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
+    ])
+      expect(args.parse([{ permission }])).toEqual([{ permission }])
+    for (const bad of [
+      { permission: 'root' },
+      { permission: 'read-only', extra: true },
+      {},
+    ])
+      expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
+  })
+
+  it('validates the simplified model editor and the replacement (MOD-05)', () => {
+    const save = CORE_OPERATION_REGISTRY['model.saveEntry'].args
+    expect(
+      save.parse([
+        {
+          entryId: 'pro',
+          sampling: { temperature: 0.7 },
+          lockFields: ['contextWindowTokens', 'maxTokens'],
+        },
+      ]),
+    ).toEqual([
+      {
+        entryId: 'pro',
+        sampling: { temperature: 0.7 },
+        lockFields: ['contextWindowTokens', 'maxTokens'],
+      },
+    ])
+    expect(
+      save.parse([{ entryId: 'pro', sampling: { temperature: null } }]),
+    ).toEqual([{ entryId: 'pro', sampling: { temperature: null } }])
+    for (const bad of [
+      { entryId: 'pro', sampling: { temperature: 3 } },
+      { entryId: 'pro', lockFields: ['apiKey'] },
+    ])
+      expect(() => save.parse([bad]), JSON.stringify(bad)).toThrow()
+    const replace = CORE_OPERATION_REGISTRY['model.replaceEntry'].args
+    expect(
+      replace.parse([{ entryId: 'chat', modelId: 'deepseek-flash' }]),
+    ).toEqual([{ entryId: 'chat', modelId: 'deepseek-flash' }])
+    expect(() => replace.parse([{ entryId: 'chat' }])).toThrow()
+  })
+
   it('validates the turn file record operations', () => {
     const diff = CORE_OPERATION_REGISTRY['workspace.turnDiff'].args
     const revert = CORE_OPERATION_REGISTRY['workspace.revertTurn'].args
@@ -175,6 +238,41 @@ describe('Core operation registry', () => {
     expect(() =>
       CORE_OPERATION_REGISTRY['goals.start'].args.parse([
         { outcome: '旧字段', sessionId: 'session_1' },
+      ]),
+    ).toThrow()
+  })
+
+  it('FIX-13 · a draft carries its own plan mode and preset', () => {
+    const draftSession = { mode: 'chat', plan: true, preset: 'read-only' }
+    expect(
+      CORE_OPERATION_REGISTRY['chat.submit'].args.parse([
+        { content: 'hi', sessionId: 'draft:1', draftSession },
+      ])[0],
+    ).toMatchObject({ draftSession })
+    expect(
+      CORE_OPERATION_REGISTRY['goals.start'].args.parse([
+        { objective: '目标', sessionId: 'draft:1', draftSession },
+      ])[0],
+    ).toMatchObject({ draftSession })
+    expect(
+      CORE_OPERATION_REGISTRY['sessions.create'].args.parse([
+        { title: '新会话', mode: 'chat', plan: true, preset: 'read-only' },
+      ]),
+    ).toEqual([
+      { title: '新会话', mode: 'chat', plan: true, preset: 'read-only' },
+    ])
+    for (const bad of [
+      { ...draftSession, preset: 'plan' },
+      { ...draftSession, plan: 'yes' },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['chat.submit'].args.parse([
+          { content: 'hi', sessionId: 'draft:1', draftSession: bad },
+        ]),
+      ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['sessions.create'].args.parse([
+        { preset: 'full_access' },
       ]),
     ).toThrow()
   })
@@ -448,6 +546,31 @@ describe('Core operation registry', () => {
         { entryId: 'entry-1', kind: 'vision' },
       ]),
     ).toEqual([{ entryId: 'entry-1', kind: 'vision' }])
+    // MOD-02: listing and probing take the form's draft connection.
+    const draft = {
+      provider: 'moonshot',
+      protocol: 'openai',
+      apiBase: 'https://api.moonshot.cn/v1',
+      apiKey: 'sk-draft',
+      connectionId: 'conn-1',
+      workspaceId: 'llm-ws01',
+    }
+    expect(
+      CORE_OPERATION_REGISTRY['model.probeConnection'].args.parse([draft]),
+    ).toEqual([draft])
+    expect(
+      CORE_OPERATION_REGISTRY['model.discoverModels'].args.parse([
+        { ...draft, refresh: true },
+      ]),
+    ).toEqual([{ ...draft, refresh: true }])
+    for (const bad of [
+      { ...draft, refresh: true },
+      { ...draft, apiKey: 42 },
+      { ...draft, workspaceId: 'x'.repeat(64) },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['model.probeConnection'].args.parse([bad]),
+      ).toThrow()
   })
 
   it('rejects malformed security-sensitive payloads before invoking CoreApi', () => {
@@ -739,6 +862,65 @@ describe('Core operation registry', () => {
     expect(setEnabled).not.toHaveBeenCalled()
   })
 
+  it('FIX-14 · commands.list / complete take a session, or a draft id with its draft context', async () => {
+    const list = vi.fn(async () => [])
+    const complete = vi.fn(async () => [])
+    const api = { commands: { list, complete } } as unknown as CoreApi
+    const draftSession = {
+      mode: 'build',
+      project: {
+        project_id: 'p',
+        project_path: '/work/p',
+        project_name: 'p',
+      },
+    }
+    await invokeCoreOperation(api, 'commands.list', [
+      { sessionId: 'draft:1', draftSession, invocationSource: 'desktop' },
+    ])
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'draft:1', draftSession }),
+    )
+    await invokeCoreOperation(api, 'commands.complete', [
+      {
+        sessionId: 'draft:1',
+        draftSession,
+        commandId: 'builtin.model',
+        rawArgs: '',
+        cursor: 0,
+        invocationSource: 'desktop',
+      },
+    ])
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'draft:1', draftSession }),
+    )
+    // Neither a session nor a draft, or a draft context on a real session:
+    // the safe argument error, which the interface shows in Chinese.
+    for (const input of [
+      { invocationSource: 'desktop' },
+      { sessionId: '  ', invocationSource: 'desktop' },
+      { draftSession, invocationSource: 'desktop' },
+      { sessionId: 'session-1', draftSession, invocationSource: 'desktop' },
+    ])
+      await expect(
+        invokeCoreOperation(api, 'commands.list', [input]),
+      ).rejects.toMatchObject({
+        code: 'invalid_core_arguments',
+        message: 'Invalid arguments for commands.list',
+      })
+    await expect(
+      invokeCoreOperation(api, 'commands.complete', [
+        {
+          commandId: 'builtin.model',
+          rawArgs: '',
+          cursor: 0,
+          invocationSource: 'desktop',
+        },
+      ]),
+    ).rejects.toMatchObject({ code: 'invalid_core_arguments' })
+    expect(list).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledOnce()
+  })
+
   it('exposes a runtime operation-key guard without accepting arbitrary strings', () => {
     expect(isCoreOperationKey('hooks.getConfig')).toBe(true)
     expect(isCoreOperationKey('chat.__proto__')).toBe(false)
@@ -758,7 +940,12 @@ type RenameResult = CoreOperationResult<'sessions.rename'>
 expectTypeOf<Awaited<RenameResult>>().toEqualTypeOf<SessionEntry>()
 
 type ToolResult = CoreOperationResult<'tools.readResult'>
-expectTypeOf<Awaited<ToolResult>>().toEqualTypeOf<{ content: string }>()
+expectTypeOf<Awaited<ToolResult>>().toEqualTypeOf<{
+  content: string
+  page: number
+  pages: number
+  bytes: number
+}>()
 
 expectTypeOf<
   ReturnType<typeof coreOperationDescriptors>[number]['key']

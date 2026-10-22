@@ -8,12 +8,9 @@ import {
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type {
-  CommandCompletion,
-  CommandDescriptor,
-  CommandSurface,
-} from '@emperor/core/api'
+import type { CommandDescriptor, CommandSurface } from '@emperor/core/api'
 import AppFrame from './components/shell/AppFrame.vue'
+import ImageViewerHost from './components/ui/ImageViewerHost.vue'
 import {
   CENTER_MIN_CHAT,
   CENTER_MIN_TRAJECTORY,
@@ -29,37 +26,62 @@ import {
   installNavHistory,
 } from './components/shell/navHistory'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
-import { useSubagentCounts } from './components/sidebar/subagentCounts'
+import { useAgentTree } from './components/sidebar/agentTree'
 import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
 import {
   openWorkspacePane,
   toggleWorkspacePane,
 } from './components/workspace/workspaceState'
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
+import { useUiPreferences } from './composables/useUiPreferences'
+import { trajectoryOffLocation } from './components/conversation/trajectoryGate'
 import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
-import Toast from './components/ui/Toast.vue'
+import {
+  pushToast,
+  showErrorToast,
+  visibleToasts,
+  type ToastOptions,
+} from './components/ui/toasts'
+import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
-import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
-import { createCommandCatalogLoader } from './commandCatalog'
-import { onBrowserPairingRequest, onBrowserReveal } from './api/backend'
+import {
+  commandCatalogOwner,
+  createCommandCatalogLoader,
+  createCommandCompleter,
+} from './commandCatalog'
+import {
+  onBrowserPairingRequest,
+  onBrowserReveal,
+  onMenuCommand,
+} from './api/backend'
 import { core } from './api/http'
+import { fetchSessionLineage } from './api/sessions'
+import {
+  createRouteOwnerController,
+  routeOwnerFromLineage,
+} from './runtime/routeOwner'
 import { useBootstrap } from './composables/useBootstrap'
 import { useNotifications } from './composables/useNotifications'
 import { useRuntime } from './composables/useRuntime'
 import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
+import { createGoalStarter } from './composables/goalStart'
 import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
 import { followPluginList } from './composables/pluginListSync'
 import { activeGoalForSession, hasProjectedGoal } from './runtime/selectors'
 import { normalizeGoal } from './runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
-import { shouldFollowActiveSession } from './runtime/routeFollow'
+import {
+  isStaleDraftRoute,
+  shouldFollowActiveSession,
+} from './runtime/routeFollow'
+import { draftSessionOf } from './runtime/sessionDrafts'
 import {
   notificationFromNotice,
   type RuntimeNotice,
@@ -74,20 +96,33 @@ const WorkspacePanel = defineAsyncComponent(
 const SettingsModal = defineAsyncComponent(
   () => import('./components/settings/SettingsModal.vue'),
 )
+// Shown only while no model is configured.
+const ModelSetupRequiredDialog = defineAsyncComponent(
+  () => import('./components/onboarding/ModelSetupRequiredDialog.vue'),
+)
+// The confirm() dialog loads on the first request (confirm.ts queues it).
+// The toast stack's view loads with the first toast (the queue is eager).
+const ToastStack = defineAsyncComponent(
+  () => import('./components/ui/ToastStack.vue'),
+)
+const ConfirmHost = defineAsyncComponent(
+  () => import('./components/ui/ConfirmHost.vue'),
+)
 
 const router = useRouter()
 const route = useRoute()
 const settingsRoute = useSettingsRoute()
-const subagentCounts = useSubagentCounts()
-const toast = ref('')
-const toastOpen = ref(false)
+const agentTree = useAgentTree()
 const modelSetupPromptOpen = ref(false)
 const modelSetupDismissed = ref(false)
 const commandDescriptors = ref<CommandDescriptor[]>([])
 
-function showToast(message: string) {
-  toast.value = message
-  toastOpen.value = Boolean(message)
+function showToast(message: string, options?: ToastOptions) {
+  pushToast(message, options)
+}
+
+function showError(error: unknown, context?: string) {
+  showErrorToast(error, context)
 }
 
 function closeModelSetupPrompt() {
@@ -95,7 +130,9 @@ function closeModelSetupPrompt() {
   modelSetupPromptOpen.value = false
 }
 
-const bootstrap = useBootstrap(showToast)
+const bootstrap = useBootstrap(showToast, {
+  onSessionUnavailable: (sessionId) => void leaveUnavailableSession(sessionId),
+})
 const sessionStore = useSession()
 const notifications = useNotifications()
 const {
@@ -127,18 +164,17 @@ const runtime = useRuntime({
   refreshMemory,
   refreshCommands: () => loadCommands(),
   showToast,
+  showError,
   resolveDraftSession: sessionStore.getSession,
   onSessionCreated: sessionStore.applySessionCreatedEvent,
   onSessionTitleUpdated: sessionStore.applySessionTitleUpdatedEvent,
   onSessionControlPendingChanged: sessionStore.applySessionControlPending,
   refreshSessions: sessionStore.load,
-  onSubagentEvent: (owner) => subagentCounts.schedule(owner),
+  onAgentTreeChanged: (event) => agentTree.handleEvent(event),
   onNotify: (notice) => notifyFromRuntime(notice),
 })
 const {
   queuedPrompts,
-  queueDraftRecovery,
-  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,
@@ -160,6 +196,7 @@ const {
   cancelInteraction,
   stopActive,
   restoreRuntimeState,
+  draftSession,
 } = runtime
 
 /** The session's goal: live projection first, bootstrap snapshot as fallback. */
@@ -182,32 +219,13 @@ function applyGoalResult(owner: string, result: GoalOperationResult) {
     boot.value.goals = { active: result.goal }
 }
 
-async function startGoal(objective: string): Promise<GoalOperationResult> {
-  const owner = sessionId.value
-  const draft = sessionStore.isDraftSessionId(owner)
-    ? sessionStore.getSession(owner)
-    : null
-  const result = await core('goals.start', {
-    objective,
-    sessionId: owner,
-    ...(draft
-      ? {
-          clientDraftId: owner,
-          draftSession: {
-            mode:
-              draft.mode === 'build' ? ('build' as const) : ('chat' as const),
-            project: {
-              project_id: draft.project_id ?? null,
-              project_path: draft.project_path ?? null,
-              project_name: draft.project_name ?? null,
-            },
-          },
-        }
-      : {}),
-  })
-  applyGoalResult(sessionId.value, result)
-  return result
-}
+const startGoal = createGoalStarter({
+  currentSessionId: () => sessionId.value,
+  draftFor: (id) =>
+    sessionStore.isDraftSessionId(id) ? sessionStore.getSession(id) : null,
+  start: (request) => core('goals.start', request),
+  apply: applyGoalResult,
+})
 
 const goalCapture = createGoalCaptureController({
   currentSessionId: () => sessionId.value,
@@ -225,19 +243,20 @@ async function runGoalAction(
   reason = 'user_confirmed_cancel',
 ): Promise<GoalOperationResult> {
   const owner = sessionId.value
+  // The goal belongs to the session on screen; name it (KRN-01).
   const result =
     action === 'pause'
-      ? await core('goals.pause', goalId)
+      ? await core('goals.pause', goalId, owner)
       : action === 'resume'
-        ? await core('goals.resume', goalId)
-        : await core('goals.cancel', goalId, reason)
+        ? await core('goals.resume', goalId, owner)
+        : await core('goals.cancel', goalId, reason, owner)
   applyGoalResult(owner, result)
   showToast(
     action === 'pause'
-      ? 'Goal 已暂停'
+      ? '目标已暂停'
       : action === 'resume'
-        ? 'Goal 已恢复'
-        : 'Goal 已清除',
+        ? '目标已恢复'
+        : '目标已清除',
   )
   return result
 }
@@ -245,9 +264,26 @@ async function runGoalAction(
 async function onSessionActivate(id: string) {
   await sessionStore.activate(id)
   switchSession(id)
+  // A draft has no bootstrap; ConversationView shows its own plan mode and
+  // preset (FIX-13).
   if (sessionStore.isDraftSessionId(id)) return
   await bootstrap.loadBootstrap(false, sessionStore.backendSessionId())
   restoreRuntimeState()
+}
+
+/**
+ * The session was archived or deleted elsewhere (its bootstrap failed and a
+ * plain one worked): go to the most recent session and say so (FIX-03).
+ */
+async function leaveUnavailableSession(sessionId: string): Promise<void> {
+  showToast('这个会话已归档或不存在，已回到最近的会话')
+  await sessionStore.load().catch(() => undefined)
+  const next = sessionStore.sessions.value.find(
+    (item) => !item.draft && item.id !== sessionId,
+  )
+  await router
+    .push(next ? sessionLocation(next.id) : { name: 'chat' })
+    .catch(() => undefined)
 }
 
 async function openProfileInterviewSession(sessionId: string | null) {
@@ -295,6 +331,15 @@ onMounted(async () => {
     connectSocket,
   })
   startupDone.value = true
+  // REL-03: an older Emperor than last time, or a restore just applied.
+  // Loaded after start-up, outside the first-load budget.
+  void import('./appDataNotices').then((notices) =>
+    notices.showDataNotices({
+      load: () => core('storage.versions'),
+      toast: pushToast,
+      openStorage: () => void settingsRoute.openSettings('advanced', 'storage'),
+    }),
+  )
   await loadCommands()
 })
 
@@ -306,29 +351,48 @@ const stopPluginList = followPluginList(boot)
 onBeforeUnmount(stopPluginList)
 
 async function refreshAll() {
-  await loadBootstrap(false, sessionStore.backendSessionId())
-  if (!error.value) {
-    connectSocket()
-    await loadCommands()
-    showToast('工作台已刷新')
-  }
+  // A failed refresh toasts and keeps the shell (useBootstrap, FIX-03).
+  if (!(await loadBootstrap(false, sessionStore.backendSessionId()))) return
+  connectSocket()
+  await loadCommands()
+  showToast('工作台已刷新')
 }
 
-watch(sessionId, () => void loadCommands())
-
-function commandCatalogSessionId(): string {
-  return (
-    sessionStore.backendSessionId() ||
-    sessionStore.sessions.value.find((item) => !item.draft)?.id ||
-    ''
-  )
+/**
+ * 「重新连接」 on the start-failure screen: a plain bootstrap (never the
+ * session that failed), then every open conversation reread from its tail,
+ * since live events may have been missed meanwhile (FIX-03).
+ */
+async function reconnect() {
+  if (!(await bootstrap.retry())) return
+  restoreRuntimeState()
+  connectSocket()
+  // The conversation store stays in the chat chunk (first-load budget).
+  const { defaultConversationStore } = await import('./conversation/store')
+  await defaultConversationStore().resyncAll()
+  await loadCommands()
 }
+
+/**
+ * The session on screen, or the start-page draft with its own mode and
+ * project — never another session's catalog (FIX-14).
+ */
+function commandOwner() {
+  const id = sessionStore.activeId.value
+  return commandCatalogOwner(id, sessionStore.getSession(id))
+}
+
+// Another session, draft or draft project: another catalog.
+watch(
+  () => JSON.stringify(commandOwner()),
+  () => void loadCommands(),
+)
 
 const commandCatalog = createCommandCatalogLoader({
-  currentSessionId: commandCatalogSessionId,
+  currentOwner: commandOwner,
   list: (owner) =>
     core('commands.list', {
-      sessionId: owner,
+      ...owner,
       includeUnavailable: false,
       invocationSource: 'desktop',
     }),
@@ -346,18 +410,16 @@ async function resolveCommandSessionId(): Promise<string> {
   const current = sessionStore.backendSessionId()
   if (current) return current
   const draftId = sessionId.value
+  // A first message is already creating this draft's session (FIX-13).
+  const sending = await draftSession(draftId)
+  if (sending) return sending
   const draft = sessionStore.getSession(draftId)
+  const { mode, project, ...settings } = draftSessionOf(draft)
   const created = await core('sessions.create', {
     title: draft?.title || '新会话',
-    mode: draft?.mode || 'chat',
-    project:
-      draft?.mode === 'build'
-        ? {
-            project_id: draft.project_id ?? null,
-            project_path: draft.project_path ?? null,
-            project_name: draft.project_name ?? null,
-          }
-        : null,
+    mode,
+    project: mode === 'build' ? project : null,
+    ...settings,
   })
   // Same promotion path as a first message: swap the draft row in place so the
   // route watcher follows to the real session instead of losing the draft id.
@@ -367,21 +429,11 @@ async function resolveCommandSessionId(): Promise<string> {
   return created.id
 }
 
-async function completeSlashCommand(
-  commandId: string,
-  rawArgs: string,
-  cursor: number,
-): Promise<CommandCompletion[]> {
-  const owner = commandCatalogSessionId()
-  if (!owner) return []
-  return await core('commands.complete', {
-    sessionId: owner,
-    commandId,
-    rawArgs,
-    cursor,
-    invocationSource: 'desktop',
-  })
-}
+const completeSlashCommand = createCommandCompleter({
+  currentOwner: commandOwner,
+  complete: (input) =>
+    core('commands.complete', { ...input, invocationSource: 'desktop' }),
+})
 
 async function activateTransitionedSession(
   session: SessionInfo,
@@ -438,7 +490,7 @@ async function runSafely(task: () => Promise<void>) {
   try {
     await task()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : String(err))
+    showError(err)
   }
 }
 
@@ -456,11 +508,22 @@ const {
   commandDescriptors,
   resolveSessionId: resolveCommandSessionId,
   controlSessionId: () => sessionStore.backendSessionId() || null,
+  draftId: () =>
+    sessionStore.backendSessionId() ? null : sessionStore.activeId.value,
+  updateDraft: sessionStore.updateDraft,
   sendMessage,
+  ensureCommands: (timeoutMs) =>
+    commandDescriptors.value.length
+      ? Promise.resolve()
+      : Promise.race([
+          loadCommands(),
+          new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+        ]),
   refreshAll,
   openCommandSurface,
   activateTransitionedSession,
   showToast,
+  showError,
   currentGoal: () => currentGoal.value,
   startGoal,
   runGoalAction,
@@ -495,35 +558,54 @@ const routeSessionId = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 const startupDone = ref(false)
-let activating: string | null = null
-
+/** 显示轨迹 (UI-S09): the route follows into the trajectory only when on. */
+const { preferences: uiPrefs } = useUiPreferences()
+const routeOwner = createRouteOwnerController({
+  resolve: async (target) => {
+    if (sessionStore.getSession(target)) return target
+    if (target.startsWith('dlg-') || target.startsWith('dgr-')) return undefined
+    const cached = Object.values(agentTree.trees)
+      .map((tree) => tree.byId[target])
+      .find(Boolean)
+    if (cached && sessionStore.getSession(cached.rootSessionId))
+      return cached.rootSessionId
+    return routeOwnerFromLineage(
+      target,
+      await fetchSessionLineage(target),
+      (id) => Boolean(sessionStore.getSession(id)),
+    )
+  },
+  activate: onSessionActivate,
+  isActive: (owner) =>
+    owner === sessionStore.activeId.value && owner === sessionId.value,
+})
 async function syncRouteSession(): Promise<void> {
-  if (!startupDone.value) return
-  if (route.name !== 'chat' && route.name !== 'trajectory') return
+  if (!startupDone.value || !isConversationRoute(route.name)) {
+    routeOwner.cancel()
+    return
+  }
   const target = routeSessionId.value
-  const active = sessionStore.activeId.value
-  if (!target) {
+  const staleDraft = isStaleDraftRoute({
+    routeSessionId: target,
+    routeSessionKnown: Boolean(target && sessionStore.getSession(target)),
+    routeSessionIsDraft: sessionStore.isDraftSessionId(target),
+  })
+  if (!target || staleDraft) {
+    routeOwner.cancel()
+    const active = sessionStore.activeId.value
     if (active)
       await router
         .replace({ ...(sessionLocation(active) as object), query: route.query })
         .catch(() => undefined)
     return
   }
-  if (target === activating) return
-  // The sidebar store and the runtime each track an active session; creating
-  // a draft only moves the store. Activate unless BOTH already point here, or
-  // sends would still go to the previously active runtime session.
-  if (target === active && target === sessionId.value) return
-  if (!sessionStore.getSession(target)) return
-  activating = target
-  try {
-    await onSessionActivate(target)
-  } finally {
-    activating = null
-  }
+  await routeOwner.sync(target)
 }
 
-watch([routeSessionId, startupDone], () => void syncRouteSession())
+watch(
+  [routeSessionId, () => route.name, startupDone],
+  () => void syncRouteSession(),
+)
 watch(
   () => sessionStore.activeId.value,
   (active) => {
@@ -546,16 +628,14 @@ watch(
       .replace({
         ...(sessionLocation(
           active,
-          route.name === 'trajectory' ? 'trajectory' : 'chat',
+          route.name === 'trajectory' && uiPrefs.value.showTrajectory
+            ? 'trajectory'
+            : 'chat',
         ) as object),
         query: route.query,
       })
       .catch(() => undefined)
   },
-)
-
-const activeSessionInfo = computed(() =>
-  sessionStore.getSession(sessionId.value),
 )
 
 // ── notifications (sidebar bell) ────────────────────────────────────────
@@ -601,16 +681,34 @@ onBeforeUnmount(() =>
 )
 
 // ── shell: workspace snapshot, columns, shortcuts ───────────────────────
-// The shared workspace snapshot follows the active session; it refreshes as
-// the active transcript grows (the agent may have touched the project).
+// The shared workspace snapshot follows the active session, so leaving the
+// chat for a full page or opening a read-only child log keeps the browser,
+// terminal and Files tabs. The viewed session (a child log) is passed along
+// so Files still accepts the files that log opens.
 const activeConversation = useLazySessionConversation(() => sessionId.value)
 bindWorkspaceSnapshotSource({
   sessionId: () => sessionId.value,
-  projectPath: () => activeSessionInfo.value?.project_path || '',
+  projectPath: () =>
+    sessionStore.getSession(sessionId.value)?.project_path || '',
   refreshKey: () => activeConversation.value?.order.value.length ?? 0,
+  viewedSessionId: () => viewedSessionId.value,
 })
 
 const frame = useFrameState()
+
+// 轨迹门控 (UI-S09): turning 显示轨迹 off leaves the trajectory at once
+// (an open settings modal stays) and folds its inspector column, whose
+// width waits for the next time.
+watch(
+  () => uiPrefs.value.showTrajectory,
+  (shown) => {
+    if (shown) return
+    frameActions.closeInspector(frame)
+    const target = trajectoryOffLocation(route)
+    if (target) void router.replace(target).catch(() => undefined)
+  },
+)
+
 /** Full-page routes (scheduler, plugins, …) have no workspace column. */
 const workspaceAvailable = computed(() => isConversationRoute(route.name))
 const centerMin = computed(() =>
@@ -663,6 +761,12 @@ const stopPairingRequests = onBrowserPairingRequest(() => {
 })
 onBeforeUnmount(stopPairingRequests)
 
+// 应用菜单 › 偏好设置… (⌘,).
+const stopMenuCommands = onMenuCommand((command) => {
+  if (command === 'open-settings') void settingsRoute.openSettings('general')
+})
+onBeforeUnmount(stopMenuCommands)
+
 provideAppContext({
   boot,
   loading,
@@ -670,8 +774,6 @@ provideAppContext({
   configContent,
   mcpContent,
   queuedPrompts,
-  queueDraftRecovery,
-  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,
@@ -718,6 +820,7 @@ provideAppContext({
   startGoal,
   submitFromComposer,
   showToast,
+  showError,
   runSafely,
   tokens: tokensData,
   tokensLoading,
@@ -736,7 +839,7 @@ provideAppContext({
     <div class="boot-card boot-error" role="alert">
       <strong>桌面端启动失败</strong>
       <p>{{ error }}</p>
-      <button type="button" class="boot-retry" @click="refreshAll">
+      <button type="button" class="boot-retry" @click="reconnect">
         重新连接
       </button>
     </div>
@@ -761,8 +864,10 @@ provideAppContext({
         <WorkspacePanel :open="open" :agent-busy="busy" />
       </template>
     </AppFrame>
+    <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
     <ModelSetupRequiredDialog
+      v-if="modelSetupPromptOpen"
       :open="modelSetupPromptOpen"
       :message="modelSetupMessage"
       @close="closeModelSetupPrompt"
@@ -770,7 +875,8 @@ provideAppContext({
     />
   </template>
 
-  <Toast v-model:open="toastOpen" :message="toast" />
+  <ToastStack v-if="visibleToasts.length" />
+  <ConfirmHost v-if="activeConfirm" />
 </template>
 
 <style scoped>
@@ -778,8 +884,8 @@ provideAppContext({
   display: grid;
   place-items: center;
   height: 100dvh;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-2));
 }
 
 .boot-card {
@@ -789,9 +895,9 @@ provideAppContext({
   gap: var(--space-3);
   max-width: 420px;
   padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
@@ -806,19 +912,19 @@ provideAppContext({
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   animation: ds-fade-in 1s ease-in-out infinite alternate;
 }
 
 .boot-error strong {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .boot-error p {
   margin: 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   word-break: break-word;
 }
 

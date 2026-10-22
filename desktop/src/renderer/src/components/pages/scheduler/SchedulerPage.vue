@@ -5,8 +5,9 @@
  * search field, the 全部 / 已开启 / 已暂停 / 已完成 tabs and one
  * SchedulerJobRow per job. A row opens SchedulerJobDialog (edit); its ⋯
  * menu runs / pauses / resumes / deletes (delete asks first; protected
- * system jobs cannot be deleted). The service line (running, concurrency,
- * queue) and the shutdown / misfire policy sit under the list.
+ * system jobs cannot be deleted). One service line (running, concurrency,
+ * queue) sits under the list; the shutdown / misfire policy is behind its
+ * ⓘ (UI-S08).
  *
  * Data: `boot.scheduler`, reloaded with `scheduler.get` on mount and every
  * time the kept-alive page is shown again; runtime `scheduler_*` events keep
@@ -23,16 +24,20 @@ import {
 } from 'vue'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
+import { Info } from 'lucide-vue-next'
 import Button from '../../ui/Button.vue'
+import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Modal from '../../ui/Modal.vue'
+import Notice from '../../ui/Notice.vue'
+import Popover from '../../ui/Popover.vue'
 import Tabs from '../../ui/Tabs.vue'
 import { DsClock, DsPlus, DsSparkle } from '../../icons/ds'
 import {
   EmptyState,
   SearchField,
-  StatusBadge,
+  Badge,
   refreshAction,
   type SettingsHeaderAction,
 } from '../../settings/ui'
@@ -65,6 +70,9 @@ const CLOCK_TICK_MS = 30_000
 
 const ctx = useAppContext()
 const busy = ref(false)
+/** The service note behind the footer's ⓘ (UI-S08: folded by default). */
+const noteOpen = ref(false)
+const noteAnchor = ref<HTMLElement | null>(null)
 const query = ref('')
 const filter = ref<SchedulerFilter>('all')
 const now = ref(Date.now())
@@ -303,6 +311,21 @@ function clearSearch() {
         @update:model-value="selectFilter"
       />
 
+      <Notice
+        v-if="scheduler.status?.startError"
+        tone="error"
+        title="定时任务没有启动"
+        :description="scheduler.status.startError"
+        role="alert"
+        data-scheduler-notice="start"
+      />
+      <Notice
+        v-if="scheduler.status?.rejectedJobs"
+        tone="warn"
+        :title="`${scheduler.status.rejectedJobs} 个定时任务无法读取`"
+        description="它们已移到数据目录的 scheduler/jobs.rejected.json，其余任务照常运行；诊断里列出了名称和原因。"
+        data-scheduler-notice="rejected"
+      />
       <p v-if="scheduler.status?.lastError" class="error" role="alert">
         {{ scheduler.status.lastError }}
       </p>
@@ -323,32 +346,34 @@ function clearSearch() {
         :icon="DsClock"
         title="还没有定时任务"
         description="定时任务会在指定时间把提示词交给主 Agent 执行，比如每天汇总进展或每周整理周报。"
+        framed
       >
-        <Button size="sm" variant="outline" @click="openCreate()">
+        <Button size="sm" variant="secondary" @click="openCreate()">
           <template #icon><DsPlus :size="14" /></template>
           新建任务
         </Button>
       </EmptyState>
       <EmptyState
         v-else
-        compact
         title="没有匹配的任务"
         description="换个关键词或状态试试。"
+        variant="inline"
+        framed
       >
-        <Button size="sm" variant="outline" @click="clearSearch">
+        <Button size="sm" variant="secondary" @click="clearSearch">
           清除筛选
         </Button>
       </EmptyState>
 
       <footer class="service">
         <div class="summary-line" data-testid="scheduler-summary">
-          <StatusBadge
+          <Badge
             class="summary-badge"
             :tone="running ? 'ok' : 'neutral'"
-            dot
+            variant="dot-label"
           >
             {{ running ? '服务运行中' : '服务已停止' }}
-          </StatusBadge>
+          </Badge>
           <span
             v-for="item in summary"
             :key="item.text"
@@ -357,9 +382,28 @@ function clearSearch() {
           >
             {{ item.text }}
           </span>
+          <span ref="noteAnchor" class="summary-info">
+            <IconButton
+              size="xs"
+              label="关于定时任务服务"
+              :tooltip="false"
+              :aria-expanded="noteOpen"
+              @click="noteOpen = !noteOpen"
+            >
+              <Info :size="14" />
+            </IconButton>
+          </span>
         </div>
-        <p class="policy">{{ POLICY_NOTE }}</p>
       </footer>
+      <Popover
+        v-model:open="noteOpen"
+        :anchor="noteAnchor"
+        label="关于定时任务服务"
+        :width="300"
+        placement="top"
+      >
+        <p class="policy">{{ POLICY_NOTE }}</p>
+      </Popover>
     </div>
 
     <Menu
@@ -428,7 +472,7 @@ function clearSearch() {
       description="任务和它的运行历史都会删除，无法撤销。"
     >
       <template #footer>
-        <Button variant="outline" @click="pendingDelete = null">取消</Button>
+        <Button variant="secondary" @click="pendingDelete = null">取消</Button>
         <Button
           variant="danger"
           data-action="confirm-delete"
@@ -451,7 +495,7 @@ function clearSearch() {
 }
 
 .filters {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .error {
@@ -482,7 +526,7 @@ function clearSearch() {
   min-width: 0;
   margin-top: var(--space-4);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
   overflow: hidden;
 }
 
@@ -494,7 +538,7 @@ function clearSearch() {
   align-items: center;
   row-gap: var(--space-1);
   margin-left: calc(var(--space-5) * -1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -512,13 +556,18 @@ function clearSearch() {
   content: '·';
   display: inline-block;
   width: var(--space-5);
-  color: rgb(var(--label-dimmed));
+  color: rgb(var(--text-disabled));
   text-align: center;
+}
+
+.summary-info {
+  display: inline-flex;
+  margin-left: var(--space-1-5);
 }
 
 .policy {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   text-wrap: pretty;

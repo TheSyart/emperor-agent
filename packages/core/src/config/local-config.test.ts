@@ -30,6 +30,8 @@ describe('local config', () => {
       await readFile(join(dir, 'settings.json'), 'utf8'),
     )
     expect(onDisk).toEqual({
+      // REL-03: settings.json says which version wrote it.
+      version: 1,
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
@@ -41,6 +43,16 @@ describe('local config', () => {
         downloadDirectory: null,
         askWhereToSave: false,
       },
+      webTools: { webFetch: true, webSearch: true },
+      sessions: { defaultPermission: 'workspace-write' },
+      taskBudget: {
+        maxSteps: 400,
+        maxBackgroundSteps: 120,
+        maxActiveAgents: 8,
+        maxTotalAgents: 64,
+        maxNoticeWakes: 32,
+      },
+      updates: { check: true },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -217,6 +229,10 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
+      'taskBudget',
+      'updates',
+      'webTools',
       'webui',
     ])
   })
@@ -245,6 +261,10 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
+      'taskBudget',
+      'updates',
+      'webTools',
       'webui',
     ])
     expect(existsSync(path)).toBe(true)
@@ -256,7 +276,128 @@ describe('local config', () => {
     await saveLocalConfig(dir, loaded)
     expect(
       Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(),
-    ).toEqual(['browser', 'desktopPet', 'prompt', 'webui'])
+    ).toEqual([
+      'browser',
+      'desktopPet',
+      'prompt',
+      'sessions',
+      'taskBudget',
+      'updates',
+      'version',
+      'webTools',
+      'webui',
+    ])
+  })
+
+  it('keeps the network tool switches, defaulting both on', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).webTools).toEqual({
+      webFetch: true,
+      webSearch: true,
+    })
+    await writeFile(
+      path,
+      JSON.stringify({ webTools: { webFetch: false, webSearch: 'yes' } }),
+      'utf8',
+    )
+    const loaded = await loadLocalConfig(dir)
+    expect(loaded.webTools).toEqual({ webFetch: false, webSearch: true })
+    await saveLocalConfig(dir, {
+      ...loaded,
+      webTools: { webFetch: true, webSearch: false },
+    })
+    expect(JSON.parse(await readFile(path, 'utf8')).webTools).toEqual({
+      webFetch: true,
+      webSearch: false,
+    })
+    // Like `browser`, a save that leaves the switches out writes the defaults.
+    const { webTools: _dropped, ...withoutSwitches } = loaded
+    await saveLocalConfig(dir, withoutSwitches)
+    expect(JSON.parse(await readFile(path, 'utf8')).webTools).toEqual({
+      webFetch: true,
+      webSearch: true,
+    })
+  })
+
+  it('keeps the task budget, each value falling back to its default (KRN-03)', async () => {
+    const path = localConfigPath(dir)
+    const defaults = {
+      maxSteps: 400,
+      maxBackgroundSteps: 120,
+      maxActiveAgents: 8,
+      maxTotalAgents: 64,
+      maxNoticeWakes: 32,
+    }
+    expect((await loadLocalConfig(dir)).taskBudget).toEqual(defaults)
+    await writeFile(
+      path,
+      JSON.stringify({
+        taskBudget: {
+          maxSteps: 50,
+          maxBackgroundSteps: 2.5,
+          maxActiveAgents: 0,
+          maxTotalAgents: '9',
+          maxNoticeWakes: 0,
+        },
+      }),
+      'utf8',
+    )
+    const loaded = await loadLocalConfig(dir)
+    expect(loaded.taskBudget).toEqual({
+      ...defaults,
+      maxSteps: 50,
+      maxNoticeWakes: 0,
+    })
+    const { taskBudget: _dropped, ...withoutBudget } = loaded
+    await saveLocalConfig(dir, withoutBudget)
+    expect(JSON.parse(await readFile(path, 'utf8')).taskBudget).toEqual(
+      defaults,
+    )
+  })
+
+  it('REL-02 keeps the update check switch, default on', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: true })
+    await writeFile(path, JSON.stringify({ updates: { check: 'no' } }), 'utf8')
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: true })
+    const loaded = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, { ...loaded, updates: { check: false } })
+    expect(JSON.parse(await readFile(path, 'utf8')).updates).toEqual({
+      check: false,
+    })
+    // Another setting saved later keeps it.
+    const again = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, {
+      ...again,
+      sessions: { defaultPermission: 'read-only' },
+    })
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: false })
+  })
+
+  it('keeps the new-session permission, defaulting to workspace-write', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).sessions).toEqual({
+      defaultPermission: 'workspace-write',
+    })
+    await writeFile(
+      path,
+      JSON.stringify({ sessions: { defaultPermission: 'root' } }),
+      'utf8',
+    )
+    expect((await loadLocalConfig(dir)).sessions).toEqual({
+      defaultPermission: 'workspace-write',
+    })
+    const loaded = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, {
+      ...loaded,
+      sessions: { defaultPermission: 'read-only' },
+    })
+    expect(JSON.parse(await readFile(path, 'utf8')).sessions).toEqual({
+      defaultPermission: 'read-only',
+    })
+    expect((await loadLocalConfig(dir)).sessions.defaultPermission).toBe(
+      'read-only',
+    )
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {

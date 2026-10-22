@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * SourceBlocks — raw message blocks in model order (`Block #N type`);
+ * SourceBlocks — raw message blocks in model order (`第 N 块 · type`);
  * tool-call blocks jump to their tool record.
  *
  * Props: blocks. Emits: open-call(callId).
@@ -19,15 +19,15 @@ defineEmits<{ 'open-call': [callId: string] }>()
         v-if="block.callId !== undefined"
         type="button"
         class="jump"
-        :aria-label="`Open Block #${index + 1} tool call summary`"
-        title="Open tool call summary"
+        :aria-label="`打开第 ${index + 1} 块的工具调用摘要`"
+        title="打开工具调用摘要"
         @click="$emit('open-call', block.callId)"
       >
-        <span class="label">Block #{{ index + 1 }} {{ block.type }}</span>
+        <span class="label">第 {{ index + 1 }} 块 · {{ block.type }}</span>
         <DsChevronRight :size="12" class="jump-icon" />
       </button>
       <div v-else class="header">
-        <span class="label">Block #{{ index + 1 }} {{ block.type }}</span>
+        <span class="label">第 {{ index + 1 }} 块 · {{ block.type }}</span>
       </div>
       <a
         v-if="block.imageSrc !== undefined"
@@ -70,22 +70,22 @@ defineEmits<{ 'open-call': [callId: string] }>()
 }
 
 .label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 11px / 16px var(--font-mono);
 }
 
 .jump-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .jump:hover .jump-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .content {
   margin: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 12px / 19px var(--font-mono);
   tab-size: 2;
   white-space: pre-wrap;

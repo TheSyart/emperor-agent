@@ -44,6 +44,7 @@ const schema = z
 
 const CODEC: SnapshotCodec<BrowserProfileRecord[]> = {
   schemaVersion: 1,
+  versionKey: 'schemaVersion',
   encode: (value) => ({ schemaVersion: 1, profiles: value }),
   decode(input) {
     return { value: schema.parse(input).profiles, schemaVersion: 1 }

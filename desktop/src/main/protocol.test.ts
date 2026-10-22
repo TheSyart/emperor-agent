@@ -8,7 +8,9 @@ import {
   resolveAttachmentRawPath,
   resolveMediaRawPath,
   resolveStaticAssetPath,
+  withContentSecurityPolicy,
 } from './protocol'
+import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
 
 const ROOT = path.join(path.parse(process.cwd()).root, 'app', 'out', 'renderer')
 
@@ -223,5 +225,32 @@ describe('resolveMediaRawPath', () => {
         stateRoot,
       }),
     ).toBeNull()
+  })
+})
+
+describe('app://bundle security headers (MAIN-3)', () => {
+  it('adds the CSP header and keeps status, type and body', async () => {
+    const policy = rendererContentSecurityPolicy()
+    const response = withContentSecurityPolicy(
+      new Response('<html></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      }),
+      policy,
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('text/html')
+    expect(response.headers.get('content-security-policy')).toBe(policy)
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await response.text()).toBe('<html></html>')
+  })
+
+  it('works on a fetched response whose headers are immutable', async () => {
+    const fetched = Response.redirect('app://bundle/index.html', 302)
+    const response = withContentSecurityPolicy(fetched, 'default-src x')
+    expect(response.status).toBe(302)
+    expect(response.headers.get('content-security-policy')).toBe(
+      'default-src x',
+    )
   })
 })

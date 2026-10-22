@@ -9,13 +9,13 @@
  */
 import { computed } from 'vue'
 import { DsChevronRight } from '../../icons/ds'
-import { StatusBadge } from '../ui'
+import { Badge } from '../ui'
 import {
   activationState,
   scopeLabel,
   type PluginSummary,
 } from './pluginInstall'
-import PluginLogo from './PluginLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { pluginSourceTag } from './pluginsModel'
 
 const props = defineProps<{ plugin: PluginSummary }>()
@@ -36,15 +36,20 @@ const showScope = computed(
       :data-plugin-scope="plugin.scope"
       @click="emit('select')"
     >
-      <PluginLogo :name="plugin.displayName" :logo="plugin.logo" :size="32" />
+      <Avatar
+        kind="logo"
+        :label="plugin.displayName"
+        :src="plugin.logo"
+        :size="28"
+      />
       <span class="main">
         <span class="title-line">
           <span class="name">{{ plugin.displayName }}</span>
-          <StatusBadge>{{ pluginSourceTag(plugin) }}</StatusBadge>
-          <StatusBadge v-if="showScope">{{
-            scopeLabel(plugin.scope)
-          }}</StatusBadge>
-          <StatusBadge :tone="state.tone" dot>{{ state.label }}</StatusBadge>
+          <Badge>{{ pluginSourceTag(plugin) }}</Badge>
+          <Badge v-if="showScope">{{ scopeLabel(plugin.scope) }}</Badge>
+          <Badge :tone="state.tone" variant="dot-label">{{
+            state.label
+          }}</Badge>
         </span>
         <span class="description" :title="plugin.description || undefined">
           {{ plugin.description || '没有描述' }}
@@ -62,7 +67,7 @@ const showScope = computed(
 }
 
 .plugin-row-item + .plugin-row-item {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .plugin-row {
@@ -78,11 +83,11 @@ const showScope = computed(
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .plugin-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .plugin-row:focus-visible {
@@ -110,8 +115,8 @@ const showScope = computed(
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -120,13 +125,13 @@ const showScope = computed(
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

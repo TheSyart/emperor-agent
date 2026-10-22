@@ -21,6 +21,8 @@ import {
   type OptionalCapabilityPortfolioEntry,
 } from '../../capabilities/portfolio'
 
+import type { UpdateDiagnostics } from '../../updates/types'
+
 type Dict = Record<string, unknown>
 
 /** Event-store statistics (kept for payload compatibility; optional source). */
@@ -55,37 +57,49 @@ export interface ActiveTaskInfo {
   cancelled: boolean
 }
 
+/**
+ * Facts that depend on the session the Diagnostics page was opened from;
+ * the caller passes it (KRN-01: never read from a focus).
+ */
+export interface DiagnosticsView {
+  readonly sessionId: string | null
+}
+
 export interface CoreDiagnosticsServiceDeps {
   runtimePaths?: RuntimePaths | null
+  /** The host's log folder (desktop main.log / core.log), as `paths.logsRoot`. */
+  logDirectory?: string | null
   legacyStateMigration?: LegacyStateMigrationResult | null
   /** Detects private `.emperor/sessions`|`.emperor/memory` already sitting inside the
-   * active project's own source tree. Returns null when there is no bound project. */
-  activeProjectLegacyPrivateData?: () => {
+   * viewed project's own source tree. Returns null when there is no bound project. */
+  projectLegacyPrivateData?: (view: DiagnosticsView) => {
     projectPath: string
     sessions: boolean
     memory: boolean
   } | null
   schedulerDiagnostics?: () => Dict
-  runtimeStats?: () => Partial<RuntimeStats>
-  workspacePolicy?: () => Dict
+  runtimeStats?: (view: DiagnosticsView) => Partial<RuntimeStats>
+  workspacePolicy?: (view: DiagnosticsView) => Dict
   sandboxCapability?: () => Dict
   processRuntime?: () => Dict
   /** Live subagent records (HarnessHost SubagentManager). */
-  subagents?: () => SubagentRecord[]
+  subagents?: (view: DiagnosticsView) => SubagentRecord[]
   /** Host-provided kernel summary: active agents, busy sessions, sandbox
    * backend availability, model routes. */
-  kernel?: () => Dict
+  kernel?: (view: DiagnosticsView) => Dict
   effectiveConfig?: () => Promise<EffectiveConfigSnapshot>
-  commandCatalog?: () => Dict
+  commandCatalog?: (view: DiagnosticsView) => Dict
   mcp?: () => MCPClientSnapshot
   activeTasks?: () => unknown[]
   desktopPetPayload?: () =>
     Partial<CoreDesktopPetPayload> | Promise<Partial<CoreDesktopPetPayload>>
   environmentSummary?: () => Dict | Promise<Dict>
   goalDiagnostics?: () => Dict | Promise<Dict>
-  externalToolConfig?: () => Dict
+  externalToolConfig?: (view: DiagnosticsView) => Dict
   /** Computer use summary (switch, drivers, targets); no grants or URLs. */
   computerUse?: () => Promise<Dict>
+  /** 检查更新 (REL-02): the switch, the test feed, Electron's age. */
+  updates?: () => UpdateDiagnostics
 }
 
 export interface CoreDiagnosticsPayload {
@@ -114,6 +128,7 @@ export interface CoreDiagnosticsPayload {
   optionalCapabilities: OptionalCapabilityPortfolioEntry[]
   externalToolConfig: Dict
   computerUse: Dict
+  updates: UpdateDiagnostics | null
 }
 
 export class CoreDiagnosticsService {
@@ -125,23 +140,23 @@ export class CoreDiagnosticsService {
     this.deps = deps
   }
 
-  async payload(): Promise<CoreDiagnosticsPayload> {
+  async payload(view: DiagnosticsView): Promise<CoreDiagnosticsPayload> {
     return {
       root: this.root,
       paths: this.pathsPayload(),
       modelConfig: await this.modelConfig(),
       localConfig: await localConfigDiagnostics(this.configRoot()),
       legacyStateMigration: this.legacyStateMigrationPayload(),
-      projectLegacyPrivateData: this.projectLegacyPrivateDataPayload(),
+      projectLegacyPrivateData: this.projectLegacyPrivateDataPayload(view),
       scheduler: this.deps.schedulerDiagnostics?.() ?? {},
-      runtime: runtimeStatsPayload(this.deps.runtimeStats?.()),
-      workspacePolicy: this.deps.workspacePolicy?.() ?? {},
+      runtime: runtimeStatsPayload(this.deps.runtimeStats?.(view)),
+      workspacePolicy: this.deps.workspacePolicy?.(view) ?? {},
       sandbox: this.deps.sandboxCapability?.() ?? {},
       processRuntime: this.deps.processRuntime?.() ?? {},
-      subagents: this.subagentsPayload(),
-      kernel: this.kernelPayload(),
+      subagents: this.subagentsPayload(view),
+      kernel: this.kernelPayload(view),
       effectiveConfig: await this.effectiveConfigPayload(),
-      commandCatalog: this.commandCatalogPayload(),
+      commandCatalog: this.commandCatalogPayload(view),
       mcp: this.deps.mcp?.() ?? {
         initialized: false,
         servers: [],
@@ -157,8 +172,9 @@ export class CoreDiagnosticsService {
       goals: await this.goalDiagnosticsPayload(),
       dependencies: this.dependencies(),
       optionalCapabilities: optionalCapabilityPortfolio(),
-      externalToolConfig: this.deps.externalToolConfig?.() ?? {},
+      externalToolConfig: this.deps.externalToolConfig?.(view) ?? {},
       computerUse: await this.computerUsePayload(),
+      updates: this.deps.updates?.() ?? null,
     }
   }
 
@@ -228,9 +244,9 @@ export class CoreDiagnosticsService {
   }
 
   /** Diagnostics-only surface: reports (never auto-migrates or deletes) private data
-   * found inside the active project's own `.emperor/` directory. */
-  private projectLegacyPrivateDataPayload(): Dict | null {
-    const detected = this.deps.activeProjectLegacyPrivateData?.() ?? null
+   * found inside the viewed project's own `.emperor/` directory. */
+  private projectLegacyPrivateDataPayload(view: DiagnosticsView): Dict | null {
+    const detected = this.deps.projectLegacyPrivateData?.(view) ?? null
     if (!detected || (!detected.sessions && !detected.memory)) return null
     return { ...detected }
   }
@@ -249,6 +265,7 @@ export class CoreDiagnosticsService {
         'migrations',
         'legacy-runtime-skills.json',
       ),
+      ...(this.deps.logDirectory ? { logsRoot: this.deps.logDirectory } : {}),
     }
   }
 
@@ -258,19 +275,19 @@ export class CoreDiagnosticsService {
     return { count: 0, recent: [] }
   }
 
-  private subagentsPayload(): SubagentRecord[] {
+  private subagentsPayload(view: DiagnosticsView): SubagentRecord[] {
     if (!this.deps.subagents) return []
     try {
-      return this.deps.subagents().map((record) => ({ ...record }))
+      return this.deps.subagents(view).map((record) => ({ ...record }))
     } catch {
       return []
     }
   }
 
-  private kernelPayload(): Dict {
+  private kernelPayload(view: DiagnosticsView): Dict {
     if (!this.deps.kernel) return {}
     try {
-      return this.deps.kernel()
+      return this.deps.kernel(view)
     } catch (error) {
       return { status: 'unavailable', error: toSafeError(error) }
     }
@@ -305,10 +322,10 @@ export class CoreDiagnosticsService {
     }
   }
 
-  private commandCatalogPayload(): Dict {
+  private commandCatalogPayload(view: DiagnosticsView): Dict {
     if (!this.deps.commandCatalog) return {}
     try {
-      return this.deps.commandCatalog()
+      return this.deps.commandCatalog(view)
     } catch (error) {
       return {
         status: 'unavailable',

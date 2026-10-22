@@ -62,7 +62,11 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
   }
 
   interface PendingChild {
-    started: Deferred<string>
+    started: Deferred<{
+      id: string
+      externalRunId?: string
+      backend?: 'internal' | 'claude-code' | 'codex'
+    }>
     settled: Deferred<ChildResult>
     disposed: Deferred<void>
   }
@@ -73,7 +77,12 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
   const createBridge = (
     post: Post,
   ): ChildPort & {
-    onChildStarted(callId: number, childId: string): void
+    onChildStarted(
+      callId: number,
+      childId: string,
+      externalRunId?: string,
+      backend?: 'internal' | 'claude-code' | 'codex',
+    ): void
     onChildStartError(callId: number, rendered: string): void
     onChildSettled(callId: number, result: ChildResult): void
     onChildFailed(callId: number, rendered: string): void
@@ -86,7 +95,11 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
         nextCallId += 1
         const callId = nextCallId
         const entry: PendingChild = {
-          started: deferred<string>(),
+          started: deferred<{
+            id: string
+            externalRunId?: string
+            backend?: 'internal' | 'claude-code' | 'codex'
+          }>(),
           settled: deferred<ChildResult>(),
           disposed: deferred<void>(),
         }
@@ -94,9 +107,9 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
         entry.settled.promise.catch(() => {})
         pending.set(callId, entry)
         post({ type: 'child-start', callId, request })
-        const childId = await entry.started.promise
+        const child = await entry.started.promise
         return {
-          id: childId,
+          ...child,
           result: entry.settled.promise,
           dispose: () => {
             post({ type: 'child-dispose', callId })
@@ -104,8 +117,12 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
           },
         }
       },
-      onChildStarted(callId, childId) {
-        pending.get(callId)?.started.resolve(childId)
+      onChildStarted(callId, childId, externalRunId, backend) {
+        pending.get(callId)?.started.resolve({
+          id: childId,
+          ...(externalRunId === undefined ? {} : { externalRunId }),
+          ...(backend === undefined ? {} : { backend }),
+        })
       },
       onChildStartError(callId, rendered) {
         const entry = pending.get(callId)
@@ -182,7 +199,12 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
           gate.resolve(undefined)
           break
         case 'child-started':
-          children.onChildStarted(message.callId, message.childId)
+          children.onChildStarted(
+            message.callId,
+            message.childId,
+            message.externalRunId,
+            message.backend,
+          )
           break
         case 'child-start-error':
           children.onChildStartError(message.callId, message.rendered)

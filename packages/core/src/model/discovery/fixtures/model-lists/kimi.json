@@ -1,0 +1,61 @@
+{
+  "vendor": "kimi",
+  "source": "Fields: model-center docs/vendor-apis/kimi.md, recorded from a real /v1/models response on 2026-09-19 (supports_dynamic_tools, supports_thinking_type, think_efforts are undocumented but returned). Values from platform.kimi.ai/docs/models (2026-10-18). No real key was used here.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.moonshot.cn/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "kimi-k3",
+              "object": "model",
+              "created": 1781222400,
+              "owned_by": "moonshot",
+              "display_name": "Kimi K3",
+              "context_length": 1048576,
+              "supports_image_in": true,
+              "supports_video_in": true,
+              "supports_reasoning": true,
+              "supports_dynamic_tools": true,
+              "supports_thinking_type": "only",
+              "think_efforts": {
+                "support": true,
+                "valid_efforts": ["low", "high", "max"],
+                "default_effort": "max"
+              }
+            },
+            {
+              "id": "kimi-k2.7-code-highspeed",
+              "object": "model",
+              "created": 1777000000,
+              "owned_by": "moonshot",
+              "display_name": "Kimi K2.7 Code Highspeed",
+              "context_length": 262144,
+              "supports_image_in": true,
+              "supports_video_in": true,
+              "supports_reasoning": true,
+              "supports_dynamic_tools": false
+            },
+            {
+              "id": "kimi-k2.6",
+              "object": "model",
+              "created": 1772000000,
+              "owned_by": "moonshot",
+              "context_length": 262144,
+              "supports_image_in": true,
+              "supports_video_in": true,
+              "supports_reasoning": true,
+              "supports_dynamic_tools": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

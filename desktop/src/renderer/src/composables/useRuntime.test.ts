@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { reactive, ref } from 'vue'
+import { effectScope, reactive, ref, watch } from 'vue'
 import type { BootstrapPayload } from '../types'
 import { useRuntime } from './useRuntime'
 
@@ -12,6 +12,61 @@ afterEach(() => {
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
+  it('invalidates an affected agent root even while another root is selected, without text invalidations', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const onAgentTreeChanged = vi.fn()
+    const runtime = useRuntime({ ...testOptions(), onAgentTreeChanged })
+    runtime.connectSocket()
+    runtime.switchSession('other')
+    const changed = {
+      event: 'agent_tree_changed',
+      rootSessionId: 'root',
+      revision: 3,
+      session_id: 'root',
+    }
+    emitCoreEvent(listener, changed)
+    emitCoreEvent(listener, {
+      event: 'subagent_delta',
+      session_id: 'root',
+      subagent_id: 'sub-a',
+      delta: 'text',
+    })
+    expect(onAgentTreeChanged).toHaveBeenCalledTimes(1)
+    expect(onAgentTreeChanged).toHaveBeenCalledWith(changed)
+  })
+
+  it('shows a toast for a session log health report of any session', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const showToast = vi.fn()
+    const runtime = useRuntime({ ...testOptions(), showToast })
+    runtime.connectSocket()
+    runtime.switchSession('other')
+    emitCoreEvent(listener, {
+      event: 'session_log_state',
+      session_id: 'damaged',
+      state: 'write_paused',
+      error: 'ENOSPC',
+      seq: 0,
+    })
+    expect(showToast).toHaveBeenCalledWith(
+      '磁盘已满，会话暂停保存；内容先留在内存里，腾出空间后会自动补写',
+    )
+  })
+
   it('refreshes memory and slash Skills after a live assistant completes', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -100,6 +155,126 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.queuedPrompts.value).toEqual([])
   })
 
+  // KRN-02: a prompt left behind by a failed or stopped turn stays queued.
+  it('shows a held prompt as waiting to send when its queue state changes', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    let queue: Array<Record<string, unknown>> = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.listQueuedPrompts') return queue
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    await flushPromises()
+
+    queue = [
+      {
+        id: 'p1',
+        turnId: '',
+        clientMessageId: 'c1',
+        content: 'later',
+        displayContent: 'later',
+        delivery: 'queue',
+        supportsInterjection: true,
+        createdOrder: 0,
+        attachmentIds: [],
+        requestedSkills: [],
+        state: 'failed-previous',
+        reason: 'previous-turn-failed',
+      },
+    ]
+    emitCoreEvent(listener, {
+      event: 'queue_item_state',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+      state: 'failed-previous',
+      reason: 'previous-turn-failed',
+    })
+    await flushPromises()
+    expect(runtime.queuedPrompts.value).toEqual([
+      expect.objectContaining({
+        id: 'p1',
+        status: 'failed-previous',
+        holdReason: 'previous-turn-failed',
+      }),
+    ])
+
+    // A step reserving it takes it out of the tray without another read.
+    emitCoreEvent(listener, {
+      event: 'queue_item_state',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+      state: 'sending',
+    })
+    expect(runtime.queuedPrompts.value).toEqual([])
+  })
+
+  it('keeps a queued draft sent when the submit reports it still queued', async () => {
+    let resolveSubmit!: (value: unknown) => void
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return new Promise((resolve) => {
+            resolveSubmit = resolve
+          })
+        if (args[0] === 'chat.listQueuedPrompts') return Promise.resolve([])
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    const outcome = runtime.sendMessage({
+      content: 'behind a failing turn',
+      delivery: 'queue',
+    })
+    resolveSubmit({
+      turnId: null,
+      messageId: 'm1',
+      content: '',
+      activeSessionId: 's1',
+      delivery: 'queued',
+      result: { kind: 'not-consumed', reason: 'previous-turn-failed' },
+    })
+    await expect(outcome).resolves.toBe(true)
+  })
+
+  it('sends a held prompt with the send action and re-reads the queue', async () => {
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.listQueuedPrompts') return []
+        if (args[0] === 'chat.manageQueuedPrompt') return { ok: true }
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    const reads = () =>
+      calls.filter((call) => call[0] === 'chat.listQueuedPrompts').length
+    const before = reads()
+    await expect(runtime.manageQueuedPrompt('p1', 'send')).resolves.toBe(true)
+    expect(calls).toContainEqual([
+      'chat.manageQueuedPrompt',
+      { sessionId: 's1', promptId: 'p1', action: 'send' },
+    ])
+    expect(reads()).toBe(before + 1)
+  })
+
   it('applies live profile onboarding state changes to bootstrap', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
@@ -147,12 +322,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(wsCtor).not.toHaveBeenCalled()
     expect(runtime.status.value).toBe('error')
     expect(runtime.pending).toMatchObject({
-      label: '桌面 IPC 不可用',
-      detail: '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      label: '无法连接 Emperor 核心',
+      detail: '请在 Emperor 桌面窗口中使用；普通浏览器连不上 Emperor 核心。',
       tone: 'error',
     })
     expect(showToast).toHaveBeenCalledWith(
-      '桌面 IPC 不可用，请在 Electron 桌面窗口中使用',
+      '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
     )
   })
 
@@ -194,7 +369,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.connectSocket()
     expect(runtime.status.value).toBe('ready')
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hello')).toBe(true)
+    const outcome = runtime.sendMessage('hello')
+    // Taken once the host's user message (or the submit result) arrives.
+    await expect(outcome).resolves.toBe(true)
     // No optimistic chat bubble: the transcript renders from the raw log.
     expect(runtime).not.toHaveProperty('messages')
     await Promise.resolve()
@@ -262,11 +439,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('original')).toBe(true)
-    expect(
-      runtime.sendMessage({ content: 'interrupt now', delivery: 'interject' }),
-    ).toBe(true)
+    expect(runtime.sendMessage('original')).toBeInstanceOf(Promise)
+    const interjected = runtime.sendMessage({
+      content: 'interrupt now',
+      delivery: 'interject',
+    })
     await flushPromises()
+    await expect(interjected).resolves.toBe(true)
 
     const submits = calls.filter((call) => call[0] === 'chat.submit')
     expect(submits).toHaveLength(2)
@@ -325,7 +504,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('publishes the rejected payload for Composer recovery when the Core queue slot is full', async () => {
+  it('reports a submission the full Core queue slot refused, so the composer restores it', async () => {
     const showToast = vi.fn()
     g.window = fakeWindow({
       invokeCore: (...args: unknown[]) => {
@@ -340,41 +519,69 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.switchSession('s1')
     await flushPromises()
     runtime.busy.value = true
-    const attachment = {
-      id: 'att_recover',
-      name: 'recover.txt',
-      mime: 'text/plain',
-      size: 7,
-      kind: 'text' as const,
-      hasText: true,
-      hasImage: false,
-      path: '/tmp/recover.txt',
-    }
 
-    expect(
+    await expect(
       runtime.sendMessage({
         content: 'recover this submission',
-        displayContent: '@skill(review) recover this submission',
         delivery: 'queue',
-        requestedSkills: [{ name: 'review', source: 'slash' }],
-        attachments: [attachment],
       }),
-    ).toBe(true)
-    await flushPromises(10)
-
-    expect(runtime.queueDraftRecovery.value).toEqual({
-      sessionId: 's1',
-      payload: {
-        content: 'recover this submission',
-        displayContent: '@skill(review) recover this submission',
-        delivery: 'queue',
-        requestedSkills: [{ name: 'review', source: 'slash' }],
-        attachments: [attachment],
-      },
-    })
+    ).resolves.toBe(false)
+    expect(runtime.queuedPrompts.value).toEqual([])
     expect(showToast).toHaveBeenCalledWith(
       '已有一条消息排队，请先编辑、插入或删除后再发送。',
     )
+  })
+
+  it('reports a direct send refused before the host took it', async () => {
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return Promise.reject({ code: 'session_not_found', message: 'gone' })
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast: vi.fn() })
+    runtime.switchSession('s1')
+    await expect(runtime.sendMessage('hello')).resolves.toBe(false)
+  })
+
+  it('keeps a message sent once its user message arrived, even if the turn fails later', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    let rejectSubmit!: (error: unknown) => void
+    let clientMessageId = ''
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          clientMessageId = String(
+            (args[1] as { clientMessageId?: string }).clientMessageId,
+          )
+          return new Promise((_resolve, reject) => {
+            rejectSubmit = reject
+          })
+        }
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast: vi.fn() })
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    const outcome = runtime.sendMessage('hello')
+    await flushPromises()
+    emitCoreEvent(listener, {
+      event: 'user_message',
+      seq: 1,
+      session_id: 's1',
+      turn_id: 's1:1',
+      client_message_id: clientMessageId,
+      content: 'hello',
+    })
+    rejectSubmit(new Error('model failed'))
+    await expect(outcome).resolves.toBe(true)
   })
 
   it('queues attachments and requested Skills while a turn is busy', async () => {
@@ -411,7 +618,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
           },
         ],
       }),
-    ).toBe(true)
+    ).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(calls.find((call) => call[0] === 'chat.submit')?.[1]).toMatchObject({
@@ -428,6 +635,64 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         supportsInterjection: false,
       }),
     ])
+  })
+
+  it('keeps the whole queued message across a queue refresh, for 编辑', async () => {
+    let clientMessageId = ''
+    const attachment = {
+      id: 'att_q',
+      name: 'chart.png',
+      mime: 'image/png',
+      size: 9,
+      kind: 'image' as const,
+      hasText: false,
+      hasImage: true,
+      path: '/tmp/chart.png',
+    }
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          clientMessageId = String(
+            (args[1] as { clientMessageId: string }).clientMessageId,
+          )
+          return new Promise(() => undefined)
+        }
+        if (args[0] === 'chat.listQueuedPrompts')
+          return clientMessageId
+            ? [
+                {
+                  id: 'host-1',
+                  turnId: '',
+                  clientMessageId,
+                  content: 'look',
+                  displayContent: 'look',
+                  delivery: 'queue',
+                  supportsInterjection: false,
+                  createdOrder: 1,
+                  attachmentIds: ['att_q'],
+                  requestedSkills: [],
+                },
+              ]
+            : []
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    void runtime.sendMessage({
+      content: 'look',
+      delivery: 'queue',
+      attachments: [attachment],
+    })
+    await flushPromises()
+    await runtime.refreshQueuedPrompts('s1')
+    expect(runtime.queuedPrompts.value[0]).toMatchObject({
+      id: 'host-1',
+      payload: { content: 'look', attachments: [attachment] },
+    })
   })
 
   it('keeps the turn busy while an ask waits inside the running turn', async () => {
@@ -471,7 +736,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('需要澄清')).toBe(true)
+    expect(runtime.sendMessage('需要澄清')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -480,6 +745,45 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.busy.value).toBe(true)
     expect(runtime.pending.label).toBe('等待你回答')
     expect(runtime.pendingInteractionsBySession.s1?.id).toBe('ask_q1')
+  })
+
+  it('keeps the turn busy, without an error, when a retried request resets the streamed reply', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          for (const event of [
+            { event: 'turn_phase', seq: 17, phase: 'started' },
+            { event: 'message_delta', seq: 33, delta: 'Half an ans' },
+            { event: 'assistant_reset', seq: 49, content: '' },
+          ])
+            emitCoreEvent(listener, {
+              ...event,
+              session_id: 's1',
+              turn_id: 's1:1',
+            })
+          return new Promise(() => {})
+        }
+        return { ok: true }
+      },
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+
+    runtime.switchSession('s1')
+    expect(runtime.sendMessage('go')).toBeInstanceOf(Promise)
+    await flushPromises()
+
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.busy.value).toBe(true)
   })
 
   it('does not surface an error when a stopped chat turn rejects as cancelled', async () => {
@@ -498,7 +802,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('停止我')).toBe(true)
+    expect(runtime.sendMessage('停止我')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -527,7 +831,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('第二条')).toBe(true)
+    expect(runtime.sendMessage('第二条')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -573,7 +877,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hi')).toBe(true)
+    expect(runtime.sendMessage('hi')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(runtime.busy.value).toBe(false)
@@ -633,7 +937,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hi')).toBe(true)
+    expect(runtime.sendMessage('hi')).toBeInstanceOf(Promise)
     await flushPromises()
 
     // The turn error renders as a log row; the matching rejection stays quiet.
@@ -645,6 +949,52 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       running: false,
       attention: false,
     })
+  })
+
+  it('FIX-03 6 · a bootstrap older than the live events never turns busy back on', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+    runtime.switchSession('s1')
+    emitCoreEvent(listener, {
+      event: 'turn_phase',
+      seq: 5,
+      session_id: 's1',
+      turn_id: 't1',
+      phase: 'started',
+    })
+    expect(runtime.busy.value).toBe(true)
+    // The turn ends while a bootstrap taken at seq 5 is still on its way.
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 7,
+      session_id: 's1',
+      turn_id: 't1',
+      content: 'done',
+    })
+    expect(runtime.busy.value).toBe(false)
+    options.boot.value = {
+      app: 'Emperor Agent',
+      runtime: { sessionId: 's1', events: [], latestSeq: 5, busy: true },
+    } as unknown as BootstrapPayload
+    runtime.restoreRuntimeState()
+    expect(runtime.busy.value).toBe(false)
+    // A bootstrap as new as the live stream still applies.
+    options.boot.value = {
+      app: 'Emperor Agent',
+      runtime: { sessionId: 's1', events: [], latestSeq: 9, busy: true },
+    } as unknown as BootstrapPayload
+    runtime.restoreRuntimeState()
+    expect(runtime.busy.value).toBe(true)
   })
 
   it('ignores live runtime events from another session for the active busy state', async () => {
@@ -1045,8 +1395,30 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     await expect(runtime.stopActive()).resolves.toBe(true)
 
-    expect(calls).toEqual([['chat.stopRuntime', {}]])
+    // KRN-01: the stop names the session on screen (none here).
+    expect(calls).toEqual([['chat.stopRuntime', { sessionId: null }]])
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('names the session on screen when stopping, and tells the bridge which one it is', async () => {
+    const calls: unknown[][] = []
+    const viewing: Array<string | null> = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        return { cancelled: 1, active: [] }
+      },
+      setViewingSession: (sessionId: string | null) => {
+        viewing.push(sessionId)
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await runtime.stopActive()
+
+    expect(viewing.at(-1)).toBe('s1')
+    expect(calls).toContainEqual(['chat.stopRuntime', { sessionId: 's1' }])
   })
 
   it('ignores the cancelled chat.submit rejection after stopActive has interrupted the UI', async () => {
@@ -1069,7 +1441,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
     runtime.switchSession('s1')
 
-    expect(runtime.sendMessage('hello')).toBe(true)
+    expect(runtime.sendMessage('hello')).toBeInstanceOf(Promise)
     await Promise.resolve()
     await expect(runtime.stopActive()).resolves.toBe(true)
     invokeCallback(rejectSubmit, new Error('active task cancelled: turn:1'))
@@ -1142,7 +1514,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(
       runtime.sendInteractionAnswer('ask_1', { scope: { choice: '完整' } }),
     ).toBe(true)
-    for (let i = 0; i < 5; i += 1) await Promise.resolve()
+    await flushPromises()
 
     expect(calls.map((call) => call[0])).toEqual([
       'control.answerInteraction',
@@ -1151,7 +1523,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(refreshSessions).toHaveBeenCalledTimes(1)
     expect(boot.value.control?.pending).toBeNull()
     expect(runtime.busy.value).toBe(false)
-    expect(showToast).toHaveBeenCalledWith('Internal error · ipc_deadbeef')
+    expect(showToast).toHaveBeenCalledWith(
+      '发生内部错误，请查看日志。 · ipc_deadbeef',
+    )
   })
 
   it('sanitizes reactive interaction answers before crossing the Core IPC boundary', async () => {
@@ -1567,7 +1941,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     runtime.connectSocket()
     runtime.switchSession('draft:local-1')
-    expect(runtime.sendMessage('第一条消息')).toBe(true)
+    expect(runtime.sendMessage('第一条消息')).toBeInstanceOf(Promise)
     await flushPromises()
 
     const submit = calls.find((call) => call[0] === 'chat.submit')
@@ -1585,6 +1959,150 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
       },
     })
     expect(runtime.busy.value).toBe(true)
+  })
+})
+
+// FIX-13: between sending a draft's first message and Core naming its
+// session, a stop or a second message waits for that session.
+describe('a draft while Core creates its session (FIX-13)', () => {
+  function draftRow(id: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      title: '新会话',
+      created_at: '',
+      updated_at: '',
+      preview: '',
+      mode: 'chat' as const,
+      project_id: null,
+      project_path: null,
+      project_name: null,
+      message_count: 0,
+      title_status: 'draft',
+      control_pending: null,
+      version: 1,
+      draft: true,
+      ...extra,
+    }
+  }
+
+  function setup(
+    draftId: string,
+    extra: Record<string, unknown> = {},
+    submit: (args: unknown[]) => Promise<unknown> = () => new Promise(() => {}),
+  ) {
+    let listener: ((event: unknown) => void) | null = null
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.submit') return await submit(args)
+        if (args[0] === 'chat.stopRuntime') return { cancelled: 1, active: [] }
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime({
+      ...options,
+      resolveDraftSession: (id: string) =>
+        id === draftId ? draftRow(id, extra) : undefined,
+    })
+    runtime.connectSocket()
+    runtime.switchSession(draftId)
+    const created = (sessionId: string) =>
+      emitCoreEvent(listener, {
+        event: 'session_created',
+        seq: 1,
+        session_id: sessionId,
+        session: { id: sessionId, title: '新会话' },
+        client_draft_id: draftId,
+      })
+    const submits = () =>
+      calls
+        .filter((call) => call[0] === 'chat.submit')
+        .map((call) => call[1] as Record<string, unknown>)
+    const stops = () => calls.filter((call) => call[0] === 'chat.stopRuntime')
+    return { runtime, options, calls, created, submits, stops }
+  }
+
+  it("2 · the first message carries the draft's plan mode and preset", async () => {
+    const f = setup('draft:own', { plan: true, preset: 'read-only' })
+    void f.runtime.sendMessage('先出计划')
+    await flushPromises()
+    expect(f.submits()[0]).toMatchObject({
+      sessionId: 'draft:own',
+      clientDraftId: 'draft:own',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+    })
+  })
+
+  it('5 · a stop pressed before the session exists reaches it once it does', async () => {
+    const f = setup('draft:d1')
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const stopped = f.runtime.stopActive()
+    await flushPromises()
+    // Held: Core has no session to stop yet.
+    expect(f.stops()).toEqual([])
+    f.created('session-d1')
+    await expect(stopped).resolves.toBe(true)
+    expect(f.stops()).toEqual([
+      ['chat.stopRuntime', { sessionId: 'session-d1' }],
+    ])
+    expect(f.runtime.busy.value).toBe(false)
+  })
+
+  it('5 · a stop on a draft with nothing sent asks Core nothing', async () => {
+    const f = setup('draft:idle')
+    await expect(f.runtime.stopActive()).resolves.toBe(false)
+    expect(f.stops()).toEqual([])
+    expect(f.runtime.pending.label).toBe('没有正在运行的任务')
+  })
+
+  it('4 · a second message waits for the session instead of making another', async () => {
+    const f = setup('draft:d2', { plan: true })
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    expect(f.submits()).toHaveLength(1)
+    f.created('session-d2')
+    await flushPromises(10)
+    expect(f.submits()).toHaveLength(2)
+    const sent = f.submits()[1]!
+    expect(sent).toMatchObject({
+      sessionId: 'session-d2',
+      content: '第二条',
+      delivery: 'queue',
+    })
+    expect(sent).not.toHaveProperty('clientDraftId')
+    expect(sent).not.toHaveProperty('draftSession')
+    void second
+  })
+
+  it('4 · when the first message fails, the waiting one is handed back', async () => {
+    let fail!: (error: Error) => void
+    const f = setup('draft:fail', {}, () =>
+      f.submits().length === 1
+        ? new Promise((_resolve, reject) => (fail = reject))
+        : new Promise(() => {}),
+    )
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    fail(new Error('模型不可用'))
+    await expect(second).resolves.toBe(false)
+    expect(f.submits()).toHaveLength(1)
   })
 })
 
@@ -1685,5 +2203,134 @@ describe('useRuntime bell notices (onNotify)', () => {
       summary: '已提交 · abcdef1',
     })
     expect(runtime.sessionRuntimeStates.s2?.attention).toBe(true)
+  })
+})
+
+describe('useRuntime runtime-state writes (FIX-04)', () => {
+  function streamingRuntime() {
+    let listener: ((event: unknown) => void) | null = null
+    const viewing: Array<string | null> = []
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+      setViewingSession: (id: string | null) => viewing.push(id),
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    // Another session the sidebar shows, settled.
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 1,
+      session_id: 's2',
+      turn_id: 's2:1',
+      content: 'done',
+    })
+    emitCoreEvent(listener, {
+      event: 'turn_phase',
+      seq: 16,
+      session_id: 's1',
+      turn_id: 's1:1',
+      phase: 'started',
+    })
+    const delta = (index: number) =>
+      emitCoreEvent(listener, {
+        event: 'message_delta',
+        seq: 32 + index * 16,
+        session_id: 's1',
+        turn_id: 's1:1',
+        delta: `piece ${index} `,
+      })
+    const emit = (event: Record<string, unknown>) =>
+      emitCoreEvent(listener, event)
+    return { runtime, delta, emit, viewing }
+  }
+
+  it('2 · fires no watcher while 1000 deltas leave the runtime values unchanged', () => {
+    const { runtime, delta } = streamingRuntime()
+    expect(runtime.sessionRuntimeStates.s1).toMatchObject({ running: true })
+    const fired: string[] = []
+    const scope = effectScope()
+    scope.run(() => {
+      watch(
+        () => runtime.sessionRuntimeStates.s1,
+        () => fired.push('s1'),
+        { flush: 'sync' },
+      )
+      watch(
+        () => runtime.sessionRuntimeStates.s2,
+        () => fired.push('s2'),
+        { flush: 'sync' },
+      )
+      watch(
+        () => runtime.sessionRuntimeStates,
+        () => fired.push('deep'),
+        { flush: 'sync', deep: true },
+      )
+      watch(
+        () => [
+          runtime.busy.value,
+          runtime.status.value,
+          runtime.sessionId.value,
+        ],
+        () => fired.push('scalars'),
+        { flush: 'sync' },
+      )
+    })
+    for (let index = 0; index < 1000; index++) delta(index)
+    scope.stop()
+    expect(fired).toEqual([])
+    expect(runtime.sessionRuntimeStates.s1).toMatchObject({
+      running: true,
+      attention: false,
+    })
+  })
+
+  it('2 · still writes a value that really changes, once', () => {
+    const { runtime, delta, emit } = streamingRuntime()
+    const seen: unknown[] = []
+    const scope = effectScope()
+    scope.run(() =>
+      watch(
+        () => runtime.sessionRuntimeStates.s1,
+        (value) => seen.push({ ...value }),
+        { flush: 'sync' },
+      ),
+    )
+    delta(0)
+    emit({
+      event: 'assistant_done',
+      seq: 999,
+      session_id: 's1',
+      turn_id: 's1:1',
+      content: 'done',
+    })
+    delta(1)
+    scope.stop()
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ running: false, attention: false })
+  })
+
+  it('takes core events as they arrive, without a JSON round trip', () => {
+    const { delta } = streamingRuntime()
+    const parse = vi.spyOn(JSON, 'parse')
+    const stringify = vi.spyOn(JSON, 'stringify')
+    for (let index = 0; index < 50; index++) delta(index)
+    expect(parse).not.toHaveBeenCalled()
+    expect(stringify).not.toHaveBeenCalled()
+  })
+
+  it('tells main the viewed session only when it changes', () => {
+    const { runtime, delta, viewing } = streamingRuntime()
+    const before = viewing.length
+    for (let index = 0; index < 100; index++) delta(index)
+    expect(viewing.length).toBe(before)
+    runtime.switchSession('s2')
+    expect(viewing.at(-1)).toBe('s2')
   })
 })

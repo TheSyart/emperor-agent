@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AtomicSnapshot,
@@ -7,6 +7,11 @@ import {
   type SnapshotCodec,
 } from '../store/persistence'
 import { EmperorError } from '../errors'
+import {
+  isSealedSecret,
+  SECRET_FIELD_NAME,
+  type SecretSealer,
+} from '../security/secret-sealer'
 import { logger } from '../util/log'
 import { normalizeMcpTransport } from './import'
 import {
@@ -47,6 +52,17 @@ export const DEFAULT_MCP_CONFIG = {
 } satisfies Record<string, unknown>
 
 export const MCP_CONFIG_FILE = 'mcp_config.json'
+/** The copy of a file that still held plaintext tokens, made before sealing them (SEC-06). */
+export const MCP_CONFIG_PRE_SEAL_PREFIX = `${MCP_CONFIG_FILE}.pre-seal-`
+
+/** What a sealed `headers` / `env` value is bound to: it opens only there. */
+export function mcpSecretContext(
+  server: string,
+  field: 'headers' | 'env',
+  name: string,
+): string {
+  return `${MCP_CONFIG_FILE}#servers/${server}/${field}/${name}`
+}
 
 /** A rejected `mcp_config.json` write; the message names paths only, never values. */
 export class McpConfigError extends EmperorError {
@@ -57,7 +73,19 @@ export class McpConfigError extends EmperorError {
 
 export interface McpConfigPersistenceOptions {
   persistenceAdapter?: PersistenceAdapter
+  /**
+   * SEC-06: seals `headers` / `env` values whose names look secret
+   * ({@link SECRET_FIELD_NAME}) on save, and opens sealed values on load.
+   */
+  sealer?: SecretSealer | null
 }
+
+/**
+ * What a load does with a sealed value it cannot open: `drop` it (connecting
+ * then fails authentication instead of sending ciphertext), or `keep` the
+ * sealed text (editor round trips, so a save does not lose it).
+ */
+export type UnreadableSecrets = 'drop' | 'keep'
 
 const MCP_CONFIG_KEY = defineConfigKey<Record<string, unknown>>({
   id: 'mcp.config',
@@ -83,8 +111,9 @@ export type EnvironmentValueSource =
 export async function loadMcpConfig(
   root: string,
   env: EnvironmentValueSource = process.env,
+  opts: McpConfigPersistenceOptions = {},
 ): Promise<MCPConfig> {
-  return (await resolveMcpConfig(root, env)).config
+  return (await resolveMcpConfig(root, env, opts)).config
 }
 
 export interface ResolvedMcpConfig {
@@ -97,7 +126,10 @@ export interface ResolvedMcpConfig {
 export async function resolveMcpConfig(
   root: string,
   env: EnvironmentValueSource = process.env,
-  opts: { preserveCorrupt?: boolean } & McpConfigPersistenceOptions = {},
+  opts: {
+    preserveCorrupt?: boolean
+    unreadableSecrets?: UnreadableSecrets
+  } & McpConfigPersistenceOptions = {},
 ): Promise<ResolvedMcpConfig> {
   const path = join(root, MCP_CONFIG_FILE)
   const candidates: ConfigCandidate<Record<string, unknown>>[] = []
@@ -130,7 +162,10 @@ export async function resolveMcpConfig(
           id: MCP_CONFIG_FILE,
           trust: 'trusted',
         },
-        value: expandEnv(loaded, env) as Record<string, unknown>,
+        value: expandEnv(
+          openMcpSecrets(loaded, opts.sealer, opts.unreadableSecrets ?? 'drop'),
+          env,
+        ) as Record<string, unknown>,
       })
   }
   const resolution = new ConfigResolver().resolve(MCP_CONFIG_KEY, {
@@ -152,8 +187,12 @@ async function readMcpConfigWithoutRecovery(
 /** Renderer/editor view: validates and normalizes config but never resolves env placeholders. */
 export async function loadMcpConfigUnresolved(
   root: string,
+  opts: McpConfigPersistenceOptions = {},
 ): Promise<MCPConfig> {
-  return maskMcpEditorSecrets(await loadMcpConfig(root, {}))
+  return maskMcpEditorSecrets(
+    (await resolveMcpConfig(root, {}, { ...opts, unreadableSecrets: 'keep' }))
+      .config,
+  )
 }
 
 function maskMcpEditorSecrets(config: MCPConfig): MCPConfig {
@@ -181,9 +220,139 @@ export async function loadMcpConfigRaw(
   const snapshot = await mcpConfigSnapshot(path, opts.persistenceAdapter).read({
     fallback,
   })
-  const value = structuredClone(snapshot.value)
+  // Opened, so named edits compare and keep real values; saving seals again.
+  const value = openMcpSecrets(snapshot.value, opts.sealer, 'keep')
   if (!objectOrNull(value.servers)) value.servers = {}
   return value
+}
+
+/** Apply `change` to every string value under `servers.*.headers|env`. */
+function mapSecretFields(
+  raw: Record<string, unknown>,
+  change: (
+    value: string,
+    where: { server: string; field: 'headers' | 'env'; name: string },
+  ) => string | undefined,
+): Record<string, unknown> {
+  const next = structuredClone(raw)
+  const servers = objectOrNull(next.servers)
+  if (!servers) return next
+  for (const [server, config] of Object.entries(servers)) {
+    const record = objectOrNull(config)
+    if (!record) continue
+    for (const field of ['headers', 'env'] as const) {
+      const values = objectOrNull(record[field])
+      if (!values) continue
+      for (const [name, value] of Object.entries(values)) {
+        if (typeof value !== 'string') continue
+        const changed = change(value, { server, field, name })
+        if (changed === undefined) delete values[name]
+        else values[name] = changed
+      }
+    }
+  }
+  return next
+}
+
+function openMcpSecrets(
+  raw: Record<string, unknown>,
+  sealer: SecretSealer | null | undefined,
+  unreadable: UnreadableSecrets,
+): Record<string, unknown> {
+  const lost: string[] = []
+  const opened = mapSecretFields(raw, (value, { server, field, name }) => {
+    if (!isSealedSecret(value)) return value
+    try {
+      if (sealer)
+        return sealer.open(value, mcpSecretContext(server, field, name))
+    } catch {
+      // Reported below by name only.
+    }
+    lost.push(`servers.${server}.${field}.${name}`)
+    return unreadable === 'keep' ? value : undefined
+  })
+  if (lost.length && unreadable === 'drop')
+    logger.warn('MCP secrets could not be opened with the local key', {
+      fields: lost,
+    })
+  return opened
+}
+
+/** `Bearer ${TOKEN}`-style values name an environment variable, not a secret. */
+function referencesOnly(value: string): boolean {
+  return (
+    ENV_PLACEHOLDER_RE.test(value) &&
+    value
+      .replace(ENV_RE, '')
+      .replace(/^\s*(bearer|basic|token)\b/i, '')
+      .trim() === ''
+  )
+}
+
+function secretToSeal(name: string, value: string): boolean {
+  return (
+    SECRET_FIELD_NAME.test(name) &&
+    value.trim() !== '' &&
+    !isSealedSecret(value) &&
+    !referencesOnly(value)
+  )
+}
+
+export function sealMcpSecrets(
+  raw: Record<string, unknown>,
+  sealer: SecretSealer | null | undefined,
+): { raw: Record<string, unknown>; sealedPlaintext: boolean } {
+  if (!sealer) return { raw, sealedPlaintext: false }
+  const canSeal = sealer.available
+  let sealedPlaintext = false
+  let unsealed = false
+  const sealed = mapSecretFields(raw, (value, { server, field, name }) => {
+    if (!secretToSeal(name, value)) return value
+    if (canSeal)
+      try {
+        const result = sealer.seal(value, mcpSecretContext(server, field, name))
+        sealedPlaintext = true
+        return result
+      } catch {
+        // Reported below; the value is kept rather than lost.
+      }
+    unsealed = true
+    return value
+  })
+  if (unsealed)
+    logger.warn('MCP secrets stay unsealed: the local key is not available')
+  return { raw: sealed, sealedPlaintext }
+}
+
+function hasUnsealedSecrets(raw: Record<string, unknown>): boolean {
+  let found = false
+  mapSecretFields(raw, (value, { name }) => {
+    if (secretToSeal(name, value)) found = true
+    return value
+  })
+  return found
+}
+
+/** `mcp_config.json.pre-seal-<ts>`: the file as it was, plaintext and all. */
+async function backupBeforeSealing(path: string): Promise<void> {
+  let source: string
+  try {
+    source = await readFile(path, 'utf8')
+    if (!hasUnsealedSecrets(validateRawConfig(JSON.parse(source)))) return
+  } catch {
+    return
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(`${path}.pre-seal-${stamp}`, 'wx', 0o600)
+    await handle.writeFile(source, 'utf8')
+    await handle.sync()
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error
+  } finally {
+    await handle?.close()
+  }
 }
 
 interface UrlParts {
@@ -289,6 +458,8 @@ export async function saveMcpConfig(
       {},
       {
         persistenceAdapter: opts.persistenceAdapter,
+        sealer: opts.sealer ?? null,
+        unreadableSecrets: 'keep',
       },
     )
   ).config
@@ -299,10 +470,10 @@ export async function saveMcpConfig(
     Array.isArray(data.defaults)
   )
     data.defaults = DEFAULT_MCP_CONFIG.defaults
-  await mcpConfigSnapshot(
-    join(root, MCP_CONFIG_FILE),
-    opts.persistenceAdapter,
-  ).write(data)
+  const path = join(root, MCP_CONFIG_FILE)
+  const sealed = sealMcpSecrets(data, opts.sealer)
+  if (sealed.sealedPlaintext) await backupBeforeSealing(path)
+  await mcpConfigSnapshot(path, opts.persistenceAdapter).write(sealed.raw)
 }
 
 function restoreMcpEditorSecrets(
@@ -606,6 +777,10 @@ function validateRawConfig(value: unknown): Record<string, unknown> {
   return raw
 }
 
+/**
+ * The user's own file (PL-10, FIX-08): no Emperor version is written into
+ * it or read out of it; a `version` key there is the user's.
+ */
 const MCP_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<Record<string, unknown>> = {
   schemaVersion: 1,
   encode(value) {

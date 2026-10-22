@@ -3,7 +3,8 @@
  * Settings › Hooks — Claude Code `hooks.json`, single column: underline
  * Tabs (配置 / 测试 / 审计) over the active tab view. State and every
  * `hooks.*` Core call live in hooks/hooksController.ts (provided here, read
- * by the tab views); the header refresh reloads config, metadata and audit.
+ * by the tab views); the header refresh reloads config, metadata and audit
+ * (an edited draft stays; the unsaved-edit guard asks before it is lost).
  * Styles stay scoped to this component and its tab views
  * (feature-style-owners.json › hooks).
  */
@@ -12,12 +13,16 @@ import { DsWarning } from '../icons/ds'
 import { EmptyState, SettingsSection } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { provideHooksController } from './hooks/hooksController'
+import { useDirtyGuard } from '../ui/useDirtyGuard'
 import HooksConfigTab from './hooks/HooksConfigTab.vue'
 import HooksTestTab from './hooks/HooksTestTab.vue'
 import HooksAuditTab from './hooks/HooksAuditTab.vue'
 
-const { tabs, activeTab, loading, error, payload, loadAll } =
+const { tabs, activeTab, loading, error, payload, loadAll, dirty } =
   provideHooksController()
+
+// Leaving 高级 › Hooks or closing settings with an edited hooks.json asks.
+useDirtyGuard('hooks.json', dirty)
 
 useSettingsHeader({
   actions: () => [
@@ -38,7 +43,7 @@ useSettingsHeader({
       v-model="activeTab"
       :tabs="tabs"
       class="hooks-tabs"
-      aria-label="Hooks views"
+      aria-label="Hooks 视图"
     />
 
     <div v-if="error" class="hooks-alert" role="alert">
@@ -49,8 +54,7 @@ useSettingsHeader({
     <EmptyState
       v-if="loading && !payload"
       title="加载 Hooks 中…"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <HooksConfigTab v-else-if="activeTab === 'config'" />
     <HooksTestTab v-else-if="activeTab === 'test'" />
@@ -62,7 +66,7 @@ useSettingsHeader({
 /* Underline tabs sit on a full-width l2 hairline, like the dsh detail tabs. */
 .hooks-tabs {
   margin-bottom: var(--space-1);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .hooks-alert {

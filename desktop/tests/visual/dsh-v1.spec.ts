@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { BASELINE_TAG, expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -48,6 +48,18 @@ async function open(
   await expect(page.locator('.app-frame')).toBeVisible()
 }
 
+/** Preset UI preferences (useUiPreferences) before the app reads them. */
+async function uiPreferences(page: Page, prefs: Record<string, unknown>) {
+  await page.addInitScript((value) => {
+    localStorage.setItem('emperor.ui.prefs.v1', JSON.stringify(value))
+  }, prefs)
+}
+
+/** UI-S03: list every turn's steps instead of the folded process line. */
+async function listProcessSteps(page: Page) {
+  await uiPreferences(page, { processDisplay: 'expanded' })
+}
+
 async function shot(page: Page, name: string) {
   await page.waitForTimeout(250)
   await page.screenshot({
@@ -80,7 +92,7 @@ async function expectPageColumnFits(page: Page) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`hero empty session (${theme})`, async ({ page }) => {
+  test(`hero empty session (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/chat-main', { theme })
     const root = page.locator('.conversation-root')
     await expect(root).toHaveAttribute('data-phase', 'hero')
@@ -91,9 +103,12 @@ for (const theme of ['dark', 'light'] as const) {
     expect(box.width).toBeLessThanOrEqual(780)
     await expectNoHorizontalOverflow(page)
     await shot(page, `hero-empty-${theme}`)
+    await expectBaseline(page, 'conversation', `hero-empty-${theme}`)
   })
 
-  test(`active conversation with docks (${theme})`, async ({ page }) => {
+  test(`active conversation with docks (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(
       page,
       '/chat/build-ui?visualQueue=on&visualGoal=executing&visualTodos=on',
@@ -108,6 +123,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.locator('.goal-dock')).toBeVisible()
     await expect(page.locator('.todo-dock')).toBeVisible()
     await shot(page, `docks-${theme}`)
+    await expectBaseline(page, 'conversation', `docks-${theme}`)
     await page.locator('.todo-dock .header').click()
     await shot(page, `docks-todo-expanded-${theme}`)
   })
@@ -152,7 +168,7 @@ test('narrow window auto-collapses the sidebar to the rail', async ({
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`composer chips and menus (${theme})`, async ({ page }) => {
+  test(`composer chips and menus (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui?visualProgress=final', { theme })
     const card = page.locator('.composer-root .card')
     await expect(card).toBeVisible()
@@ -167,6 +183,7 @@ for (const theme of ['dark', 'light'] as const) {
     const modelMenu = page.getByRole('menu', { name: '模型与思考' })
     await expect(modelMenu).toBeVisible()
     await shot(page, `composer-model-menu-${theme}`)
+    await expectBaseline(page, 'conversation', `composer-model-menu-${theme}`)
     // dsh two-level menu: drill into the provider-grouped model list …
     await modelMenu.getByRole('menuitem', { name: /^模型/ }).click()
     await expect(
@@ -193,7 +210,7 @@ for (const theme of ['dark', 'light'] as const) {
     await page.keyboard.press('Escape')
 
     await card.locator('.context-meter .trigger').click()
-    await expect(page.locator('.context-meter .panel')).toBeVisible()
+    await expect(page.getByRole('dialog', { name: '上下文用量' })).toBeVisible()
     await shot(page, `composer-context-${theme}`)
   })
 }
@@ -209,35 +226,44 @@ test('composer slash palette and plan chip', async ({ page }) => {
 
 for (const theme of ['dark', 'light'] as const) {
   for (const control of ['permission', 'ask-multi', 'plan'] as const) {
-    test(`takeover ${control} (${theme})`, async ({ page }) => {
-      await open(page, `/chat/build-ui?visualControl=${control}`, { theme })
-      const kind =
-        control === 'permission'
-          ? 'approval'
-          : control === 'plan'
-            ? 'plan'
-            : 'question'
-      const card = page.locator(`[data-takeover="${kind}"]`)
-      await expect(card).toBeVisible()
-      await expect(page.locator('.composer-root .card')).toBeHidden()
-      if (control === 'ask-multi') {
-        await card.getByText('侧栏').click()
-        await card.getByText('输入框').click()
-      }
-      await shot(page, `takeover-${control}-${theme}`)
-    })
+    test(
+      `takeover ${control} (${theme})`,
+      // The approval card is the key screen; the other two stay archive-only.
+      { tag: control === 'permission' ? BASELINE_TAG : [] },
+      async ({ page }) => {
+        await open(page, `/chat/build-ui?visualControl=${control}`, { theme })
+        const kind =
+          control === 'permission'
+            ? 'approval'
+            : control === 'plan'
+              ? 'plan'
+              : 'question'
+        const card = page.locator(`[data-takeover="${kind}"]`)
+        await expect(card).toBeVisible()
+        await expect(page.locator('.composer-root .card')).toBeHidden()
+        if (control === 'ask-multi') {
+          await card.getByText('侧栏').click()
+          await card.getByText('输入框').click()
+        }
+        await shot(page, `takeover-${control}-${theme}`)
+        if (control === 'permission')
+          await expectBaseline(
+            page,
+            'conversation',
+            `takeover-approval-${theme}`,
+          )
+      },
+    )
   }
 }
 
 const settingsSections = [
   'general',
   'model',
-  'hooks',
   'computer',
   'memory',
   'tokens',
-  'pet',
-  'diagnostics',
+  'advanced',
 ] as const
 
 // Sections that moved out of the modal: their deep links open the page.
@@ -272,7 +298,7 @@ for (const section of settingsSections) {
     const dialog = page.getByRole('dialog').first()
     await expect(dialog).toBeVisible()
     const box = (await dialog.boundingBox())!
-    expect(Math.round(box.width)).toBeLessThanOrEqual(800)
+    expect(Math.round(box.width)).toBeLessThanOrEqual(880)
     await expectNoHorizontalOverflow(page)
     await shot(page, `settings-${section}`)
   })
@@ -289,40 +315,51 @@ test('settings modal light + legacy route redirect', async ({ page }) => {
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`workspace launcher and panes (${theme})`, async ({ page }) => {
+  test(`workspace empty state and panes (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui?visualProgress=final', { theme })
     const toggle = page.getByRole('button', { name: '工作台', exact: true })
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
     const workspace = page.locator('.workspace-col')
-    const launcher = workspace.locator('.workspace-launcher')
-    await expect(launcher).toBeVisible()
+    // No history yet: the four pane entries (UI-S06; no launcher home).
+    const start = workspace.locator('.workspace-start')
+    await expect(start).toBeVisible()
     // 审查 / 终端 / 文件 / 浏览器 (the 电脑 pane left for the conversation
     // preview, CU-02).
-    await expect(launcher.locator('.launcher-row')).toHaveCount(4)
+    await expect(start.locator('.start-entry')).toHaveCount(4)
     await expect(
-      launcher.locator('.launcher-row[data-pane="browser"]'),
+      start.locator('.start-entry[data-pane="browser"]'),
     ).toBeEnabled()
     await page.waitForTimeout(400)
     const box = (await workspace.boundingBox())!
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(360)
-    await shot(page, `workspace-launcher-${theme}`)
+    await shot(page, `workspace-start-${theme}`)
     for (const pane of ['review', 'terminal', 'files', 'browser']) {
-      const segment = workspace.locator(`.segments [data-pane="${pane}"]`)
+      const segment = workspace.locator(
+        `.workspace-panes [data-tab-id="${pane}"]`,
+      )
       if (await segment.isDisabled()) continue
       await segment.click()
-      await expect(segment).toHaveAttribute('aria-pressed', 'true')
+      await expect(segment).toHaveAttribute('aria-selected', 'true')
       await expect(workspace.locator('.workspace-body')).toHaveAttribute(
         'data-pane',
         pane,
       )
       await shot(page, `workspace-${pane}-${theme}`)
     }
-    await workspace.getByRole('button', { name: '工作台首页' }).click()
-    await expect(launcher).toBeVisible()
+    await expect(
+      workspace.getByRole('button', { name: '工作台首页' }),
+    ).toHaveCount(0)
     await workspace.getByRole('button', { name: '关闭工作台' }).click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    // Reopening shows the pane used last, not the empty state.
+    await toggle.click()
+    await expect(workspace.locator('.workspace-body')).toHaveAttribute(
+      'data-pane',
+      'browser',
+    )
+    await expect(start).toHaveCount(0)
   })
 }
 
@@ -332,7 +369,9 @@ test.describe('a11y media-feature degradation', () => {
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await open(page, '/chat/chat-main')
-    await expect(page.locator('.composer-root .primary')).toBeVisible()
+    await expect(
+      page.locator('.composer-root .ds-icon-button[data-variant="primary"]'),
+    ).toBeVisible()
     const fast = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
         '--duration-fast',
@@ -340,7 +379,9 @@ test.describe('a11y media-feature degradation', () => {
     )
     expect(fast.trim()).toBe('1ms')
     const durations = await page.evaluate(() => {
-      const el = document.querySelector('.composer-root .primary')
+      const el = document.querySelector(
+        '.composer-root .ds-icon-button[data-variant="primary"]',
+      )
       return el ? getComputedStyle(el).transitionDuration : null
     })
     expect(durations).not.toBeNull()
@@ -359,12 +400,16 @@ test.describe('a11y media-feature degradation', () => {
     await page.emulateMedia({ contrast: 'more' })
     await open(page, '/chat/chat-main', { theme: 'dark' })
     const darkBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(darkBorder.trim()).toBe('88 88 98')
     await open(page, '/chat/chat-main', { theme: 'light' })
     const lightBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(lightBorder.trim()).toBe('150 150 158')
   })
@@ -373,6 +418,8 @@ test.describe('a11y media-feature degradation', () => {
 test('sidebar rows and header tabs drive the /chat/:sessionId routes', async ({
   page,
 }) => {
+  // UI-S09: the 对话 | 轨迹 tabs exist only while 显示轨迹 is on.
+  await uiPreferences(page, { showTrajectory: true })
   await open(page, '/chat/build-ui?visualProgress=final')
   await page.getByRole('tab', { name: '轨迹' }).click()
   await expect(page).toHaveURL(/\/chat\/build-ui\/trajectory/)
@@ -425,9 +472,11 @@ test('sending a message shows the user bubble at once and streams the reply', as
   expect(Date.now() - sentAt).toBeLessThan(2_000)
   await expect(root).toHaveAttribute('data-phase', 'active')
   await expect(page.locator('.turn-status')).toBeVisible()
+  // UI-S03: the running steps are one live line naming the current step.
   await expect(
-    page.locator('.tool-row[data-call-id="call_reply_read"]'),
-  ).toBeVisible({ timeout: 15_000 })
+    page.locator('[data-process-group][data-live] [data-process-header]'),
+  ).toContainText('读取', { timeout: 15_000 })
+  await expect(page.locator('.turn-status')).toBeHidden()
   await shot(page, 'app-send-streaming')
   await expect(page.getByText('界面改动都集中在')).toBeVisible({
     timeout: 20_000,
@@ -442,7 +491,10 @@ test('a new chat sends to its own draft session, never the previous one', async 
   page,
 }) => {
   await open(page, '/chat/build-ui')
-  await page.locator('.new-session').click()
+  await page
+    .getByRole('navigation', { name: '侧栏导航' })
+    .getByRole('button', { name: '新对话', exact: true })
+    .click()
   await expect(page).toHaveURL(/\/chat\/draft:/)
   await page.getByLabel('消息输入框').fill('这是新对话的第一条消息')
   await page.getByLabel('消息输入框').press('Enter')
@@ -474,7 +526,10 @@ test('a slash command run from a draft moves the view to the new session', async
   page,
 }) => {
   await open(page, '/chat/build-ui')
-  await page.locator('.new-session').click()
+  await page
+    .getByRole('navigation', { name: '侧栏导航' })
+    .getByRole('button', { name: '新对话', exact: true })
+    .click()
   await expect(page).toHaveURL(/\/chat\/draft:/)
   await page.getByLabel('消息输入框').fill('/plan on')
   await page.getByLabel('消息输入框').press('Enter')
@@ -487,6 +542,11 @@ for (const theme of ['dark', 'light'] as const) {
   test(`tool row Inspect opens the trajectory inspector (${theme})`, async ({
     page,
   }) => {
+    // UI-S09: Inspect is offered only while 显示轨迹 is on.
+    await uiPreferences(page, {
+      processDisplay: 'expanded',
+      showTrajectory: true,
+    })
     await open(page, '/chat/build-ui', { theme })
     const row = page.locator('.tool-row[data-call-id="call_grep"]')
     await row.scrollIntoViewIfNeeded()
@@ -502,7 +562,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(selected).toHaveAttribute('data-kind', 'tool')
     await expect(selected).toContainText('grep')
     await expect(
-      inspector.getByRole('tab', { name: 'Summary', exact: true }),
+      inspector.getByRole('tab', { name: '摘要', exact: true }),
     ).toHaveAttribute('aria-selected', 'true')
     await expect(
       page.getByRole('button', { name: '详情', exact: true }),
@@ -599,15 +659,16 @@ test('plan takeover approves the plan and returns the composer', async ({
 test('subagent row opens the child session and the breadcrumb returns', async ({
   page,
 }) => {
+  await listProcessSteps(page)
   await open(page, '/chat/build-ui')
-  const line = page.locator('[data-subagent-line]').first()
-  await line.scrollIntoViewIfNeeded()
-  await line.locator('.open-link').click()
+  const entry = page.locator('[data-agent-entry]').first()
+  await entry.scrollIntoViewIfNeeded()
+  await entry.click()
   await expect(page).toHaveURL(/\/chat\/showcase-child/)
   const crumbs = page.locator('.conversation-header .crumbs')
   await expect(crumbs.locator('.crumb')).toHaveCount(2)
   await expect(crumbs.locator('.crumb').first()).toHaveText('构建 Visual UI')
-  await expect(page.locator('.read-only-composer')).toBeVisible()
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
   await expect(page.locator('.composer-root .card')).toHaveCount(0)
   await expect(
     page.locator('.user-bubble, [data-chat-flow-kind]').first(),
@@ -615,19 +676,22 @@ test('subagent row opens the child session and the breadcrumb returns', async ({
   await shot(page, 'app-child-session')
   await crumbs.locator('button.crumb').first().click()
   await expect(page).toHaveURL(/\/chat\/build-ui(\?|$)/)
-  await expect(page.locator('.read-only-composer')).toHaveCount(0)
+  await expect(page.locator('[data-child-composer]')).toHaveCount(0)
 })
 
 test('nested depth-3 subagent: breadcrumb chain and read-only composer', async ({
   page,
 }) => {
   await installNestedSubagentFixture(page)
+  await listProcessSteps(page)
   await open(page, `/chat/${NESTED_IDS.kid2}`)
   const crumbs = page.locator('.conversation-header .crumbs .crumb')
   await expect(crumbs).toHaveText(['构建 Visual UI', '调研子任务', '深入检索'])
   await expect(crumbs.last()).toHaveAttribute('aria-current', 'page')
-  await expect(page.locator('.read-only-composer')).toBeVisible()
-  await expect(page.locator('.read-only-composer')).toContainText('调研子任务')
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
+  await expect(page.locator('[data-child-composer]')).toContainText(
+    '调研子任务',
+  )
   await expect(page.getByText('child found x').first()).toBeVisible()
   await shot(page, 'app-child-depth3')
 
@@ -636,8 +700,8 @@ test('nested depth-3 subagent: breadcrumb chain and read-only composer', async (
   await page.locator('.conversation-header button.crumb').nth(1).click()
   await expect(page).toHaveURL(new RegExp(`/chat/${NESTED_IDS.kid1}`))
   await expect(crumbs).toHaveText(['构建 Visual UI', '调研子任务'])
-  await expect(page.locator('.read-only-composer')).toBeVisible()
-  await page.locator('[data-subagent-line] .open-link').first().click()
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
+  await page.locator('[data-agent-entry]').first().click()
   await expect(page).toHaveURL(new RegExp(`/chat/${NESTED_IDS.kid2}`))
   await expect(crumbs).toHaveCount(3)
 
@@ -662,9 +726,9 @@ async function expectWithinViewport(
   await expectNoHorizontalOverflow(page)
 }
 
-test('model editor discovers candidates, edits an entry and tests the connection', async ({
-  page,
-}) => {
+// MOD-05: the editor edits a saved model (new ones come from the add-model
+// dialog); the connection is read-only there, tests run from the row.
+test('model editor edits a saved model; the row tests it', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=model', {
     width: 1280,
     height: 860,
@@ -672,94 +736,48 @@ test('model editor discovers candidates, edits an entry and tests the connection
   await page.getByRole('button', { name: '编辑 Visual Local' }).click()
   // The editor expands inside the row card: no nested dialog.
   const row = page.locator('[data-entry-id="visual-entry"]')
-  await expect(row.getByTestId('model-editor')).toBeVisible()
+  const editor = row.getByTestId('model-editor')
+  await expect(editor).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(1)
-  await page.getByRole('button', { name: '获取模型' }).click()
-  await expect(page.getByText('已获取 3 个模型')).toBeVisible()
-  const candidates = page.getByRole('group', { name: '候选模型' })
-  await expect(candidates.getByRole('button')).toHaveCount(3)
-
-  const modelId = page.getByLabel('模型 ID')
-  await candidates.getByRole('button', { name: 'visual-pro' }).click()
-  await expect(modelId).toHaveValue('visual-pro')
-  const reasoning = page.getByLabel('思考强度')
-  await expect(reasoning).toBeEnabled()
-  await modelId.fill('private-model-v2')
-  await expect(modelId).toHaveValue('private-model-v2')
-  await expect(reasoning).toBeDisabled()
-  await expect(page.getByRole('button', { name: '保存模型' })).toBeEnabled()
+  await expect(editor.getByTestId('model-editor-connection')).toBeVisible()
+  await expect(editor.locator('input[type="password"]')).toHaveCount(0)
+  await expect(editor.getByLabel('上下文', { exact: true })).toBeVisible()
+  await expect(editor.getByLabel('每次输出', { exact: true })).toBeVisible()
+  await editor
+    .getByRole('radiogroup', { name: '上下文预设' })
+    .getByRole('radio', { name: '200K' })
+    .click()
+  await expect(editor.getByLabel('上下文', { exact: true })).toHaveValue(
+    '200000',
+  )
+  await editor.getByRole('button', { name: '高级' }).click()
+  await expect(editor.getByLabel('温度')).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await shot(page, 'settings-model-editor')
 
-  await page.getByRole('button', { name: '测试文本' }).click()
-  await expect(page.getByText('通过 · 42ms')).toBeVisible()
-  await row.getByTestId('model-connection-test').scrollIntoViewIfNeeded()
+  await row.getByRole('button', { name: '测试 Visual Local' }).click()
+  await expect(row.getByText('通过 · 42ms')).toBeVisible()
   await shot(page, 'settings-model-editor-tested')
 })
 
-test('model editor adds a new entry', async ({ page }) => {
-  await open(page, '/chat/build-ui?settings=model', {
-    width: 1280,
-    height: 860,
-  })
-  await page.getByRole('button', { name: '添加模型', exact: true }).click()
-  await expect(page.getByTestId('model-add-card')).toBeVisible()
-  // The add card starts at the provider picker (logo tiles by region).
-  const picker = page.getByTestId('provider-picker')
-  await expect(picker.getByRole('region', { name: '国内厂商' })).toBeVisible()
-  await expectSettingsColumnFits(page)
-  await shot(page, 'settings-model-add-picker')
-  await picker.getByRole('button', { name: 'Visual Provider' }).click()
-  await page.getByLabel('模型 ID').fill('visual-added')
-  await page.getByLabel('标识', { exact: true }).fill('Visual Added')
-  await shot(page, 'settings-model-add')
-  await page.getByRole('button', { name: '保存模型' }).click()
-  await expect(page.getByRole('button', { name: '保存模型' })).toBeHidden()
-  // Saving returns to the model list (reopen the section if it closed).
-  if (!(await page.getByRole('dialog', { name: '设置' }).isVisible())) {
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await page
-      .getByRole('navigation', { name: '设置分区' })
-      .getByRole('button', { name: '模型', exact: true })
-      .click()
-  }
-  await expect(page.getByText('Visual Added').first()).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('已保存「Visual Added」')
-})
+// Adding models goes through the three-step dialog (models.spec.ts, MOD-04).
 
-test('model added under a provider reuses its key', async ({ page }) => {
+test('model row deletes from its ⋯ after a confirmation', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=model', {
     width: 1280,
     height: 860,
   })
-  const anthropic = page.locator('[data-provider="anthropic"]')
-  await expect(anthropic.getByText('2 个模型')).toBeVisible()
-  await expect(anthropic.getByText('Key 已配置')).toBeVisible()
-  await anthropic
-    .getByRole('button', { name: '在 Anthropic 下添加模型' })
-    .click()
-  const add = anthropic.getByTestId('model-add-card')
-  await expect(add).toBeVisible()
-  await expect(add.getByRole('textbox', { name: 'API Key' })).toHaveAttribute(
-    'placeholder',
-    '沿用「Claude Visual」的 API Key',
-  )
-  await expectSettingsColumnFits(page)
-  await shot(page, 'settings-model-add-in-provider')
-})
-
-test('model row deletes after an inline confirmation', async ({ page }) => {
-  await open(page, '/chat/build-ui?settings=model', {
-    width: 1280,
-    height: 860,
+  await page.getByRole('button', { name: 'Claude Visual 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '删除' }).click()
+  const confirmDialog = page.getByRole('dialog', {
+    name: '删除「Claude Visual」？',
   })
-  await page.getByRole('button', { name: '删除 Claude Visual' }).click()
-  await expect(page.getByText('确认删除？')).toBeVisible()
-  await page.getByRole('button', { name: '确认删除 Claude Visual' }).click()
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole('button', { name: '删除' }).click()
   await expect(page.locator('[data-entry-id="anthropic-entry"]')).toHaveCount(0)
-  await expect(page.getByRole('status')).toContainText(
-    '已删除「Claude Visual」',
-  )
+  await expect(
+    page.getByRole('status').filter({ hasText: '已删除「Claude Visual」' }),
+  ).toBeVisible()
 })
 
 // ── Settings › 模型 and the 能力 page (native sections) ───────────────
@@ -983,7 +1001,9 @@ test.describe('plugin logos on a high-density screen', () => {
     }) => {
       await open(page, '/capabilities', { width: 1280, height: 860, theme })
       const shell = fullPage(page)
-      const github = shell.locator('[data-plugin-id="github"] img.plugin-logo')
+      const github = shell.locator(
+        '[data-plugin-id="github"] .ds-avatar[data-shown="image"] img',
+      )
       await expect(github).toBeVisible()
       // Loaded, not broken.
       expect(
@@ -991,16 +1011,18 @@ test.describe('plugin logos on a high-density screen', () => {
           (image) => (image as HTMLImageElement).naturalWidth,
         ),
       ).toBe(384)
-      // An address that cannot load falls back to the monogram tile.
+      // An address that cannot load falls back to the colour tile.
       await expect(
         shell.locator(
-          '[data-plugin-id="acme/release-notes"] .plugin-logo.monogram',
+          '[data-plugin-id="acme/release-notes"] .ds-avatar[data-shown="color"]',
         ),
       ).toBeVisible()
       await shot(page, `plugins-logos-list-${theme}`)
 
       const sources = await shell
-        .locator('[data-plugin-group="preinstalled"] img.plugin-logo')
+        .locator(
+          '[data-plugin-group="preinstalled"] .ds-avatar[data-shown="image"] img',
+        )
         .evaluateAll((images) =>
           images.map((image) => (image as HTMLImageElement).src),
         )
@@ -1008,7 +1030,7 @@ test.describe('plugin logos on a high-density screen', () => {
         const board = document.createElement('div')
         board.id = 'logo-board'
         board.style.cssText =
-          'position:fixed;inset:auto 24px 24px auto;display:grid;gap:16px;padding:16px;border-radius:12px;background:rgb(var(--bg-layer-2));z-index:99999'
+          'position:fixed;inset:auto 24px 24px auto;display:grid;gap:16px;padding:16px;border-radius:12px;background:rgb(var(--surface-raised));z-index:99999'
         for (const src of srcs) {
           const row = document.createElement('div')
           row.style.cssText = 'display:flex;align-items:end;gap:16px'
@@ -1076,7 +1098,7 @@ const TOOL_GROUPS = [
   /^基础工具\s*9$/,
   /^网络\s*1$/,
   /^任务与规划\s*7$/,
-  /^子代理与工作流\s*7$/,
+  /^子智能体与工作流\s*7$/,
   /^技能、记忆与配置\s*4$/,
 ]
 
@@ -1138,20 +1160,75 @@ test('first-run model prompt opens the settings model section', async ({
   ).toBeVisible()
 })
 
-test('profile onboarding starts, defers and skips from the notice dock', async ({
+// UI-S12: the illustration fills the dialog behind the copy and follows
+// the theme; the brand line is the vector mark plus the name.
+for (const theme of ['dark', 'light'] as const) {
+  test(`first-run model prompt artwork (${theme})`, async ({ page }) => {
+    await open(page, '/chat?visualModel=unavailable', { theme })
+    const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
+    await expect(prompt).toBeVisible()
+    const art = prompt.locator('img.model-setup-art')
+    await expect(art).toHaveAttribute(
+      'src',
+      new RegExp(`model-setup-hero-${theme}\\.webp`),
+    )
+    await expect
+      .poll(() => art.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBe(1600)
+    await expect(prompt.locator('svg.brand-mark')).toBeVisible()
+    await expect(prompt.locator('.model-setup-wordmark')).toHaveText(
+      'Emperor Agent',
+    )
+    const box = (await prompt.boundingBox())!
+    const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
+    // The art fills the dialog at 16:10; the copy keeps to the empty left.
+    expect(box.width / box.height).toBeCloseTo(1.6, 1)
+    expect(copy.x + copy.width - box.x).toBeLessThanOrEqual(box.width * 0.45)
+    await expect(
+      prompt.getByRole('button', { name: '去配置模型' }),
+    ).toBeFocused()
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `first-run-model-${theme}`)
+  })
+}
+
+test('first-run model prompt stacks the artwork on a narrow window', async ({
+  page,
+}) => {
+  await open(page, '/chat?visualModel=unavailable', {
+    width: 700,
+    height: 860,
+    theme: 'light',
+  })
+  const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
+  await expect(prompt).toBeVisible()
+  const art = (await prompt.locator('img.model-setup-art').boundingBox())!
+  const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
+  expect(art.height).toBe(200)
+  expect(copy.y).toBeGreaterThanOrEqual(art.y + art.height - 1)
+  await expect(prompt.getByRole('button', { name: '稍后配置' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await shot(page, 'first-run-model-narrow')
+})
+
+test('profile onboarding starts from the hero and stays in 记忆', async ({
   page,
 }) => {
   await open(page, '/chat/chat-main?visualProfile=pending', {
     width: 1280,
     height: 820,
   })
-  const notice = page.locator('.notice-dock')
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '开始访谈' }).click()
+  // UI-S04: the offer is on the hero of the empty chat (once), not a dock
+  // above every composer.
+  await expect(page.locator('.notice-dock')).toHaveCount(0)
+  const prompt = page.locator('.hero-profile-prompt')
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '开始访谈' }).click()
   const card = page.locator('[data-takeover="question"]')
   await expect(card).toBeVisible()
   await expect(card.getByText('我平时怎么称呼你？')).toBeVisible()
   await expect(card.getByRole('button', { name: '不再提醒' })).toBeVisible()
+  await expect(prompt).toHaveCount(0)
   await shot(page, 'profile-onboarding-question')
 
   await card
@@ -1159,9 +1236,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .last()
     .click()
   await expect(card).toBeHidden()
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '不再提醒' }).click()
-  await expect(notice).toBeHidden()
+  // Deferred: the offer stays on this chat's hero (and nowhere else).
+  await expect(page.locator('.notice-dock')).toHaveCount(0)
+  await expect(prompt).toBeVisible()
 
   // The profile (and its interview) lives in 记忆 › 用户档案.
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -1170,8 +1247,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .getByRole('button', { name: '记忆', exact: true })
     .click()
   await page.getByRole('radio', { name: '用户档案' }).click()
-  await expect(page.getByText('已跳过')).toBeVisible()
-  await expect(page.getByRole('button', { name: '重新开始' })).toBeVisible()
+  const settings = page.getByTestId('settings-modal')
+  await expect(settings.getByText('待补充')).toBeVisible()
+  await expect(settings.getByRole('button', { name: '开始访谈' })).toBeVisible()
 })
 
 test('hooks editor: edit, validate, save, match and test-run', async ({
@@ -1477,13 +1555,13 @@ test('diagnostics section reports environment status and re-detects', async ({
   // One overview card first: the state as badges, one conclusion, then the
   // issues. No number tiles, no lead-in, no notice while requests work.
   const overview = dialog.getByTestId('diagnostics-overview')
-  await expect(overview.locator('.summary .ds-status-badge')).toHaveText([
+  await expect(overview.locator('.summary .ds-badge')).toHaveText([
     '3 项需要关注',
   ])
   await expect(overview.locator('.conclusion')).toHaveText('其余都正常')
   await expect(dialog.locator('.ds-metric')).toHaveCount(0)
   await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
-  await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+  await expect(dialog.locator('.ds-notice')).toHaveCount(0)
   const issues = overview.getByRole('list', { name: '需要关注' })
   await expect(issues.locator('[data-issue="environment-node"]')).toContainText(
     '环境工具 · node',
@@ -1499,7 +1577,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(cards).toHaveCount(5)
   await expect(dialog.getByTestId('environment-section')).toHaveCount(0)
   const badges = (id: string) =>
-    dialog.locator(`[data-diagnostic-card="${id}"] .head .ds-status-badge`)
+    dialog.locator(`[data-diagnostic-card="${id}"] .head .ds-badge`)
   await expect(badges('environment')).toHaveText(['2 项需要关注'])
   await expect(badges('desktop')).toHaveText(['1 项需要关注'])
   for (const id of ['runtime', 'paths', 'config'])
@@ -1519,7 +1597,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(
     environment.getByTestId('environment-tool-git').locator('.value'),
   ).toHaveText('2.55.0')
-  await expect(environment.locator('.ds-status-badge')).toHaveCount(0)
+  await expect(environment.locator('.ds-badge')).toHaveCount(0)
   await expect(
     environment.getByText('blocked-visual Skill 需要 Python'),
   ).toBeVisible()
@@ -1550,7 +1628,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(runtime.getByText('定时任务存储')).toBeVisible()
   await expect(runtime.getByText('Owned Process Runtime')).toHaveCount(0)
   await expect(runtime.getByText(/另有 \d+ 项未返回数据/)).toBeVisible()
-  await expect(runtime.locator('.body .ds-status-badge')).toHaveCount(0)
+  await expect(runtime.locator('.body .ds-badge')).toHaveCount(0)
   await shot(page, 'settings-diagnostics-runtime')
 
   // 存储路径 starts with the runtime root, as a path.
@@ -1597,7 +1675,7 @@ for (const theme of ['dark', 'light'] as const)
       theme,
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveCount(1)
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('环境检测失败')
@@ -1606,59 +1684,22 @@ for (const theme of ['dark', 'light'] as const)
     await shot(page, `settings-diagnostics-failed-${theme}`)
   })
 
-test('pet section previews bundled sprites and toggles the pet', async ({
-  page,
-}) => {
+// 桌宠 is a switch in 常规 › 外观 since UI-S07 (the sprite gallery is gone).
+test('the pet switch in 常规 › 外观 starts the pet', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=pet', {
     width: 1280,
     height: 860,
   })
+  await expect(page).toHaveURL(/settings=general/)
   const dialog = page.getByRole('dialog', { name: '设置' })
-  const sprites = dialog.locator('[data-sprite] .pet-sprite')
-  await expect(sprites).toHaveCount(14)
-  // Every frame strip decodes, and is exactly `frames` cells wide.
-  const strips = await sprites.evaluateAll((nodes) =>
-    Promise.all(
-      nodes.map(async (node) => {
-        const url = getComputedStyle(node).backgroundImage.slice(5, -2)
-        const image = new Image()
-        image.src = url
-        await image.decode()
-        return {
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-          frames: Number((node as HTMLElement).dataset.frames),
-        }
-      }),
-    ),
-  )
-  for (const strip of strips)
-    expect(strip).toEqual({
-      width: strip.frames * 192,
-      height: 208,
-      frames: strip.frames,
-    })
-  await dialog.locator('[data-sprite="happy"]').click()
-  const stage = dialog.getByTestId('pet-preview').getByRole('img')
-  await expect(stage).toHaveAttribute('aria-label', '小单 完成')
-  // The preview actually steps through frames.
-  const firstFrame = await stage.evaluate(
-    (node) => getComputedStyle(node).backgroundPositionX,
-  )
-  await expect
-    .poll(() =>
-      stage.evaluate((node) => getComputedStyle(node).backgroundPositionX),
-    )
-    .not.toBe(firstFrame)
-  const toggle = dialog.getByRole('switch')
+  const toggle = dialog.locator('#general-pet')
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
-  await expect(dialog.getByTestId('pet-status')).toHaveText('待启动')
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  for (const section of ['hooks', 'computer', 'pet', 'diagnostics'] as const) {
+  for (const section of ['hooks', 'computer', 'diagnostics'] as const) {
     test(`settings ${section} section fits the column (${theme})`, async ({
       page,
     }) => {
@@ -1788,6 +1829,32 @@ test('settings MCP imports pasted JSON and manages the new card', async ({
   await expect(settings.locator('.mcp-server-card')).toHaveCount(4)
 })
 
+for (const theme of ['dark', 'light'] as const) {
+  test(`settings MCP card shows a stdio server's recent output (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/build-ui?settings=mcp', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const settings = fullPage(page)
+    const card = settings.locator('.mcp-server-card[data-server="github"]')
+    await card.getByRole('button', { name: /github/ }).click()
+    await card.getByRole('button', { name: '查看最近输出' }).click()
+    const output = card.locator('.server-output pre')
+    await expect(output).toContainText('GitHub MCP Server running on stdio')
+    await expect(card.getByRole('button', { name: '刷新输出' })).toBeVisible()
+    // Remote servers have no process output.
+    const remote = settings.locator('.mcp-server-card[data-server="context7"]')
+    await remote.getByRole('button', { name: /context7/ }).click()
+    await expect(remote.locator('.server-output')).toHaveCount(0)
+    await expectMcpColumnFits(page, settings)
+    await card.scrollIntoViewIfNeeded()
+    await shot(page, `settings-mcp-output-${theme}`)
+  })
+}
+
 test('settings MCP empty state explains paste import', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=mcp&visualMcp=empty', {
     width: 1280,
@@ -1834,7 +1901,7 @@ async function scrollOptions(page: Page, to: 'top' | 'bottom') {
 // pages.spec.ts.
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`settings memory tabs, overview and versions (${theme})`, async ({
+  test(`settings memory tabs, overview and versions (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?settings=memory', {
@@ -1843,8 +1910,9 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
+    // Two editors (UI-S07); 历史 on the editor, the rest under 更多.
     const tabs = dialog.getByRole('radiogroup', { name: '记忆类型' })
-    await expect(tabs.getByRole('radio')).toHaveCount(5)
+    await expect(tabs.getByRole('radio')).toHaveText(['长期记忆', '用户档案'])
     const editor = dialog.getByRole('textbox', { name: /MEMORY|AGENTS/ })
     await expect(editor).toBeVisible()
     // The editor takes the remaining height of the options column.
@@ -1852,6 +1920,7 @@ for (const theme of ['dark', 'light'] as const) {
     expect(box.height).toBeGreaterThan(300)
     await expectOptionsFit(page)
     await shot(page, `settings-memory-${theme}`)
+    await expectBaseline(page, 'settings', `memory-${theme}`)
 
     await dialog.getByRole('button', { name: /上下文概览/ }).click()
     await expect(dialog.getByText('语义压缩')).toBeVisible()
@@ -1859,7 +1928,8 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-memory-overview-${theme}`)
     await dialog.getByRole('button', { name: /上下文概览/ }).click()
 
-    await tabs.getByRole('radio', { name: '版本' }).click()
+    await dialog.getByTestId('memory-history').click()
+    await expect(dialog.getByTestId('settings-page-title')).toHaveText('历史')
     const versions = dialog.locator('[data-version-id]')
     await expect(versions).toHaveCount(3)
     await versions
@@ -1869,15 +1939,20 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(versions.first().locator('[data-diff]')).toBeVisible()
     await expectOptionsFit(page)
     await shot(page, `settings-memory-versions-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: '情景' }).click()
+    const more = dialog.locator('[data-action="more"]')
+    await more.click()
+    await page.locator('[data-menu-item="episodes"]').click()
     await expect(
       dialog.getByRole('textbox', { name: /2026-06-26/ }),
     ).toHaveValue(/# 2026-06-26/)
     await expect(dialog.getByRole('button', { name: '选择日期' })).toBeVisible()
     await shot(page, `settings-memory-episodes-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: 'Watchlist' }).click()
+    await more.click()
+    await page.locator('[data-menu-item="watchlist"]').click()
     await expect(
       dialog.locator('[data-action="check-watchlist"]'),
     ).toBeVisible()
@@ -1908,7 +1983,9 @@ test('settings memory profile tab edits USER.local.md', async ({ page }) => {
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`settings tokens dashboard views (${theme})`, async ({ page }) => {
+  test(`settings tokens dashboard views (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(page, '/chat/build-ui?settings=tokens', {
       width: 1280,
       height: 860,
@@ -1917,6 +1994,18 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     const metrics = dialog.getByTestId('token-metrics')
     await expect(metrics.locator('[data-metric]')).toHaveCount(4)
+    // The main page: metrics and the trend (UI-S07).
+    const chart = dialog.locator('.token-trend-chart svg.chart')
+    await expect(chart).toBeVisible()
+    await dialog
+      .getByRole('slider', { name: /Token 用量趋势日期/ })
+      .hover({ position: { x: 300, y: 120 } })
+    await expectOptionsFit(page)
+    await shot(page, `settings-tokens-trend-${theme}`)
+    await expectBaseline(page, 'settings', `usage-${theme}`)
+
+    // 详细: the heatmap, the ranking and the cache view.
+    await dialog.getByTestId('usage-details').click()
     const grid = dialog.getByRole('grid', { name: /热力图/ })
     await expect(grid.locator('[data-cell-index]')).toHaveCount(53 * 7)
     // Fluid heatmap: spans the column and keeps square cells.
@@ -1929,15 +2018,6 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-tokens-${theme}`)
 
     const views = dialog.getByRole('radiogroup', { name: '用量视图' })
-    await views.getByRole('radio', { name: '趋势' }).click()
-    const chart = dialog.locator('.token-trend-chart svg.chart')
-    await expect(chart).toBeVisible()
-    await dialog
-      .getByRole('slider', { name: /Token 用量趋势日期/ })
-      .hover({ position: { x: 300, y: 120 } })
-    await expectOptionsFit(page)
-    await shot(page, `settings-tokens-trend-${theme}`)
-
     await views.getByRole('radio', { name: '模型' }).click()
     const ranking = dialog.getByRole('list', { name: /模型用量排名/ })
     await expect(ranking.getByRole('listitem')).toHaveCount(5)
@@ -1975,11 +2055,13 @@ test('scheduler page / memory / tokens fit a narrow panel', async ({
     await expect(dialog).toBeVisible()
     if (section === 'scheduler')
       await expect(dialog.locator('.job-row').first()).toBeVisible()
-    if (section === 'tokens')
+    if (section === 'tokens') {
+      await dialog.getByTestId('usage-details').click()
       await dialog
         .getByRole('radiogroup', { name: '用量视图' })
         .getByRole('radio', { name: '模型' })
         .click()
+    }
     await expectOptionsFit(page)
     await shot(page, `settings-${section}-narrow`)
   }

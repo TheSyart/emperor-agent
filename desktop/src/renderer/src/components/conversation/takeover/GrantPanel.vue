@@ -7,14 +7,16 @@
  * unverified, and allows or refuses this one action (Core offers only
  * 「本次」: the AI drives continuously and only high-impact actions and
  * credential fills ask, 2026-09-29). A scope picker appears only if Core
- * ever offers more than one. One-shot like ApprovalPanel; Esc dismisses
- * (Core records a denial).
+ * ever offers more than one. One-shot like ApprovalPanel; Esc folds the
+ * card, it never denies.
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
-import Segmented from '../../settings/ui/Segmented.vue'
+import Segmented from '../../ui/Segmented.vue'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import { GRANT_DENY, grantAnswer, grantPresentation } from './grantModel'
 
 const props = defineProps<{ interaction: ControlInteraction }>()
@@ -46,10 +48,6 @@ function send(optionId: string) {
   )
   if (!ok) answered.value = false
 }
-
-function cancel() {
-  ctx.cancelInteraction(props.interaction.id)
-}
 </script>
 
 <template>
@@ -59,10 +57,10 @@ function cancel() {
       class="card"
       tabindex="-1"
       aria-label="电脑操作授权"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span>电脑操作授权</span>
         <span v-if="presentation.tool" class="tool"
           >· {{ presentation.tool }}</span
@@ -124,7 +122,7 @@ function cancel() {
           拒绝
         </Button>
         <Button
-          variant="primary"
+          variant="secondary"
           :data-option-id="scope"
           :disabled="answered || scope === ''"
           @click="send(scope)"
@@ -149,11 +147,11 @@ function cancel() {
 .card {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -163,18 +161,10 @@ function cancel() {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .tool {
@@ -195,12 +185,12 @@ function cancel() {
 
 .headline {
   font-size: calc(var(--fs-s) + 1px);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 24px;
 }
 
 .target {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -215,14 +205,14 @@ function cancel() {
 }
 
 .input-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 
 .input-value {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -237,7 +227,7 @@ function cancel() {
 }
 
 .reason {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 22px;
   white-space: pre-wrap;
@@ -245,7 +235,7 @@ function cancel() {
 }
 
 .reason-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .scope {
@@ -256,7 +246,7 @@ function cancel() {
 }
 
 .scope-label {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: 20px;
 }

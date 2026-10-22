@@ -1,41 +1,49 @@
 /* ── Markdown body (MarkdownBlock: panels, plan review, file preview) ─────── */
 
 .markdown-body {
-  @apply min-w-0 max-w-full text-[14px] leading-7;
-  color: rgb(var(--fg));
+  min-width: 0;
+  max-width: 100%;
+  color: rgb(var(--text-1));
+  font-size: var(--fs-s);
+  line-height: var(--lh-md);
   overflow-wrap: anywhere;
 }
 
 .markdown-body > :first-child {
-  @apply mt-0;
+  margin-top: 0;
 }
 
 .markdown-body > * + * {
-  @apply mt-3;
+  margin-top: var(--space-3);
 }
 
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3 {
-  @apply font-semibold leading-tight;
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-semibold);
 }
 
 .markdown-body h1 {
-  @apply text-xl;
+  font-size: var(--fs-hero);
+  line-height: var(--lh-hero);
 }
 
 .markdown-body h2 {
-  @apply text-lg;
+  font-size: 18px;
+  line-height: var(--lh-md);
 }
 
 .markdown-body h3 {
-  @apply text-base;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
 }
 
 .markdown-body a {
-  @apply font-medium underline underline-offset-4;
   color: rgb(var(--accent));
+  font-weight: var(--weight-medium);
+  text-decoration-line: underline;
+  text-underline-offset: 4px;
 }
 
 /* 链接/文档 chip 卡：图标用 CSS mask + data-URI SVG(命名色,无 # 过审计),
@@ -46,11 +54,11 @@
   gap: 0.25em;
   padding: 0 0.375em;
   margin: 0 0.125em;
-  border: 1px solid rgb(var(--border));
-  border-radius: var(--radius-md);
-  background: rgb(var(--bg-elevated));
-  color: rgb(var(--fg));
-  font-weight: 500;
+  border: 1px solid rgb(var(--stroke-solid));
+  border-radius: var(--r-sm);
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
   text-decoration: none;
   vertical-align: baseline;
   cursor: pointer;
@@ -60,9 +68,9 @@
 }
 
 .markdown-body a.md-link-chip:hover {
-  border-color: rgb(var(--border-strong));
-  background: rgb(var(--bg-inset));
-  color: rgb(var(--fg));
+  border-color: rgb(var(--stroke-solid-strong));
+  background: rgb(var(--surface-sunken));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body a.md-link-chip::before {
@@ -70,13 +78,26 @@
   flex: none;
   width: 0.875em;
   height: 0.875em;
-  background-color: rgb(var(--fg) / var(--text-tertiary));
+  background-color: rgb(var(--text-3));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
 
 .markdown-body a.md-link-chip[data-md-link='web'] {
   --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
+  gap: var(--space-1-5);
+  padding: 0 var(--space-0-5);
+  margin-inline: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: rgb(var(--text-link));
+  line-height: 1.85;
+}
+
+.markdown-body a.md-link-chip[data-md-link='web']:hover {
+  background: var(--surface-hover);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .markdown-body a.md-link-chip[data-md-link='file'] {
@@ -85,47 +106,78 @@
 
 .markdown-body ul,
 .markdown-body ol {
-  @apply ml-5 space-y-1;
+  margin-left: var(--space-5);
+}
+
+.markdown-body ul > :not([hidden]) ~ :not([hidden]),
+.markdown-body ol > :not([hidden]) ~ :not([hidden]) {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
 }
 
 .markdown-body ul {
-  @apply list-disc;
+  list-style-type: disc;
 }
 
 .markdown-body ol {
-  @apply list-decimal;
+  list-style-type: decimal;
 }
 
 .markdown-body blockquote {
-  @apply border-l-2 py-1 pl-4;
-  border-color: rgb(var(--border-strong));
-  color: rgb(var(--fg) / var(--text-secondary));
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  border-left-width: 2px;
+  border-color: rgb(var(--stroke-solid-strong));
+  color: rgb(var(--text-2));
 }
 
 .markdown-body code {
-  @apply rounded px-1.5 py-0.5 font-mono text-[0.9em];
-  background: rgb(var(--bg-inset));
-  color: rgb(var(--fg));
+  padding: var(--space-0-5) var(--space-1-5);
+  border-radius: var(--r-xs);
+  background: rgb(var(--surface-sunken));
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 
 .markdown-body pre {
-  @apply max-w-full overflow-x-auto rounded-md border p-3.5;
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-inset));
-  color: rgb(var(--fg));
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--space-3-5);
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid));
+  background: rgb(var(--surface-sunken));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body pre code {
-  @apply bg-transparent p-0;
+  padding: 0;
+  background-color: transparent;
 }
 
 .markdown-body table {
-  @apply block w-full max-w-full overflow-x-auto rounded-md border text-sm;
-  border-color: rgb(var(--border));
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid));
+  font-size: var(--fs-s);
+  line-height: var(--lh-xs);
 }
 
 .markdown-body th,
 .markdown-body td {
-  @apply border-b px-3 py-2 text-left;
-  border-color: rgb(var(--border));
+  padding: var(--space-2) var(--space-3);
+  border-bottom-width: 1px;
+  border-color: rgb(var(--stroke-solid));
+  text-align: left;
+}
+
+/* Filled color artwork must not become a solid monochrome mask. */
+.markdown-body a.md-link-chip[data-md-color]::before {
+  background: var(--md-link-image) center / contain no-repeat;
+  -webkit-mask: none;
+  mask: none;
 }

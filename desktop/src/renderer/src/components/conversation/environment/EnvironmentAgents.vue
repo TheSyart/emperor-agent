@@ -1,0 +1,327 @@
+<script setup lang="ts">
+/**
+ * 子智能体 on the environment card (UI-S05): one row with up to three faces
+ * and 「1 运行 · 3 完成」; clicking it lists the agents in place (active plus
+ * recent, five at first). The list opens by itself when the viewed page is
+ * one of them. 「标记为已结束」 stays on an external task with no outcome.
+ */
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Users } from 'lucide-vue-next'
+import {
+  agentAncestry,
+  agentDuration,
+  agentStack,
+  agentSummary,
+} from './environmentAgentsModel'
+import EnvironmentRow from './EnvironmentRow.vue'
+import {
+  agentTitle,
+  agentSourceLabel,
+  agentPhaseLabel,
+  type AgentView,
+} from '@emperor/core/runtime-contract'
+import {
+  useAgentTree,
+  agentLocation,
+  visibleAgentChildren,
+} from '../../sidebar/agentTree'
+import Avatar from '../../ui/Avatar.vue'
+import { abandonDelegation } from '../../../api/delegations'
+const props = defineProps<{ rootSessionId: string; agents?: AgentView[] }>()
+const route = useRoute()
+const router = useRouter()
+const model = useAgentTree()
+const all = ref(false)
+const open = ref(false)
+// 用时 of a running agent moves on while the card is open (AGT-10).
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  clock = setInterval(() => {
+    now.value = Date.now()
+  }, 15_000)
+})
+onBeforeUnmount(() => {
+  if (clock) clearInterval(clock)
+})
+const readableRoot = computed(() =>
+  props.rootSessionId && !/^(sub-|dlg-|dgr-|draft:)/.test(props.rootSessionId)
+    ? props.rootSessionId
+    : undefined,
+)
+const tree = computed(() =>
+  readableRoot.value ? model.trees[readableRoot.value] : undefined,
+)
+const error = computed(() =>
+  !props.agents && readableRoot.value
+    ? model.errors[readableRoot.value]
+    : undefined,
+)
+function refreshRoot() {
+  if (readableRoot.value) void model.refresh(readableRoot.value)
+}
+const agents = computed(() => props.agents ?? tree.value?.agents ?? [])
+const visible = computed(() => visibleAgentChildren(agents.value, all.value))
+const summary = computed(() => agentSummary(agents.value))
+const faces = computed(() => agentStack(agents.value))
+watch(
+  () => props.rootSessionId,
+  (root) => {
+    all.value = false
+    open.value = false
+    if (root && !props.agents) refreshRoot()
+  },
+  { immediate: true },
+)
+const currentId = computed(() =>
+  route.name === 'external-agent'
+    ? route.params.delegationId
+    : route.params.sessionId,
+)
+// Reveal direct links to older entries once; later refreshes respect manual collapse.
+watch(
+  () =>
+    agents.value.some((agent) => agent.id === currentId.value)
+      ? `${props.rootSessionId}:${currentId.value}`
+      : '',
+  (selection) => {
+    if (!selection) return
+    open.value = true
+    if (
+      !visibleAgentChildren(agents.value, false).some(
+        (agent) => agent.id === currentId.value,
+      )
+    )
+      all.value = true
+  },
+  { immediate: true },
+)
+function ancestry(agent: AgentView) {
+  return agentAncestry(props.rootSessionId, agent, agents.value)
+}
+/** 「标记为已结束」 for an external task whose run has no outcome (AGT-04). */
+const ending = ref<string | null>(null)
+const endError = ref('')
+async function end(agent: AgentView) {
+  if (ending.value || !readableRoot.value) return
+  ending.value = agent.id
+  endError.value = ''
+  try {
+    await abandonDelegation({ id: agent.id, sessionId: readableRoot.value })
+  } catch (cause) {
+    endError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    ending.value = null
+    refreshRoot()
+  }
+}
+</script>
+<template>
+  <section
+    v-if="agents.length || error"
+    class="agents-section"
+    data-section="subagents"
+  >
+    <EnvironmentRow
+      v-if="agents.length"
+      data-row="agents"
+      label="子智能体"
+      :value="summary"
+      :status="faces[0]?.phase === 'running' ? 'running' : undefined"
+      :expanded="open"
+      aria-controls="env-card-agents"
+      @click="open = !open"
+    >
+      <template #lead>
+        <span class="faces">
+          <template v-for="agent in faces" :key="agent.id">
+            <Avatar
+              v-if="agent.backend === 'internal'"
+              kind="sprite"
+              :id="agent.id"
+              :size="20"
+              data-agent-face
+            />
+            <Avatar
+              v-else
+              kind="logo"
+              :icon-id="agent.backend"
+              :label="agentSourceLabel(agent.backend)"
+              :size="16"
+              data-agent-face
+            />
+          </template>
+          <Users v-if="!faces.length" :size="16" />
+        </span>
+      </template>
+    </EnvironmentRow>
+    <div v-if="open" id="env-card-agents" class="agent-list">
+      <div v-for="agent in visible" :key="agent.id" class="agent-entry">
+        <button
+          type="button"
+          class="agent-row"
+          :data-agent-id="agent.id"
+          :title="ancestry(agent).text"
+          :aria-current="currentId === agent.id ? 'page' : undefined"
+          @click="router.push(agentLocation(agent))"
+        >
+          <Avatar
+            kind="sprite"
+            v-if="agent.backend === 'internal'"
+            :id="agent.id"
+            :size="28"
+          />
+          <Avatar
+            kind="logo"
+            v-else
+            :icon-id="agent.backend"
+            :label="agentSourceLabel(agent.backend)"
+            :size="16"
+            :data-agent-logo="agent.backend"
+          />
+          <span class="agent-copy"
+            ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
+            ><small>{{ agentSourceLabel(agent.backend) }}</small
+            ><small
+              v-if="ancestry(agent).unavailable"
+              data-unavailable-parent
+              >{{ ancestry(agent).unavailable }}</small
+            ></span
+          >
+          <span class="agent-phase" data-agent-phase
+            >{{ agentPhaseLabel(agent.phase)
+            }}<small v-if="agentDuration(agent, now)" data-agent-duration>{{
+              agentDuration(agent, now)
+            }}</small></span
+          >
+        </button>
+        <button
+          v-if="agent.needsExit && readableRoot"
+          type="button"
+          class="agent-end"
+          :data-abandon-agent="agent.id"
+          title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，目标可以继续。"
+          :disabled="ending !== null"
+          @click="end(agent)"
+        >
+          {{ ending === agent.id ? '正在结束…' : '标记为已结束' }}
+        </button>
+      </div>
+      <p v-if="endError" class="agents-error" role="alert">{{ endError }}</p>
+      <button
+        v-if="agents.length > 5"
+        type="button"
+        class="agent-more"
+        data-show-all-agents
+        :aria-expanded="all"
+        @click="all = !all"
+      >
+        {{ all ? '收起' : '显示全部子智能体' }}
+      </button>
+    </div>
+    <p v-if="error" class="agents-error" role="alert">
+      {{ error }}
+      <button
+        type="button"
+        class="agent-more"
+        data-retry-agents
+        @click="refreshRoot"
+      >
+        重试
+      </button>
+    </p>
+  </section>
+</template>
+<style scoped>
+.faces {
+  display: inline-flex;
+  align-items: center;
+}
+/* Overlapping cut-out faces (UI-S13): no ring, no tile. */
+.faces > * + * {
+  margin-left: calc(-1 * var(--space-1-5));
+}
+.agent-list {
+  padding: var(--space-0-5) 0 var(--space-1) var(--space-2);
+}
+.agents-error {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: rgb(var(--text-2));
+  font: var(--font-xs);
+}
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1-5) var(--space-1);
+  border-radius: var(--radius-row);
+  border: 0;
+  background: transparent;
+  color: rgb(var(--text-2));
+  text-align: left;
+  cursor: pointer;
+}
+.agent-row:hover,
+.agent-row[aria-current='page'] {
+  background: var(--surface-hover);
+}
+.agent-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.agent-copy strong,
+.agent-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-copy strong {
+  font-weight: var(--weight-medium);
+  font-size: var(--fs-xs);
+}
+.agent-copy small,
+.agent-phase,
+.agent-more {
+  font-size: var(--fs-xxs);
+  color: rgb(var(--text-3));
+}
+.agent-phase {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-0-5);
+}
+.agent-phase small {
+  font-variant-numeric: tabular-nums;
+}
+.agent-end {
+  display: block;
+  margin: 0 0 var(--space-1) calc(28px + var(--space-3));
+  padding: var(--space-0-5) var(--space-2);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: rgb(var(--text-2));
+  font-size: var(--fs-xxs);
+  cursor: pointer;
+}
+.agent-end:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.agent-end:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.agent-more {
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+</style>

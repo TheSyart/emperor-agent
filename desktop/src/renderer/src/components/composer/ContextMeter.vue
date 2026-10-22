@@ -1,16 +1,17 @@
 <script setup lang="ts">
 /**
- * ContextMeter — dsh 28px context ring; click opens a menu-surface popover
- * (264px, r12, lv3) with used / max tokens, percent and a usage bar. Data
+ * ContextMeter — dsh 28px context ring; click opens a ui/Popover (264px,
+ * above the ring) with used / max tokens, percent and a usage bar. Data
  * comes from the runtime's context_usage projection (boot.context_used and
  * the current model's context window).
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import Popover from '../ui/Popover.vue'
 
 const props = defineProps<{ used: number; max: number }>()
 
 const open = ref(false)
-const root = ref<HTMLElement | null>(null)
+const trigger = ref<HTMLButtonElement | null>(null)
 
 const ratio = computed(() =>
   props.max > 0 ? Math.min(1, Math.max(0, props.used / props.max)) : 0,
@@ -31,25 +32,12 @@ function fmt(value: number): string {
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(Math.round(value))
 }
-
-function onPointerDown(event: PointerEvent): void {
-  if (root.value && !root.value.contains(event.target as Node))
-    open.value = false
-}
-
-watch(open, (value) => {
-  if (value) document.addEventListener('pointerdown', onPointerDown, true)
-  else document.removeEventListener('pointerdown', onPointerDown, true)
-})
-
-onBeforeUnmount(() =>
-  document.removeEventListener('pointerdown', onPointerDown, true),
-)
 </script>
 
 <template>
-  <span ref="root" class="context-meter" @keydown.esc="open = false">
+  <span class="context-meter">
     <button
+      ref="trigger"
       type="button"
       class="trigger"
       :aria-label="label"
@@ -70,34 +58,37 @@ onBeforeUnmount(() =>
         />
       </svg>
     </button>
-    <div
-      v-if="open"
-      class="panel ds-fade-in"
-      role="dialog"
-      aria-label="上下文用量"
+    <Popover
+      v-model:open="open"
+      :anchor="trigger"
+      label="上下文用量"
+      :width="264"
+      placement="top"
     >
-      <div class="header">
-        <span class="headline">上下文窗口</span>
-        <span class="figures">{{ fmt(used) }} / {{ fmt(max) }}</span>
-      </div>
-      <div class="bar">
-        <span
-          class="segment"
-          :data-tone="tone"
-          :style="{ width: `${percent}%` }"
-        />
-      </div>
-      <dl class="rows">
-        <div class="row">
-          <dt>已用</dt>
-          <dd>{{ percent }}%</dd>
+      <div class="usage">
+        <div class="header">
+          <span class="headline">上下文窗口</span>
+          <span class="figures">{{ fmt(used) }} / {{ fmt(max) }}</span>
         </div>
-        <div class="row">
-          <dt>剩余</dt>
-          <dd>{{ fmt(Math.max(0, max - used)) }}</dd>
+        <div class="bar">
+          <span
+            class="segment"
+            :data-tone="tone"
+            :style="{ width: `${percent}%` }"
+          />
         </div>
-      </dl>
-    </div>
+        <dl class="rows">
+          <div class="row">
+            <dt>已用</dt>
+            <dd>{{ percent }}%</dd>
+          </div>
+          <div class="row">
+            <dt>剩余</dt>
+            <dd>{{ fmt(Math.max(0, max - used)) }}</dd>
+          </div>
+        </dl>
+      </div>
+    </Popover>
   </span>
 </template>
 
@@ -117,13 +108,13 @@ onBeforeUnmount(() =>
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .trigger:hover,
 .trigger[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .trigger[data-tone='warn'] {
@@ -131,12 +122,12 @@ onBeforeUnmount(() =>
 }
 
 .trigger[data-tone='danger'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .track {
   fill: none;
-  stroke: var(--border-l4);
+  stroke: var(--stroke-4);
   stroke-width: 2;
 }
 
@@ -147,21 +138,10 @@ onBeforeUnmount(() =>
   stroke-linecap: round;
 }
 
-.panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + var(--space-2));
-  z-index: var(--z-menu);
-  box-sizing: border-box;
-  width: 264px;
-  padding: var(--space-3);
-  border: 1px solid var(--border-inverted);
-  border-radius: var(--radius-card);
-  background: rgb(var(--menu-fill));
-  box-shadow: var(--shadow-lv3);
+.usage {
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -172,14 +152,14 @@ onBeforeUnmount(() =>
 }
 
 .headline {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .figures {
   margin-left: auto;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bar {
@@ -188,14 +168,14 @@ onBeforeUnmount(() =>
   margin: var(--space-2-5) 0 var(--space-3);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .segment {
   min-width: 2px;
   height: 100%;
   border-radius: 0;
-  background: rgb(var(--label-tertiary));
+  background: rgb(var(--text-3));
 }
 
 .segment[data-tone='warn'] {
@@ -203,7 +183,7 @@ onBeforeUnmount(() =>
 }
 
 .segment[data-tone='danger'] {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .rows {
@@ -219,12 +199,12 @@ onBeforeUnmount(() =>
 }
 
 .row dt {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 </style>

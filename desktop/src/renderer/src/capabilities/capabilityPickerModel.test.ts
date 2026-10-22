@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SlashPaletteItem } from '../commands'
-import type { ToolInfo } from '../types'
 import { buildCapabilityPickerGroups } from './capabilityPickerModel'
+import type { PluginChoice } from './pluginChoices'
 
 const commands: SlashPaletteItem[] = [
   {
@@ -12,7 +12,7 @@ const commands: SlashPaletteItem[] = [
     name: '/plan',
     title: 'Plan mode',
     completion: '/plan ',
-    description: '开启 Plan',
+    description: '开启计划',
     category: '执行控制',
     source: 'builtin',
     sourceLabel: '',
@@ -25,7 +25,7 @@ const commands: SlashPaletteItem[] = [
     name: '/goal',
     title: 'Goal',
     completion: '/goal ',
-    description: '开启 Goal',
+    description: '开启目标',
     category: '执行控制',
     source: 'builtin',
     sourceLabel: '',
@@ -60,73 +60,45 @@ const commands: SlashPaletteItem[] = [
   },
 ]
 
-const tools: ToolInfo[] = [
-  {
-    name: 'read_file',
-    description: '读取文件',
-    source: 'builtin',
-    read_only: true,
-  },
-  {
-    name: 'mcp_github_get_issue',
-    description: '读取 GitHub issue',
-    source: 'mcp',
-    server: 'github',
-    read_only: true,
-  },
-]
-
 describe('capability picker model', () => {
-  it('does not expose builtin tools in the composer picker', () => {
-    const groups = buildCapabilityPickerGroups({
-      commands,
-      tools,
-      mcpContent: '',
-    })
+  it('does not expose builtin tools or MCP servers in the composer picker', () => {
+    const groups = buildCapabilityPickerGroups({ commands, plugins: [] })
     const labels = groups.flatMap((group) =>
       group.items.map((item) => item.label),
     )
     const groupLabels = groups.map((group) => group.label)
 
     expect(groupLabels).not.toContain('内建工具')
+    expect(groupLabels).not.toContain('MCP')
     expect(labels).not.toContain('read_file')
+    expect(labels).not.toContain('github')
   })
 
-  it('turns skill and MCP selections into inline placeholder tokens', () => {
+  it('UI-S04: offers Skills as chips and plugins, nothing else', () => {
     const groups = buildCapabilityPickerGroups({
       commands,
-      tools,
-      mcpContent: JSON.stringify({
-        servers: { gitlab: { transport: 'stdio', enabled: true } },
-      }),
+      plugins: [
+        {
+          id: 'github',
+          label: 'GitHub',
+          description: 'Issues and pull requests',
+          logo: null,
+          scope: 'managed',
+          unavailable: null,
+        },
+      ] as PluginChoice[],
     })
-    const skill = groups
-      .flatMap((group) => group.items)
-      .find((item) => item.id === 'skill:clawhub')
-    const github = groups
-      .flatMap((group) => group.items)
-      .find((item) => item.id === 'mcp:github')
-    const gitlab = groups
-      .flatMap((group) => group.items)
-      .find((item) => item.id === 'mcp:gitlab')
-
-    expect(skill?.completion).toBe('@skill(clawhub)')
-    expect(github?.completion).toBe('@mcp(github)')
-    expect(gitlab?.completion).toBe('@mcp(gitlab)')
-  })
-
-  it('turns Plan and Goal selections into lifecycle activations', () => {
-    const items = buildCapabilityPickerGroups({
-      commands,
-      tools,
-      mcpContent: '',
-    }).flatMap((group) => group.items)
-
-    expect(items.find((item) => item.id === 'command:/plan')?.action).toBe(
-      'activate_plan',
-    )
-    expect(items.find((item) => item.id === 'command:/goal')?.action).toBe(
-      'activate_goal',
-    )
+    expect(groups.map((group) => group.label)).toEqual(['Skills', '插件'])
+    const skill = groups[0]!.items[0]!
+    expect(skill).toMatchObject({
+      id: 'skill:clawhub',
+      action: 'insert_reference',
+      reference: { kind: 'skill', id: 'clawhub', label: 'Clawhub' },
+    })
+    // Plan, Goal and the other commands start with `/`; Plan is in the
+    // permission menu.
+    const items = groups.flatMap((group) => group.items)
+    expect(items.some((item) => item.action === 'activate_plan')).toBe(false)
+    expect(items.some((item) => item.action === 'activate_goal')).toBe(false)
   })
 })

@@ -5,6 +5,7 @@
  * collapsed rail, with right-side tooltips. The toggle pins an explicit
  * theme; 跟随系统 is chosen in Settings › 常规.
  */
+import IconButton from '../ui/IconButton.vue'
 import { computed } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { DsDark, DsLight, DsSettings } from '../icons/ds'
@@ -35,17 +36,15 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
         <span v-if="!rail" class="label">设置</span>
       </button>
     </Tooltip>
-    <Tooltip :label="themeLabel" :side="rail ? 'right' : 'top'" :delay-ms="500">
-      <button
-        type="button"
-        class="theme"
-        :aria-label="themeLabel"
-        data-testid="sidebar-theme-toggle"
-        @click="toggle()"
-      >
-        <component :is="themeIcon" :size="rail ? 18 : 16" />
-      </button>
-    </Tooltip>
+    <IconButton
+      class="theme"
+      :label="themeLabel"
+      :side="rail ? 'right' : 'top'"
+      data-testid="sidebar-theme-toggle"
+      @click="toggle()"
+    >
+      <component :is="themeIcon" :size="rail ? 18 : 16" />
+    </IconButton>
   </div>
 </template>
 
@@ -83,7 +82,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   border: none;
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   cursor: pointer;
@@ -92,7 +91,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
 
 .settings:hover,
 .theme:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 [data-rail] .settings {
@@ -118,7 +117,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 

@@ -7,6 +7,15 @@ import type {
   ModelTestResult,
   ResolvedModelProfile,
 } from '../types'
+import type {
+  CoreOperationArgs,
+  ModelConnectionInput,
+  ModelDefaultsInput,
+  ModelDiscoveryPayload,
+  ModelFacts,
+  ModelFactsSource,
+  ProbeResult,
+} from '@emperor/core/api'
 import { invokeCore } from './backend'
 
 export async function saveModelEntry(
@@ -95,4 +104,34 @@ export async function discoverProviderModels(settings: {
         }
       : {}),
   })
+}
+
+/** One cheap request with the draft connection (MOD-02). */
+export async function probeModelConnection(
+  connection: ModelConnectionInput,
+): Promise<ProbeResult> {
+  return invokeCore('model.probeConnection', connection)
+}
+
+/** The connection's models, merged with the bundled catalog (MOD-02). */
+export async function listConnectionModels(
+  connection: ModelConnectionInput & { refresh?: boolean },
+): Promise<ModelDiscoveryPayload> {
+  return invokeCore('model.discoverModels', connection)
+}
+
+/** Several models of one connection, one write (MOD-03). */
+export type ModelEntriesSaveRequest = CoreOperationArgs<'model.saveEntries'>[0]
+
+export async function saveModelEntries(
+  input: ModelEntriesSaveRequest,
+): Promise<ModelConfigPayload & { savedEntryIds: string[] }> {
+  return invokeCore('model.saveEntries', input)
+}
+
+/** Catalog defaults for a model id typed in by hand (MOD-03). */
+export async function lookupModelDefaults(
+  input: ModelDefaultsInput,
+): Promise<{ facts: ModelFacts; source: ModelFactsSource }> {
+  return invokeCore('model.lookupDefaults', input)
 }

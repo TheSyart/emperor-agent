@@ -1,24 +1,30 @@
 <script setup lang="ts">
 /**
- * Settings › 模型 — saved model entries grouped by provider (dsh
- * ModelsSection pattern): one outlined card per provider (logo, name, model
- * count, key status, endpoint) listing its models as rows. 「编辑」 expands the
- * entry editor under its row (no nested dialog), 「删除」 asks inline.
+ * Settings › 模型 (MOD-05) — one card per provider: the logo, name and the
+ * connection's state (「已连接」「Key 无效 · N 天前测试」「未测试」, or what
+ * the key lacks), the key's last 4 characters and the host; 「管理模型」 and
+ * the card's 「⋯」: 更换 Key (every model on the connection, one
+ * `model.updateConnection`, after saying how many change), 编辑地址, 刷新模型
+ * 资料 (the differences first, then 「应用」) and 删除供应商. Its models are
+ * rows (model/ModelRow): 「测试」「编辑」「⋯ › 删除」 on hover; a retired model
+ * offers 「替换为 X」 (`model.replaceEntry`: the replacement takes its
+ * place, the active and the backup model follow). 「编辑」 opens the simple
+ * editor under the row (model/ModelEntryEditor).
  *
- * Adding a model: the header's 「添加模型」 opens an add card whose first step
- * is the provider picker (logo tiles by region); a provider card's own
- * 「添加模型」 skips the picker. A model added under a provider that already
- * has a saved key reuses it (`credentialsFrom`) until another key is typed.
- * With no models yet the add card is open from the start. The execution /
- * cost policy is a SettingsGroup of rows below the list. The model used by a
- * conversation is picked in the composer, not here.
+ * Adding models: the header's 「添加模型」 opens the three-step dialog
+ * (model/AddModelDialog); a card's 「管理模型」 opens it at step 2 for that
+ * provider. With no models yet the dialog opens by itself. Saved rows are
+ * highlighted and the first new model gets a text test in the background.
+ * The execution / cost policy (model/ModelPolicyGroup) saves as it changes.
+ * The model a conversation uses is picked in the composer, not here.
  *
  * Every write returns the full model config payload, which is applied to the
  * bootstrap state (current model, provider, availability, profile
- * onboarding) — the same contract the retired ModelView had.
+ * onboarding).
  */
-import { computed, nextTick, ref, watch } from 'vue'
-import { deleteModelEntry } from '../../api/model'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import { deleteModelEntry, testModelEntry } from '../../api/model'
+import { addModelRequested, takeAddModelRequest } from './model/addModelRequest'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type {
@@ -27,47 +33,43 @@ import type {
   ProviderOption,
 } from '../../types'
 import Button from '../ui/Button.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 import { DsPlus } from '../icons/ds'
+import ConnectionAddressDialog from './model/ConnectionAddressDialog.vue'
+import ConnectionKeyDialog from './model/ConnectionKeyDialog.vue'
+import MetadataRefreshDialog from './model/MetadataRefreshDialog.vue'
 import ModelEntryEditor from './model/ModelEntryEditor.vue'
 import ModelPolicyGroup from './model/ModelPolicyGroup.vue'
-import ProviderPicker from './model/ProviderPicker.vue'
+import ModelRow from './model/ModelRow.vue'
+import { modelEntryLabel, modelTestSummary } from './model/modelFormModel'
 import {
-  CAPABILITY_ROWS,
-  CAPABILITY_TAGS,
-  formatTokenCount,
-  modelEntryLabel,
-} from './model/modelFormModel'
+  connectionStatus,
+  hostOf,
+  keyTail,
+  sameConnection,
+} from './model/modelListModel'
 import {
-  credentialSourceEntry,
   groupEntriesByProvider,
   providerCredentialState,
-  providerDisplayName,
-  providerEndpointSummary,
   type ProviderGroup,
 } from '../../model/providerGroups'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import {
   EmptyState,
+  Notice,
   SettingsCard,
   SettingsGroup,
+  SettingsRowMenu,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from './ui'
+import { confirm } from '../ui/confirm'
+import type { RejectedModelEntryPayload } from '../../types'
 
-/**
- * The add flow: `pick` shows the provider picker; `form` the new-entry
- * editor for `provider` — in the top add card, or inside that provider's
- * card when `inGroup`.
- */
-type AddState =
-  | { step: 'pick' }
-  | {
-      step: 'form'
-      provider: string
-      source: ModelEntry | null
-      inGroup: boolean
-    }
+// The dialog loads when it is first opened.
+const AddModelDialog = defineAsyncComponent(
+  () => import('./model/AddModelDialog.vue'),
+)
 
 const ctx = useAppContext()
 
@@ -75,42 +77,69 @@ const payload = computed<ModelConfigPayload | null>(
   () => ctx.boot.value?.modelConfig ?? null,
 )
 const entries = computed(() => payload.value?.models ?? [])
+/** Entries in model_config.json that do not validate (MOD-03). */
+const rejected = computed(() => payload.value?.rejectedEntries ?? [])
 const providerOptions = computed<ProviderOption[]>(
   () => payload.value?.providerOptions ?? [],
 )
 const groups = computed(() =>
   groupEntriesByProvider(entries.value, providerOptions.value),
 )
-const modelCounts = computed(() =>
-  Object.fromEntries(
-    groups.value.map((group) => [group.provider, group.entries.length]),
-  ),
-)
 
-const adding = ref<AddState | null>(null)
+/** The add-model dialog: open, and the provider it manages (null: add). */
+const dialogOpen = ref(false)
+const manageProvider = ref<string | null>(null)
+const dialogKey = ref(0)
+/** Rows saved by the dialog, highlighted for a few seconds. */
+const highlight = ref<Set<string>>(new Set())
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
 /** The saved entry whose editor is open. */
 const editing = ref<string | null>(null)
-const confirmingDelete = ref<string | null>(null)
-const deletingId = ref<string | null>(null)
 const notice = ref('')
 const listError = ref('')
-/** Bumped to remount the add editor with a fresh draft. */
-const addRevision = ref(0)
+/** Row tests of this visit: running, and their one-line outcome. */
+const testing = ref<Set<string>>(new Set())
+const testSummaries = ref<Record<string, string>>({})
 
-const topAdd = computed(() =>
-  adding.value && !(adding.value.step === 'form' && adding.value.inGroup)
-    ? adding.value
-    : null,
+/** The connection dialogs: which one is open, for which models. */
+type ConnectionDialog = 'key' | 'address' | 'refresh'
+const connectionDialog = ref<ConnectionDialog | null>(null)
+const dialogEntries = ref<ModelEntry[]>([])
+const dialogLabel = ref('')
+const dialogVisible = computed({
+  get: () => connectionDialog.value !== null,
+  set: (open: boolean) => {
+    if (!open) connectionDialog.value = null
+  },
+})
+
+let autoOpened = false
+// 添加模型… from the composer's model menu (addModelRequest.ts).
+watch(
+  () => addModelRequested.value && Boolean(payload.value),
+  (requested) => {
+    if (requested && takeAddModelRequest()) {
+      autoOpened = true
+      openAdd()
+    }
+  },
 )
 
-// First-run posture: with nothing configured the add card is the page.
+// First run: with nothing configured the dialog opens by itself, once.
 watch(
   () => Boolean(payload.value) && entries.value.length === 0,
   (empty) => {
-    if (empty && !adding.value) adding.value = { step: 'pick' }
+    if (empty && !autoOpened) {
+      autoOpened = true
+      openAdd()
+    }
   },
   { immediate: true },
 )
+if (payload.value && takeAddModelRequest()) {
+  autoOpened = true
+  openAdd()
+}
 
 useSettingsHeader({
   actions: () => [
@@ -126,72 +155,134 @@ useSettingsHeader({
   ],
 })
 
-function groupOf(provider: string): ProviderGroup | undefined {
-  return groups.value.find((group) => group.provider === provider)
+/** The card's status: what the key lacks first, then the last test. */
+function cardStatus(group: ProviderGroup): {
+  text: string
+  tone: 'ok' | 'warn' | 'error' | 'neutral'
+} {
+  const state = providerCredentialState(group)
+  if (state === 'reentry') return { text: '凭据需要重新输入', tone: 'warn' }
+  if (state === 'missing') return { text: '缺少 API Key', tone: 'warn' }
+  const status = connectionStatus(group.entries)
+  if (state === 'keyless' && status.text === '未测试')
+    return { text: '本地 · 无需 Key', tone: 'neutral' }
+  return status
 }
 
-function optionOf(provider: string): ProviderOption | undefined {
-  return providerOptions.value.find((option) => option.name === provider)
+function cardDetail(group: ProviderGroup): string {
+  const hosts = [
+    ...new Set(group.entries.map((entry) => hostOf(entry.apiBase))),
+  ].filter(Boolean)
+  return [hosts.join('、'), keyTail(group.entries)].filter(Boolean).join(' · ')
 }
 
-function addingIn(group: ProviderGroup): boolean {
-  const state = adding.value
-  return Boolean(
-    state?.step === 'form' &&
-    state.inGroup &&
-    state.provider === group.provider,
-  )
-}
-
-function capabilityTags(entry: ModelEntry): string[] {
-  const profile = entry.resolvedProfile
-  if (!profile) return []
-  return CAPABILITY_ROWS.filter((row) => profile[row.key]).map(
-    (row) => CAPABILITY_TAGS[row.key],
-  )
-}
-
-function contextLabel(entry: ModelEntry): string {
-  const tokens = formatTokenCount(
-    entry.resolvedProfile?.contextWindowTokens || entry.contextWindowTokens,
-  )
-  return tokens ? `${tokens} 上下文` : ''
+function connectionOf(entry: ModelEntry): ModelEntry[] {
+  return entries.value.filter((item) => sameConnection(item, entry))
 }
 
 function resetTransient(): void {
   notice.value = ''
   listError.value = ''
-  confirmingDelete.value = null
 }
 
 function openAdd(): void {
   resetTransient()
   editing.value = null
-  adding.value = { step: 'pick' }
-  addRevision.value += 1
+  manageProvider.value = null
+  dialogKey.value += 1
+  dialogOpen.value = true
 }
 
-function startAdd(provider: string, inGroup: boolean): void {
+function manage(group: ProviderGroup): void {
   resetTransient()
   editing.value = null
-  adding.value = {
-    step: 'form',
-    provider,
-    source: credentialSourceEntry(groupOf(provider)),
-    inGroup,
+  manageProvider.value = group.provider
+  dialogKey.value += 1
+  dialogOpen.value = true
+}
+
+function openConnection(
+  kind: ConnectionDialog,
+  label: string,
+  models: ModelEntry[],
+): void {
+  resetTransient()
+  dialogLabel.value = label
+  dialogEntries.value = models
+  connectionDialog.value = kind
+}
+
+function cardMenu(group: ProviderGroup) {
+  const lead = group.entries[0]!
+  return [
+    {
+      id: 'change-key',
+      label: '更换 Key',
+      onSelect: () => openConnection('key', group.label, connectionOf(lead)),
+    },
+    {
+      id: 'edit-address',
+      label: '编辑地址',
+      onSelect: () =>
+        openConnection('address', group.label, connectionOf(lead)),
+    },
+    {
+      id: 'refresh-metadata',
+      label: '刷新模型资料',
+      onSelect: () => openConnection('refresh', group.label, group.entries),
+    },
+    {
+      id: 'delete-provider',
+      label: '删除供应商',
+      danger: true,
+      onSelect: () => deleteProvider(group),
+    },
+  ]
+}
+
+function editAddress(entry: ModelEntry): void {
+  const group = groups.value.find((item) => item.provider === entry.provider)
+  openConnection('address', group?.label ?? entry.provider, connectionOf(entry))
+}
+
+async function onConnectionSaved(next: ModelConfigPayload): Promise<void> {
+  await applyPayload(next)
+  notice.value =
+    connectionDialog.value === 'refresh' ? '已更新模型资料' : '已更新连接'
+}
+
+/** The dialog saved: show the new rows and test the first one quietly. */
+async function onDialogSaved(
+  result: ModelConfigPayload & { savedEntryIds: string[] },
+): Promise<void> {
+  await applyPayload(result)
+  const ids = result.savedEntryIds
+  highlight.value = new Set(ids)
+  clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => (highlight.value = new Set()), 4000)
+  notice.value = ids.length ? `已添加 ${ids.length} 个模型` : '已更新模型'
+  const first = ids[0]
+  if (!first) return
+  const label =
+    result.models.find((entry) => entry.entryId === first)
+      ?.effectiveDisplayName ?? first
+  try {
+    const test = await testModelEntry(first, 'text')
+    notice.value = test.ok
+      ? `已添加 ${ids.length} 个模型 ·「${label}」测试通过`
+      : `已添加 ${ids.length} 个模型 ·「${label}」测试失败：${test.error ?? '没有回复'}`
+  } catch (error) {
+    notice.value = `已添加 ${ids.length} 个模型 ·「${label}」测试失败：${
+      error instanceof Error ? error.message : String(error)
+    }`
   }
-  addRevision.value += 1
+  await reload({ quiet: true })
 }
 
 function toggleEdit(entry: ModelEntry): void {
   resetTransient()
-  adding.value = null
   if (editing.value === entry.entryId) closeEditor()
   else editing.value = entry.entryId
-}
-
-function closeAdd(): void {
-  adding.value = null
 }
 
 function closeEditor(): void {
@@ -226,39 +317,135 @@ async function applyPayload(next: ModelConfigPayload): Promise<void> {
 }
 
 async function onSaved(next: ModelConfigPayload, label: string): Promise<void> {
-  adding.value = null
   editing.value = null
   notice.value = `已保存「${label}」`
   await applyPayload(next)
 }
 
-async function reload(): Promise<void> {
-  listError.value = ''
+async function reload(options: { quiet?: boolean } = {}): Promise<void> {
+  if (!options.quiet) listError.value = ''
   try {
-    await applyPayload(await core('model.getConfig'))
+    const next = await core('model.getConfig')
+    if (next && Array.isArray(next.models)) await applyPayload(next)
+  } catch (error) {
+    if (!options.quiet)
+      listError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** Test a model; the row says how it went, the card's status follows. */
+async function testEntry(entry: ModelEntry): Promise<void> {
+  if (testing.value.has(entry.entryId)) return
+  testing.value = new Set([...testing.value, entry.entryId])
+  try {
+    const result = await testModelEntry(entry.entryId, 'text')
+    testSummaries.value = {
+      ...testSummaries.value,
+      [entry.entryId]: modelTestSummary(result),
+    }
+  } catch (error) {
+    testSummaries.value = {
+      ...testSummaries.value,
+      [entry.entryId]: error instanceof Error ? error.message : String(error),
+    }
+  } finally {
+    const next = new Set(testing.value)
+    next.delete(entry.entryId)
+    testing.value = next
+  }
+  await reload({ quiet: true })
+}
+
+async function replaceEntry(entry: ModelEntry, modelId: string): Promise<void> {
+  resetTransient()
+  try {
+    const result = await core('model.replaceEntry', {
+      entryId: entry.entryId,
+      modelId,
+    })
+    await applyPayload(result)
+    highlight.value = new Set([result.replacedEntryId])
+    clearTimeout(highlightTimer)
+    highlightTimer = setTimeout(() => (highlight.value = new Set()), 4000)
+    notice.value = `已把「${modelEntryLabel(entry)}」换成 ${modelId}`
   } catch (error) {
     listError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
-function askDelete(entry: ModelEntry): void {
+async function deleteEntry(entry: ModelEntry): Promise<void> {
+  const label = modelEntryLabel(entry)
+  if (
+    !(await confirm({
+      title: `删除「${label}」？`,
+      body: '这个模型会从 model_config.json 里删掉；同一连接下的其他模型不受影响。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
+  )
+    return
   resetTransient()
   if (editing.value === entry.entryId) editing.value = null
-  confirmingDelete.value = entry.entryId
-}
-
-async function confirmDelete(entry: ModelEntry): Promise<void> {
-  if (deletingId.value) return
-  deletingId.value = entry.entryId
-  listError.value = ''
   try {
     await applyPayload(await deleteModelEntry(entry.entryId))
-    confirmingDelete.value = null
-    notice.value = `已删除「${modelEntryLabel(entry)}」`
+    notice.value = `已删除「${label}」`
   } catch (error) {
     listError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    deletingId.value = null
+  }
+}
+
+async function deleteProvider(group: ProviderGroup): Promise<void> {
+  resetTransient()
+  if (
+    group.entries.some(
+      (entry) => entry.entryId === payload.value?.activeModelId,
+    )
+  ) {
+    listError.value = `「${group.label}」里有正在使用的模型，先在输入框换成别的模型再删除`
+    return
+  }
+  if (
+    !(await confirm({
+      title: `删除供应商「${group.label}」？`,
+      body: `它的 ${group.entries.length} 个模型和保存的 Key 都会删除，无法恢复。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
+  )
+    return
+  try {
+    let next: ModelConfigPayload | null = null
+    for (const entry of group.entries)
+      next = await deleteModelEntry(entry.entryId)
+    if (next) await applyPayload(next)
+    notice.value = `已删除「${group.label}」`
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : String(error)
+    await reload({ quiet: true })
+  }
+}
+
+function rejectedLabel(item: RejectedModelEntryPayload): string {
+  return item.modelId || item.entryId || `第 ${item.index + 1} 个条目`
+}
+
+/** Remove an entry that does not validate from model_config.json. */
+async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
+  if (
+    !(await confirm({
+      title: `删除无法读取的「${rejectedLabel(item)}」？`,
+      body: '这个条目会从 model_config.json 里删掉，无法恢复。其余模型不受影响。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
+  )
+    return
+  listError.value = ''
+  try {
+    await applyPayload(await core('model.discardRejected', { key: item.key }))
+    notice.value = `已删除「${rejectedLabel(item)}」`
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : String(error)
   }
 }
 </script>
@@ -267,57 +454,30 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   <SettingsSection
     intro="按供应商管理模型的连接、凭证与能力。对话使用哪个模型，在聊天输入框中选择。"
   >
-    <EmptyState
-      v-if="!payload"
-      title="正在读取模型配置…"
-      variant="plain"
-      compact
-    />
+    <EmptyState v-if="!payload" title="正在读取模型配置…" variant="inline" />
     <template v-else>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <p v-if="listError" class="list-error" role="alert">{{ listError }}</p>
+      <Notice
+        v-if="rejected.length"
+        tone="warn"
+        :title="`有 ${rejected.length} 个模型条目无法读取`"
+        data-testid="model-rejected"
+      >
+        model_config.json
+        里的这些条目不完整或格式不对，已先跳过，其余模型照常可用。可以删掉它们；要继续使用，就重新添加这个模型。
+        <ul class="rejected-list">
+          <li v-for="item in rejected" :key="item.key">
+            <span class="rejected-name">{{ rejectedLabel(item) }}</span>
+            <span class="rejected-reason">{{ item.reason }}</span>
+            <Button size="sm" variant="secondary" @click="discardRejected(item)"
+              >删除</Button
+            >
+          </li>
+        </ul>
+      </Notice>
 
       <SettingsGroup variant="stack" data-testid="model-entries">
-        <SettingsCard
-          v-if="topAdd"
-          :key="`add-${addRevision}`"
-          variant="outline"
-          class="add-card"
-          :title="
-            topAdd.step === 'pick'
-              ? '添加模型 · 选择供应商'
-              : `添加模型 · ${providerDisplayName(topAdd.provider, optionOf(topAdd.provider))}`
-          "
-          data-testid="model-add-card"
-          data-editor-host
-        >
-          <template #actions>
-            <Button
-              v-if="topAdd.step === 'pick' && entries.length"
-              size="sm"
-              variant="outline"
-              @click="closeAdd"
-            >
-              取消
-            </Button>
-          </template>
-          <ProviderPicker
-            v-if="topAdd.step === 'pick'"
-            :options="providerOptions"
-            :counts="modelCounts"
-            @pick="(provider) => startAdd(provider, false)"
-          />
-          <ModelEntryEditor
-            v-else
-            :entry="null"
-            :provider="topAdd.provider"
-            :source="topAdd.source"
-            :provider-options="providerOptions"
-            @saved="onSaved"
-            @cancel="closeAdd"
-          />
-        </SettingsCard>
-
         <SettingsCard
           v-for="group in groups"
           :key="group.provider"
@@ -327,167 +487,108 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           :data-provider="group.provider"
         >
           <template #leading>
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               :icon-id="group.iconId"
               :label="group.label"
-              size="lg"
+              :size="40"
             />
           </template>
           <template #meta>
-            <span class="model-count">{{ group.entries.length }} 个模型</span>
-            <StatusBadge
-              v-if="providerCredentialState(group) === 'ok'"
-              tone="ok"
-              dot
+            <Badge
+              :tone="cardStatus(group).tone"
+              variant="dot-label"
+              data-connection-status
+              >{{ cardStatus(group).text }}</Badge
             >
-              Key 已配置
-            </StatusBadge>
-            <StatusBadge
-              v-else-if="providerCredentialState(group) === 'missing'"
-              tone="warn"
-              dot
-            >
-              缺少 API Key
-            </StatusBadge>
-            <StatusBadge v-else>本地 · 无需 Key</StatusBadge>
           </template>
           <template #description>
-            <span class="endpoint">{{ providerEndpointSummary(group) }}</span>
+            <span class="endpoint">{{ cardDetail(group) }}</span>
           </template>
           <template #actions>
             <Button
               size="sm"
-              variant="outline"
-              :aria-label="`在 ${group.label} 下添加模型`"
-              :aria-expanded="addingIn(group)"
-              @click="
-                addingIn(group) ? closeAdd() : startAdd(group.provider, true)
-              "
+              variant="secondary"
+              :aria-label="`管理 ${group.label} 的模型`"
+              @click="manage(group)"
             >
-              <template #icon><DsPlus :size="14" /></template>
-              添加模型
+              管理模型
             </Button>
+            <SettingsRowMenu
+              :label="`${group.label} 的更多操作`"
+              :items="cardMenu(group)"
+            />
           </template>
 
-          <div
-            v-if="addingIn(group) && adding?.step === 'form'"
-            :key="`add-${addRevision}`"
-            class="group-add"
-            data-testid="model-add-card"
-            data-editor-host
-          >
-            <h4 class="group-add-title">添加 {{ group.label }} 模型</h4>
-            <ModelEntryEditor
-              :entry="null"
-              :provider="adding.provider"
-              :source="adding.source"
-              :provider-options="providerOptions"
-              @saved="onSaved"
-              @cancel="closeAdd"
-            />
-          </div>
-
           <ul class="model-list" :aria-label="`${group.label} 的模型`">
-            <li
+            <ModelRow
               v-for="entry in group.entries"
               :key="entry.entryId"
-              class="model-row"
-              :class="{ editing: editing === entry.entryId }"
-              :data-entry-id="entry.entryId"
-              data-editor-host
+              :entry="entry"
+              :active="entry.entryId === payload.activeModelId"
+              :editing="editing === entry.entryId"
+              :highlight="highlight.has(entry.entryId)"
+              :testing="testing.has(entry.entryId)"
+              :test-summary="testSummaries[entry.entryId] ?? ''"
+              @test="testEntry(entry)"
+              @edit="toggleEdit(entry)"
+              @delete="deleteEntry(entry)"
+              @replace="(modelId: string) => replaceEntry(entry, modelId)"
             >
-              <div class="model-line">
-                <div class="model-text">
-                  <span class="model-title">
-                    <span class="model-name">{{ modelEntryLabel(entry) }}</span>
-                    <StatusBadge
-                      v-if="entry.entryId === payload.activeModelId"
-                      tone="accent"
-                    >
-                      当前
-                    </StatusBadge>
-                  </span>
-                  <span class="model-meta">
-                    <code class="model-id">{{ entry.modelId }}</code>
-                    <span
-                      v-for="tag in capabilityTags(entry)"
-                      :key="tag"
-                      class="cap-tag"
-                    >
-                      {{ tag }}
-                    </span>
-                    <span v-if="contextLabel(entry)" class="context">
-                      {{ contextLabel(entry) }}
-                    </span>
-                  </span>
-                </div>
-                <div class="model-actions">
-                  <template v-if="confirmingDelete === entry.entryId">
-                    <span class="confirm-text">确认删除？</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      :disabled="deletingId === entry.entryId"
-                      @click="confirmingDelete = null"
-                    >
-                      取消
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      :disabled="deletingId === entry.entryId"
-                      :aria-label="`确认删除 ${modelEntryLabel(entry)}`"
-                      @click="confirmDelete(entry)"
-                    >
-                      {{ deletingId === entry.entryId ? '删除中…' : '删除' }}
-                    </Button>
-                  </template>
-                  <template v-else>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      :aria-label="`编辑 ${modelEntryLabel(entry)}`"
-                      :aria-expanded="editing === entry.entryId"
-                      @click="toggleEdit(entry)"
-                    >
-                      编辑
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      class="delete"
-                      :aria-label="`删除 ${modelEntryLabel(entry)}`"
-                      @click="askDelete(entry)"
-                    >
-                      删除
-                    </Button>
-                  </template>
-                </div>
-              </div>
               <ModelEntryEditor
                 v-if="editing === entry.entryId"
-                class="row-editor"
                 :entry="entry"
                 :provider-options="providerOptions"
                 @saved="onSaved"
                 @cancel="closeEditor"
+                @edit-address="editAddress(entry)"
               />
-            </li>
+            </ModelRow>
           </ul>
         </SettingsCard>
 
         <EmptyState
-          v-if="!entries.length && !adding"
+          v-if="!entries.length"
           title="还没有模型"
           description="添加一个模型后即可开始对话。"
+          framed
         >
-          <Button size="sm" variant="outline" @click="openAdd">
+          <Button size="sm" variant="secondary" @click="openAdd">
             添加第一个模型
           </Button>
         </EmptyState>
       </SettingsGroup>
 
       <ModelPolicyGroup :payload="payload" @updated="applyPayload" />
+      <AddModelDialog
+        v-if="dialogOpen"
+        :key="dialogKey"
+        v-model:open="dialogOpen"
+        :payload="payload"
+        :manage-provider="manageProvider"
+        @saved="onDialogSaved"
+      />
+      <ConnectionKeyDialog
+        v-if="connectionDialog === 'key'"
+        v-model:open="dialogVisible"
+        :label="dialogLabel"
+        :entries="dialogEntries"
+        @saved="onConnectionSaved"
+      />
+      <ConnectionAddressDialog
+        v-if="connectionDialog === 'address'"
+        v-model:open="dialogVisible"
+        :label="dialogLabel"
+        :entries="dialogEntries"
+        @saved="onConnectionSaved"
+      />
+      <MetadataRefreshDialog
+        v-if="connectionDialog === 'refresh'"
+        v-model:open="dialogVisible"
+        :label="dialogLabel"
+        :entries="dialogEntries"
+        @updated="onConnectionSaved"
+      />
     </template>
   </SettingsSection>
 </template>
@@ -506,37 +607,10 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   overflow-wrap: anywhere;
 }
 
-.add-card {
-  border-color: rgb(var(--label-dimmed));
-}
-
-.model-count {
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
-}
-
 .endpoint {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
-}
-
-.group-add {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-3-5);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
-}
-
-.group-add-title {
-  margin: 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
 }
 
 .model-list {
@@ -547,110 +621,30 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   list-style: none;
 }
 
-.model-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-  padding: var(--space-2-5) 0;
-}
-
-.model-row:first-child {
-  padding-top: 0;
-}
-
-.model-row:last-child {
-  padding-bottom: 0;
-}
-
-.model-row + .model-row {
-  border-top: 1px solid var(--border-l1);
-}
-
-.model-line {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.model-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--space-0-5);
-  min-width: 0;
-}
-
-.model-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  min-width: 0;
-}
-
-.model-name {
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-row.editing .model-name {
-  font-weight: 500;
-}
-
-.model-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
-}
-
-.model-id {
-  min-width: 0;
-  font: var(--font-code-small);
-  color: rgb(var(--label-secondary));
-  overflow-wrap: anywhere;
-}
-
-.cap-tag {
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
-  font-size: var(--fs-xxxs);
-  line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
-}
-
-.model-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
+.rejected-list {
+  display: grid;
   gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.model-actions .delete {
-  color: rgb(var(--state-error-label));
+.rejected-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.row-editor {
-  padding: var(--space-3) var(--space-3-5);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+.rejected-name {
+  flex: none;
+  font-weight: var(--weight-medium);
 }
 
-.confirm-text {
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
-  white-space: nowrap;
+.rejected-reason {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(var(--text-2));
 }
 </style>

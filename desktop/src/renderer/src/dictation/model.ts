@@ -160,6 +160,7 @@ function bindingChord(binding: ShortcutBinding, mac: boolean): Chord {
 /** macOS and Emperor's menu keep these; a dictation shortcut must not. */
 const MAC_RESERVED: ReadonlyArray<readonly [string, string]> = [
   ['Command+Q', '退出 Emperor'],
+  ['Command+,', '偏好设置'],
   ['Command+W', '关闭窗口'],
   ['Command+H', '隐藏 Emperor'],
   ['Alt+Command+H', '隐藏其他应用'],

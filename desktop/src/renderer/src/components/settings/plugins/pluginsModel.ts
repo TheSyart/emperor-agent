@@ -1,6 +1,7 @@
 /**
- * Pure view model of 能力 › 插件: grouping and search for the list, and the
- * member groups, state badges, tools and facts of one plugin's detail.
+ * Pure view model of 能力 › 插件: grouping and search for the list, the
+ * project's suggestions (SEC-07), and the member groups, state badges,
+ * tools and facts of one plugin's detail.
  */
 import type { ToolInfo } from '../../../types'
 import type { SettingsSectionKey } from '../settingsSections'
@@ -32,6 +33,52 @@ export function groupPlugins(list: readonly PluginSummary[]): {
     installed: list.filter((plugin) => plugin.scope !== 'managed'),
     preinstalled: list.filter((plugin) => plugin.scope === 'managed'),
   }
+}
+
+/**
+ * What the project's `.emperor/settings.json` suggests enabling and the user
+ * has not decided yet (SEC-07): Core marks those project rows `suggested`.
+ */
+export function pluginSuggestions(
+  list: readonly PluginSummary[],
+): PluginSummary[] {
+  return list.filter(
+    (plugin) => plugin.scope === 'project' && plugin.suggested === true,
+  )
+}
+
+const MEMBER_WORDS: ReadonlyArray<
+  readonly [keyof PluginSummary['capabilities'], string]
+> = [
+  ['skills', 'Skill'],
+  ['mcpServers', 'MCP server'],
+  ['hooks', 'Hook'],
+  ['apps', '应用连接'],
+]
+
+/** What a plugin brings, in a few words (`2 个 Skill、1 个 Hook`); `''` for none. */
+export function pluginMembersText(
+  capabilities: PluginSummary['capabilities'],
+): string {
+  return MEMBER_WORDS.filter(([key]) => capabilities[key] > 0)
+    .map(
+      ([key, word]) =>
+        `${capabilities[key]} 个${/^[A-Za-z]/.test(word) ? ' ' : ''}${word}`,
+    )
+    .join('、')
+}
+
+/** Why each variable a failed hook may need did not reach it. */
+export function hookVariableNotes(
+  variables: Component['variables'],
+): Array<{ name: string; note: string }> {
+  return (variables ?? []).map((variable) => ({
+    name: variable.name,
+    note:
+      variable.state === 'undeclared'
+        ? '插件清单的 env 没有声明'
+        : 'Emperor 的环境里没有',
+  }))
 }
 
 export function filterPlugins(
@@ -159,6 +206,14 @@ export function pluginFacts(detail: PluginDetail): DefinitionItem[] {
       : null,
     { term: '版本', value: detail.version ?? '未提供', mono: true },
     { term: '权限', value: permissions.join('，') || '无' },
+    // SEC-07: the only variables of Emperor's environment its hooks see.
+    detail.permissions.env.length
+      ? {
+          term: '可读环境变量',
+          value: detail.permissions.env.join('、'),
+          mono: true,
+        }
+      : null,
     detail.category ? { term: '类别', value: detail.category } : null,
     detail.homepage ? { term: '主页', value: detail.homepage } : null,
     detail.license ? { term: '许可证', value: detail.license } : null,

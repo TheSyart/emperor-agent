@@ -269,7 +269,7 @@ export function agentInstructionsMiddleware(
   const maxBytes = options.maxBytes ?? DEFAULT_INSTRUCTIONS_MAX_BYTES
   return ({ agent, messages, step }) => {
     if (step !== 1) return undefined
-    const cwd = agent.session.header.cwd
+    const cwd = agent.session.cwd
     if (cwd === undefined) return undefined
     // Delegated agents inherit their parent's instructions through the fork seed or prompt.
     const files = discoverInstructionFiles(cwd, {

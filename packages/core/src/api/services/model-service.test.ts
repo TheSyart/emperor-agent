@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,9 @@ import {
 import { LlmClient } from '../../llm/client'
 import type { GenerateOptions } from '../../llm/types'
 import { ScriptedAdapter, type ScriptedReply } from '../../harness/testing'
+import { ModelDiscovery } from '../../model/discovery'
+import { createLocalKeySealer } from '../../security/secret-sealer'
+import { jsonResponse, scriptedFetch } from '../../model/discovery/testing'
 import { CoreModelService } from './model-service'
 
 function tmp(prefix: string): string {
@@ -51,6 +54,7 @@ async function service(
     refreshModelConfig?: () => void | Promise<void>
     afterConfigSaved?: () => any
     replies?: ScriptedReply[]
+    discovery?: ModelDiscovery
   } = {},
 ): Promise<CoreModelService> {
   const { replies, ...deps } = overrides
@@ -210,14 +214,13 @@ describe('CoreModelService schema v2', () => {
 
     await modelService.activate(secondId)
     expect((await modelService.getConfig()).activeModelId).toBe(secondId)
+    // The entry in use cannot be deleted (MOD-03); switch first.
+    await expect(modelService.deleteEntry(secondId)).rejects.toThrow('正在使用')
+    await modelService.activate(firstId)
     await modelService.deleteEntry(secondId)
-    expect((await modelService.getConfig()).activeModelId).toBe(firstId)
-    await modelService.deleteEntry(firstId)
     expect(await modelService.getConfig()).toMatchObject({
-      activeModelId: null,
-      models: [],
-      current: null,
-      availability: { usable: false },
+      activeModelId: firstId,
+      models: [expect.objectContaining({ entryId: firstId })],
     })
     expect(lifecycle.filter((item) => item === 'onboarding')).toHaveLength(1)
   })
@@ -392,11 +395,15 @@ describe('CoreModelService schema v2', () => {
       ok: true,
       provider: 'deepseek',
       protocol: 'anthropic',
-      source: 'anthropic',
+      source: 'vendor_api',
+      parser: 'deepseek',
       models: [{ id: 'deepseek-chat' }],
     })
-    expect(calls[0]?.url).toBe('https://api.deepseek.com/anthropic/v1/models')
-    expect(calls[0]?.headers.get('x-api-key')).toBe('sk-secret-1234')
+    // The Anthropic-compatible endpoint's key also lists models on
+    // DeepSeek's own host, which reports limits the Anthropic shape lacks.
+    expect(calls[0]?.url).toBe('https://api.deepseek.com/models')
+    expect(calls[0]?.headers.get('authorization')).toBe('Bearer sk-secret-1234')
+    expect(JSON.stringify(result)).not.toContain('sk-secret-1234')
   })
 
   it('copies a sibling credential into a new entry only for the same provider endpoint', async () => {
@@ -483,7 +490,7 @@ describe('CoreModelService schema v2', () => {
         apiBase: 'https://attacker.example/v1',
         apiKey: '***1234',
       }),
-    ).resolves.toMatchObject({ ok: false, code: 'credential_required' })
+    ).resolves.toMatchObject({ ok: false, code: 'CREDENTIAL_REQUIRED' })
 
     await expect(
       modelService.discoverModels({
@@ -493,7 +500,7 @@ describe('CoreModelService schema v2', () => {
         apiBase: 'https://api.deepseek.com/v1',
         apiKey: null,
       }),
-    ).resolves.toMatchObject({ ok: false, code: 'credential_required' })
+    ).resolves.toMatchObject({ ok: false, code: 'CREDENTIAL_REQUIRED' })
 
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -523,19 +530,17 @@ describe('CoreModelService schema v2', () => {
     expect(activated.profileOnboarding).toMatchObject({ started: true })
     expect(activateHook).toHaveBeenCalledOnce()
 
+    // Deleting the active entry is refused (MOD-03), so a delete can no
+    // longer be what first makes the active model usable.
     const deleteRoot = tmp('emperor-model-service-delete-onboarding-')
     writeConfig(deleteRoot, [invalid, local], 'invalid')
-    const deleteHook = vi.fn(() => ({
-      started: true,
-      state: { status: 'in_progress' },
-    }))
-    const deleted = await (
-      await service(deleteRoot, {
-        afterConfigSaved: deleteHook,
-      })
-    ).deleteEntry('invalid')
-    expect(deleted.profileOnboarding).toMatchObject({ started: true })
-    expect(deleteHook).toHaveBeenCalledOnce()
+    const deleteHook = vi.fn()
+    await expect(
+      (await service(deleteRoot, { afterConfigSaved: deleteHook })).deleteEntry(
+        'invalid',
+      ),
+    ).rejects.toThrow('正在使用')
+    expect(deleteHook).not.toHaveBeenCalled()
   })
 
   it('keeps vision tests read-only and rejects descriptive negative answers', async () => {
@@ -598,5 +603,166 @@ describe('CoreModelService schema v2', () => {
         apiKey: 'key',
       }),
     ).rejects.toThrow('provider')
+  })
+})
+
+describe('CoreModelService connection probe (MOD-02)', () => {
+  const kimi = (overrides: Partial<ModelEntryV2> = {}) =>
+    entry({
+      entryId: 'kimi',
+      provider: 'moonshot',
+      protocol: 'openai',
+      modelId: 'kimi-k3',
+      apiBase: 'https://api.moonshot.cn/v1',
+      apiKey: 'sk-stored-1111111111',
+      reasoningEffort: null,
+      ...overrides,
+    })
+  const draft = {
+    entryId: 'kimi',
+    provider: 'moonshot',
+    protocol: 'openai' as const,
+    apiBase: 'https://api.moonshot.cn/v1',
+  }
+
+  it('11. tests the connection with the draft key, not the stored one (UI-29)', async () => {
+    const root = tmp('emperor-model-service-probe-draft-')
+    writeConfig(root, [kimi()])
+    const { fetch, requests } = scriptedFetch(() =>
+      jsonResponse({ object: 'list', data: [{ id: 'kimi-k3' }] }),
+    )
+    const modelService = await service(root, {
+      discovery: new ModelDiscovery({ fetch }),
+    })
+
+    const typed = await modelService.probeConnection({
+      ...draft,
+      apiKey: 'sk-draft-2222222222',
+    })
+    expect(typed).toMatchObject({ ok: true, modelCount: 1, method: 'list' })
+    expect(requests[0]?.headers.authorization).toBe(
+      'Bearer sk-draft-2222222222',
+    )
+
+    // A masked draft on the same connection means "keep the saved key".
+    await modelService.probeConnection({ ...draft, apiKey: '***1111' })
+    expect(requests[1]?.headers.authorization).toBe(
+      'Bearer sk-stored-1111111111',
+    )
+
+    // The saved key never goes to an address the user has since changed,
+    // and an explicit null means no key at all.
+    for (const input of [
+      { ...draft, apiBase: 'https://proxy.example.com/v1', apiKey: '***1111' },
+      { ...draft, apiKey: null },
+    ])
+      await expect(modelService.probeConnection(input)).resolves.toMatchObject({
+        ok: false,
+        code: 'AUTH',
+      })
+    expect(requests).toHaveLength(2)
+
+    // Listing follows the same rule.
+    const listed = await modelService.discoverModels({
+      ...draft,
+      apiKey: 'sk-draft-3333333333',
+    })
+    expect(listed).toMatchObject({ ok: true, models: [{ id: 'kimi-k3' }] })
+    expect(requests[2]?.headers.authorization).toBe(
+      'Bearer sk-draft-3333333333',
+    )
+    expect(JSON.stringify([typed, listed])).not.toMatch(/sk-(stored|draft)/)
+  })
+
+  it('needs no key for a local server and reports a missing address', async () => {
+    const root = tmp('emperor-model-service-probe-local-')
+    writeConfig(root, [])
+    const { fetch, requests } = scriptedFetch(() =>
+      jsonResponse({ models: [{ name: 'qwen3:32b' }] }),
+    )
+    const modelService = await service(root, {
+      discovery: new ModelDiscovery({ fetch }),
+    })
+
+    await expect(
+      modelService.probeConnection({ provider: 'ollama', protocol: 'openai' }),
+    ).resolves.toMatchObject({ ok: true, modelCount: 1 })
+    expect(requests[0]?.url).toBe('http://localhost:11434/api/tags')
+
+    await expect(
+      modelService.probeConnection({
+        provider: 'vllm',
+        protocol: 'openai',
+        apiBase: '',
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'WRONG_BASE' })
+  })
+
+  it('resolves a stored credential by connectionId once entries carry one', async () => {
+    const root = tmp('emperor-model-service-probe-connection-id-')
+    writeConfig(root, [kimi()])
+    const { fetch, requests } = scriptedFetch(() => jsonResponse({ data: [] }))
+    const modelService = await service(root, {
+      discovery: new ModelDiscovery({ fetch }),
+    })
+    // model_config.json has no connectionId yet (MOD-03 adds it), so the
+    // reference finds nothing and no stored key is sent.
+    await expect(
+      modelService.probeConnection({
+        connectionId: 'conn-kimi',
+        provider: 'moonshot',
+        protocol: 'openai',
+        apiBase: 'https://api.moonshot.cn/v1',
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'AUTH' })
+    expect(requests).toHaveLength(0)
+  })
+})
+
+describe('CoreModelService sealed keys (SEC-06)', () => {
+  it('saves through the service with a sealed key and shows only its last 4 characters (cards 1, 10)', async () => {
+    const root = tmp('emperor-model-service-sealed-')
+    const sealer = createLocalKeySealer(root)
+    const models = new CoreModelService(root, { sealer })
+    const payload = await models.saveEntry({
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-5.2',
+      apiBase: 'https://api.openai.com/v1',
+      apiKey: 'sk-proj-abcdefghijklmnopWXYZ',
+      contextWindowTokens: 128_000,
+      maxTokens: 16_000,
+    })
+    const disk = readFileSync(join(root, 'model_config.json'), 'utf8')
+    expect(disk).not.toContain('sk-proj-abcdefghijklmnop')
+    expect(disk).toMatch(/"apiKey": "el1:/)
+    expect(payload.models[0]!.apiKey).toBe('***WXYZ')
+    expect(JSON.stringify(payload)).not.toContain('abcdefghijklmnop')
+    expect(JSON.stringify(payload)).not.toContain('el1:')
+    expect(payload.models[0]!.credentialState).toBeUndefined()
+    expect(payload.availability.usable).toBe(true)
+  })
+
+  it('shows 凭据需要重新输入 for entries whose local key is gone (card 3)', async () => {
+    const root = tmp('emperor-model-service-reentry-')
+    const sealer = createLocalKeySealer(root)
+    await new CoreModelService(root, { sealer }).saveEntry({
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-5.2',
+      apiBase: 'https://api.openai.com/v1',
+      apiKey: 'sk-proj-lost-key-0000',
+      contextWindowTokens: 128_000,
+      maxTokens: 16_000,
+    })
+    rmSync(join(root, 'computer-use', 'secrets'), { recursive: true })
+    const payload = await new CoreModelService(root, {
+      sealer: createLocalKeySealer(root),
+    }).getConfig()
+    expect(payload.models).toHaveLength(1)
+    expect(payload.models[0]!.apiKey).toBe('')
+    expect(payload.models[0]!.credentialState).toBe('needs_reentry')
+    expect(payload.availability.usable).toBe(false)
+    expect(payload.availability.message).toContain('凭据需要重新输入')
   })
 })

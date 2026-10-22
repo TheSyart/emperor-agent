@@ -10,13 +10,15 @@ import type { ChatNode, ChatNodeKind, ChatNodeOf } from '../types'
 /**
  * Relative positions around one durable event for synthetic nodes: an
  * interrupted assistant sits just before the closing boundary, its
- * interrupted tool follow-ups after it, and turn-level notices just before
- * the turn tail (anchored at turn/end).
+ * interrupted tool follow-ups after it, then the turn-level notices and the
+ * turn's files card, all before the turn tail (anchored at turn/end), which
+ * is the turn's last row (UI-S13).
  */
 export const CHAT_SYNTHETIC_SEQ_OFFSETS = {
   interruptedAssistant: -0.9,
   interruptedFollowup: -0.8,
   turnNotice: -0.1,
+  turnFiles: -0.05,
 } as const
 
 /** Best loaded Location of a Context (start, else first match). */

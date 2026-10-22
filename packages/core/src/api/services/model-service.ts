@@ -3,19 +3,43 @@ import {
   activateModelEntry,
   activeEntry,
   deleteModelEntry,
+  discardRejectedModelEntry,
+  effectiveDisplayName,
+  effectiveMetadata,
   findEntry,
   loadModelConfig,
   maskSecret,
+  newEntryId,
+  sameConnection,
   parseModelConfig,
+  saveModelConfig,
+  saveModelEntries,
   saveModelEntry,
   saveModelPolicy,
+  updateModelConnection,
   upsertModelEntryConfig,
+  withModelConfigLock,
+  type ModelConnectionSettings,
   type ModelEntry,
+  type ModelEntryDraft,
+  type ModelEntryMetadata,
   type ModelEntryUpdate,
   type ModelEntryV2,
   type ModelExecutionPolicy,
+  type ModelMetadataField,
   type ModelProtocol,
 } from '../../config/model-config'
+import {
+  lookupModelFacts,
+  MODEL_CATALOG_INFO,
+} from '../../model/metadata/lookup'
+import type { ModelFacts, ModelFactsSource } from '../../model/metadata/types'
+import type { PersistenceAdapter } from '../../store/persistence'
+import {
+  ModelTestLog,
+  testFailureKind,
+  type ModelTestRecord,
+} from './model-test-log'
 import {
   modelAvailability,
   type ModelAvailability,
@@ -38,12 +62,18 @@ import {
   type ProviderSpec,
 } from '../../llm/catalog'
 import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
+import type { SecretSealer } from '../../security/secret-sealer'
+import {
+  ModelDiscovery,
+  type ConnectionFix,
+  type DiscoveredModel,
+  type DiscoveryConnection,
+  type DiscoveryErrorCode,
+  type ParserId,
+  type ProbeResult,
+} from '../../model/discovery'
 
 type Dict = Record<string, any>
-
-const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
-const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models'
-const ANTHROPIC_VERSION = '2023-06-01'
 
 export interface CoreModelServiceDeps {
   /** Test hook: build the one-shot client used by `test()`. */
@@ -51,9 +81,63 @@ export interface CoreModelServiceDeps {
   refreshModelConfig?: () => void | Promise<void>
   afterConfigSaved?: () =>
     ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
+  /** Test hook: model lists and connection checks (transport, cache). */
+  discovery?: ModelDiscovery
+  /** Seals API keys in `model_config.json` (SEC-06); absent: left as written. */
+  sealer?: SecretSealer | null
+  /** Test hook: the file IO under model_config.json (counting writes). */
+  persistenceAdapter?: PersistenceAdapter
 }
 
-export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
+/** A batch of one connection's models (MOD-03 `model.saveEntries`). */
+export interface ModelEntriesSaveInput {
+  connection: ModelConnectionSettings
+  entries: ModelEntryDraft[]
+  activateEntryId?: string | null
+}
+
+/** A rejected entry as Settings shows it: never its raw content. */
+export interface RejectedModelEntryPayload {
+  /** What `model.discardRejected` takes: the entryId, or `#<index>`. */
+  key: string
+  index: number
+  entryId: string | null
+  modelId: string | null
+  provider: string | null
+  reason: string
+}
+
+export interface ModelMetadataChange {
+  field: ModelMetadataField
+  from: unknown
+  to: unknown
+}
+
+export interface ModelMetadataDiff {
+  entryId: string
+  modelId: string
+  source: ModelFactsSource
+  changes: ModelMetadataChange[]
+}
+
+export interface ModelMetadataRefreshInput {
+  entryIds?: string[]
+  connectionId?: string
+  /** Apply the differences (locked fields are never touched). */
+  apply?: boolean
+}
+
+export interface ModelDefaultsInput {
+  provider: string
+  protocol: ModelProtocol
+  apiBase?: string
+  modelId: string
+}
+
+export type ModelEntrySaveInput = Omit<
+  ModelEntryUpdate,
+  'legacy' | 'sampling' | 'metadata'
+> & {
   /**
    * New entries only: copy the API key (and legacy extra headers) of this
    * saved entry instead of submitting one. The source must be the same
@@ -61,6 +145,16 @@ export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
    * endpoint it was not saved for.
    */
   credentialsFrom?: string
+  /** The editor's temperature (高级); null removes it (MOD-05). */
+  sampling?: { temperature?: number | null }
+  /** Fields the user set in the editor: metadata refreshes keep them. */
+  lockFields?: ModelMetadataField[]
+}
+
+export interface ModelEntryReplaceInput {
+  entryId: string
+  /** The model to use instead, on the same connection. */
+  modelId: string
 }
 
 export interface ModelProfilePreviewInput {
@@ -76,10 +170,24 @@ export interface ModelEntryPayload extends Omit<
   ModelEntryV2,
   'apiKey' | 'legacy'
 > {
+  /** `***` + the last 4 characters of a saved key, or '' (never the key). */
   apiKey: string
   effectiveDisplayName: string
   resolvedProfile: ResolvedModelProfile
+  /** The saved key cannot be opened (local key gone): Settings asks for it again. */
+  credentialState?: 'needs_reentry'
+  /** Where the entry's facts came from; old entries read as manual, locked. */
+  metadata: ModelEntryMetadata
+  /**
+   * The model's lifecycle: as saved, else what the bundled catalog knows
+   * (MOD-05: Settings offers the replacement of a retired model).
+   */
+  lifecycle?: ModelEntryLifecycle
+  /** The last connection test of this entry (model_tests.json). */
+  lastTest?: ModelTestRecord
 }
+
+export type ModelEntryLifecycle = NonNullable<ModelEntryMetadata['lifecycle']>
 
 export interface CurrentModelPayload {
   entryId: string
@@ -107,16 +215,38 @@ export interface ModelConfigPayload {
   current: CurrentModelPayload | null
   availability: ModelAvailability
   providerOptions: ProviderOption[]
+  /** Entries in the file that do not validate (Settings: 修复 / 删除). */
+  rejectedEntries: RejectedModelEntryPayload[]
 }
 
 export interface ModelConfigSavePayload extends ModelConfigPayload {
   profileOnboarding?: ProfileOnboardingActionResult
 }
 
-export interface DiscoveredModel {
-  id: string
-  ownedBy?: string
-  created?: number | string
+export type { DiscoveredModel, ProbeResult } from '../../model/discovery'
+
+/**
+ * A connection as the add-model form holds it. The draft `apiKey` always
+ * wins; a stored key is used only when the draft key is empty or masked
+ * (`***…`) and `entryId` / `connectionId` points at a saved entry on the
+ * same provider, protocol and API base. `apiKey: null` means no key.
+ */
+export interface ModelConnectionInput {
+  entryId?: string
+  /** MOD-03 connection id; matched against entries that carry one. */
+  connectionId?: string
+  provider?: string
+  protocol?: ModelProtocol
+  apiBase?: string
+  apiKey?: string | null
+  extraHeaders?: Record<string, string>
+  /** Bailian (百炼) workspace, for its official model catalog. */
+  workspaceId?: string
+}
+
+export interface ModelDiscoveryInput extends ModelConnectionInput {
+  /** Skip the 15-minute cache. */
+  refresh?: boolean
 }
 
 export interface ModelDiscoveryPayload {
@@ -124,26 +254,67 @@ export interface ModelDiscoveryPayload {
   provider: string
   protocol: ModelProtocol
   apiBase: string | null
-  source: string
+  /** `catalog`: no list endpoint, the models are catalog recommendations. */
+  source: 'vendor_api' | 'catalog' | 'none'
+  parser: ParserId | null
   models: DiscoveredModel[]
-  code?: string
+  truncated: boolean
+  totalCount: number
+  droppedSecretLikeIds: number
+  cached: boolean
+  fetchedAt: string | null
+  fix?: ConnectionFix
+  code?: DiscoveryErrorCode
   message?: string
+  status?: number
 }
+
+type ResolvedConnection =
+  | { ok: true; connection: DiscoveryConnection; spec: ProviderSpec }
+  | {
+      ok: false
+      spec: ProviderSpec
+      protocol: ModelProtocol
+      apiBase: string
+      code: 'CREDENTIAL_REQUIRED' | 'MISSING_API_BASE' | 'NOT_COMPATIBLE'
+      message: string
+    }
 
 export class CoreModelService {
   readonly root: string
   private readonly deps: CoreModelServiceDeps
+  private readonly discovery: ModelDiscovery
   private profileOnboardingRequested = false
 
   constructor(root: string, deps: CoreModelServiceDeps) {
     this.root = resolve(root)
     this.deps = deps
+    this.discovery = deps.discovery ?? new ModelDiscovery()
+  }
+
+  private get tests(): ModelTestLog {
+    return (this.testLog ??= new ModelTestLog(this.root))
+  }
+
+  private testLog: ModelTestLog | undefined
+
+  private get store() {
+    return {
+      sealer: this.deps.sealer ?? null,
+      ...(this.deps.persistenceAdapter
+        ? { persistenceAdapter: this.deps.persistenceAdapter }
+        : {}),
+    }
   }
 
   async getConfig(): Promise<ModelConfigPayload> {
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = activeEntry(config) ?? null
-    const models = config.raw.models.map((item) => modelEntryPayload(item))
+    const reentry = new Set(config.credentialsNeedingReentry)
+    const tests = await this.tests.all()
+    const models = config.raw.models.map((item) =>
+      modelEntryPayload(item, reentry.has(item.entryId), tests[item.entryId]),
+    )
     return {
       schemaVersion: 2,
       activeModelId: config.activeModelId,
@@ -152,14 +323,168 @@ export class CoreModelService {
       current: entry ? currentModelPayload(entry) : null,
       availability: modelAvailability(config),
       providerOptions: providerOptions(),
+      rejectedEntries: config.rejectedEntries.map((item) => ({
+        key: item.entryId ?? `#${item.index}`,
+        index: item.index,
+        entryId: item.entryId,
+        modelId: item.modelId,
+        provider:
+          typeof item.raw.provider === 'string' ? item.raw.provider : null,
+        reason: item.reason,
+      })),
     }
   }
 
-  async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
+  /**
+   * Save several models of one connection with one write and one config
+   * refresh (MOD-03). Every entry is checked first; one bad entry fails
+   * the batch and nothing is written.
+   */
+  async saveEntries(
+    input: ModelEntriesSaveInput,
+  ): Promise<ModelConfigSavePayload & { savedEntryIds: string[] }> {
+    const before = await loadModelConfig(this.root, this.store)
     const wasUsable = modelAvailability(before).usable
-    const { credentialsFrom, ...fields } = input
-    const update = normalizeEntrySecret(fields)
+    input.entries.forEach((draft, index) => {
+      if (!draft.reasoningEffort) return
+      const profile = resolveModelProfile({
+        provider: input.connection.provider,
+        protocol: input.connection.protocol,
+        modelId: draft.modelId,
+        capabilityOverrides: draft.capabilityOverrides,
+        detected: draft.detected,
+      })
+      if (!profile.reasoningEfforts.includes(draft.reasoningEffort as never))
+        throw new Error(
+          `第 ${index + 1} 个模型（${draft.modelId}）不支持思考强度 ${draft.reasoningEffort}`,
+        )
+    })
+    const { savedEntryIds } = await saveModelEntries(
+      this.root,
+      input,
+      this.store,
+    )
+    return { ...(await this.afterModelMutation(wasUsable)), savedEntryIds }
+  }
+
+  /**
+   * Change the key and/or address of every model on one connection
+   * (MOD-03), named by connectionId or by one of its entries.
+   */
+  async updateConnection(input: {
+    connectionId?: string | null
+    entryId?: string | null
+    apiKey?: string | null
+    apiBase?: string | null
+  }): Promise<ModelConfigSavePayload & { updated: number }> {
+    const before = await loadModelConfig(this.root, this.store)
+    const { updated } = await updateModelConnection(
+      this.root,
+      input,
+      this.store,
+    )
+    return {
+      ...(await this.afterModelMutation(modelAvailability(before).usable)),
+      updated,
+    }
+  }
+
+  /** Drop a rejected entry from the file (Settings › 模型 › 删除). */
+  async discardRejected(key: string): Promise<ModelConfigPayload> {
+    await discardRejectedModelEntry(this.root, key, this.store)
+    await this.deps.refreshModelConfig?.()
+    return this.getConfig()
+  }
+
+  /**
+   * Compare entries with the bundled catalog (MOD-03). Returns the
+   * differences; with `apply`, writes them (one write), skipping every
+   * field the user locked and recording where the facts came from.
+   */
+  async refreshMetadata(input: ModelMetadataRefreshInput): Promise<{
+    diffs: ModelMetadataDiff[]
+    applied: boolean
+  }> {
+    const run = async () => {
+      const config = await loadModelConfig(this.root, this.store)
+      const targets = config.raw.models.filter((entry) =>
+        input.entryIds?.length
+          ? input.entryIds.includes(entry.entryId)
+          : input.connectionId
+            ? entry.connectionId === input.connectionId
+            : false,
+      )
+      if (!targets.length) throw new Error('没有要刷新的模型')
+      const plans = targets.map((entry) => metadataPlan(entry))
+      const diffs = plans.map((plan) => plan.diff)
+      if (!input.apply) return { diffs, applied: false }
+      const updated = new Map(
+        plans.map((plan) => [plan.diff.entryId, plan.next]),
+      )
+      await saveModelConfig(
+        this.root,
+        {
+          ...config.raw,
+          models: config.raw.models.map(
+            (entry) => updated.get(entry.entryId) ?? entry,
+          ),
+        },
+        this.store,
+      )
+      return { diffs, applied: true }
+    }
+    const result = input.apply
+      ? await withModelConfigLock(this.root, run)
+      : await run()
+    if (result.applied) await this.deps.refreshModelConfig?.()
+    return result
+  }
+
+  /** Catalog defaults for a model typed in by hand (MOD-03). */
+  lookupDefaults(input: ModelDefaultsInput): {
+    facts: ModelFacts
+    source: ModelFactsSource
+  } {
+    const modelId = trimString(input.modelId)
+    if (!modelId) throw new Error('modelId required')
+    const facts = lookupModelFacts({
+      provider: trimString(input.provider),
+      ...(input.apiBase ? { apiBase: input.apiBase } : {}),
+      modelId,
+    })
+    return { facts, source: facts.source }
+  }
+
+  /** Tests: every entry's opened API key, in file order. */
+  async connectionKeysForTest(): Promise<Array<string | null>> {
+    const config = await loadModelConfig(this.root, this.store)
+    return config.raw.models.map((entry) => entry.apiKey)
+  }
+
+  async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
+    const before = await loadModelConfig(this.root, this.store)
+    const wasUsable = modelAvailability(before).usable
+    const { credentialsFrom, sampling, lockFields, ...fields } = input
+    const update: ModelEntryUpdate = normalizeEntrySecret(fields)
+    const existing = update.entryId
+      ? before.raw.models.find((entry) => entry.entryId === update.entryId)
+      : undefined
+    if (sampling !== undefined) {
+      const next = { ...existing?.sampling }
+      if (sampling.temperature === null) delete next.temperature
+      else if (sampling.temperature !== undefined)
+        next.temperature = sampling.temperature
+      update.sampling = next
+    }
+    if (lockFields?.length && existing) {
+      const metadata = effectiveMetadata(existing)
+      update.metadata = {
+        ...metadata,
+        userLocked: [
+          ...new Set([...(metadata.userLocked ?? []), ...lockFields]),
+        ],
+      }
+    }
     if (credentialsFrom)
       inheritCredentials(before.raw.models, update, credentialsFrom)
     const prospective = upsertModelEntryConfig(before.raw, update)
@@ -177,7 +502,7 @@ export class CoreModelService {
       throw new Error(
         `模型 ${prospectiveEntry.modelId} 不支持思考强度 ${prospectiveEntry.reasoningEffort}`,
       )
-    await saveModelEntry(this.root, update)
+    await saveModelEntry(this.root, update, this.store)
     return this.afterModelMutation(wasUsable)
   }
 
@@ -202,14 +527,14 @@ export class CoreModelService {
   }
 
   async deleteEntry(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
-    await deleteModelEntry(this.root, requiredId(entryId))
+    const before = await loadModelConfig(this.root, this.store)
+    await deleteModelEntry(this.root, requiredId(entryId), this.store)
     return this.afterModelMutation(modelAvailability(before).usable)
   }
 
   async activate(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
-    await activateModelEntry(this.root, requiredId(entryId))
+    const before = await loadModelConfig(this.root, this.store)
+    await activateModelEntry(this.root, requiredId(entryId), this.store)
     return this.afterModelMutation(modelAvailability(before).usable)
   }
 
@@ -217,7 +542,7 @@ export class CoreModelService {
     entryId: string,
     reasoningEffort: string | null,
   ): Promise<ModelConfigPayload> {
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = findEntry(config, requiredId(entryId))
     if (!entry) throw new Error(`model entry not found: ${entryId}`)
     const profile = resolvedProfile(entry)
@@ -226,24 +551,103 @@ export class CoreModelService {
       !profile.reasoningEfforts.includes(reasoningEffort as any)
     )
       throw new Error(`模型 ${entry.modelId} 不支持思考强度 ${reasoningEffort}`)
-    await saveModelEntry(this.root, {
-      entryId: entry.entryId,
-      reasoningEffort,
-    })
+    await saveModelEntry(
+      this.root,
+      { entryId: entry.entryId, reasoningEffort },
+      this.store,
+    )
     await this.deps.refreshModelConfig?.()
     return this.getConfig()
   }
 
   async savePolicy(policy: ModelExecutionPolicy): Promise<ModelConfigPayload> {
-    await saveModelPolicy(this.root, policy)
+    await saveModelPolicy(this.root, policy, this.store)
     await this.deps.refreshModelConfig?.()
     return this.getConfig()
   }
 
-  async discoverModels(input: Dict): Promise<ModelDiscoveryPayload> {
-    const config = await loadModelConfig(this.root)
-    const entryId = trimString(input.entryId)
-    const entry = entryId ? (findEntry(config, entryId) ?? null) : null
+  /**
+   * The connection's models from the vendor's own list (all pages, merged
+   * with the bundled catalog), or catalog recommendations when the vendor
+   * has no list. Uses the draft connection (see `ModelConnectionInput`).
+   */
+  async discoverModels(
+    input: ModelDiscoveryInput,
+  ): Promise<ModelDiscoveryPayload> {
+    const resolved = await this.resolveConnection(input)
+    if (!resolved.ok)
+      return {
+        ok: false,
+        provider: resolved.spec.name,
+        protocol: resolved.protocol,
+        apiBase: resolved.apiBase || null,
+        source: 'none',
+        parser: null,
+        models: [],
+        truncated: false,
+        totalCount: 0,
+        droppedSecretLikeIds: 0,
+        cached: false,
+        fetchedAt: null,
+        code: resolved.code,
+        message: resolved.message,
+      }
+    const { connection } = resolved
+    const result = await this.discovery.discover(connection, {
+      refresh: input.refresh === true,
+    })
+    const base = {
+      provider: connection.provider,
+      protocol: connection.protocol,
+      apiBase: connection.apiBase,
+      parser: result.parser,
+    }
+    if (!result.ok)
+      return {
+        ...base,
+        ok: false,
+        source: 'none',
+        models: [],
+        truncated: false,
+        totalCount: 0,
+        droppedSecretLikeIds: 0,
+        cached: false,
+        fetchedAt: null,
+        code: result.code,
+        message: result.message,
+        ...(result.fix ? { fix: result.fix } : {}),
+        ...(result.status !== undefined ? { status: result.status } : {}),
+      }
+    const { ok: _ok, parser: _parser, ...listed } = result
+    return { ...base, ok: true, ...listed }
+  }
+
+  /**
+   * Check the draft connection with one cheap request (UI-29: the form's
+   * values, not the saved entry). Never sends a stored key to an address
+   * other than the one it was saved for, and never returns a key.
+   */
+  async probeConnection(input: ModelConnectionInput): Promise<ProbeResult> {
+    const resolved = await this.resolveConnection(input)
+    if (!resolved.ok)
+      return {
+        ok: false,
+        code:
+          resolved.code === 'CREDENTIAL_REQUIRED'
+            ? 'AUTH'
+            : resolved.code === 'MISSING_API_BASE'
+              ? 'WRONG_BASE'
+              : 'NOT_COMPATIBLE',
+        message: resolved.message,
+      }
+    return this.discovery.probe(resolved.connection)
+  }
+
+  private async resolveConnection(
+    input: ModelConnectionInput,
+  ): Promise<ResolvedConnection> {
+    const config = await loadModelConfig(this.root, this.store)
+    const entry = credentialSource(config, input)
     const providerName = trimString(input.provider) || entry?.provider || ''
     const spec = findByName(providerName)
     if (!spec) throw new Error(`provider 无效: ${providerName}`)
@@ -258,10 +662,12 @@ export class CoreModelService {
         `provider ${spec.name} 不支持 protocol: ${protocol ?? ''}`,
       )
 
-    const submittedBase = trimString(input.apiBase)
     const apiBase = normalizeApiBase(
       protocol,
-      submittedBase || entry?.apiBase || spec.apiBases[protocol] || '',
+      trimString(input.apiBase) ||
+        entry?.apiBase ||
+        spec.apiBases[protocol] ||
+        '',
     )
     const canReuseEntryCredentials = discoveryIdentityMatches(
       entry,
@@ -279,42 +685,53 @@ export class CoreModelService {
       entry,
       canReuseEntryCredentials,
     )
-    const discovery = spec.modelDiscovery[protocol] ?? 'unsupported'
+    const unavailable = (
+      code: 'CREDENTIAL_REQUIRED' | 'MISSING_API_BASE' | 'NOT_COMPATIBLE',
+      message: string,
+    ): ResolvedConnection => ({
+      ok: false,
+      spec,
+      protocol,
+      apiBase,
+      code,
+      message,
+    })
 
-    if (discovery === 'unsupported')
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'unsupported_protocol',
+    if ((spec.modelDiscovery[protocol] ?? 'unsupported') === 'unsupported')
+      return unavailable(
+        'NOT_COMPATIBLE',
         `${spec.displayName} 当前不支持通过 ${protocol} 自动获取模型列表，请手动填写模型 ID。`,
       )
-    if (!spec.isLocal && !spec.isOauth && !apiKey)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'credential_required',
-        `请先填写 ${spec.displayName} 的 API Key 后再获取模型列表。`,
-      )
     if (!apiBase)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'missing_api_base',
-        `请先填写 ${spec.displayName} 的 API Base 后再获取模型列表。`,
+      return unavailable(
+        'MISSING_API_BASE',
+        `请先填写 ${spec.displayName} 的 API 地址。`,
+      )
+    if (!isHttpUrl(apiBase))
+      return unavailable(
+        'MISSING_API_BASE',
+        `API 地址无效：需要 http:// 或 https:// 开头的完整地址。`,
+      )
+    // Local servers and custom gateways may need no key; everyone else does.
+    if (!spec.isLocal && !spec.isOauth && spec.name !== 'custom' && !apiKey)
+      return unavailable(
+        'CREDENTIAL_REQUIRED',
+        `请先填写 ${spec.displayName} 的 API Key。`,
       )
 
-    return discovery === 'anthropic'
-      ? discoverAnthropicModels(spec, protocol, apiBase, apiKey, extraHeaders)
-      : discoverOpenAiCompatibleModels(
-          spec,
-          protocol,
-          apiBase,
-          apiKey,
-          extraHeaders,
-        )
+    const workspaceId = trimString(input.workspaceId)
+    return {
+      ok: true,
+      spec,
+      connection: {
+        provider: spec.name,
+        protocol,
+        apiBase,
+        apiKey,
+        ...(Object.keys(extraHeaders).length ? { extraHeaders } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+      },
+    }
   }
 
   async test(body: { entryId?: string; kind?: string }): Promise<Dict> {
@@ -324,7 +741,7 @@ export class CoreModelService {
       return { ok: false, kind, error: "kind must be 'text' or 'vision'" }
     if (!entryId) return { ok: false, kind, error: 'entryId required' }
 
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = findEntry(config, entryId)
     if (!entry)
       return { ok: false, kind, error: `model entry not found: ${entryId}` }
@@ -387,6 +804,7 @@ export class CoreModelService {
       })
       const sample = response.text.trim().slice(0, 200)
       const ok = kind === 'vision' ? visionOk(sample) : /pong/i.test(sample)
+      await this.rememberTest(config, entryId, kind, ok ? null : 'error')
       return {
         ok,
         kind,
@@ -398,6 +816,7 @@ export class CoreModelService {
         finishReason: response.finish.kind,
       }
     } catch (error) {
+      await this.rememberTest(config, entryId, kind, testFailureKind(error))
       return {
         ok: false,
         kind,
@@ -408,6 +827,81 @@ export class CoreModelService {
         provider,
       }
     }
+  }
+
+  /** Keep the outcome for 设置 › 模型's connection status; never fails a test. */
+  private async rememberTest(
+    config: Awaited<ReturnType<typeof loadModelConfig>>,
+    entryId: string,
+    kind: string,
+    failure: 'auth' | 'error' | null,
+  ): Promise<void> {
+    try {
+      await this.tests.record(
+        entryId,
+        {
+          ok: failure === null,
+          kind: kind === 'vision' ? 'vision' : 'text',
+          testedAt: new Date().toISOString(),
+          ...(failure ? { failure } : {}),
+        },
+        new Set(config.raw.models.map((entry) => entry.entryId)),
+      )
+    } catch {
+      // The status line falls back to 「未测试」.
+    }
+  }
+
+  /**
+   * Use another model of the same connection instead of `entryId` (MOD-05:
+   * a retired model's 「替换为 X」). The replacement takes the old entry's
+   * place in the list, the active model and the backup model; what the user
+   * set (locked fields, capability overrides, temperature, the key) stays,
+   * the rest comes from the catalog for the new model. One write.
+   */
+  async replaceEntry(
+    input: ModelEntryReplaceInput,
+  ): Promise<ModelConfigSavePayload & { replacedEntryId: string }> {
+    const before = await loadModelConfig(this.root, this.store)
+    const wasUsable = modelAvailability(before).usable
+    const replacedEntryId = await withModelConfigLock(this.root, async () => {
+      const config = await loadModelConfig(this.root, this.store)
+      const old = config.raw.models.find(
+        (entry) => entry.entryId === requiredId(input.entryId),
+      )
+      if (!old) throw new Error(`model entry not found: ${input.entryId}`)
+      const modelId = trimString(input.modelId)
+      if (!modelId) throw new Error('modelId required')
+      if (
+        config.raw.models.some(
+          (entry) =>
+            entry !== old &&
+            entry.modelId === modelId &&
+            sameConnection(entry, old),
+        )
+      )
+        throw new Error(`「${modelId}」已经添加在这个连接下`)
+      const next = replacementEntry(old, modelId)
+      const raw = config.raw
+      const policy = structuredClone(raw.policy)
+      if (policy?.fallback.entryId === old.entryId)
+        policy.fallback.entryId = next.entryId
+      await saveModelConfig(
+        this.root,
+        {
+          ...raw,
+          activeModelId:
+            raw.activeModelId === old.entryId
+              ? next.entryId
+              : raw.activeModelId,
+          models: raw.models.map((entry) => (entry === old ? next : entry)),
+          ...(policy ? { policy } : {}),
+        },
+        this.store,
+      )
+      return next.entryId
+    })
+    return { ...(await this.afterModelMutation(wasUsable)), replacedEntryId }
   }
 
   private async afterModelMutation(
@@ -482,19 +976,229 @@ function resolvedProfile(
     protocol: entry.protocol ?? 'openai',
     modelId,
     capabilityOverrides: entry.capabilityOverrides,
+    detected: entry.detected,
     contextWindowTokens: entry.contextWindowTokens ?? undefined,
     maxTokens: entry.maxTokens ?? undefined,
   })
 }
 
-function modelEntryPayload(entry: ModelEntryV2): ModelEntryPayload {
+function modelEntryPayload(
+  entry: ModelEntryV2,
+  needsReentry: boolean,
+  lastTest?: ModelTestRecord,
+): ModelEntryPayload {
   const { legacy: _legacy, ...safe } = entry
+  const lifecycle = entryLifecycle(entry)
   return {
     ...safe,
-    apiKey: maskSecret(entry.apiKey),
-    effectiveDisplayName: entry.displayName || entry.modelId,
+    apiKey: needsReentry ? '' : maskSecret(entry.apiKey),
+    effectiveDisplayName: effectiveDisplayName(entry),
     resolvedProfile: resolvedProfile(entry),
+    metadata: effectiveMetadata(entry),
+    ...(lifecycle ? { lifecycle } : {}),
+    ...(lastTest ? { lastTest } : {}),
+    ...(needsReentry ? { credentialState: 'needs_reentry' as const } : {}),
   }
+}
+
+/** The saved lifecycle, else the bundled catalog's (retirements land there). */
+function entryLifecycle(entry: ModelEntryV2): ModelEntryLifecycle | undefined {
+  const saved = entry.metadata?.lifecycle
+  if (saved?.status) return { ...saved }
+  const facts = lookupModelFacts({
+    provider: entry.provider,
+    apiBase: entry.apiBase,
+    modelId: entry.modelId,
+  })
+  return facts.lifecycle ? { ...facts.lifecycle } : undefined
+}
+
+/** The entry for `modelId` that replaces `old` (see replaceEntry). */
+function replacementEntry(old: ModelEntryV2, modelId: string): ModelEntryV2 {
+  const facts = lookupModelFacts({
+    provider: old.provider,
+    apiBase: old.apiBase,
+    modelId,
+  })
+  const metadata = effectiveMetadata(old)
+  const locked = new Set(metadata.userLocked ?? [])
+  const next: ModelEntryV2 = {
+    ...structuredClone(old),
+    entryId: newEntryId(),
+    modelId,
+  }
+  if (!locked.has('displayName')) delete next.displayName
+  if (!locked.has('contextWindowTokens') && facts.contextWindowTokens)
+    next.contextWindowTokens = facts.contextWindowTokens
+  const maxTokens = defaultMaxTokens(facts)
+  if (!locked.has('maxTokens') && maxTokens) next.maxTokens = maxTokens
+  if (facts.maxInputTokens || facts.maxOutputTokens)
+    next.limits = stripUndefinedFacts({
+      maxInputTokens: facts.maxInputTokens,
+      maxOutputTokens: facts.maxOutputTokens,
+    })
+  else delete next.limits
+  if (!locked.has('capabilities'))
+    next.detected = stripUndefinedFacts({
+      toolCall: facts.capabilities.toolCall,
+      vision: facts.capabilities.vision,
+      reasoning: facts.capabilities.reasoning,
+      reasoningEfforts: facts.reasoning?.efforts,
+      defaultReasoningEffort: facts.reasoning?.defaultEffort,
+      reasoningControl: facts.reasoning?.control,
+      acceptsTemperature: facts.acceptsTemperature,
+      modalities: facts.modalities,
+      kind: facts.kind,
+    })
+  if (!locked.has('reasoningEffort')) next.reasoningEffort = null
+  if (!locked.has('pricing')) {
+    const price = facts.pricingUsdPerMTok
+    if (price?.input !== undefined && price.output !== undefined)
+      next.pricing = {
+        inputUsdPerMillionTokens: price.input,
+        outputUsdPerMillionTokens: price.output,
+        cacheReadUsdPerMillionTokens: price.cacheRead ?? 0,
+        cacheWriteUsdPerMillionTokens: price.cacheWrite ?? 0,
+      }
+    else delete next.pricing
+  }
+  if (facts.acceptsTemperature === false && next.sampling)
+    delete next.sampling.temperature
+  const { lifecycle: _lifecycle, ...rest } = metadata
+  next.metadata = {
+    ...rest,
+    ...(facts.name ? { name: facts.name } : {}),
+    source: facts.source,
+    catalogKey: facts.key,
+    catalogVersion: MODEL_CATALOG_INFO.sha256,
+    checkedAt: new Date().toISOString(),
+    ...(facts.lifecycle ? { lifecycle: { ...facts.lifecycle } } : {}),
+  }
+  return next
+}
+
+/**
+ * What a request asks for by default (T4 §3): min(上限, 32K); a model that
+ * always thinks, with ≥128K of output, min(上限, 64K); unknown 8,192.
+ */
+function defaultMaxTokens(facts: ModelFacts): number | undefined {
+  const limit = facts.maxOutputTokens
+  if (!limit) return undefined
+  const alwaysThinks = facts.reasoning?.control === 'always'
+  return Math.min(limit, alwaysThinks && limit >= 128_000 ? 64_000 : 32_000)
+}
+
+/** What refreshing one entry from the catalog would change (MOD-03). */
+function metadataPlan(entry: ModelEntryV2): {
+  diff: ModelMetadataDiff
+  next: ModelEntryV2
+} {
+  const facts = lookupModelFacts({
+    provider: entry.provider,
+    apiBase: entry.apiBase,
+    modelId: entry.modelId,
+  })
+  const metadata = effectiveMetadata(entry)
+  const locked = new Set(metadata.userLocked ?? [])
+  const next: ModelEntryV2 = structuredClone(entry)
+  const changes: ModelMetadataChange[] = []
+  const change = (
+    field: ModelMetadataField,
+    from: unknown,
+    to: unknown,
+    write: () => void,
+  ) => {
+    if (to === undefined || locked.has(field)) return
+    if (JSON.stringify(from) === JSON.stringify(to)) return
+    changes.push({ field, from, to })
+    write()
+  }
+  change(
+    'contextWindowTokens',
+    entry.contextWindowTokens,
+    facts.contextWindowTokens,
+    () => (next.contextWindowTokens = facts.contextWindowTokens!),
+  )
+  change(
+    'maxTokens',
+    entry.maxTokens,
+    facts.maxOutputTokens,
+    () => (next.maxTokens = facts.maxOutputTokens!),
+  )
+  const price = facts.pricingUsdPerMTok
+  if (price?.input !== undefined && price.output !== undefined) {
+    const pricing = {
+      inputUsdPerMillionTokens: price.input,
+      outputUsdPerMillionTokens: price.output,
+      cacheReadUsdPerMillionTokens: price.cacheRead ?? 0,
+      cacheWriteUsdPerMillionTokens: price.cacheWrite ?? 0,
+    }
+    change('pricing', entry.pricing, pricing, () => (next.pricing = pricing))
+  }
+  const detected = {
+    ...entry.detected,
+    ...stripUndefinedFacts({
+      toolCall: facts.capabilities.toolCall,
+      vision: facts.capabilities.vision,
+      reasoning: facts.capabilities.reasoning,
+      acceptsTemperature: facts.acceptsTemperature,
+      modalities: facts.modalities,
+      kind: facts.kind,
+    }),
+  }
+  change(
+    'capabilities',
+    entry.detected,
+    detected,
+    () => (next.detected = detected),
+  )
+  if (facts.reasoning) {
+    const reasoning = {
+      reasoningEfforts: facts.reasoning.efforts,
+      defaultReasoningEffort: facts.reasoning.defaultEffort,
+      reasoningControl: facts.reasoning.control,
+    }
+    change(
+      'reasoningEffort',
+      {
+        reasoningEfforts: entry.detected?.reasoningEfforts,
+        defaultReasoningEffort: entry.detected?.defaultReasoningEffort,
+        reasoningControl: entry.detected?.reasoningControl,
+      },
+      reasoning,
+      () =>
+        (next.detected = {
+          ...next.detected,
+          ...stripUndefinedFacts(reasoning),
+        }),
+    )
+  }
+  change('displayName', metadata.name, facts.name, () => {
+    metadata.name = facts.name
+  })
+  next.metadata = {
+    ...metadata,
+    source: facts.source,
+    catalogKey: facts.key,
+    catalogVersion: MODEL_CATALOG_INFO.sha256,
+    checkedAt: new Date().toISOString(),
+    ...(facts.lifecycle ? { lifecycle: { ...facts.lifecycle } } : {}),
+  }
+  return {
+    diff: {
+      entryId: entry.entryId,
+      modelId: entry.modelId,
+      source: facts.source,
+      changes,
+    },
+    next,
+  }
+}
+
+function stripUndefinedFacts<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  ) as Partial<T>
 }
 
 function currentModelPayload(entry: ModelEntry): CurrentModelPayload {
@@ -571,212 +1275,6 @@ function discoveryExtraHeaders(
   )
 }
 
-async function discoverOpenAiCompatibleModels(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  apiKey: string,
-  extraHeaders: Record<string, string>,
-): Promise<ModelDiscoveryPayload> {
-  let last: ModelDiscoveryPayload | null = null
-  for (const url of openAiModelEndpointCandidates(apiBase || '')) {
-    try {
-      const response = await fetchWithTimeout(url, {
-        method: 'GET',
-        headers: discoveryHeaders(
-          extraHeaders,
-          apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-        ),
-      })
-      if (!response.ok) {
-        last = discoveryUnavailable(
-          spec,
-          protocol,
-          apiBase,
-          codeForHttpStatus(response.status),
-          response.statusText || `HTTP ${response.status}`,
-        )
-        continue
-      }
-      return {
-        ok: true,
-        provider: spec.name,
-        protocol,
-        apiBase,
-        source: 'openai_compat',
-        models: parseDiscoveredModels(await response.json()),
-      }
-    } catch (error) {
-      last = discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        codeForFetchError(error),
-        fetchErrorMessage(error),
-      )
-    }
-  }
-  return (
-    last ??
-    discoveryUnavailable(
-      spec,
-      protocol,
-      apiBase,
-      'no_endpoint',
-      '未找到可用的模型列表 endpoint。',
-    )
-  )
-}
-
-async function discoverAnthropicModels(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  apiKey: string,
-  extraHeaders: Record<string, string>,
-): Promise<ModelDiscoveryPayload> {
-  try {
-    const response = await fetchWithTimeout(anthropicModelsUrl(apiBase), {
-      method: 'GET',
-      headers: discoveryHeaders(extraHeaders, {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      }),
-    })
-    if (!response.ok)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        codeForHttpStatus(response.status),
-        response.statusText || `HTTP ${response.status}`,
-      )
-    return {
-      ok: true,
-      provider: spec.name,
-      protocol,
-      apiBase,
-      source: 'anthropic',
-      models: parseDiscoveredModels(await response.json()),
-    }
-  } catch (error) {
-    return discoveryUnavailable(
-      spec,
-      protocol,
-      apiBase,
-      codeForFetchError(error),
-      fetchErrorMessage(error),
-    )
-  }
-}
-
-function discoveryUnavailable(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  code: string,
-  message: string,
-): ModelDiscoveryPayload {
-  return {
-    ok: false,
-    provider: spec.name,
-    protocol,
-    apiBase,
-    source: spec.modelDiscovery[protocol] ?? 'unsupported',
-    models: [],
-    code,
-    message,
-  }
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), MODEL_DISCOVERY_TIMEOUT_MS)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function discoveryHeaders(
-  extraHeaders: Record<string, string>,
-  defaults: Record<string, string>,
-): Headers {
-  const headers = new Headers({ accept: 'application/json', ...defaults })
-  for (const [key, value] of Object.entries(extraHeaders))
-    headers.set(key, value)
-  return headers
-}
-
-function openAiModelEndpointCandidates(apiBase: string): string[] {
-  const base = trimApiBase(apiBase)
-  return base ? [`${base}/models`] : []
-}
-
-function anthropicModelsUrl(apiBase: string | null): string {
-  const base = trimApiBase(apiBase || '')
-  if (!base) return ANTHROPIC_MODELS_URL
-  if (base.endsWith('/v1')) return `${base}/models`
-  return `${base}/v1/models`
-}
-
-function parseDiscoveredModels(body: unknown): DiscoveredModel[] {
-  const data = modelArray(body)
-  const seen = new Set<string>()
-  const out: DiscoveredModel[] = []
-  for (const raw of data) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-    const item = raw as Record<string, unknown>
-    const id =
-      trimString(item.id) || trimString(item.name) || trimString(item.model)
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    const model: DiscoveredModel = { id }
-    const ownedBy =
-      trimString(item.owned_by) ||
-      trimString(item.ownedBy) ||
-      trimString(item.owner)
-    const created = item.created ?? item.created_at ?? item.createdAt
-    if (ownedBy) model.ownedBy = ownedBy
-    if (typeof created === 'number' || typeof created === 'string')
-      model.created = created
-    out.push(model)
-  }
-  return out.sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function modelArray(body: unknown): unknown[] {
-  if (Array.isArray(body)) return body
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return []
-  const record = body as Record<string, unknown>
-  if (Array.isArray(record.data)) return record.data
-  if (Array.isArray(record.models)) return record.models
-  return []
-}
-
-function codeForHttpStatus(status: number): string {
-  if (status === 401 || status === 403) return 'auth'
-  if (status === 429) return 'rate_limit'
-  if (status >= 500 || status === 408) return 'transient'
-  return 'request_failed'
-}
-
-function codeForFetchError(error: unknown): string {
-  return error instanceof Error && error.name === 'AbortError'
-    ? 'timeout'
-    : 'network_error'
-}
-
-function fetchErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.name === 'AbortError')
-    return '获取模型列表超时。'
-  return error instanceof Error ? error.message : String(error)
-}
-
 // 1×1 opaque red RGBA PNG. Keep the expected answer aligned with visionOk().
 const VISION_PROBE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
@@ -806,12 +1304,42 @@ function visionOk(sample: string): boolean {
   return normalized === 'red' || normalized === '红' || normalized === '红色'
 }
 
-function trimString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+/**
+ * The saved entry whose key a masked draft may reuse: `entryId`, or the
+ * first entry carrying `connectionId` (entries gain one in MOD-03; until
+ * then a connection id finds nothing and no stored key is used).
+ */
+function credentialSource(
+  config: Awaited<ReturnType<typeof loadModelConfig>>,
+  input: ModelConnectionInput,
+): ModelEntry | null {
+  const entryId = trimString(input.entryId)
+  if (entryId) return findEntry(config, entryId) ?? null
+  const connectionId = trimString(input.connectionId)
+  if (!connectionId) return null
+  const raw = config.raw.models.find(
+    (item) =>
+      (item as unknown as Record<string, unknown>).connectionId ===
+      connectionId,
+  )
+  return raw ? (findEntry(config, raw.entryId) ?? null) : null
 }
 
-function trimApiBase(value: string): string {
-  return value.trim().replace(/\/+$/, '')
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !url.username &&
+      !url.password
+    )
+  } catch {
+    return false
+  }
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {

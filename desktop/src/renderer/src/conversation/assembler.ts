@@ -209,6 +209,7 @@ interface InternalContext {
 
 interface ViewState {
   readonly target: string
+  readonly definition: ConversationViewDefinition
   readonly builder: ConversationViewBuilder
   snapshot: unknown
   /** Last published Node per key (identity reused when unchanged). */
@@ -384,10 +385,35 @@ export class ConversationAssembler {
     return this.replaceWindow(this.events(), this.hasMore)
   }
 
+  /**
+   * Undo an `extend` (a lazy target nobody shows any more, UI-39): drop
+   * exactly these Definitions and view targets, then re-assemble the loaded
+   * window without them, so later events no longer pay for them. Unchanged
+   * Nodes of the remaining targets keep their identity.
+   * @returns immediate publication, or none when nothing was registered.
+   */
+  retract(
+    definitions: readonly ConversationDefinition[],
+    viewDefinitions: readonly ConversationViewDefinition[],
+  ): ConversationPublication {
+    const dropped = new Set<unknown>(definitions)
+    const kept = this.definitions.filter((item) => !dropped.has(item))
+    let removed = kept.length !== this.definitions.length
+    this.definitions.splice(0, this.definitions.length, ...kept)
+    for (const definition of viewDefinitions) {
+      if (this.views.get(definition.target)?.definition !== definition) continue
+      this.views.delete(definition.target)
+      removed = true
+    }
+    if (!removed) return 'none'
+    return this.replaceWindow(this.events(), this.hasMore)
+  }
+
   private addView(definition: ConversationViewDefinition): void {
     const builder = definition.create()
     this.views.set(definition.target, {
       target: definition.target,
+      definition,
       builder,
       snapshot: builder.empty,
       published: new Map(),

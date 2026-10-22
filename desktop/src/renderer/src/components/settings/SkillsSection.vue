@@ -58,7 +58,6 @@ import {
   filterInvalidSkills,
   filterSkills,
   invalidSkillDeleteTarget,
-  invalidSkillFolder,
   SKILL_SCOPE_HINTS,
   SKILL_SOURCE_FILTERS,
   skillCountText,
@@ -249,7 +248,14 @@ function onImported(summary: SkillImportSummary, fromPaste = false) {
 }
 
 function revealInvalid(item: InvalidSkillInfo) {
-  return ctx.runSafely(() => openPath(invalidSkillFolder(item)))
+  // Main opens the folder only if Core lists this rejected Skill.
+  return ctx.runSafely(() =>
+    openPath({
+      kind: 'invalid-skill',
+      path: item.path,
+      sessionId: sessionId.value,
+    }),
+  )
 }
 
 async function confirmDeleteInvalid() {
@@ -333,21 +339,23 @@ const deleteDialogOpen = computed({
         :icon="DsSkill"
         title="还没有 Skill"
         description="粘贴一个 SKILL.md，或把 Skill 文件夹放进个人 Skills 文件夹。"
+        framed
       >
         <Button size="sm" variant="primary" @click="pasteOpen = true">
           粘贴 SKILL.md
         </Button>
-        <Button size="sm" variant="outline" @click="openFolder('user')">
+        <Button size="sm" variant="secondary" @click="openFolder('user')">
           打开 Skills 文件夹
         </Button>
       </EmptyState>
       <EmptyState
         v-else-if="filtered"
-        compact
         title="没有匹配的 Skill"
         description="换个关键词或来源试试。"
+        variant="inline"
+        framed
       >
-        <Button size="sm" variant="outline" @click="clearFilters">
+        <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选
         </Button>
       </EmptyState>
@@ -413,8 +421,8 @@ const deleteDialogOpen = computed({
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 </style>

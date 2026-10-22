@@ -14,11 +14,17 @@
  * - reserved/claimed round never admitted, or admitted round cancelled
  *   (turn aborted) → durable `pause` (fallback: disarm);
  * - downstream pre-step rejection of a valid round → `block` `prompt-rejected`;
- * - cancellation unrelated to a goal round, max-tokens, or agent error → disarm.
+ * - cancellation unrelated to a goal round, max-tokens, a spent task budget
+ *   (KRN-03), or agent error → disarm.
  *
  * Human work always wins: a competing `next-turn` message queued while a
  * reservation is still pending makes it stale; the round is re-reserved at
  * the next idle checkpoint.
+ *
+ * The gate drops a stale or forged round from the step; when nothing else
+ * enters, the step has nothing to run and the turn ends empty (the inbox's
+ * two-phase claim discards the dropped message, KRN-02), so queued work
+ * behind it runs next.
  */
 
 import { contextMessage, type UserMessage } from '../../llm/message'
@@ -60,14 +66,13 @@ interface DriverState {
   requested: boolean
   running: boolean
   stopping: boolean
-  /** The gate rejected a whole step; pending inbox work needs a fresh wakeup. */
-  rewake: boolean
   readonly disposers: Array<() => void>
 }
 
 export interface GoalRoundDriverOptions {
   /** Durability checkpoint awaited after a goal change, before queuing work (e.g. the session store flush). */
   flush?: (session: Session) => Promise<void>
+  hasOutstandingDelegations?: (agentId: string) => boolean
 }
 
 /** Whether a message is a `<goal_round>` continuation prompt. */
@@ -127,7 +132,6 @@ export class GoalRoundDriver {
       requested: false,
       running: false,
       stopping: false,
-      rewake: false,
       disposers: [],
     }
     this.states.set(agent, state)
@@ -159,6 +163,12 @@ export class GoalRoundDriver {
     }
   }
 
+  /** Semantic settlement only; output deltas must never trigger model polling. */
+  delegationSettled(agentId: string): void {
+    for (const state of this.states.values())
+      if (state.agent.id === agentId) this.requestDrive(state)
+  }
+
   private detach(state: DriverState): void {
     if (this.states.get(state.agent) !== state) return
     state.stopping = true
@@ -170,7 +180,7 @@ export class GoalRoundDriver {
       attempt.stale = true
       if (
         attempt.phase === 'queued' &&
-        state.agent.inbox.remove(attempt.messageId)
+        state.agent.inbox.discard(attempt.messageId, 'dropped')
       ) {
         // withdrawn before any step claimed it
       } else if (state.agent.status === 'running') {
@@ -234,7 +244,7 @@ export class GoalRoundDriver {
         return
       case 'turn/end': {
         const reason = event.data.reason
-        if (reason.kind === 'max-tokens') {
+        if (reason.kind === 'max-tokens' || reason.kind === 'budget') {
           this.disarm(state)
         } else if (reason.kind === 'aborted') {
           // Claimed/admitted (or discarded from the inbox by the cancel) → the round was cancelled.
@@ -264,6 +274,9 @@ export class GoalRoundDriver {
       !this.stillQueued(state, attempt) &&
       (attempt.rejected || attempt.cancelled || attempt.phase !== 'admitted')
     ) {
+      // A rejected or stopped step handed the round back to the inbox: it
+      // must not run later on its own.
+      state.agent.inbox.discard(attempt.messageId, 'dropped')
       const goal = this.currentGoal(state)
       if (this.isArmedActive(goal, attempt.rejected ? attempt : undefined)) {
         state.attempt = undefined
@@ -330,20 +343,6 @@ export class GoalRoundDriver {
     const { agent } = state
     if (!this.ready(state)) return
 
-    if (state.rewake) {
-      // A rejected step ends the turn without draining the inbox; re-send
-      // the first pending message (same identity) so queued work runs.
-      state.rewake = false
-      const pending = agent.inbox.nextTurn[0] ?? agent.inbox.nextStep[0]
-      if (pending !== undefined) {
-        const target = agent.inbox.locate(pending.id)?.target ?? 'next-turn'
-        agent.inbox.remove(pending.id)
-        agent.send(pending, target, true)
-        state.requested = true
-        return
-      }
-    }
-
     if (state.needsCheckpoint) {
       state.needsCheckpoint = false
       if (this.options.flush !== undefined) {
@@ -384,7 +383,11 @@ export class GoalRoundDriver {
       })
       return
     }
-    if (agent.inbox.hasPending) return
+    if (
+      agent.inbox.hasPending ||
+      this.options.hasOutstandingDelegations?.(agent.id)
+    )
+      return
 
     const round = goal.roundsStarted + 1
     const message = contextMessage(
@@ -441,6 +444,7 @@ export class GoalRoundDriver {
       try {
         const goal = this.service.get(agent)
         valid =
+          !this.options.hasOutstandingDelegations?.(agent.id) &&
           this.isArmedActive(goal, attempt) &&
           isNextRound({ goal, roundsStarted: goal.roundsStarted }, attempt)
       } catch (error: unknown) {
@@ -459,10 +463,8 @@ export class GoalRoundDriver {
     const remaining = messages.filter((message) => message.id !== submitted.id)
     if (remaining.some((message) => !isRuntimeContext(message)))
       return { kind: 'enter', messages: remaining }
-    if (state !== undefined) {
-      state.rewake = true
-      this.requestDrive(state)
-    }
-    return { kind: 'reject' }
+    // Nothing else to run: an empty step, so the turn ends and the driver
+    // moves on to whatever is queued behind the dropped round.
+    return { kind: 'enter', messages: [] }
   }
 }

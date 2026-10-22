@@ -41,6 +41,7 @@ describe('Codex hook translation', () => {
     ['MultiEdit', ['edit']],
     ['Read|Glob|Grep', ['read', 'glob', 'grep']],
     ['WebSearch|web_search', ['web_search']],
+    ['WebFetch|web_fetch', ['web_fetch']],
     ['update_plan|TodoWrite', ['todo_write']],
     ['Agent|spawn_agent|Task', ['subagent', 'subagent_fork']],
   ])('maps the tool matcher %s', (matcher, subjects) => {
@@ -76,8 +77,8 @@ describe('Codex hook translation', () => {
   })
 
   it.each([
-    ['WebFetch', '没有与「WebFetch」对应的工具'],
-    ['Bash|WebFetch', '没有与「WebFetch」对应的工具'],
+    ['NotebookEdit', '没有与「NotebookEdit」对应的工具'],
+    ['Bash|NotebookEdit', '没有与「NotebookEdit」对应的工具'],
     ['Bash.*', '不翻译一般正则'],
     ['mcp__.*', '不翻译一般正则'],
     ['^(?:Bash)$', '不翻译一般正则'],

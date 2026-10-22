@@ -96,6 +96,46 @@ describe('extractBoundedZip', () => {
     ).toThrow(/link|unsafe/i)
   })
 
+  it('skips and lists symlink entries when asked to (KRN-13)', () => {
+    const base = root()
+    const archive = join(base, 'tool.zip')
+    writeFileSync(
+      archive,
+      zip([
+        { name: 'kept.txt', data: Buffer.from('kept') },
+        {
+          name: 'link.txt',
+          data: Buffer.from('kept.txt'),
+          unixMode: 0o120777,
+        },
+      ]),
+    )
+    const result = extractBoundedZip({
+      archive,
+      destination: join(base, 'tool'),
+      skipLinks: true,
+    })
+    expect(result.files).toEqual(['kept.txt'])
+    expect(result.skippedLinks).toEqual(['link.txt'])
+    expect(existsSync(join(base, 'tool', 'link.txt'))).toBe(false)
+  })
+
+  it('still refuses a device entry when links are skipped', () => {
+    const base = root()
+    const archive = join(base, 'tool.zip')
+    writeFileSync(
+      archive,
+      zip([{ name: 'dev', data: Buffer.from(''), unixMode: 0o060644 }]),
+    )
+    expect(() =>
+      extractBoundedZip({
+        archive,
+        destination: join(base, 'tool'),
+        skipLinks: true,
+      }),
+    ).toThrow(/unsafe/i)
+  })
+
   it('enforces entry, per-file, and total uncompressed limits', () => {
     const base = root()
     const archive = join(base, 'tool.zip')

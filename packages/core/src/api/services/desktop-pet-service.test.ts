@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CoreDesktopPetService } from './desktop-pet-service'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
@@ -14,7 +17,7 @@ describe('CoreDesktopPetService', () => {
     const stateRoot = tmp('emperor-pet-service-state-')
     const service = new CoreDesktopPetService(root, { stateRoot })
 
-    const enabled = await service.setEnabled(true)
+    const enabled = await service.setEnabled(true, VIEW)
 
     expect(enabled).toMatchObject({
       enabled: true,
@@ -33,7 +36,7 @@ describe('CoreDesktopPetService', () => {
       existsSync(join(stateRoot, 'memory', 'desktop_pet', 'state.json')),
     ).toBe(false)
 
-    const disabled = await service.setEnabled(false)
+    const disabled = await service.setEnabled(false, VIEW)
 
     expect(disabled).toMatchObject({
       enabled: false,
@@ -43,18 +46,5 @@ describe('CoreDesktopPetService', () => {
     expect(readFileSync(join(stateRoot, 'settings.json'), 'utf8')).toContain(
       '"enabled": false',
     )
-  })
-
-  it('runs mutation checks synchronously before toggling', () => {
-    const service = new CoreDesktopPetService(
-      tmp('emperor-pet-service-guard-'),
-      {
-        assertMutation: () => {
-          throw new Error('blocked')
-        },
-      },
-    )
-
-    expect(() => service.setEnabled(true)).toThrow('blocked')
   })
 })

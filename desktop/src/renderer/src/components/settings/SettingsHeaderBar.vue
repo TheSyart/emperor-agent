@@ -9,6 +9,7 @@
  *
  * Props: actions (SettingsHeaderAction[]).
  */
+import Spinner from '../ui/Spinner.vue'
 import { computed, reactive, ref, type ComponentPublicInstance } from 'vue'
 import Button from '../ui/Button.vue'
 import IconButton from '../ui/IconButton.vue'
@@ -85,11 +86,14 @@ async function activate(action: SettingsHeaderAction) {
         :aria-expanded="action.menu?.length ? menuId === action.id : undefined"
         @click="activate(action)"
       >
+        <Spinner
+          v-if="kindOf(action) === 'refresh' && isBusy(action)"
+          size="md"
+        />
         <DsRefresh
-          v-if="kindOf(action) === 'refresh'"
+          v-else-if="kindOf(action) === 'refresh'"
           :size="16"
           class="glyph"
-          :class="{ spinning: isBusy(action) }"
         />
         <component :is="action.icon" v-else-if="action.icon" :size="16" />
       </IconButton>
@@ -97,7 +101,7 @@ async function activate(action: SettingsHeaderAction) {
         v-else
         :ref="(el) => setAnchor(action.id, el)"
         size="sm"
-        :variant="kindOf(action) === 'primary' ? 'primary' : 'outline'"
+        :variant="kindOf(action) === 'primary' ? 'primary' : 'secondary'"
         :disabled="action.disabled || isBusy(action)"
         :title="action.title"
         :data-action="action.id"
@@ -147,19 +151,9 @@ async function activate(action: SettingsHeaderAction) {
   min-width: 0;
 }
 
-.glyph.spinning {
-  animation: settings-header-spin 0.9s linear infinite;
-}
-
 .chevron {
   flex: none;
   margin-right: calc(-1 * var(--space-0-5));
-  color: rgb(var(--label-caption));
-}
-
-@keyframes settings-header-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  color: rgb(var(--text-3));
 }
 </style>

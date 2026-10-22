@@ -67,6 +67,7 @@ import {
   showDictationPartial,
 } from './dictationDraft'
 import { trackEditorView } from './editorViews'
+import { resourceDecorationPlugin } from './resourceDecorations'
 
 const props = withDefaults(
   defineProps<{
@@ -90,6 +91,8 @@ const emit = defineEmits<{
   change: [output: ComposerOutput]
   trigger: [trigger: ComposerTrigger | null]
   focus: []
+  /** Files pasted from the clipboard (a screenshot, copied files). */
+  files: [files: File[]]
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -207,6 +210,7 @@ function createState(doc?: PMNode): EditorState {
     plugins: [
       placeholderPlugin,
       dictationDraftPlugin,
+      resourceDecorationPlugin,
       history(),
       keymap({
         'Mod-z': undo,
@@ -287,7 +291,11 @@ onMounted(() => {
       return true
     },
     handlePaste: (_view, event) => {
-      if (event.clipboardData?.files.length) return false
+      const files = event.clipboardData?.files
+      if (files?.length) {
+        emit('files', Array.from(files))
+        return true
+      }
       const text = event.clipboardData?.getData('text/plain')
       if (!text) return false
       return pasteText(text)
@@ -457,8 +465,47 @@ defineExpose({
 </template>
 
 <style scoped>
+.composer-editor :deep(.composer-url-decoration) {
+  color: rgb(var(--text-link));
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent) / 0.3);
+  text-underline-offset: 4px;
+  border-radius: var(--r-xs);
+  background: transparent;
+}
+.composer-editor :deep(.composer-url-decoration::before) {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline: var(--space-1) var(--space-1-5);
+  vertical-align: -0.1em;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18'/%3E%3C/svg%3E")
+    center/contain no-repeat;
+}
+.composer-editor :deep(.composer-url-decoration[data-site-letter]::before) {
+  content: attr(data-site-letter) / '';
+  mask: none;
+  background: rgb(var(--accent) / 0.14);
+  border-radius: var(--r-xs);
+  font: var(--weight-semibold) 0.7em/1.4 var(--font-sans);
+  text-align: center;
+}
+.composer-editor
+  :deep(.composer-url-decoration[data-resource-kind='github']::before) {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Cpath d='M9 19c-4 1-4-2-6-3m12 6v-4c0-1-.3-2-1-2.6 3-.3 6-1.4 6-6.5 0-1.4-.5-2.7-1.4-3.7.3-1.2.3-2.4-.2-3.6 0 0-1.2-.4-3.6 1.4a13 13 0 0 0-7 0C5.4 1.2 4.2 1.6 4.2 1.6c-.5 1.2-.5 2.4-.2 3.6a5.5 5.5 0 0 0-1.4 3.7c0 5.1 3 6.2 6 6.5-.7.6-1 1.6-1 2.6v4'/%3E%3C/svg%3E");
+}
 .composer-editor {
   min-width: 0;
+}
+.composer-editor
+  :deep(.composer-url-decoration[data-site-icon='ready']::before) {
+  content: '';
+  mask: none;
+  background: rgb(var(--site-icon-plate)) var(--composer-site-icon) center /
+    contain no-repeat;
+  border-radius: var(--r-xs);
 }
 
 .composer-editor :deep(.composer-editor-input) {
@@ -469,7 +516,7 @@ defineExpose({
   padding: var(--space-1) var(--space-3) 0 var(--space-4);
   overflow-y: auto;
   outline: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   caret-color: rgb(var(--caret));
   font-family: var(--font-sans);
   font-size: inherit;
@@ -506,14 +553,14 @@ defineExpose({
   content: attr(data-placeholder);
   float: left;
   height: 0;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   pointer-events: none;
 }
 
 /* Dictation (dictationDraft.ts): what is being heard, not yet text. */
 .composer-editor :deep(.composer-dictation-draft) {
-  color: rgb(var(--label-tertiary));
-  text-decoration: underline dotted rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
+  text-decoration: underline dotted rgb(var(--text-3));
   text-underline-offset: 0.2em;
   pointer-events: none;
   user-select: none;
@@ -524,7 +571,7 @@ defineExpose({
 }
 
 .composer-editor :deep(.composer-dictation-replaced) {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 
@@ -535,9 +582,9 @@ defineExpose({
   padding: 0 var(--space-1);
   margin: 0 var(--space-0-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
-  font-weight: 500;
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   vertical-align: baseline;
   cursor: default;

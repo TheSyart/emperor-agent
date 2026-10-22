@@ -74,12 +74,8 @@ describe('workspace snapshot safe projections', () => {
         withinWorkspace: true,
       },
       containment: {
-        decision: 'unsandboxed',
+        decision: 'user-allowed-unsandboxed',
         backend: 'none',
-        capabilityStatus: 'unsupported',
-        filesystem: 'unrestricted',
-        network: 'unrestricted',
-        processTree: false,
         policyHash: 'policy-secret',
         reason: 'test',
       },
@@ -108,6 +104,7 @@ describe('workspace snapshot safe projections', () => {
       createdAt: 1,
       exited: false,
       exitCode: null,
+      busy: false,
     })
 
     expect(process).toEqual({

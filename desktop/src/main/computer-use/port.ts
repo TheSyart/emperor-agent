@@ -56,13 +56,16 @@ export class DesktopComputerUsePort implements ComputerUseHostPort {
     return this.options.credentials?.() ?? null
   }
 
-  async capabilities(): Promise<DriverCapability[]> {
+  async capabilities(
+    options: { readonly connect?: boolean } = {},
+  ): Promise<DriverCapability[]> {
     const embedded = this.embeddedBrowser()
     const external = this.externalBrowser()
     const desktop = this.desktop()
     // TCC can change while the helper stays connected; its hello permissions
-    // describe only the initial handshake.
-    await desktop?.permissions().catch(() => undefined)
+    // describe only the initial handshake. A status read (`connect: false`)
+    // asks a running helper only and never starts one.
+    await desktop?.permissions(options).catch(() => undefined)
     const unavailable = (
       driver: DriverCapability['driver'],
       label: string,

@@ -1,17 +1,16 @@
 <script setup lang="ts">
 /**
- * Tooltip — dsh hover bubble (13/20 on tooltip-bg, radius 8, fade-in).
- * Wraps its trigger (default slot); the bubble teleports to <body> with
- * fixed positioning so overflow containers never clip it.
+ * Tooltip — hover bubble around its trigger (default slot); the bubble
+ * teleports to <body> with fixed positioning so overflow containers never
+ * clip it. Shortcut keys render with Kbd. IconButton has its own tooltip
+ * (useTooltip), so it is never wrapped in this.
  *
- * Props:
- * - label: bubble text (pre-line).
- * - shortcut?: a key label after the text, such as ⇧⌘D.
- * - side: 'top' (default) | 'bottom' | 'right'.
- * - delayMs (default 400).
- * - disabled?.
+ * Props: label, shortcut?, side ('top' default | 'bottom' | 'right'),
+ * delayMs (default 400), disabled?.
  */
-import { onBeforeUnmount, ref } from 'vue'
+import { ref } from 'vue'
+import TooltipBubble from './TooltipBubble.vue'
+import { useTooltip } from './useTooltip'
 
 const props = withDefaults(
   defineProps<{
@@ -24,106 +23,31 @@ const props = withDefaults(
   { shortcut: '', side: 'top', delayMs: 400, disabled: false },
 )
 
-const GAP = 6
 const anchor = ref<HTMLElement | null>(null)
-const visible = ref(false)
-const position = ref({ left: '0px', top: '0px' })
-let timer: ReturnType<typeof setTimeout> | undefined
-
-function place() {
-  const rect = anchor.value?.getBoundingClientRect()
-  if (!rect) return
-  if (props.side === 'right')
-    position.value = {
-      left: `${rect.right + GAP}px`,
-      top: `${rect.top + rect.height / 2}px`,
-    }
-  else
-    position.value = {
-      left: `${rect.left + rect.width / 2}px`,
-      top: `${props.side === 'top' ? rect.top - GAP : rect.bottom + GAP}px`,
-    }
-}
-
-function show() {
-  if (props.disabled || !props.label) return
-  clearTimeout(timer)
-  timer = setTimeout(() => {
-    place()
-    visible.value = true
-  }, props.delayMs)
-}
-
-function hide() {
-  clearTimeout(timer)
-  visible.value = false
-}
-
-onBeforeUnmount(() => clearTimeout(timer))
+const tooltip = useTooltip({
+  anchor,
+  side: () => props.side,
+  delayMs: () => props.delayMs,
+  enabled: () => !props.disabled && Boolean(props.label),
+})
+const { visible, position, side: bubbleSide, listeners } = tooltip
 </script>
 
 <template>
-  <span
-    ref="anchor"
-    class="ds-tooltip-anchor"
-    @pointerenter="show"
-    @pointerleave="hide"
-    @focusin="show"
-    @focusout="hide"
-    @pointerdown="hide"
-  >
+  <span ref="anchor" class="ds-tooltip-anchor" v-on="listeners">
     <slot />
   </span>
-  <Teleport to="body">
-    <div
-      v-if="visible"
-      class="ds-tooltip ds-fade-in"
-      role="tooltip"
-      :data-side="side"
-      :style="position"
-    >
-      {{ label
-      }}<kbd v-if="shortcut" class="ds-tooltip-shortcut">{{ shortcut }}</kbd>
-    </div>
-  </Teleport>
+  <TooltipBubble
+    v-if="visible"
+    :label="label"
+    :shortcut="shortcut"
+    :side="bubbleSide"
+    :position="position"
+  />
 </template>
 
 <style scoped>
 .ds-tooltip-anchor {
   display: inline-flex;
-}
-
-.ds-tooltip {
-  position: fixed;
-  z-index: var(--z-lightbox);
-  width: max-content;
-  max-width: 50vw;
-  padding: calc(var(--space-1) - 1px) calc(var(--space-2) - 1px);
-  border-radius: var(--radius-row);
-  background: rgb(var(--tooltip-bg));
-  color: rgb(var(--tooltip-fg));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  white-space: pre-line;
-  overflow-wrap: break-word;
-  pointer-events: none;
-}
-
-.ds-tooltip-shortcut {
-  margin-left: var(--space-1-5);
-  font-family: var(--font-mono);
-  opacity: 0.7;
-}
-
-.ds-tooltip[data-side='top'] {
-  transform: translate(-50%, -100%);
-}
-
-.ds-tooltip[data-side='bottom'] {
-  transform: translateX(-50%);
-}
-
-.ds-tooltip[data-side='right'] {
-  transform: translateY(-50%);
 }
 </style>

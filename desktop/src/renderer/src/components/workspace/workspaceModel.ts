@@ -5,6 +5,25 @@ export const FILES_TREE_MIN = 240
 export const FILES_TREE_MAX = 320
 export const FILES_TREE_DEFAULT = 280
 
+/**
+ * 审查 refreshes the slow parts (current-branch PR through `gh`, the branch
+ * list) at most this often; status and worktrees come with every workspace
+ * snapshot poll.
+ */
+export const GIT_REVIEW_SLOW_TTL_MS = 60_000
+
+/**
+ * How long the 审查 pane waits for a read (status, branches and worktrees
+ * together) before it stops, says why and offers 重试 (FIX-08). Core's own
+ * Git commands may run longer; the pane just stops waiting.
+ */
+export const GIT_REVIEW_READ_TIMEOUT_MS = 20_000
+
+/** The reason the 审查 pane shows when a read took too long. */
+export function gitReadTimeoutMessage(): string {
+  return `读取 Git 状态超过 ${GIT_REVIEW_READ_TIMEOUT_MS / 1000} 秒没有完成。`
+}
+
 /** Files tree column width (px) persisted as right_workspace.filesTreeWidth. */
 export function clampFilesTreeWidth(value: number): number {
   if (!Number.isFinite(value)) return FILES_TREE_DEFAULT
@@ -64,7 +83,7 @@ export function filterGitFilesByPaths(
 }
 
 export function gitFileChangeLabel(file: GitFileStatus): string {
-  if (file.binary) return 'binary'
+  if (file.binary) return '二进制'
   const additions = Math.max(0, Math.floor(file.additions ?? 0))
   const deletions = Math.max(0, Math.floor(file.deletions ?? 0))
   if (!additions && !deletions) return ''

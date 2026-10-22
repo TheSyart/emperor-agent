@@ -39,7 +39,7 @@ const summary = computed(() => {
 </script>
 
 <template>
-  <div class="compaction" :data-status="data.status">
+  <div class="compaction" data-process-step :data-status="data.status">
     <button
       type="button"
       class="row"
@@ -83,7 +83,7 @@ const summary = computed(() => {
   height: var(--lh-base);
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: none;
   color: inherit;
   font: inherit;
@@ -95,7 +95,7 @@ const summary = computed(() => {
 }
 
 .row:not(:disabled):hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .leading {
@@ -105,14 +105,14 @@ const summary = computed(() => {
   width: var(--space-4);
   height: var(--space-4);
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .icon-context,
 .icon-chevron {
   display: inline-flex;
   grid-area: 1 / 1;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .icon-chevron {
@@ -142,11 +142,11 @@ const summary = computed(() => {
   flex: none;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 [data-status='error'] .title {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .sep {
@@ -155,7 +155,7 @@ const summary = computed(() => {
   height: 2px;
   margin: 0 var(--space-2);
   border-radius: 50%;
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
 }
 
 .summary {
@@ -166,18 +166,18 @@ const summary = computed(() => {
   white-space: nowrap;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body {
   padding: var(--space-1) 0 var(--space-1)
     calc(var(--space-4) + var(--space-1-5));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body :deep(.ds-md) {
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

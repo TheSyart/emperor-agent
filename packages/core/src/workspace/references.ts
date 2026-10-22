@@ -1,57 +1,104 @@
 import { randomBytes } from 'node:crypto'
+import { ReferenceSiteIconService } from './reference-site-icon'
+import { fileURLToPath } from 'node:url'
+import type { WebFetchClient } from '../network/web-fetch-client'
+import {
+  ReferencePreviewService,
+  type GitHubPreviewReader,
+  type ReferencePreviewInput,
+  type ReferencePreview,
+} from './reference-preview'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
+import {
+  previewCanonicalFile,
+  statCanonicalFile,
+  type FilePreviewResult,
+  type FileStatResult,
+} from './file-preview'
 import {
   resolveOwnedProject,
   WorkspaceOperationError,
   type ResolveWorkspaceProject,
 } from './common'
 
-export type ReferenceKind = 'project_file' | 'external_file' | 'web'
-
-export type ReferenceAction = 'open_files' | 'reveal' | 'open_external'
-
-export interface ReferenceDescriptor {
-  id: string
-  kind: ReferenceKind
-  label: string
-  tooltip: string
-  available: boolean
-  /** The target is an existing directory (else a file, or missing). */
-  directory?: true
-  relativePath?: string
-  line?: number
-  actions: ReferenceAction[]
-}
-
-export interface ResolveReferenceInput {
-  sessionId: string
-  sourceMessageId: string
-  href: string
-  label: string
-}
+import type {
+  ReferenceDescriptor,
+  ResolveReferenceInput,
+} from './reference-types'
+export type {
+  ReferenceKind,
+  ReferenceAction,
+  ReferenceDescriptor,
+  ResolveReferenceInput,
+} from './reference-types'
 
 interface StoredReference {
+  delegationId?: string
   sessionId: string
   sourceMessageId: string
   descriptor: ReferenceDescriptor
   canonicalPath?: string
 }
 
+export interface AttachmentReferenceTarget {
+  root: string
+  relativePath: string
+  label: string
+}
+
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
+  resolveFileRoot?: (sessionId: string) => string
+  delegatedRoot?: (sessionId: string, delegationId: string) => string
+  delegatedImageRoots?: (sessionId: string, delegationId: string) => string[]
+  preferReveal?: (sessionId: string) => boolean
   maxEntries?: number
+  authorizeSession?: (sessionId: string) => void
+  webFetchClient?: WebFetchClient | null
+  githubPreview?: GitHubPreviewReader
+  resolveAttachment?: (attachmentId: string) => AttachmentReferenceTarget | null
 }
 
 export class WorkspaceReferenceService {
+  private readonly delegatedRoot?: WorkspaceReferenceServiceOptions['delegatedRoot']
+  private readonly delegatedImageRoots?: WorkspaceReferenceServiceOptions['delegatedImageRoots']
   private readonly resolveProject: ResolveWorkspaceProject
   private readonly maxEntries: number
+  private readonly preferReveal: (sessionId: string) => boolean
+  private readonly previews: ReferencePreviewService
+  private readonly siteIcons: ReferenceSiteIconService
   private readonly references = new Map<string, StoredReference>()
   private readonly cache = new Map<string, string>()
 
-  constructor(options: WorkspaceReferenceServiceOptions) {
+  constructor(private readonly options: WorkspaceReferenceServiceOptions) {
+    this.delegatedRoot = options.delegatedRoot
+    this.delegatedImageRoots = options.delegatedImageRoots
     this.resolveProject = options.resolveProject
     this.maxEntries = options.maxEntries ?? 2_000
+    this.preferReveal = options.preferReveal ?? (() => false)
+    this.previews = new ReferencePreviewService({
+      authorize: (input) => {
+        return this.authorize(input.referenceId, input.sessionId)
+      },
+      webFetchClient: options.webFetchClient,
+      githubPreview: options.githubPreview,
+    })
+    this.siteIcons = new ReferenceSiteIconService({
+      authorize: (input) => this.authorize(input.referenceId, input.sessionId),
+      webFetchClient: options.webFetchClient,
+    })
+  }
+
+  siteIcon(input: ReferencePreviewInput) {
+    return this.siteIcons.icon(input)
+  }
+
+  preview(
+    input: ReferencePreviewInput,
+    signal?: AbortSignal,
+  ): Promise<ReferencePreview> {
+    return this.previews.preview(input, signal)
   }
 
   resolve(input: ResolveReferenceInput): ReferenceDescriptor {
@@ -68,17 +115,33 @@ export class WorkspaceReferenceService {
         '引用目标无效。',
       )
 
+    if (input.delegationId)
+      this.delegatedRoot?.(input.sessionId, input.delegationId)
+    if (/^attachment:/i.test(href)) return this.resolveAttachment(input, href)
     if (/^https?:\/\//i.test(href)) return this.resolveWeb(input, href)
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^file:/i.test(href))
+    if (
+      /^[a-z][a-z0-9+.-]*:/i.test(href) &&
+      !/^file:/i.test(href) &&
+      !/^[^/\\:]+\.[^/\\:]+:[1-9]\d*(?::[1-9]\d*)?$/.test(href)
+    )
       throw new WorkspaceOperationError(
         'reference_protocol_denied',
         '不支持该引用协议。',
       )
 
-    return this.resolveFile(input, href)
+    const descriptor = this.resolveFile(input, href)
+    const stored = this.references.get(descriptor.id)
+    if (stored) stored.delegationId = input.delegationId
+    return descriptor
+  }
+
+  delegationScope(referenceId: string, sessionId: string): string | undefined {
+    this.authorize(referenceId, sessionId)
+    return this.references.get(referenceId)?.delegationId
   }
 
   authorize(referenceId: string, sessionId: string): ReferenceDescriptor {
+    this.options.authorizeSession?.(sessionId)
     const stored = this.references.get(referenceId)
     if (!stored)
       throw new WorkspaceOperationError(
@@ -102,6 +165,123 @@ export class WorkspaceReferenceService {
         '该引用不允许在文件管理器中定位。',
       )
     return stored.canonicalPath
+  }
+  /** Main-only image capability; callers still enforce an owned workspace. */
+  previewPath(referenceId: string, sessionId: string): string {
+    const descriptor = this.authorize(referenceId, sessionId)
+    const stored = this.references.get(referenceId)!
+    if (!descriptor.available || descriptor.directory || !stored.canonicalPath)
+      throw new WorkspaceOperationError(
+        'reference_image_unavailable',
+        '图片文件不可用。',
+      )
+    return stored.canonicalPath
+  }
+
+  previewFile(input: {
+    sessionId: string
+    referenceId: string
+  }): Promise<FilePreviewResult> {
+    const { descriptor, path } = this.previewable(input)
+    if (descriptor.directory) {
+      if (realpathSync(path) !== path)
+        throw new WorkspaceOperationError(
+          'reference_target_changed',
+          '目录位置已改变。',
+        )
+      return Promise.resolve({
+        id: `file:${path}`,
+        name: basename(path),
+        path,
+        kind: 'directory',
+        mimeType: 'inode/directory',
+        bytes: 0,
+        truncated: false,
+        revealable: descriptor.actions.includes('reveal'),
+      })
+    }
+    return previewCanonicalFile(path).then((value) => ({
+      ...value,
+      revealable: descriptor.actions.includes('reveal'),
+    }))
+  }
+
+  /** Size and mtime of what previewFile would read, under the same checks. */
+  statFile(input: { sessionId: string; referenceId: string }): FileStatResult {
+    return statCanonicalFile(this.previewable(input).path)
+  }
+
+  private previewable(input: { sessionId: string; referenceId: string }): {
+    descriptor: ReferenceDescriptor
+    path: string
+  } {
+    const descriptor = this.authorize(input.referenceId, input.sessionId)
+    const path = this.references.get(input.referenceId)?.canonicalPath
+    if (
+      !descriptor.available ||
+      !path ||
+      !descriptor.actions.includes('preview')
+    )
+      throw new WorkspaceOperationError(
+        'reference_action_denied',
+        '该引用无法预览文件内容。',
+      )
+    return { descriptor, path }
+  }
+
+  private resolveAttachment(
+    input: ResolveReferenceInput,
+    href: string,
+  ): ReferenceDescriptor {
+    this.options.authorizeSession?.(input.sessionId)
+    const attachmentId = href.slice('attachment:'.length)
+    if (!/^att_\d{4}-\d{2}_[0-9a-f]{8}$/.test(attachmentId))
+      throw new WorkspaceOperationError(
+        'reference_attachment_invalid',
+        '附件引用无效。',
+      )
+    const attachment = this.options.resolveAttachment?.(attachmentId)
+    if (!attachment)
+      throw new WorkspaceOperationError(
+        'reference_attachment_unknown',
+        '附件不存在或已被移除。',
+      )
+    const path = attachment.relativePath
+    if (
+      !path ||
+      path.includes('\0') ||
+      path.includes('\\') ||
+      isAbsolute(path) ||
+      path.split('/').includes('..')
+    )
+      throw new WorkspaceOperationError(
+        'reference_attachment_invalid',
+        '附件路径无效。',
+      )
+    const root = realpathSync(attachment.root)
+    const requested = resolve(root, path)
+    const exists = existsSync(requested)
+    const canonical = exists ? realpathSync(requested) : requested
+    if (!within(root, requested) || !within(root, canonical))
+      throw new WorkspaceOperationError(
+        'reference_attachment_invalid',
+        '附件路径超出存储范围。',
+      )
+    const available = exists && statSync(canonical).isFile()
+    return this.store(
+      input.sessionId,
+      input.sourceMessageId,
+      {
+        id: referenceId(),
+        kind: 'external_file',
+        label: cleanLabel(input.label, attachment.label),
+        tooltip: canonical,
+        available,
+        actions: available ? ['reveal', 'preview'] : [],
+      },
+      available ? canonical : undefined,
+      `attachment\0${input.sessionId}\0${input.sourceMessageId}\0${attachmentId}\0${canonical}`,
+    )
   }
 
   private resolveWeb(
@@ -155,8 +335,15 @@ export class WorkspaceReferenceService {
     rawHref: string,
   ): ReferenceDescriptor {
     const { target, line } = fileTarget(rawHref)
-    const scope = resolveOwnedProject(this.resolveProject, input.sessionId)
-    const projectRoot = realpathSync(scope.projectRoot)
+    this.options.authorizeSession?.(input.sessionId)
+    const projectRoot = realpathSync(
+      input.delegationId && this.delegatedRoot
+        ? this.delegatedRoot(input.sessionId, input.delegationId)
+        : this.options.resolveFileRoot
+          ? this.options.resolveFileRoot(input.sessionId)
+          : resolveOwnedProject(this.resolveProject, input.sessionId)
+              .projectRoot,
+    )
     if (!isAbsolute(target) && escapesProject(target))
       throw new WorkspaceOperationError(
         'reference_outside_project',
@@ -172,8 +359,21 @@ export class WorkspaceReferenceService {
     const lexicalWithin = within(projectRoot, lexicalTarget)
     const exists = existsSync(lexicalTarget)
     const canonicalTarget = exists ? realpathSync(lexicalTarget) : lexicalTarget
+    const nativeImageWithin =
+      !!input.delegationId &&
+      isAbsolute(target) &&
+      /\.(png|jpe?g|gif|webp)$/i.test(canonicalTarget) &&
+      (
+        this.delegatedImageRoots?.(input.sessionId, input.delegationId) ?? []
+      ).some((root) => within(root, canonicalTarget))
     const canonicalWithin =
-      lexicalWithin && within(projectRoot, canonicalTarget)
+      (lexicalWithin && within(projectRoot, canonicalTarget)) ||
+      nativeImageWithin
+    if (input.delegationId && !canonicalWithin)
+      throw new WorkspaceOperationError(
+        'reference_outside_project',
+        '子智能体引用不能指向工作区外。',
+      )
     const stats = exists ? statSync(canonicalTarget) : undefined
     const directory = stats?.isDirectory() === true
     const available = stats?.isFile() === true || directory
@@ -183,7 +383,11 @@ export class WorkspaceReferenceService {
     }
     const fallback = basename(target) || target
 
-    if (canonicalWithin) {
+    if (
+      canonicalWithin &&
+      !input.delegationId &&
+      !this.preferReveal(input.sessionId)
+    ) {
       const relativePath = toProjectPath(relative(projectRoot, lexicalTarget))
       const descriptor: ReferenceDescriptor = {
         id: referenceId(),
@@ -193,7 +397,7 @@ export class WorkspaceReferenceService {
         ...shape,
         relativePath,
         ...(line ? { line } : {}),
-        actions: available ? ['open_files'] : [],
+        actions: available ? ['open_files', 'preview', 'reveal'] : [],
       }
       return this.store(
         input.sessionId,
@@ -217,7 +421,7 @@ export class WorkspaceReferenceService {
           actions: available ? ['reveal'] : [],
         },
         available ? canonicalTarget : undefined,
-        `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+        `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
       )
 
     if (!isAbsolute(target))
@@ -238,7 +442,7 @@ export class WorkspaceReferenceService {
         actions: available ? ['reveal'] : [],
       },
       available ? canonicalTarget : undefined,
-      `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+      `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
     )
   }
 
@@ -278,13 +482,39 @@ export class WorkspaceReferenceService {
 }
 
 function fileTarget(rawHref: string): { target: string; line?: number } {
-  const decoded = /^file:/i.test(rawHref)
-    ? decodeURIComponent(new URL(rawHref).pathname)
-    : decodeURIComponent(rawHref)
-  const match = decoded.match(/#L([1-9]\d*)$/i)
-  return {
-    target: match ? decoded.slice(0, match.index) : decoded,
-    ...(match ? { line: Number(match[1]) } : {}),
+  try {
+    let path = rawHref
+    let fragmentLine: string | undefined
+    let fileUrl: URL | undefined
+    if (/^file:/i.test(rawHref)) {
+      fileUrl = new URL(rawHref)
+      if (fileUrl.search || fileUrl.username || fileUrl.password)
+        throw new Error('invalid file URL')
+      fragmentLine = fileUrl.hash.match(/^#L([1-9]\d*)$/i)?.[1]
+      fileUrl.hash = ''
+      path = fileUrl.pathname
+    }
+    const position = path.match(/#L([1-9]\d*)$|:([1-9]\d*)(?::([1-9]\d*))?$/i)
+    const rawLine = fragmentLine ?? position?.[1] ?? position?.[2]
+    if (position) path = path.slice(0, position.index)
+    let target: string
+    if (fileUrl) {
+      fileUrl.pathname = path
+      target = fileURLToPath(fileUrl)
+    } else target = decodeURIComponent(path)
+    const line = rawLine === undefined ? undefined : Number(rawLine)
+    if (
+      !target ||
+      target.includes('\0') ||
+      (line !== undefined && !Number.isSafeInteger(line))
+    )
+      throw new Error('invalid file target')
+    return { target, ...(line === undefined ? {} : { line }) }
+  } catch {
+    throw new WorkspaceOperationError(
+      'reference_target_invalid',
+      '文件引用无效。',
+    )
   }
 }
 

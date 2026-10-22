@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { WorkspaceFilesService } from './files'
+import { WorkspaceFilesService, trimPartialUtf8 } from './files'
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'emperor-files-'))
@@ -88,6 +88,33 @@ describe('WorkspaceFilesService', () => {
     await expect(
       service.read({ sessionId: 's1', relativePath: 'opaque.bin' }),
     ).resolves.toMatchObject({ kind: 'binary' })
+  })
+
+  it('keeps truncated Chinese text as text when the cut splits a character', async () => {
+    const root = fixture()
+    // 7 bytes: "ab" + 设 (3 bytes) + the first 2 bytes of 计.
+    writeFileSync(join(root, 'zh.md'), 'ab设计说明')
+    const service = new WorkspaceFilesService({
+      resolveProject: () => ({ sessionId: 's1', projectRoot: root }),
+      maxTextBytes: 7,
+    })
+    const result = await service.read({
+      sessionId: 's1',
+      relativePath: 'zh.md',
+    })
+    expect(result).toMatchObject({
+      kind: 'text',
+      truncated: true,
+      content: 'ab设',
+    })
+  })
+
+  it('trims only an incomplete UTF-8 tail', () => {
+    const text = Buffer.from('a设😀', 'utf8')
+    expect(trimPartialUtf8(text)).toEqual(text)
+    expect(trimPartialUtf8(text.subarray(0, 6)).toString()).toBe('a设')
+    expect(trimPartialUtf8(text.subarray(0, 3)).toString()).toBe('a')
+    expect(trimPartialUtf8(Buffer.from('abc'))).toEqual(Buffer.from('abc'))
   })
 
   it('searches lazily by relative path with stable pagination', async () => {

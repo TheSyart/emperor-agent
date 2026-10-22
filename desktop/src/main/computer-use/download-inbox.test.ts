@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   statSync,
   unlinkSync,
   utimesSync,
@@ -64,6 +66,7 @@ function inbox(existing: string[] = []) {
     },
     exists: (path) => existing.includes(path),
     hashFile: async () => 'a'.repeat(64),
+    quarantine: async () => undefined,
   })
   return { box, made }
 }
@@ -262,6 +265,34 @@ describe('download inbox across restarts', () => {
       again.moveTo(record.downloadId, 'relative/dir'),
     ).resolves.toBeUndefined()
   })
+
+  it('never writes over an index a newer Emperor wrote (REL-03)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-newer-'))
+    const indexPath = join(root, '.index.json')
+    const newer = JSON.stringify({ version: 2, entries: [], futureOnly: 1 })
+    writeFileSync(indexPath, newer)
+    const box = new DownloadInbox({
+      root,
+      indexPath,
+      hashFile: async () => 'c'.repeat(64),
+    })
+    const item = new FakeItem('later.csv')
+    const record = await box.receive(
+      'tab_1',
+      { ...request, ownerSessionId: 's1' },
+      async () => {
+        expect(box.offer('tab_1', event(), item)).toBe('accepted')
+        writeFileSync(item.savePath, 'x\n')
+        item.progress(2)
+        item.finish()
+      },
+      new AbortController().signal,
+    )
+    expect(record.state).toBe('completed')
+    // This process still knows the file; the newer index stays as it was.
+    expect(box.pathOf(record.downloadId)).toBe(item.savePath)
+    expect(readFileSync(indexPath, 'utf8')).toBe(newer)
+  })
 })
 
 describe('download inbox list (设置 › 浏览器 › 下载历史记录)', () => {
@@ -433,5 +464,95 @@ describe('download inbox retention and save as', () => {
     await expect(
       box.moveToFile(record.downloadId, 'relative.csv'),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('download inbox source mark (SEC-10, MAIN-9)', () => {
+  /** One completed download into a real temporary inbox. */
+  async function completed(box: DownloadInbox, name = 'report.csv') {
+    const item = new FakeItem(name)
+    const record = await box.receive(
+      'tab_1',
+      request,
+      async () => {
+        expect(box.offer('tab_1', event(), item)).toBe('accepted')
+        writeFileSync(item.savePath, 'a,b\n')
+        item.progress(4)
+        item.finish()
+      },
+      new AbortController().signal,
+    )
+    return { record, path: item.savePath }
+  }
+
+  it.skipIf(process.platform !== 'darwin')(
+    'marks a finished inbox file with com.apple.quarantine',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-mark-'))
+      const box = new DownloadInbox({
+        root,
+        indexPath: join(root, '.index.json'),
+      })
+      const { record, path } = await completed(box)
+      expect(record.state).toBe('completed')
+      const mark = execFileSync(
+        '/usr/bin/xattr',
+        ['-p', 'com.apple.quarantine', path],
+        { encoding: 'utf8' },
+      ).trim()
+      expect(mark).toMatch(/^0083;[0-9a-f]+;Emperor Agent;$/)
+      expect(box.list()[0]).not.toHaveProperty('unmarked')
+    },
+  )
+
+  it('keeps a file whose mark could not be set, and says so after a restart', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-unmarked-'))
+    const indexPath = join(root, '.index.json')
+    const marked: string[] = []
+    const box = new DownloadInbox({
+      root,
+      indexPath,
+      hashFile: async () => 'c'.repeat(64),
+      quarantine: async (path) => {
+        marked.push(path)
+        throw new Error('xattr failed')
+      },
+    })
+    const { record, path } = await completed(box)
+    expect(record.state).toBe('completed')
+    expect(marked).toEqual([path])
+    expect(box.list()[0]).toMatchObject({
+      downloadId: record.downloadId,
+      unmarked: true,
+    })
+    expect(new DownloadInbox({ root, indexPath }).list()[0]?.unmarked).toBe(
+      true,
+    )
+  })
+
+  it('refuses a configuration profile (.mobileconfig)', async () => {
+    const { box } = inbox()
+    const offered = event()
+    const record = await box.receive(
+      'tab_1',
+      request,
+      async () => {
+        expect(
+          box.offer(
+            'tab_1',
+            offered,
+            new FakeItem(
+              'Wi-Fi.mobileconfig',
+              10,
+              'application/octet-stream',
+              'https://files.test/Wi-Fi.mobileconfig',
+            ),
+          ),
+        ).toBe('refused')
+      },
+      new AbortController().signal,
+    )
+    expect(offered.preventDefault).toHaveBeenCalled()
+    expect(record).toMatchObject({ state: 'refused', bytes: 0 })
   })
 })

@@ -157,7 +157,7 @@ class WireFakeCore implements EmperorAcpCore {
   }
 
   readonly chat = {
-    submit: async (input: EmperorAcpSubmitInput) => {
+    runBackground: async (input: EmperorAcpSubmitInput) => {
       this.submitCalls += 1
       await new Promise((resolve) => setTimeout(resolve, 20))
       await input.emit?.({

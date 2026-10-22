@@ -15,6 +15,27 @@ function render(source: string): string {
 // （原样转义/拒绝成链/困在引号属性里），改造前即安全；DOMPurify 是防御纵深，
 // 防的是未来配置漂移（如误开 html:true）而不是现存漏洞。
 describe('useMarkdown rendering safety (Wave1.4)', () => {
+  it('routes local markdown images through owned previews instead of loading filesystem or bundle paths', () => {
+    for (const path of [
+      '/Users/me/sun.png',
+      'images/sun.png',
+      'file:///Users/me/sun.png',
+    ]) {
+      const html = render(`![太阳](${path})`)
+      expect(html).toContain('data-md-image=')
+      expect(html).not.toMatch(/\ssrc=/)
+    }
+  })
+  it('never loads a remote image: a placeholder asks first (UI-38)', () => {
+    const html = render('![太阳](https://example.com/sun.png "t")')
+    expect(html).not.toMatch(/<img/)
+    expect(html).toContain('data-md-remote-image="https://example.com/sun.png"')
+    expect(html).toContain('data-md-remote-alt="太阳"')
+    expect(html).toContain('点击加载图片 · example.com')
+    expect(render('![x](http://tracker.example/p.gif)')).toContain(
+      '点击加载图片 · tracker.example',
+    )
+  })
   it('renders raw HTML injection attempts as escaped text, not tags', () => {
     const html = render('<img src=x onerror=alert(1)>')
     expect(html).not.toMatch(/<img[^>]*onerror/i)
@@ -37,6 +58,24 @@ describe('sanitizeHtml hardening layer (Wave1.4)', () => {
   it('strips event handlers from raw HTML', () => {
     const clean = sanitizeHtml('<img src="x" onerror="alert(1)">')
     expect(clean).not.toContain('onerror')
+  })
+
+  it('keeps only local image sources (data:, blob:, app:) (UI-38)', () => {
+    expect(
+      sanitizeHtml('<img src="https://tracker.example/p.png" alt="p">'),
+    ).not.toContain('src=')
+    expect(sanitizeHtml('<img src="//tracker.example/p.png">')).not.toContain(
+      'src=',
+    )
+    expect(
+      sanitizeHtml('<img srcset="https://tracker.example/p.png 2x">'),
+    ).not.toContain('srcset')
+    for (const src of [
+      'data:image/png;base64,iVBORw0KGgo=',
+      'blob:app://bundle/0f3c',
+      'app://attachments/att_2026-10_abcdef12/raw',
+    ])
+      expect(sanitizeHtml(`<img src="${src}">`)).toContain(`src="${src}"`)
   })
 
   it('strips script tags entirely', () => {
@@ -66,6 +105,18 @@ describe('sanitizeHtml hardening layer (Wave1.4)', () => {
 })
 
 describe('link chips', () => {
+  it('identifies GitHub objects and uses the individually drawn file vectors', () => {
+    expect(render('[PR](https://github.com/a/b/pull/42)')).toContain(
+      'data-resource-type="pull_request"',
+    )
+    expect(render('[config](a.yaml)')).toContain('data-md-custom-icon="yaml"')
+    expect(render('[markdown](README.md)')).toContain(
+      'data-md-custom-icon="markdown"',
+    )
+    expect(render('[config](a.yaml)')).toContain('--md-link-image:')
+    expect(render('[config](a.yaml)')).toContain('data-md-color="true"')
+    expect(render('[README](README.md)')).toContain('--md-link-ico:')
+  })
   it('marks http(s) links as web chips with safe-open attrs', () => {
     const html = render('[t](https://example.com/p)')
     expect(html).toContain('class="md-link-chip"')
@@ -102,11 +153,14 @@ describe('link chips', () => {
     expect(html).toContain('data-md-link="web"')
   })
 
-  it('truncates very long autolinked URLs', () => {
-    const html = render(
-      'https://example.com/very/long/path/that/goes/on/and/on/and/on/forever/xyz',
+  it('keeps long URLs, queries and fragments complete', () => {
+    const url =
+      'https://example.com/very/long/path/that/goes/on/and/on/and/on/forever/xyz?view=full#section'
+    const html = render(url)
+    expect(html).toContain(
+      `>example.com${url.slice('https://example.com'.length)}</a>`,
     )
-    expect(html).toContain('…</a>')
+    expect(html).not.toContain('…</a>')
   })
 
   it('does not chip links inside code spans', () => {
@@ -169,7 +223,15 @@ describe('classifyMdLink', () => {
     expect(classifyMdLink('#anchor')).toBeNull()
     expect(classifyMdLink('relative/path.md')).toBe('file')
     expect(classifyMdLink('./src/main.ts#L42')).toBe('file')
+    expect(classifyMdLink('README.md:12:3')).toBe('file')
+    expect(classifyMdLink('javascript:12')).toBeNull()
   })
+})
+
+it('keeps CJK punctuation outside automatically linked URLs', () => {
+  const html = render('参考 https://example.com/guide，再看说明。')
+  expect(html).toContain('href="https://example.com/guide"')
+  expect(html).toContain('</a>，再看说明。')
 })
 
 describe('hrefToFilePath', () => {

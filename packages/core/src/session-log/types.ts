@@ -44,8 +44,15 @@ export interface SessionHeader {
   readonly cwd?: string
   /** Parent session for forks and subagents. */
   readonly parentSession?: string
-  /** Number of events copied from the parent as this session's seed. */
+  /** Number of the parent's events this session starts from (its seed). */
   readonly seedLength?: number
+  /**
+   * A fork child written since KRN-12 keeps its seed out of its own log: it
+   * is the parent's first `seedLength` events, the last of which has this
+   * type and time (checked when the child is opened). Without it the seed
+   * is copied into the log (older children).
+   */
+  readonly seedRef?: { readonly lastType: string; readonly lastTime: number }
   readonly origin?: 'subagent'
   readonly delegationDepth?: number
 }
@@ -64,6 +71,26 @@ export type TurnEndReason =
   | { kind: 'max-tokens' }
   /** Closed by crash repair: the process died inside this turn. */
   | { kind: 'interrupted' }
+  /** The user dismissed the plan review to reply; the turn ends without another request. */
+  | { kind: 'plan-dismissed' }
+  /** The task budget stopped the turn before its next step (KRN-03). */
+  | TurnBudgetReason
+
+/**
+ * Which budget ended a turn (KRN-03): its steps (`maxSteps`, the limit that
+ * applied), or the task's priced spend over the root and every subagent,
+ * failed attempts included (`unpricedRoutes`: usage that could not be
+ * priced, so the cap could not be kept).
+ */
+export type TurnBudgetReason =
+  | { kind: 'budget'; limit: 'steps'; maxSteps: number }
+  | {
+      kind: 'budget'
+      limit: 'cost'
+      capUsdNanos: number
+      spentUsdNanos: number
+      unpricedRoutes?: string[]
+    }
 
 export interface TodoItem {
   content: string
@@ -85,6 +112,16 @@ export interface RequestContext {
 }
 
 export type RequestHeaderReason = 'initial' | 'resume' | 'change'
+
+/** Why an image left the requests: `request-bytes` = over the route's inline image budget. */
+export type ImageOffloadReason = 'request-bytes'
+
+/**
+ * Why a session's working directory moved: it entered or left a managed
+ * worktree, or its binding changed while it was not open (`worktree-resync`).
+ */
+export type WorkingDirectoryChangeReason =
+  'worktree-enter' | 'worktree-exit' | 'worktree-resync'
 
 /** Core event payloads; domains merge more entries in. */
 export interface SessionEventMap {
@@ -118,6 +155,21 @@ export interface SessionEventMap {
   'todo/write': { todos: TodoItem[] }
   'request/header': { header: EpochHeader; reason: RequestHeaderReason }
   'request/context': RequestContext
+  /**
+   * The images of surface node `seq` are sent as a placeholder from now on,
+   * whatever route serves later requests (KRN-05, DSH-13).
+   */
+  'image/offload': { seq: number; reason: ImageOffloadReason }
+  /**
+   * Where the session's tools work from now on (KRN-11): a managed worktree
+   * it entered, or back to the checkout it left. Last one wins over the
+   * header's `cwd`.
+   */
+  'working-directory/change': {
+    from: string
+    to: string
+    reason: WorkingDirectoryChangeReason
+  }
   /** Marks where a fork's copied seed ends. */
   'session/end-seed': Record<string, never>
 }

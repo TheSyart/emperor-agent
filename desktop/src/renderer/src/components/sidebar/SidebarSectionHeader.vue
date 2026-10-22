@@ -30,34 +30,44 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
   align-items: center;
   justify-content: space-between;
   gap: var(--space-1);
-  height: 36px;
+  height: var(--space-7);
   padding-left: var(--space-1);
-  background: rgb(var(--sidebar-fill));
+  background: rgb(var(--surface-canvas));
 }
 
 .section-label {
   padding: 0 var(--space-1);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
 .section-label:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .section-label[aria-expanded='false'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
+/* Trailing actions (+, ⋯) only while the header is hovered or focused, or
+   their menu is open (UI-S11). */
 .section-actions {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+
+.section-header:hover .section-actions,
+.section-header:focus-within .section-actions,
+.section-actions:has([aria-expanded='true']) {
+  opacity: 1;
 }
 </style>

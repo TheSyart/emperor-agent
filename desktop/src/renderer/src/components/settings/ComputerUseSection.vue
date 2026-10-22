@@ -27,6 +27,7 @@
  * refreshes on the host's `computer_use_changed` events. Switching off
  * never waits on a pending card (Core does not guard it).
  */
+import { confirm } from '../ui/confirm'
 import type { ComputerUseStatusView } from '@emperor/core/runtime-contract'
 import type {
   MacHelperPermission,
@@ -41,23 +42,19 @@ import {
   macHelperStatus,
   onCoreEvent,
 } from '../../api/backend'
-import { core } from '../../api/http'
+import { core, withCoreDeadline } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import Button from '../ui/Button.vue'
 import {
   SettingsCard,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
 } from './ui'
-import {
-  refreshAction,
-  useSettingsHeader,
-  useSettingsPages,
-} from './settingsHeader'
+import { useSettingsPages } from './settingsHeader'
 import {
   computerUseHeadline,
   desktopNotice,
@@ -78,6 +75,8 @@ const { page, open: openPage } = useSettingsPages({
 const status = ref<ComputerUseStatusView | null>(null)
 const loaded = ref(false)
 const busy = ref(false)
+/** The master switch's own request; other actions never block it. */
+const switching = ref(false)
 const error = ref('')
 const helper = ref<MacHelperStatus | null>(null)
 
@@ -168,9 +167,22 @@ async function refreshHelper(): Promise<void> {
   }
 }
 
+/**
+ * One reload at a time; asking again while one runs reads once more after
+ * it, so a change made meanwhile is never answered by a read that started
+ * before it (FIX-08).
+ */
 async function reload(): Promise<void> {
-  if (reloading !== null) return reloading
-  reloading = loadStatus()
+  if (reloading !== null) {
+    reloadAgain = true
+    return reloading
+  }
+  reloading = (async () => {
+    do {
+      reloadAgain = false
+      await loadStatus()
+    } while (reloadAgain)
+  })()
   try {
     await reloading
   } finally {
@@ -179,10 +191,15 @@ async function reload(): Promise<void> {
 }
 
 let reloading: Promise<void> | null = null
+let reloadAgain = false
+/** Bumped by every status a switch brings back: older reads are stale. */
+let statusSeq = 0
 
 async function loadStatus(): Promise<void> {
   try {
-    status.value = await core('computerUse.status')
+    const seq = statusSeq
+    const next = await core('computerUse.status')
+    if (seq === statusSeq) status.value = next
     await refreshHelper()
     error.value = ''
   } catch (cause) {
@@ -192,12 +209,14 @@ async function loadStatus(): Promise<void> {
   }
 }
 
+// Every action gives up after 30 s (a stuck Helper or IPC), so the page
+// never stays disabled; the error names the timeout.
 async function act(task: () => Promise<unknown>): Promise<void> {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
-    await task()
+    await withCoreDeadline(task())
     await reload()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -206,9 +225,25 @@ async function act(task: () => Promise<unknown>): Promise<void> {
   }
 }
 
-function setEnabled(next: boolean): void {
-  if (next === enabled.value) return
-  void act(() => core('computerUse.setEnabled', next))
+// The master switch is the emergency stop: it works while another action
+// (重新连接, a permission request) is still waiting. It shows the state Core
+// answers at once; the Helper's status follows (FIX-08: it may take seconds).
+async function setEnabled(next: boolean): Promise<void> {
+  if (next === enabled.value || switching.value) return
+  switching.value = true
+  error.value = ''
+  try {
+    const answered = await withCoreDeadline(
+      core('computerUse.setEnabled', next),
+    )
+    statusSeq += 1
+    status.value = answered
+    void reload()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    switching.value = false
+  }
 }
 
 function setDriverEnabled(
@@ -224,11 +259,14 @@ function acknowledgeRetiredApps(): void {
   void act(() => core('computerUse.acknowledgeRetiredApps'))
 }
 
-function clearScreenshots(): void {
+async function clearScreenshots(): Promise<void> {
   if (
-    !window.confirm(
-      '删除电脑操作保存的全部截图？对话记录里的截图将显示为「附件已清除」。',
-    )
+    !(await confirm({
+      title: '删除全部截图？',
+      body: '删除电脑操作保存的全部截图。对话记录里的截图将显示为「附件已清除」。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
   )
     return
   void act(() => core('computerUse.clearScreenshots', {}))
@@ -258,14 +296,17 @@ const PERMISSION_LABELS: Record<MacHelperPermission, string> = {
   'screen-recording': '屏幕录制',
 }
 
-function resetPermissions(): void {
+async function resetPermissions(): Promise<void> {
   const targets = resettable.value
   if (targets.length === 0) return
   const labels = targets.map((item) => PERMISSION_LABELS[item]).join('和')
   if (
-    !window.confirm(
-      `重置 Emperor Computer Helper 的${labels}授权并登记当前版本？之后需要在系统设置里重新打开开关。`,
-    )
+    !(await confirm({
+      title: `重置${labels}授权？`,
+      body: `重置 Emperor Computer Helper 的${labels}授权并登记当前版本。之后需要在系统设置里重新打开开关。`,
+      confirmLabel: '重置',
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {
@@ -285,8 +326,8 @@ function refreshOnReturn(): void {
     void ctx.runSafely(reload)
 }
 
-useSettingsHeader({ actions: () => [refreshAction(() => reload())] })
-
+// No header refresh: the page reloads on computer_use_changed and when the
+// window comes back from System Settings.
 let unsubscribe = () => {}
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -321,13 +362,13 @@ onBeforeUnmount(() => {
   <SettingsSection>
     <template v-if="page === null">
       <div v-if="anyNotice" class="cu-notices">
-        <SettingsNotice
+        <Notice
           v-if="error"
           tone="error"
           title="操作没有完成"
           :description="error"
         />
-        <SettingsNotice
+        <Notice
           v-if="retiredApps.length"
           tone="info"
           title="这些应用现在也可以由 Emperor 操作"
@@ -341,21 +382,21 @@ onBeforeUnmount(() => {
           <template #actions>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               @click="acknowledgeRetiredApps"
               >知道了</Button
             >
           </template>
-        </SettingsNotice>
-        <SettingsNotice
+        </Notice>
+        <Notice
           v-if="scopedRetired"
           tone="info"
           title="电脑操作已关闭"
           description="电脑操作改为由 AI 连续操作，不再逐项授权。你之前选择的「逐项授权」已停用；确认后重新打开即可。"
           data-testid="computer-use-scoped-retired"
         />
-        <SettingsNotice
+        <Notice
           v-if="notice"
           :title="notice.title"
           :description="notice.description"
@@ -377,7 +418,7 @@ onBeforeUnmount(() => {
             <Button
               v-if="notice.restart"
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               data-testid="mac-helper-restart"
               @click="reconnectHelper"
@@ -393,7 +434,7 @@ onBeforeUnmount(() => {
               >重新连接</Button
             >
           </template>
-        </SettingsNotice>
+        </Notice>
       </div>
 
       <SettingsCard
@@ -404,18 +445,18 @@ onBeforeUnmount(() => {
       >
         <template #leading><MousePointerClick :size="18" /></template>
         <template v-if="cardBadge" #meta>
-          <StatusBadge
+          <Badge
             :tone="cardBadge.tone"
-            dot
+            variant="dot-label"
             data-testid="computer-use-status"
-            >{{ cardBadge.text }}</StatusBadge
+            >{{ cardBadge.text }}</Badge
           >
         </template>
         <template #actions>
           <Switch
             id="computer-use-enabled"
             :model-value="enabled"
-            :disabled="busy || !supported"
+            :disabled="switching || !supported"
             aria-label="电脑操作"
             @update:model-value="setEnabled"
           />
@@ -429,9 +470,7 @@ onBeforeUnmount(() => {
           data-driver="desktop"
         >
           <template v-if="desktopRow.stage !== '可用'" #badge>
-            <StatusBadge :tone="desktopRow.tone">{{
-              desktopRow.stage
-            }}</StatusBadge>
+            <Badge :tone="desktopRow.tone">{{ desktopRow.stage }}</Badge>
           </template>
           <template #description>
             <span :class="{ 'cu-warn': desktopText.warn }">{{
@@ -452,9 +491,7 @@ onBeforeUnmount(() => {
           data-driver="external-browser"
         >
           <template v-if="chromeRow.stage !== '可用'" #badge>
-            <StatusBadge :tone="chromeRow.tone">{{
-              chromeRow.stage
-            }}</StatusBadge>
+            <Badge :tone="chromeRow.tone">{{ chromeRow.stage }}</Badge>
           </template>
           <template #description>
             <span data-testid="browser-pairing-summary">{{
@@ -464,7 +501,7 @@ onBeforeUnmount(() => {
           <div class="cu-control">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-testid="browser-pairing-manage"
               @click="openPage('chrome')"
               >管理</Button
@@ -501,9 +538,11 @@ onBeforeUnmount(() => {
           :description="row.description"
           :data-permission="row.id"
         >
-          <StatusBadge :tone="row.tone" :dot="row.tone === 'ok'">{{
-            row.badge
-          }}</StatusBadge>
+          <Badge
+            :tone="row.tone"
+            :variant="row.tone === 'ok' ? 'dot-label' : 'soft'"
+            >{{ row.badge }}</Badge
+          >
         </SettingsRow>
       </SettingsGroup>
 
@@ -514,7 +553,7 @@ onBeforeUnmount(() => {
         >
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy || screenshots.empty"
             data-testid="computer-use-clear-screenshots"
             @click="clearScreenshots"
@@ -564,12 +603,12 @@ onBeforeUnmount(() => {
   display: inline-block;
   margin: var(--space-1) var(--space-1) 0 0;
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--settings-card-control-fill));
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 </style>

@@ -21,7 +21,7 @@ export interface ProviderGroup {
   entries: ModelEntry[]
 }
 
-export type ProviderCredentialState = 'ok' | 'missing' | 'keyless'
+export type ProviderCredentialState = 'ok' | 'missing' | 'keyless' | 'reentry'
 
 export interface ProviderSection {
   region: ProviderRegion
@@ -98,12 +98,15 @@ export function credentialSourceEntry(
 }
 
 /**
- * `keyless` = a local server that needs no key and none is saved; `missing`
- * = at least one entry of a keyed provider has no saved key.
+ * `reentry` = a saved key can no longer be opened (SEC-06) and must be typed
+ * again; `keyless` = a local server that needs no key and none is saved;
+ * `missing` = at least one entry of a keyed provider has no saved key.
  */
 export function providerCredentialState(
   group: Pick<ProviderGroup, 'entries' | 'option'>,
 ): ProviderCredentialState {
+  if (group.entries.some((entry) => entry.credentialState === 'needs_reentry'))
+    return 'reentry'
   const withKey = group.entries.filter((entry) => Boolean(entry.apiKey)).length
   if (withKey === group.entries.length) return 'ok'
   if (group.option?.isLocal && withKey === 0) return 'keyless'

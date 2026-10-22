@@ -226,21 +226,21 @@ defineExpose({ toggleSidebar, columns })
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background: rgb(var(--bg-base));
-  transition: grid-template-columns var(--duration-ds-slow) var(--ease-in-out);
+  background: rgb(var(--surface-base));
 }
 
 .app-frame[data-dragging] {
-  transition: none;
   cursor: col-resize;
   user-select: none;
 }
 
+/* Flat columns (UI-S11): the sidebar sits on the canvas, the rest on the
+   base surface, one hairline between them. */
 .sidebar-col {
   min-width: 0;
   overflow: hidden;
-  border-right: 1px solid var(--border-l1);
-  background: rgb(var(--sidebar-fill));
+  border-right: 0.5px solid var(--stroke-1);
+  background: rgb(var(--surface-canvas));
 }
 
 .center-col {
@@ -254,7 +254,7 @@ defineExpose({ toggleSidebar, columns })
 .workspace-col {
   min-width: 0;
   overflow: hidden;
-  border-left: 1px solid var(--border-l2);
+  border-left: 0.5px solid var(--stroke-1);
 }
 
 .app-frame[data-workspace-collapsed] .workspace-col {
@@ -281,12 +281,12 @@ defineExpose({ toggleSidebar, columns })
   box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-8);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   opacity: 0;
   transform: translate(-50%, -50%);
-  transition: opacity var(--duration-ds-slow) var(--ease-in-out);
+  transition: opacity var(--motion-slow) var(--ease-standard);
 }
 
 .workspace-col:hover ~ .handle[data-side='workspace']::after,

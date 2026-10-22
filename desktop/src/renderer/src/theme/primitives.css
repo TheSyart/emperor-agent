@@ -1,0 +1,151 @@
+/* ── L1 primitives (DS-01) ──
+   Theme-agnostic raw values: the ink / paper / gold palette, the raw
+   shadows, and every size, radius, type, spacing, z-index and motion
+   scale. Only L2 (semantic.*.css) may reference colour primitives;
+   components use L2/L3 (style-audit enforces it). Colours are RGB triplets
+   for rgb(var(--x) / alpha). */
+:root {
+  --shadow-lv1: 0 2px 4px 0 rgb(0 0 0 / 0.05);
+  --shadow-lv2: 0 4px 12px 0 rgb(0 0 0 / 0.02), 0 2px 8px 0 rgb(0 0 0 / 0.04);
+  --shadow-lv3:
+    0 0 1px 0 rgb(0 0 0 / 0.2), 0 0 4px 0 rgb(0 0 0 / 0.02),
+    0 12px 32px 0 rgb(0 0 0 / 0.08);
+  --radius-row: 8px;
+  --radius-cell: 10px;
+  --radius-card: 12px;
+  --radius-takeover: 20px;
+  --radius-composer: 22px;
+  --radius-modal: 24px;
+  --radius-pill: 999px;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial,
+    sans-serif;
+  --font-mono:
+    'SF Mono', 'JetBrains Mono', ui-monospace, 'Fira Code', Consolas,
+    'Liberation Mono', Menlo, 'PingFang SC', 'Microsoft YaHei';
+  --fs-xxxs: 11px;
+  --lh-xxxs: 14px;
+  --fs-xxs: 12px;
+  --lh-xxs: 18px;
+  --fs-xs: 13px;
+  --lh-xs: 20px;
+  --fs-s: 14px;
+  --lh-s: 22px;
+  --fs-base: 16px;
+  --lh-base: 24px;
+  --fs-md: 16px;
+  --lh-md: 28px;
+  --fs-hero: 20px;
+  --lh-hero: 28px;
+  --fs-code: 13px;
+  --lh-code: 22px;
+  --font-xxxs: var(--fs-xxxs) / var(--lh-xxxs) var(--font-sans);
+  --font-xxs: var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
+  --font-xs: var(--fs-xs) / var(--lh-xs) var(--font-sans);
+  --font-s: var(--fs-s) / var(--lh-s) var(--font-sans);
+  --font-base: var(--fs-base) / var(--lh-base) var(--font-sans);
+  --font-md: var(--fs-md) / var(--lh-md) var(--font-sans);
+  --font-code: var(--fs-code) / var(--lh-code) var(--font-mono);
+  --font-code-small: var(--fs-xxs) / var(--lh-xxs) var(--font-mono);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-0-5: 2px;
+  --space-1-5: 6px;
+  --space-2-5: 10px;
+  --space-3-5: 14px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-overlay: 40;
+  --z-drawer: 60;
+  --z-popover: 80;
+  --z-toast: 100;
+  --z-modal: 120;
+  --z-menu: 140;
+  --z-lightbox: 160;
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration: 220ms;
+  --duration-slow: 340ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.2, 0.64, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+  --tracking-tight: -0.02em;
+  --tracking-body: 0;
+  --leading-tight: 1.25;
+  --leading-body: 1.45;
+  --leading-caption: 1.3;
+
+  /* ── Target palette (DS-01 phase 2 points L2 here) ── */
+  --ink-0: 15 15 14;
+  --ink-50: 20 20 19;
+  --ink-100: 26 26 25;
+  --ink-150: 33 33 32;
+  --ink-200: 40 40 38;
+  --ink-250: 48 48 46;
+  --ink-300: 58 58 55;
+  --ink-400: 82 81 77;
+  --ink-500: 107 105 100;
+  --ink-600: 138 135 128;
+  --ink-700: 168 166 161;
+  --ink-800: 207 205 200;
+  --ink-900: 236 236 234;
+  --ink-1000: 250 250 249;
+  --paper-0: 255 255 255;
+  --paper-50: 246 245 242;
+  --paper-100: 239 238 234;
+  --paper-150: 231 229 224;
+  --gold-300: 230 200 142;
+  --gold-400: 221 184 120;
+  --gold-500: 212 170 94;
+  --gold-600: 184 135 58;
+  --gold-700: 156 111 36;
+  --gold-800: 142 100 32;
+
+  /* ── Target scales ── */
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-full: 999px;
+  --control-xs: 20px;
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 40px;
+  --row-h: 32px;
+  --row-h-lg: 52px;
+  --icon-xs: 12px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-stroke: 1.5;
+  --type-caption: 12px / 18px;
+  --type-footnote: 13px / 20px;
+  --type-body-sm: 14px / 22px;
+  --type-body: 15px / 26px;
+  --type-title-sm: 16px / 24px;
+  --type-title: 20px / 28px;
+  --type-display: 28px / 36px;
+  --md-h1: 20px / 30px;
+  --md-h2: 18px / 28px;
+  --md-h3: 16px / 26px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --content-chat: 760px;
+  --content-page: 880px;
+  --content-form: 640px;
+}

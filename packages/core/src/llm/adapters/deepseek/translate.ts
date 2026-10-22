@@ -8,7 +8,7 @@
  * @module dsh-llm-deepseek/translate
  */
 
-import { EMPTY_RESPONSE_CODE, LlmError } from '../../error'
+import { EMPTY_RESPONSE_CODE, httpErrorCode, LlmError } from '../../error'
 import type {
   ContentBlock,
   FinishReason,
@@ -16,16 +16,31 @@ import type {
   TokenUsage,
 } from '../../types'
 import { DONE } from './sse'
-import type { WireChunk, WireUsage } from './types'
+import type { WireChunk, WireError, WireUsage } from './types'
 
 /** One open block under assembly. */
 interface OpenBlock {
   index: number
   kind: 'text' | 'reasoning' | 'tool-call'
   text: string
-  /** tool-call only */
+  /** tool-call only; absent until a delta carries a non-empty value. */
   callId?: string
   name?: string
+}
+
+/**
+ * Accept one streamed identity field of a tool call. `id` and `name` are
+ * identity, not accumulation: the wire sends each on the call's first delta.
+ * A continuation delta that repeats the field empty, or `null` (as some
+ * OpenAI-compatible gateways do), means "unchanged", never "clear".
+ */
+function acceptIdentity(
+  current: string | undefined,
+  incoming: unknown,
+): string | undefined {
+  return typeof incoming === 'string' && incoming.length > 0
+    ? incoming
+    : current
 }
 
 /**
@@ -33,6 +48,24 @@ interface OpenBlock {
  * @param reason - the wire `finish_reason` string.
  * @returns the mapped reason; unrecognized values (content_filter, …) become `{kind: 'error'}` with the uppercased value as `code`.
  */
+/** An error object inside the stream, classified like the same HTTP error. */
+function inStreamError(error: NonNullable<WireError['error']>): LlmError {
+  const detail = [error.code, error.type, error.message]
+    .filter((field): field is string => typeof field === 'string')
+    .join(' ')
+  const status = /rate.?limit|too many requests/i.test(detail)
+    ? 429
+    : /auth|api.?key|permission|unauthori[sz]ed/i.test(detail)
+      ? 401
+      : /invalid.?request|context|too long|max.*tokens/i.test(detail)
+        ? 400
+        : 500
+  return new LlmError(
+    error.message || 'DeepSeek stream returned an error',
+    httpErrorCode(status, detail),
+  )
+}
+
 export function mapFinishReason(reason: string): FinishReason {
   switch (reason) {
     case 'stop':
@@ -153,6 +186,11 @@ export async function* translate(
       )
     }
 
+    // A provider can end a stream with an error object instead of a chunk
+    // (KRN-13): it ends the request with that error.
+    const streamError = (chunk as WireError).error
+    if (streamError) throw inStreamError(streamError)
+
     for (const choice of chunk.choices ?? []) {
       const delta = choice.delta
 
@@ -201,8 +239,8 @@ export async function* translate(
             blockType: 'tool-call',
           }
         }
-        if (call.id !== undefined) block.callId = call.id
-        if (call.function?.name !== undefined) block.name = call.function.name
+        block.callId = acceptIdentity(block.callId, call.id)
+        block.name = acceptIdentity(block.name, call.function?.name)
         const fragment = call.function?.arguments ?? ''
         block.text += fragment
         yield {

@@ -13,6 +13,8 @@
  * Emits: record-select(index) (direct row selection), clear (whitespace
  * click: clears selection and the timeline range).
  */
+import EmptyState from '../ui/EmptyState.vue'
+import Spinner from '../ui/Spinner.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // @ts-expect-error vue-virtual-scroller v2 beta 无类型声明（见 shims）
 import { RecycleScroller } from 'vue-virtual-scroller'
@@ -439,7 +441,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
       class="pane"
       role="grid"
       tabindex="0"
-      aria-label="Trajectory ledger"
+      aria-label="轨迹记录"
       :aria-rowcount="layout.rows.length"
       :aria-activedescendant="
         focusPosition >= 0 ? `traj-row-${focusPosition}` : undefined
@@ -461,11 +463,9 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
         aria-live="polite"
       >
         <span v-if="openState === 'error'" class="error-text">{{
-          controller.windowState.value.error ?? 'Failed to load trajectory'
+          controller.windowState.value.error ?? '轨迹加载失败'
         }}</span>
-        <template v-else>
-          <span class="spinner" aria-hidden="true" />Loading trajectory…
-        </template>
+        <template v-else> <Spinner size="sm" />正在加载轨迹… </template>
       </div>
       <div v-if="hasMore" class="history-row" data-history-load>
         <button
@@ -474,15 +474,14 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
           :disabled="loadingOlder"
           @click.stop="loadOlder"
         >
-          <span v-if="loadingOlder" class="spinner" aria-hidden="true" />
-          {{
-            loadingOlder ? 'Loading earlier history…' : 'Load earlier history'
-          }}
+          <Spinner v-if="loadingOlder" size="sm" />
+          {{ loadingOlder ? '正在加载更早的记录…' : '加载更早的记录' }}
         </button>
       </div>
-      <p v-if="openState === 'open' && layout.rows.length === 0" class="empty">
-        No trajectory records yet
-      </p>
+      <EmptyState
+        v-if="openState === 'open' && layout.rows.length === 0"
+        title="还没有轨迹记录"
+      />
       <RecycleScroller
         v-if="virtual"
         class="list"
@@ -565,8 +564,8 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 .traj-table {
   --traj-turn-accent: color-mix(
     in srgb,
-    rgb(var(--accent-fill)) 22%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--accent)) 22%,
+    rgb(var(--surface-base))
   );
 
   position: relative;
@@ -576,7 +575,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   container: trajectory-table / inline-size;
 }
 
@@ -605,19 +604,19 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   justify-content: center;
   gap: var(--space-1-5);
   height: 30px;
-  border-bottom: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-secondary));
+  border-bottom: 1px solid var(--stroke-2);
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
 }
 
 .error-text {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .history-row {
   height: 30px;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .history-button {
@@ -628,43 +627,19 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   width: 100%;
   height: 29px;
   border: 0;
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-2));
   cursor: pointer;
   font: var(--font-xxs);
 }
 
 .history-button:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .history-button:disabled {
   cursor: default;
-}
-
-.spinner {
-  width: 10px;
-  height: 10px;
-  box-sizing: border-box;
-  border: 1.5px solid var(--border-l2);
-  border-top-color: rgb(var(--accent-fill));
-  border-radius: 50%;
-  animation: traj-spin 700ms linear infinite;
-}
-
-@keyframes traj-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-6) var(--space-4);
-  color: rgb(var(--label-tertiary));
-  font: var(--font-xs);
-  text-align: center;
 }
 
 .terminal-row {

@@ -7,6 +7,8 @@ import type { TrajectoryTurnModel } from './layout'
 import { trajectoryPreviewText } from './preview'
 import type { TrajectoryCellKind, TrajectoryCellProps } from './record'
 import { trajectoryRecordId } from './record'
+
+const STEP_TITLE = /^第 (\d+) 步$/
 import { trajectoryRequestKey, type TrajectoryRequestNumber } from './requests'
 
 /** One ledger row (a record, or a synthetic folded summary). */
@@ -48,8 +50,8 @@ export interface TrajectoryDetailTabItem {
 }
 
 const SYSTEM_PROMPT_TABS: readonly TrajectoryDetailTabItem[] = [
-  { id: 'system-prompt', label: 'System Prompt' },
-  { id: 'tools', label: 'Tools' },
+  { id: 'system-prompt', label: '系统提示词' },
+  { id: 'tools', label: '工具' },
 ]
 const SYSTEM_UPDATE_TABS: readonly TrajectoryDetailTabItem[] = [
   ...SYSTEM_PROMPT_TABS,
@@ -58,10 +60,10 @@ const SYSTEM_UPDATE_TABS: readonly TrajectoryDetailTabItem[] = [
 
 /** Inspector tabs of a selected request. */
 export const TRAJECTORY_REQUEST_TABS: readonly TrajectoryDetailTabItem[] = [
-  { id: 'overview', label: 'Summary' },
-  { id: 'options', label: 'Options' },
-  { id: 'usage', label: 'Usage' },
-  { id: 'timing', label: 'Timing' },
+  { id: 'overview', label: '摘要' },
+  { id: 'options', label: '选项' },
+  { id: 'usage', label: '用量' },
+  { id: 'timing', label: '计时' },
 ]
 
 /** Flatten the layout into ledger rows with group/turn boundaries. */
@@ -129,16 +131,15 @@ export function filterTrajectoryRecords(
   return filtered
 }
 
-/** Step number of a `Step N` group title. */
+/** Step number of a step group title (`trajectoryStepTitle`). */
 export function trajectoryRequestStep(group: string): number | undefined {
-  if (!group.startsWith('Step ')) return undefined
-  const value = Number(group.slice('Step '.length))
+  const value = Number(STEP_TITLE.exec(group)?.[1])
   return Number.isInteger(value) && value > 0 ? value : undefined
 }
 
-/** Section label of a turn (`Turn N` / `Between turns`). */
+/** Section label of a turn (`第 N 轮` / `轮次之间`). */
 export function trajectorySectionLabel(turn: number | null): string {
-  return turn === null ? 'Between turns' : `Turn ${turn}`
+  return turn === null ? '轮次之间' : `第 ${turn} 轮`
 }
 
 /**
@@ -220,15 +221,12 @@ function summarizeTurn(records: readonly TrajectoryLedgerRecord[]): string {
   const steps = new Set(
     records
       .map((record) => record.group)
-      .filter((group) => group.startsWith('Step ')),
+      .filter((group) => trajectoryRequestStep(group) !== undefined),
   ).size
   const toolCalls = records.filter(
     (record) => record.cell.kind === 'tool' || record.cell.kind === 'subtool',
   ).length
-  return [
-    `${steps} ${steps === 1 ? 'step' : 'steps'}`,
-    `${toolCalls} tool ${toolCalls === 1 ? 'call' : 'calls'}`,
-  ].join(' · ')
+  return `${steps} 步 · ${toolCalls} 次工具调用`
 }
 
 /** Fold collapsed turns into their first record plus a summary row. */
@@ -302,7 +300,7 @@ function summarizeAssistantTools(
     ),
   ]
   const count = records.length
-  const summary = `${count} tool ${count === 1 ? 'call' : 'calls'}`
+  const summary = `${count} 次工具调用`
   return names.length > 0 ? `${summary} · ${names.join(', ')}` : summary
 }
 
@@ -392,29 +390,29 @@ export function trajectoryRecordState(
 
 /** Status label of a record state. */
 export function trajectoryStatusLabel(state: TrajectoryRecordState): string {
-  if (state === 'error') return 'Failed'
-  if (state === 'running') return 'Pending'
-  return 'Completed'
+  if (state === 'error') return '失败'
+  if (state === 'running') return '进行中'
+  return '已完成'
 }
 
 /** Human label of a message / context source. */
 export function trajectoryMessageSourceLabel(source: unknown): string {
   if (typeof source !== 'object' || source === null || Array.isArray(source))
-    return 'Unknown'
+    return '未知'
   const properties = source as Record<string, unknown>
   const kind = properties.kind
-  if (kind === 'user') return 'User'
+  if (kind === 'user') return '用户'
   if (kind === 'context') {
     const producer = properties.producer
     return typeof producer === 'string' && producer !== ''
-      ? `Context · ${producer}`
-      : 'Context'
+      ? `上下文 · ${producer}`
+      : '上下文'
   }
   if (kind === 'event') {
     const type = properties.type
-    return typeof type === 'string' && type !== '' ? `Event · ${type}` : 'Event'
+    return typeof type === 'string' && type !== '' ? `事件 · ${type}` : '事件'
   }
-  if (typeof kind !== 'string' || kind === '') return 'Unknown'
+  if (typeof kind !== 'string' || kind === '') return '未知'
   return `${kind[0]?.toUpperCase() ?? ''}${kind.slice(1)}`
 }
 
@@ -537,23 +535,23 @@ export function trajectoryDetailTabs(
       : SYSTEM_UPDATE_TABS
   if (cell.kind === 'compacted')
     return [
-      { id: 'overview', label: 'Summary' },
-      { id: 'raw', label: 'Raw' },
+      { id: 'overview', label: '摘要' },
+      { id: 'raw', label: '原始' },
     ]
   if (isTrajectoryMarkdownRecord(cell))
     return [
-      { id: 'overview', label: 'Summary' },
-      { id: 'rendered', label: 'Preview' },
-      { id: 'raw', label: 'Raw' },
+      { id: 'overview', label: '摘要' },
+      { id: 'rendered', label: '预览' },
+      { id: 'raw', label: '原始' },
       ...(cell.messageSource === undefined
         ? []
-        : [{ id: 'source', label: 'Source' } as const]),
+        : [{ id: 'source', label: '来源' } as const]),
     ]
   return [
-    { id: 'overview', label: 'Summary' },
-    ...(cell.inputDetail ? [{ id: 'input', label: 'Payload' } as const] : []),
-    ...(cell.outputDetail ? [{ id: 'output', label: 'Result' } as const] : []),
-    { id: 'schema', label: 'Schema' },
-    { id: 'timing', label: 'Timing' },
+    { id: 'overview', label: '摘要' },
+    ...(cell.inputDetail ? [{ id: 'input', label: '载荷' } as const] : []),
+    ...(cell.outputDetail ? [{ id: 'output', label: '结果' } as const] : []),
+    { id: 'schema', label: '参数结构' },
+    { id: 'timing', label: '计时' },
   ]
 }

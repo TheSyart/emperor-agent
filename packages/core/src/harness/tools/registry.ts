@@ -26,6 +26,7 @@ import {
   type ToolDefinition,
   type ToolExecutionResult,
   type ToolRunContext,
+  type ToolTurnConclusion,
 } from './definition'
 
 export type PreToolDecision =
@@ -67,6 +68,9 @@ export type ToolResultObserver = (
   call: ToolCallInfo,
   result: ToolExecutionResult,
 ) => void
+export interface WorkspaceAccessLeaseProvider {
+  acquire(call: ToolCallInfo): Promise<{ release(): void } | undefined>
+}
 export type ApprovalOutcome =
   'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 export type ApprovalHandler = (request: {
@@ -108,7 +112,36 @@ interface CallState {
   definition: ToolDefinition | undefined
   deferred: UserMessage[]
   concludes: boolean
+  conclusion?: ToolTurnConclusion
   bodyInvoked: boolean
+}
+
+/**
+ * Settle with `body`, or reject with the signal's reason as soon as it
+ * aborts. The body keeps running (its lease stays held until it settles);
+ * the listener is removed once either side wins.
+ */
+function raceAbort<T>(body: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    body.catch(() => undefined)
+    return Promise.reject(signal.reason as Error)
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason as Error)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    body.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error as Error)
+      },
+    )
+  })
 }
 
 export class ToolRegistry {
@@ -124,6 +157,12 @@ export class ToolRegistry {
   readonly guards: ToolGuard[] = []
   readonly observers: ToolResultObserver[] = []
   private approval: ApprovalHandler | undefined
+  private executionLeases: WorkspaceAccessLeaseProvider | undefined
+  setWorkspaceAccessLeaseProvider(
+    provider: WorkspaceAccessLeaseProvider | undefined,
+  ): void {
+    this.executionLeases = provider
+  }
   private readonly states = new WeakMap<ToolRunContext, CallState>()
 
   /**
@@ -189,7 +228,8 @@ export class ToolRegistry {
         const definition = this.tools.get(name)!
         return {
           name,
-          description: definition.description,
+          description:
+            definition.descriptionFor?.(agent) ?? definition.description,
           parameters:
             definition.parametersFor?.(agent) ?? definition.parameters,
         }
@@ -259,8 +299,9 @@ export class ToolRegistry {
         deferContext: (message: UserMessage) => {
           state.deferred.push(message)
         },
-        concludeTurn: () => {
+        concludeTurn: (reason?: ToolTurnConclusion) => {
           state.concludes = true
+          if (reason !== undefined) state.conclusion = reason
         },
       }
       this.states.set(context, state)
@@ -369,7 +410,7 @@ export class ToolRegistry {
     }
   }
 
-  /** Stage 2: run the body under the caller signal and the tool timeout. */
+  /** Stage 2: run the body under the caller signal (always raced) and the tool timeout. */
   async dispatch(context: ToolRunContext): Promise<ToolExecutionResult> {
     const state = this.states.get(context)
     const definition = state?.definition
@@ -380,27 +421,41 @@ export class ToolRegistry {
       definition.timeoutMs === undefined
         ? undefined
         : deadline(context.signal, definition.timeoutMs, TOOL_TIMEOUT)
-    const bodyContext: ToolRunContext =
+    let bodyContext: ToolRunContext =
       limit === undefined ? context : { ...context, signal: limit.signal }
     this.states.set(bodyContext, state)
+    let releaseLease: (() => void) | undefined
     try {
+      const lease = await this.executionLeases?.acquire(bodyContext)
+      if (lease) {
+        let references = 1
+        const retain = () => {
+          references++
+          let released = false
+          return {
+            release: () => {
+              if (released) return
+              released = true
+              if (--references === 0) lease.release()
+            },
+          }
+        }
+        releaseLease = () => {
+          if (--references === 0) lease.release()
+        }
+        bodyContext = { ...bodyContext, retainWorkspaceLease: retain }
+        this.states.set(bodyContext, state)
+      }
+      if (bodyContext.signal.aborted) return toolAbortedResult(true)
       state.bodyInvoked = true
-      const body = definition.execute(context.arguments, bodyContext)
-      const returned =
-        limit === undefined
-          ? await body
-          : await Promise.race([
-              body,
-              new Promise<never>((_resolve, reject) => {
-                limit.signal.addEventListener(
-                  'abort',
-                  () => {
-                    reject(limit.signal.reason)
-                  },
-                  { once: true },
-                )
-              }),
-            ])
+      const releaseBody = releaseLease
+      const body = definition
+        .execute(context.arguments, bodyContext)
+        .finally(() => releaseBody?.())
+      releaseLease = undefined
+      // Always race the abort, with or without a timeout: a body that
+      // ignores its signal must not keep a stopped turn waiting.
+      const returned = await raceAbort(body, bodyContext.signal)
       const normalized = normalizeToolReturn(returned)
       const meta =
         normalized.meta === undefined
@@ -440,6 +495,7 @@ export class ToolRegistry {
       if (context.signal.aborted) return toolAbortedResult(false)
       return toolErrorResult(error)
     } finally {
+      releaseLease?.()
       limit?.dispose()
     }
   }
@@ -498,7 +554,12 @@ export class ToolRegistry {
         ...result,
         ...(contexts.length > 0 ? { additionalContexts: contexts } : {}),
         ...(state.concludes && !result.isError
-          ? { concludesTurn: true as const }
+          ? {
+              concludesTurn: true as const,
+              ...(state.conclusion === undefined
+                ? {}
+                : { turnConclusion: state.conclusion }),
+            }
           : {}),
       }
       try {

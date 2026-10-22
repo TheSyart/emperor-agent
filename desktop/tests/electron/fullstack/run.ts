@@ -190,6 +190,13 @@ async function closeSettings(page: Page): Promise<void> {
   await page.getByRole('dialog', { name: '设置' }).waitFor({ state: 'hidden' })
 }
 
+/** Answer the in-app confirm() dialog (ui/ConfirmHost) with its button. */
+async function confirmInApp(page: Page, label: string): Promise<void> {
+  const confirm = page.locator('.ds-modal [role="dialog"]')
+  await confirm.getByRole('button', { name: label, exact: true }).click()
+  await confirm.waitFor({ state: 'hidden' })
+}
+
 /**
  * 已开启 / 已关闭 from the master switch, or what the card names when it is
  * neither simply on nor off (不可用).
@@ -386,6 +393,16 @@ async function launch(
     .setViewportSize({ width: 1440, height: 900 })
     .catch(() => undefined)
   await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+  // UI-S03: a turn's steps fold into one line. This suite reads the tool
+  // rows themselves, so it lists them (处理过程 = 始终展开).
+  await page.evaluate(() =>
+    localStorage.setItem(
+      'emperor.ui.prefs.v1',
+      JSON.stringify({ processDisplay: 'expanded' }),
+    ),
+  )
+  await page.reload()
+  await page.locator('.app-frame').waitFor({ timeout: 60_000 })
   return { app, page }
 }
 
@@ -432,7 +449,7 @@ async function fullstack(
       const profileForm = page.locator('form.profile-form')
       await profileForm.locator('input').fill('E2E profile')
       await page
-        .getByRole('dialog', { name: '新建 profile' })
+        .getByRole('dialog', { name: '新建登录档案' })
         .getByRole('button', { name: '新建' })
         .click()
       await profileForm.waitFor({ state: 'hidden' })
@@ -516,8 +533,9 @@ async function fullstack(
       const sealedVault = JSON.parse(
         readFileSync(join(home, 'computer-use', 'vault.json'), 'utf8'),
       ) as { version?: number }
+      // SEC-09 writes version 3 (every field bound to its entry).
       if (
-        sealedVault.version !== 2 ||
+        (sealedVault.version ?? 0) < 3 ||
         statSync(join(home, 'computer-use', 'secrets', 'local.key')).size !== 32
       )
         throw new Error('vault is not sealed with the local key')
@@ -526,14 +544,12 @@ async function fullstack(
 
       await dialog.getByTestId('settings-crumb').click()
       await openBrowserPage(page, 'manage-profiles')
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       const row = dialog
         .locator('.ds-settings-row')
         .filter({ hasText: 'E2E profile' })
         .first()
       await row.getByRole('button', { name: '清空' }).click()
+      await confirmInApp(page, '清空')
       await until(
         async () => {
           const afterClear = await core<Array<{ profileId: string }>>(
@@ -547,10 +563,8 @@ async function fullstack(
         5_000,
         'profile clear and permission revocation',
       )
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       await row.getByRole('button', { name: '删除' }).click()
+      await confirmInApp(page, '删除')
       await closeSettings(page)
       return {
         profileCreated: true,
@@ -839,15 +853,13 @@ async function fullstack(
       if (scan(home)) throw new Error('password appeared in Emperor Home files')
       const dialog = await openBrowserSettings(page)
       await openBrowserPage(page, 'manage-passwords')
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       await dialog
         .locator('.ds-settings-row')
         .filter({ hasText: 'E2E credential' })
         .first()
         .getByRole('button', { name: '删除' })
         .click()
+      await confirmInApp(page, '删除')
       await until(
         async () =>
           (await dialog
@@ -994,8 +1006,235 @@ async function fullstack(
     },
   )
 
+  // KRN-02: a message queued behind a stopped turn is not dropped and does
+  // not run on its own; it waits as 待发送 until the user sends it.
+  await check(
+    page,
+    'a message queued behind a stopped turn waits as 待发送 and 发送 runs it',
+    async () => {
+      // The first turn's request never answers: it stays open until stopped.
+      const running = hold({ text: 'never shown' })
+      model.enqueue(running.step, say('KRN-02 queued message answered'))
+      await send(page, 'KRN-02 long turn')
+      await until(() => running.reached, 15_000, 'the turn to reach the model')
+      await send(page, 'KRN-02 queued message')
+      const dock = page.getByRole('region', { name: '待处理消息队列' })
+      await until(
+        async () =>
+          (await dock.innerText().catch(() => '')).includes(
+            'KRN-02 queued message',
+          ),
+        10_000,
+        'the queued message in the dock',
+      )
+      await page.getByRole('button', { name: '停止', exact: true }).click()
+      await until(
+        async () =>
+          (await dock.innerText().catch(() => '')).includes(
+            '待发送 · 上一轮已停止',
+          ),
+        10_000,
+        'the message to wait as 待发送',
+      )
+      await page.screenshot({ path: join(shots, 'queue-held.png') })
+      if (await assistantSaid(page, 'KRN-02 queued message answered'))
+        throw new Error('the held message ran on its own')
+      await dock.getByRole('button', { name: '发送排队消息' }).click()
+      await until(
+        () => assistantSaid(page, 'KRN-02 queued message answered'),
+        15_000,
+        'the sent message to run',
+      )
+      await until(
+        async () => (await dock.count()) === 0,
+        10_000,
+        'the dock to empty',
+      )
+    },
+  )
+
+  await startPage(page, model)
+
   if (model.errors.length > 0)
     throw new Error(`model step errors: ${String(model.errors[0])}`)
+}
+
+/** A toast that says something failed (FIX-13: Core's refusal, a stop). */
+function failureToasts(page: Page) {
+  return page.locator('.ds-toast').filter({ hasText: /失败|会话|sessionId/ })
+}
+
+/** 新对话: the start page, a draft Core has not created yet. */
+async function newChat(page: Page): Promise<void> {
+  await page
+    .getByRole('button', { name: '新对话', exact: true })
+    .first()
+    .click()
+  await until(
+    () => decodeURIComponent(page.url()).includes('/chat/draft:'),
+    10_000,
+    'the start page',
+  )
+}
+
+/** The session the window shows, once the route left the draft. */
+async function realSessionOnScreen(page: Page): Promise<string> {
+  await until(
+    () => /\/chat\/(?!draft:)[^/?]+/.test(decodeURIComponent(page.url())),
+    15_000,
+    'the new session in the route',
+  )
+  return decodeURIComponent(page.url()).split('/chat/')[1]!.split(/[/?]/)[0]!
+}
+
+/**
+ * FIX-13: the start page's plan mode and permission preset belong to its
+ * draft and reach the session its first message creates; a new chat shows
+ * nothing of the previous one; a stop pressed right after sending stops the
+ * new session.
+ */
+async function startPage(page: Page, model: FakeModel): Promise<void> {
+  await check(
+    page,
+    'FIX-13 · plan mode turned on on the start page: the session runs its first step in plan mode',
+    async () => {
+      await newChat(page)
+      await page.getByRole('button', { name: '添加附件与能力' }).first().click()
+      await page
+        .getByRole('menuitem', { name: /计划模式/ })
+        .first()
+        .click()
+      const chip = page.getByRole('button', { name: '退出计划', exact: true })
+      await chip.waitFor({ timeout: 10_000 })
+      if (await failureToasts(page).count())
+        throw new Error(
+          `toast: ${await failureToasts(page).first().innerText()}`,
+        )
+      let firstStep: { plan: boolean; tools: string[] } | null = null
+      model.enqueue((request) => {
+        firstStep = {
+          plan: JSON.stringify(request.messages[0] ?? {}).includes(
+            'You are in plan mode',
+          ),
+          tools: (request.tools ?? []).map((tool) => tool.function.name),
+        }
+        return { text: 'FIX-13 plan reply' }
+      })
+      await send(page, 'FIX-13 先出一份计划')
+      const sessionId = await realSessionOnScreen(page)
+      await until(
+        () => assistantSaid(page, 'FIX-13 plan reply'),
+        20_000,
+        'the reply',
+      )
+      const control = await core<{ plan: boolean; preset: string }>(
+        page,
+        'control.get',
+        sessionId,
+      )
+      if (!firstStep) throw new Error('the model was not asked')
+      const step = firstStep as { plan: boolean; tools: string[] }
+      if (!step.plan) throw new Error('the first step was not in plan mode')
+      if (!step.tools.includes('exit_plan_mode'))
+        throw new Error(`no exit_plan_mode in ${step.tools.join(',')}`)
+      if (control.plan !== true)
+        throw new Error(`control ${JSON.stringify(control)}`)
+      if (!(await chip.isVisible())) throw new Error('the plan chip went away')
+      if (await failureToasts(page).count())
+        throw new Error(
+          `toast: ${await failureToasts(page).first().innerText()}`,
+        )
+      await page.screenshot({ path: join(shots, 'start-page-plan.png') })
+      return {
+        sessionId,
+        control: { plan: control.plan, preset: control.preset },
+      }
+    },
+  )
+
+  await check(
+    page,
+    "FIX-13 · a new chat does not show the previous chat's plan mode or goal",
+    async () => {
+      // The chat on screen is in plan mode (the check before).
+      await newChat(page)
+      await page
+        .locator('.conversation-root[data-phase="hero"]')
+        .waitFor({ timeout: 10_000 })
+      const chips = await page
+        .getByRole('button', { name: '退出计划', exact: true })
+        .count()
+      const goalBars = await page.locator('.goal-dock').count()
+      if (chips || goalBars)
+        throw new Error(`plan chips ${chips}, goal bars ${goalBars}`)
+      return { chips, goalBars }
+    },
+  )
+
+  await check(
+    page,
+    'FIX-13 · 只读 on the start page: the session starts read-only',
+    async () => {
+      await newChat(page)
+      await page.locator('.permission-chip button').first().click()
+      await page.getByRole('menuitem', { name: /只读/ }).first().click()
+      await until(
+        async () =>
+          (await page.locator('.permission-chip').innerText()).includes('只读'),
+        10_000,
+        'the chip to say 只读',
+      )
+      model.enqueue(say('FIX-13 read-only reply'))
+      await send(page, 'FIX-13 只读会话')
+      const sessionId = await realSessionOnScreen(page)
+      await until(
+        () => assistantSaid(page, 'FIX-13 read-only reply'),
+        20_000,
+        'the reply',
+      )
+      const control = await core<{ plan: boolean; preset: string }>(
+        page,
+        'control.get',
+        sessionId,
+      )
+      if (control.preset !== 'read-only' || control.plan !== false)
+        throw new Error(`control ${JSON.stringify(control)}`)
+      if (await failureToasts(page).count())
+        throw new Error(
+          `toast: ${await failureToasts(page).first().innerText()}`,
+        )
+      return { sessionId, preset: control.preset }
+    },
+  )
+
+  await check(
+    page,
+    'FIX-13 · 停止 right after the first message stops the new session',
+    async () => {
+      await newChat(page)
+      const running = hold({ text: 'FIX-13 never shown' })
+      model.enqueue(running.step)
+      await send(page, 'FIX-13 马上停止')
+      await page.getByRole('button', { name: '停止', exact: true }).click()
+      const sessionId = await realSessionOnScreen(page)
+      await until(
+        async () =>
+          (await page
+            .getByRole('button', { name: '停止', exact: true })
+            .count()) === 0,
+        15_000,
+        'the stop button to go',
+      )
+      running.release()
+      await page.waitForTimeout(1_000)
+      if (await assistantSaid(page, 'FIX-13 never shown'))
+        throw new Error('the turn ran on after 停止')
+      const failed = await page.getByText('停止任务失败').count()
+      if (failed || (await failureToasts(page).count()))
+        throw new Error('the stop failed')
+      return { sessionId, modelReached: running.reached }
+    },
+  )
 }
 
 async function realModel(page: Page, site: FixtureSite): Promise<void> {

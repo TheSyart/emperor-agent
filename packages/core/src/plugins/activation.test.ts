@@ -192,7 +192,7 @@ describe('plugin hooks', () => {
               matcher: '^mcp__my-files__read$',
               hooks: [{ command: 'files.sh' }],
             },
-            { matcher: 'WebFetch', hooks: [{ command: 'never.sh' }] },
+            { matcher: 'NotebookEdit', hooks: [{ command: 'never.sh' }] },
           ],
           SessionStart: [
             { matcher: 'startup', hooks: [{ command: 'start.sh' }] },
@@ -207,6 +207,7 @@ describe('plugin hooks', () => {
     expect(set).toEqual({
       pluginId: 'guard-kit',
       scope: 'user',
+      allowedEnv: [],
       env: {
         PLUGIN_ROOT: root,
         CLAUDE_PLUGIN_ROOT: root,
@@ -217,17 +218,20 @@ describe('plugin hooks', () => {
         PreToolUse: [
           {
             matcher: 'bash|edit|write',
-            hooks: [{ command: 'guard.sh', timeoutSec: 5 }],
+            hooks: [{ id: 'PreToolUse#1', command: 'guard.sh', timeoutSec: 5 }],
           },
           {
             matcher: '^(?:mcp_guard-kit-my-files_read)$',
-            hooks: [{ command: 'files.sh' }],
+            hooks: [{ id: 'PreToolUse#2', command: 'files.sh' }],
           },
         ],
         SessionStart: [
-          { matcher: 'startup', hooks: [{ command: 'start.sh' }] },
+          {
+            matcher: 'startup',
+            hooks: [{ id: 'SessionStart#1', command: 'start.sh' }],
+          },
         ],
-        Stop: [{ hooks: [{ command: 'stop.sh' }] }],
+        Stop: [{ hooks: [{ id: 'Stop#1', command: 'stop.sh' }] }],
       },
     })
   })
@@ -260,10 +264,41 @@ describe('plugin hooks', () => {
     const { hooks } = contributions([legacy, quiet])
     expect(hooks).toHaveLength(1)
     expect(hooks[0]!.config).toEqual({
-      PostToolUse: [{ matcher: 'mcp_.*', hooks: [{ command: 'log.sh' }] }],
+      PostToolUse: [
+        {
+          matcher: 'mcp_.*',
+          hooks: [{ id: 'PostToolUse#1', command: 'log.sh' }],
+        },
+      ],
     })
     expect(hooks[0]!.env.PLUGIN_DATA).toBe(
       join(HOME, 'plugins', 'data', 'acme', 'legacy'),
     )
+  })
+  it('hands the manifest’s env list to the package’s hook set (SEC-07 test 3)', () => {
+    const kit = active('env-kit', {
+      'plugin.json': {
+        $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+        name: 'env-kit',
+        env: ['ACME_TOKEN'],
+      },
+      'hooks/hooks.json': {
+        hooks: {
+          PreToolUse: [
+            { matcher: 'Bash', hooks: [{ command: 'check.sh', timeout: 300 }] },
+          ],
+        },
+      },
+    })
+    const [set] = contributions([kit], {
+      env: { PATH: '/usr/bin', ACME_TOKEN: 'never-copied-here' },
+    }).hooks
+    expect(set!.allowedEnv).toEqual(['ACME_TOKEN'])
+    // Only names travel; values are read when the hook runs.
+    expect(JSON.stringify(set)).not.toContain('never-copied-here')
+    // The hook keeps what it asked for; the runner caps it (120 s).
+    expect(set!.config.PreToolUse![0]!.hooks).toEqual([
+      { id: 'PreToolUse#1', command: 'check.sh', timeoutSec: 300 },
+    ])
   })
 })

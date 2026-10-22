@@ -4,6 +4,9 @@ import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import { TOOL_CATEGORIES, type ToolCategory } from '../harness/tools/definition'
 import { makeApi, type ApiFixture } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 // 能力 › 工具 lists Emperor's own tools by category (PLAN-CAP-001 ST-08):
 // every builtin tool the Agent sees has one, and the computer use tools
 // belong to their plugin (its detail lists them), not to that page.
@@ -14,12 +17,17 @@ afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.api.close()
 })
 
-/** Every tool a host can register: web search and computer use on too. */
+/** Every tool a host can register: web fetch, web search and computer use on too. */
 async function fullApi() {
   const fixture = await makeApi({
     extra: {
       computerUsePort: new FakeComputerUsePort(),
       computerUseSettings: () => ({ enabled: true }),
+      webFetchClient: {
+        get: async () => {
+          throw new Error('not called')
+        },
+      },
       webSearch: { search: async () => [] },
     },
   })
@@ -39,7 +47,7 @@ const EXPECTED: Record<ToolCategory, string[]> = {
     'read',
     'write',
   ],
-  network: ['web_search'],
+  network: ['web_fetch', 'web_search'],
   planning: [
     'ask_user_question',
     'create_goal',
@@ -50,6 +58,8 @@ const EXPECTED: Record<ToolCategory, string[]> = {
     'update_goal',
   ],
   agents: [
+    'collect_agent',
+    'inspect_agent',
     'interrupt_agent',
     'list_agents',
     'ralph',
@@ -65,7 +75,7 @@ describe('the tool catalog of 能力 › 工具', () => {
   it('gives every builtin tool a category', async () => {
     const api = await fullApi()
     const builtin = api.skills
-      .tools()
+      .tools(VIEW)
       .filter((tool) => tool.source === 'builtin' && !tool.plugin_id)
     // A new tool registered without a category fails here, by name.
     expect(
@@ -86,7 +96,7 @@ describe('the tool catalog of 能力 › 工具', () => {
   it('puts the computer use tools under their plugin, without a category', async () => {
     const api = await fullApi()
     const gui = api.skills
-      .tools()
+      .tools(VIEW)
       .filter((tool) => tool.plugin_id === 'computer-use')
     expect(gui.map((tool) => tool.name).sort()).toEqual(
       Object.keys(GUI_TOOL_CATALOG).sort(),

@@ -3,12 +3,9 @@ import {
   exploreCatalogIssues,
   exploreEntryInstalled,
   exploreEntryIssues,
-  exploreKindCounts,
-  filterExploreEntries,
   isPrivateHost,
   mcpEntryConfigText,
   mcpEntryServerNames,
-  normalizeExploreFilter,
   publicHttpsIssue,
   skillNameFromUrl,
   validExploreEntries,
@@ -194,35 +191,6 @@ describe('explore list helpers', () => {
     }),
   ]
 
-  it('filters by kind and searches name, publisher, text and tags', () => {
-    const ids = (list: ExploreEntry[]) => list.map((entry) => entry.id)
-    expect(ids(filterExploreEntries(entries))).toHaveLength(3)
-    expect(ids(filterExploreEntries(entries, { filter: 'mcp' }))).toEqual([
-      'acme-tools',
-    ])
-    expect(ids(filterExploreEntries(entries, { query: 'node.js' }))).toEqual([
-      'acme-tools',
-    ])
-    expect(ids(filterExploreEntries(entries, { query: ' other ' }))).toEqual([
-      'acme-kit',
-    ])
-    expect(ids(filterExploreEntries(entries, { query: '写作' }))).toEqual([
-      'acme-writer',
-      'acme-kit',
-    ])
-    expect(
-      filterExploreEntries(entries, { query: '写作', filter: 'mcp' }),
-    ).toEqual([])
-    expect(exploreKindCounts(entries)).toEqual({
-      all: 3,
-      skill: 1,
-      mcp: 1,
-      plugin: 1,
-    })
-    expect(normalizeExploreFilter('plugin')).toBe('plugin')
-    expect(normalizeExploreFilter('nope')).toBe('all')
-  })
-
   it('knows what is installed already', () => {
     const [writer, tools, kit] = entries as [
       ExploreEntry,
@@ -254,5 +222,51 @@ describe('explore list helpers', () => {
     })
     expect(text.endsWith('\n')).toBe(true)
     expect(mcpEntryConfigText(skill())).toBe('')
+  })
+})
+
+describe('recommendedEntries (UI-S08)', () => {
+  const entry = (id: string, kind: 'skill' | 'mcp' | 'plugin') =>
+    ({ id, kind }) as unknown as import('./exploreModel').ExploreEntry
+  const all = [
+    entry('s1', 'skill'),
+    entry('m1', 'mcp'),
+    entry('s2', 'skill'),
+    entry('m2', 'mcp'),
+    entry('s3', 'skill'),
+    entry('m3', 'mcp'),
+    entry('s4', 'skill'),
+    entry('p1', 'plugin'),
+  ]
+
+  it('shows up to six on 插件, and only its kind on Skills and MCP', async () => {
+    const { recommendedEntries } = await import('./exploreModel')
+    expect(recommendedEntries(all, 'plugins').map((e) => e.id)).toEqual([
+      's1',
+      'm1',
+      's2',
+      'm2',
+      's3',
+      'm3',
+    ])
+    expect(recommendedEntries(all, 'skills').map((e) => e.id)).toEqual([
+      's1',
+      's2',
+      's3',
+      's4',
+    ])
+    expect(recommendedEntries(all, 'mcp').map((e) => e.id)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+    ])
+    expect(recommendedEntries(all, 'tools')).toEqual([])
+  })
+
+  it('shows nothing when fewer than three would fit a tab', async () => {
+    const { recommendedEntries } = await import('./exploreModel')
+    expect(
+      recommendedEntries([entry('m1', 'mcp'), entry('m2', 'mcp')], 'mcp'),
+    ).toEqual([])
   })
 })

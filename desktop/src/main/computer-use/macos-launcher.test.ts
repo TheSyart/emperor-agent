@@ -1,7 +1,20 @@
-import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { createHmac, randomBytes } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
-import { readFile, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import {
+  chmodSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { open, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FrameDecoder,
@@ -9,11 +22,13 @@ import {
 } from '../../../../packages/core/src/harness/computer-use/protocol/framing'
 import {
   LSREGISTER,
+  MACOS_TOOLS,
   installPackagedMacosHelper,
   launchMacosHelper,
   macosHelperAppPath,
   macosNativeArch,
   macosSocketLocation,
+  signedIdentity,
   type MacosHelperInstallFs,
   type MacosHelperInstallSystem,
 } from './macos-launcher'
@@ -28,12 +43,18 @@ const HELPER_ID = 'com.emperor.agent.desktop.computer-helper'
 const TEAM = 'TEAM123456'
 const CDHASH = 'a'.repeat(40)
 const OLD_CDHASH = 'b'.repeat(40)
+// SEC-04: system tools by absolute path, never through PATH.
+const CODESIGN = '/usr/bin/codesign'
+const DITTO = '/usr/bin/ditto'
+const PLUTIL = '/usr/bin/plutil'
+const PS = '/bin/ps'
 
 interface FakeSignature {
   readonly identifier: string
   readonly team: string | null
   readonly cdHash: string
   readonly adHoc: boolean
+  readonly runtime?: boolean
 }
 interface FakeEntry {
   kind: 'dir' | 'file' | 'symlink'
@@ -58,6 +79,8 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
   lsregisterFails = false
   /** Signature applied by `codesign --force --sign -` (Preview re-seal). */
   resealed: FakeSignature | null = null
+  /** A codesign that drops `--options runtime` (SEC-04 negative case). */
+  resealDropsRuntime = false
   /** Lets a test corrupt what ditto copies. */
   onDitto: ((destination: string) => void) | null = null
   private temporaryCount = 0
@@ -106,16 +129,16 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
 
   async execFile(file: string, args: readonly string[]) {
     this.calls.push([file, ...args])
-    if (file === 'ps') {
+    if (file === PS) {
       if (this.psFails) throw new Error('ps failed')
       return { stdout: `${this.processes.join('\n')}\n`, stderr: '' }
     }
-    if (file === 'plutil') return { stdout: '', stderr: '' }
+    if (file === PLUTIL) return { stdout: '', stderr: '' }
     if (file === LSREGISTER) {
       if (this.lsregisterFails) throw new Error('lsregister failed')
       return { stdout: '', stderr: '' }
     }
-    if (file === 'ditto') {
+    if (file === DITTO) {
       const [from, to] = args.filter((arg) => !arg.startsWith('--')) as [
         string,
         string,
@@ -127,11 +150,16 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
       this.onDitto?.(to)
       return { stdout: '', stderr: '' }
     }
-    if (file !== 'codesign') throw new Error(`unexpected command ${file}`)
+    if (file !== CODESIGN) throw new Error(`unexpected command ${file}`)
     if (args[0] === '--force') {
-      const target = this.entry(args[3]!)
+      const target = this.entry(args[args.length - 1]!)
       if (!this.resealed) throw new Error('no reseal identity')
-      target.signature = this.resealed
+      const runtime =
+        !this.resealDropsRuntime &&
+        args.some(
+          (arg, index) => arg === '--options' && args[index + 1] === 'runtime',
+        )
+      target.signature = { ...this.resealed, runtime }
       return { stdout: '', stderr: '' }
     }
     const path = args[args.length - 1]!
@@ -139,7 +167,11 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
     if (!signature || this.entry(path).invalid)
       throw new Error('codesign failed')
     if (args[0] === '--verify') return { stdout: '', stderr: '' }
-    const flags = signature.adHoc ? '0x2(adhoc)' : '0x10000(runtime)'
+    const flags = signature.adHoc
+      ? signature.runtime
+        ? '0x10002(adhoc,runtime)'
+        : '0x2(adhoc)'
+      : '0x10000(runtime)'
     return {
       stdout: '',
       stderr: [
@@ -261,6 +293,20 @@ describe('macOS helper launcher paths', () => {
     })
   })
 
+  it('puts the socket under a custom data directory (MAIN-25)', () => {
+    expect(
+      macosSocketLocation({
+        home: '/Users/a',
+        stateRoot: '/tmp/e2e-home',
+        uid: 501,
+      }),
+    ).toEqual({
+      directory: '/tmp/e2e-home/run',
+      path: '/tmp/e2e-home/run/cu-501.sock',
+      temporary: false,
+    })
+  })
+
   it('locates packaged and development helper apps', () => {
     expect(
       macosHelperAppPath({
@@ -313,52 +359,14 @@ describe('macOS helper launcher paths', () => {
       expect(macosNativeArch(node!)).toBe(native)
   })
 
-  it('starts through LaunchServices arguments and retries the socket until handshake', async () => {
-    const home = `/tmp/cu-launch-${randomUUID()}`
+  it('listens before LaunchServices starts the Helper and hands it the secret on stdin, never argv', async () => {
+    const home = mkdtempSync('/tmp/cu-launch-')
     const uid = process.getuid!()
-    const location = macosSocketLocation({ home, uid })
-    const received: Record<string, unknown>[] = []
-    let peer: Socket | undefined
-    const server = createServer((socket) => {
-      peer = socket
-      const decoder = new FrameDecoder()
-      socket.on('data', (chunk: Buffer) => {
-        for (const frame of decoder.push(chunk)) {
-          if (frame.kind !== 'json') continue
-          const message = frame.value as Record<string, unknown>
-          received.push(message)
-          if (message.type === 'request')
-            socket.write(
-              Buffer.from(
-                encodeJsonFrame({
-                  type: 'response',
-                  id: message.id,
-                  ok: true,
-                  result: {},
-                }),
-              ),
-            )
-        }
-      })
-      socket.write(
-        Buffer.from(
-          encodeJsonFrame({
-            type: 'hello',
-            protocol: 1,
-            helperVersion: 'test',
-            platform: 'macos',
-            arch: 'arm64',
-            capabilities: [],
-            permissions: {},
-          }),
-        ),
-      )
-    })
-    let attempts = 0
-    let launchArgs: readonly string[] = []
     const installPackagedHelper = vi.fn(
       async () => '/tmp/Emperor Computer Helper.app',
     )
+    let launchArgs: readonly string[] = []
+    let helper: SimulatedHelper | null = null
     try {
       const client = await launchMacosHelper({
         packaged: true,
@@ -366,57 +374,371 @@ describe('macOS helper launcher paths', () => {
         installPackagedHelper,
         home,
         uid,
-        connectTimeoutMs: 1_000,
+        connectTimeoutMs: 5_000,
         openApp: async (args) => {
           launchArgs = args
-          await new Promise<void>((resolve, reject) =>
-            server.listen(location.path, () => resolve()).once('error', reject),
-          )
-        },
-        connectSocket: (path) => {
-          attempts++
-          if (attempts < 3) return Promise.reject(new Error('not ready yet'))
-          return new Promise<Socket>((resolve, reject) => {
-            const socket = createConnection(path)
-            socket.once('connect', () => resolve(socket))
-            socket.once('error', reject)
-          })
+          // The socket is already listening when LaunchServices runs.
+          const socketPath = args[args.indexOf('--socket') + 1]!
+          expect(existsSync(socketPath)).toBe(true)
+          helper = await simulatedHelper(args)
         },
       })
-      expect(attempts).toBe(3)
-      expect(installPackagedHelper).toHaveBeenCalledOnce()
       expect(installPackagedHelper).toHaveBeenCalledWith(
         '/Applications/Emperor Agent.app/Contents/Library/Helpers/Emperor Computer Helper.app',
       )
-      expect(launchArgs.slice(0, 7)).toEqual([
+      const fifo = launchArgs[5]!
+      expect(launchArgs).toEqual([
         '-g',
         '-n',
         '-a',
         '/tmp/Emperor Computer Helper.app',
+        '--stdin',
+        fifo,
         '--args',
         '--parent-pid',
         String(process.pid),
-      ])
-      expect(launchArgs.slice(7, 10)).toEqual([
-        '--nonce',
-        expect.stringMatching(/^[a-f0-9]{64}$/),
         '--socket',
+        `${home}/.emperor/run/cu-${uid}.sock`,
       ])
-      expect(launchArgs[10]).toBe(location.path)
-      await vi.waitFor(() =>
-        expect(received[0]).toEqual({
-          type: 'welcome',
-          protocol: 1,
-          nonce: launchArgs[8],
-        }),
-      )
+      expect(fifo.startsWith(`${home}/.emperor/run/`)).toBe(true)
+      const secret = helper!.secret
+      expect(secret).toMatch(/^[0-9a-f]{64}$/)
+      expect(launchArgs.join(' ')).not.toContain(secret)
+      expect(launchArgs).not.toContain('--nonce')
+      expect(helper!.welcomeVerified).toBe(true)
+      expect(await client.request('permissions.status', {})).toEqual({
+        permissions: { accessibility: 'granted' },
+      })
+      // Nothing is left to connect to, and the secret is gone from disk.
+      expect(existsSync(launchArgs.at(-1)!)).toBe(false)
+      expect(existsSync(fifo)).toBe(false)
       await client.close()
     } finally {
-      peer?.destroy()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
       await rm(home, { recursive: true, force: true })
     }
   })
+
+  it('replaces a stale socket of its own at the path, and refuses anything else there', async () => {
+    const home = mkdtempSync('/tmp/cu-stale-')
+    const uid = process.getuid!()
+    const location = macosSocketLocation({ home, uid })
+    let helper: SimulatedHelper | null = null
+    try {
+      mkdirSync(location.directory, { recursive: true, mode: 0o700 })
+      // A socket an earlier launch left behind (nobody listens on it).
+      const stale = createServer()
+      await new Promise<void>((resolveListen) =>
+        stale.listen(location.path, resolveListen),
+      )
+      await new Promise<void>((resolveClose) => {
+        stale.close(() => resolveClose())
+      })
+      // Node removes the file on close; put back a dead socket file.
+      execFileSync('/usr/bin/python3', [
+        '-c',
+        'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])',
+        location.path,
+      ])
+      expect(existsSync(location.path)).toBe(true)
+      const client = await launchMacosHelper({
+        packaged: false,
+        appPath: '/tmp/Emperor Computer Helper.app',
+        home,
+        uid,
+        connectTimeoutMs: 5_000,
+        openApp: async (args) => {
+          helper = await simulatedHelper(args)
+        },
+      })
+      expect(helper!.welcomeVerified).toBe(true)
+      await client.close()
+      // A regular file where the socket goes is left alone and refused.
+      writeFileSync(location.path, 'not a socket')
+      await expect(
+        launchMacosHelper({
+          packaged: false,
+          appPath: '/tmp/Emperor Computer Helper.app',
+          home,
+          uid,
+          connectTimeoutMs: 1_000,
+          openApp: async () => undefined,
+        }),
+      ).rejects.toThrow('Could not prepare the Computer Use helper connection')
+      expect(readFileSync(location.path, 'utf8')).toBe('not a socket')
+    } finally {
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  // SEC-09 test 8: a process of the same user that connects first cannot
+  // answer the challenge; main keeps waiting for the Helper it launched.
+  it('refuses a rival that races the Helper to the socket (SEC-09 #8)', async () => {
+    const home = mkdtempSync('/tmp/cu-race-')
+    const uid = process.getuid!()
+    const rivals: RivalConnection[] = []
+    let helper: SimulatedHelper | null = null
+    try {
+      const client = await launchMacosHelper({
+        packaged: false,
+        appPath: '/tmp/Emperor Computer Helper.app',
+        home,
+        uid,
+        connectTimeoutMs: 5_000,
+        openApp: async (args) => {
+          const socketPath = args[args.indexOf('--socket') + 1]!
+          // One rival guesses a proof, one stays silent, one replays the
+          // greeting a real Helper would send without the secret.
+          rivals.push(await rivalConnection(socketPath, 'guess'))
+          rivals.push(await rivalConnection(socketPath, 'silent'))
+          rivals.push(await rivalConnection(socketPath, 'no-proof'))
+          await Promise.all(
+            rivals
+              .filter((rival) => rival.mode !== 'silent')
+              .map((rival) => rival.closed),
+          )
+          helper = await simulatedHelper(args)
+        },
+      })
+      for (const rival of rivals.filter((item) => item.mode !== 'silent')) {
+        expect(rival.challenged).toBe(true)
+        expect(rival.received.map((message) => message.type)).toEqual([
+          'challenge',
+        ])
+      }
+      // The silent one is dropped once the Helper is in.
+      await rivals.find((rival) => rival.mode === 'silent')!.closed
+      expect(helper!.welcomeVerified).toBe(true)
+      expect(await client.request('permissions.status', {})).toEqual({
+        permissions: { accessibility: 'granted' },
+      })
+      await client.close()
+    } finally {
+      for (const rival of rivals) rival.socket.destroy()
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('gives up when no peer proves itself before the deadline', async () => {
+    const home = mkdtempSync('/tmp/cu-timeout-')
+    const rivals: RivalConnection[] = []
+    let socketPath = ''
+    let fifo = ''
+    try {
+      await expect(
+        launchMacosHelper({
+          packaged: false,
+          appPath: '/tmp/Emperor Computer Helper.app',
+          home,
+          uid: process.getuid!(),
+          connectTimeoutMs: 400,
+          openApp: async (args) => {
+            socketPath = args[args.indexOf('--socket') + 1]!
+            fifo = args[args.indexOf('--stdin') + 1]!
+            rivals.push(await rivalConnection(socketPath, 'guess'))
+          },
+        }),
+      ).rejects.toThrow('Computer Use helper did not connect')
+      expect(existsSync(socketPath)).toBe(false)
+      expect(existsSync(fifo)).toBe(false)
+    } finally {
+      for (const rival of rivals) rival.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+const HELLO = {
+  type: 'hello',
+  protocol: 1,
+  helperVersion: 'test',
+  platform: 'macos',
+  arch: 'arm64',
+  capabilities: [],
+  permissions: {},
+}
+
+function proof(secret: string, label: string, server: string, client: string) {
+  return createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update(`${label}\0${server}\0${client}`)
+    .digest('hex')
+}
+
+interface SimulatedHelper {
+  readonly secret: string
+  readonly socket: Socket
+  welcomeVerified: boolean
+}
+
+/** What the Swift Helper does: read the secret from stdin, connect, prove it. */
+async function simulatedHelper(
+  args: readonly string[],
+): Promise<SimulatedHelper> {
+  const fifo = args[args.indexOf('--stdin') + 1]!
+  const socketPath = args[args.indexOf('--socket') + 1]!
+  const stdin = await open(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+  const { bytesRead, buffer } = await stdin.read(Buffer.alloc(256), 0, 256)
+  await stdin.close()
+  const line = buffer.subarray(0, bytesRead).toString('utf8')
+  expect(line.endsWith('\n')).toBe(true)
+  const secret = line.trim()
+  const socket = createConnection(socketPath)
+  socket.on('error', () => undefined)
+  const state: SimulatedHelper = { secret, socket, welcomeVerified: false }
+  const clientNonce = randomBytes(32).toString('hex')
+  let serverNonce = ''
+  const decoder = new FrameDecoder()
+  socket.on('data', (chunk: Buffer) => {
+    for (const frame of decoder.push(chunk)) {
+      if (frame.kind !== 'json') continue
+      const message = frame.value as Record<string, unknown>
+      if (message.type === 'challenge') {
+        serverNonce = message.nonce as string
+        socket.write(
+          Buffer.from(
+            encodeJsonFrame({
+              ...HELLO,
+              nonce: clientNonce,
+              proof: proof(
+                secret,
+                'emperor-helper-hello',
+                serverNonce,
+                clientNonce,
+              ),
+            }),
+          ),
+        )
+      } else if (message.type === 'welcome') {
+        state.welcomeVerified =
+          message.proof ===
+          proof(secret, 'emperor-main-welcome', serverNonce, clientNonce)
+      } else if (message.type === 'request') {
+        socket.write(
+          Buffer.from(
+            encodeJsonFrame({
+              type: 'response',
+              id: message.id,
+              ok: true,
+              result:
+                message.method === 'permissions.status'
+                  ? { permissions: { accessibility: 'granted' } }
+                  : {},
+            }),
+          ),
+        )
+      }
+    }
+  })
+  await new Promise<void>((resolveConnect) =>
+    socket.once('connect', resolveConnect),
+  )
+  return state
+}
+
+interface RivalConnection {
+  readonly mode: 'guess' | 'silent' | 'no-proof'
+  readonly socket: Socket
+  readonly received: Record<string, unknown>[]
+  readonly closed: Promise<void>
+  challenged: boolean
+}
+
+async function rivalConnection(
+  socketPath: string,
+  mode: RivalConnection['mode'],
+): Promise<RivalConnection> {
+  const socket = createConnection(socketPath)
+  socket.on('error', () => undefined)
+  const received: Record<string, unknown>[] = []
+  const rival: RivalConnection = {
+    mode,
+    socket,
+    received,
+    challenged: false,
+    closed: new Promise<void>((resolveClosed) =>
+      socket.once('close', () => resolveClosed()),
+    ),
+  }
+  const decoder = new FrameDecoder()
+  socket.on('data', (chunk: Buffer) => {
+    for (const frame of decoder.push(chunk)) {
+      if (frame.kind !== 'json') continue
+      const message = frame.value as Record<string, unknown>
+      received.push(message)
+      if (message.type !== 'challenge' || mode === 'silent') continue
+      rival.challenged = true
+      socket.write(
+        Buffer.from(
+          encodeJsonFrame(
+            mode === 'guess'
+              ? {
+                  ...HELLO,
+                  nonce: randomBytes(32).toString('hex'),
+                  proof: randomBytes(32).toString('hex'),
+                }
+              : HELLO,
+          ),
+        ),
+      )
+    }
+  })
+  await new Promise<void>((resolveConnect) =>
+    socket.once('connect', resolveConnect),
+  )
+  return rival
+}
+
+describe('system tools (SEC-04)', () => {
+  it('runs codesign, ditto, plutil, ps, open and mkfifo from their absolute paths', () => {
+    expect(MACOS_TOOLS).toEqual({
+      codesign: '/usr/bin/codesign',
+      ditto: '/usr/bin/ditto',
+      plutil: '/usr/bin/plutil',
+      ps: '/bin/ps',
+      open: '/usr/bin/open',
+      mkfifo: '/usr/bin/mkfifo',
+    })
+  })
+
+  it.runIf(process.platform === 'darwin')(
+    '8. checks a signature with /usr/bin/codesign when PATH starts with another codesign',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-codesign-path-'))
+      const saved = process.env.PATH
+      try {
+        const probe = join(root, 'probe')
+        copyFileSync('/usr/bin/true', probe)
+        execFileSync('/usr/bin/codesign', [
+          '--force',
+          '--sign',
+          '-',
+          '--options',
+          'runtime',
+          probe,
+        ])
+        const bin = join(root, 'bin')
+        const marker = join(root, 'fake-codesign-ran')
+        mkdirSync(bin)
+        writeFileSync(
+          join(bin, 'codesign'),
+          `#!/bin/sh\ntouch '${marker}'\necho 'Identifier=com.emperor.agent.desktop.computer-helper' >&2\necho 'CDHash=${'f'.repeat(40)}' >&2\necho 'TeamIdentifier=EVILTEAM00' >&2\nexit 0\n`,
+        )
+        chmodSync(join(bin, 'codesign'), 0o755)
+        process.env.PATH = `${bin}:${saved ?? ''}`
+        const identity = await signedIdentity(probe)
+        expect(existsSync(marker)).toBe(false)
+        expect(identity.adHoc).toBe(true)
+        expect(identity.team).toBeNull()
+        expect(identity.runtime).toBe(true)
+        expect(identity.cdHash).not.toBe('f'.repeat(40))
+      } finally {
+        process.env.PATH = saved
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
 })
 
 describe('packaged macOS helper installation', () => {
@@ -426,9 +748,9 @@ describe('packaged macOS helper installation', () => {
       helper: signedHelper,
     })
     await expect(install(system)).resolves.toBe(installed(CDHASH))
-    expect(system.calls.filter(([command]) => command === 'ditto')).toEqual([
+    expect(system.calls.filter(([command]) => command === DITTO)).toEqual([
       [
-        'ditto',
+        DITTO,
         SOURCE,
         `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
       ],
@@ -444,7 +766,7 @@ describe('packaged macOS helper installation', () => {
     expect(system.entries.get(`${HOME}/.emperor`)?.mode).toBe(0o700)
     expect(system.entries.get(INSTALLED_ROOT)?.mode).toBe(0o700)
     // No stale copy, so the process list is never read.
-    expect(system.calls.some(([command]) => command === 'ps')).toBe(false)
+    expect(system.calls.some(([command]) => command === PS)).toBe(false)
   })
 
   it('re-verifies the installed copy on every launch and refuses a changed one', async () => {
@@ -456,13 +778,13 @@ describe('packaged macOS helper installation', () => {
     system.calls.length = 0
     await expect(install(system)).resolves.toBe(installed(CDHASH))
     expect(system.calls).toContainEqual([
-      'codesign',
+      CODESIGN,
       '--verify',
       '--strict',
       '--',
       installed(CDHASH),
     ])
-    expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+    expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
 
     const copy = system.entries.get(installed(CDHASH))!
     copy.signature = { ...signedHelper, cdHash: 'd'.repeat(40) }
@@ -487,7 +809,7 @@ describe('packaged macOS helper installation', () => {
       message: 'Unsafe installed Computer Use helper',
     })
     // A refused copy is never replaced or deleted behind the user's back.
-    expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+    expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
     expect(system.has(installed(CDHASH))).toBe(true)
   })
 
@@ -520,7 +842,7 @@ describe('packaged macOS helper installation', () => {
         code: 'DRIVER_UNAVAILABLE',
         message: 'Computer Use helper signer does not match the app',
       })
-      expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+      expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
       expect(system.has(`${HOME}/.emperor`)).toBe(false)
     }
     const wrongApp = new FakeInstallSystem({
@@ -565,9 +887,9 @@ describe('packaged macOS helper installation', () => {
     }
     await expect(install(system)).resolves.toBe(installed(resealed))
     // A downloaded Preview's quarantine must not reach the resealed copy.
-    expect(system.calls.filter(([command]) => command === 'ditto')).toEqual([
+    expect(system.calls.filter(([command]) => command === DITTO)).toEqual([
       [
-        'ditto',
+        DITTO,
         '--noqtn',
         SOURCE,
         `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
@@ -575,7 +897,7 @@ describe('packaged macOS helper installation', () => {
     ])
     const plist = `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app/Contents/Info.plist`
     expect(system.calls).toContainEqual([
-      'plutil',
+      PLUTIL,
       '-replace',
       'EmperorExpectedMainCDHash',
       '-string',
@@ -583,7 +905,7 @@ describe('packaged macOS helper installation', () => {
       plist,
     ])
     expect(system.calls).toContainEqual([
-      'plutil',
+      PLUTIL,
       '-replace',
       'EmperorExpectedMainExecutable',
       '-string',
@@ -593,6 +915,51 @@ describe('packaged macOS helper installation', () => {
     expect(system.children(INSTALLED_ROOT)).toEqual([resealed])
     await expect(install(system)).resolves.toBe(installed(resealed))
     expect(system.children(INSTALLED_ROOT)).toEqual([resealed])
+  })
+
+  it('reseals the Preview helper copy with the hardened runtime (SEC-04)', async () => {
+    const previewApp = { ...signedApp, team: null, adHoc: true }
+    const resealed = '2'.repeat(40)
+    const preview = () => {
+      const system = new FakeInstallSystem({
+        app: previewApp,
+        helper: {
+          ...signedHelper,
+          team: null,
+          adHoc: true,
+          cdHash: OLD_CDHASH,
+        },
+      })
+      system.resealed = {
+        identifier: HELPER_ID,
+        team: null,
+        adHoc: true,
+        cdHash: resealed,
+      }
+      return system
+    }
+    const system = preview()
+    await expect(install(system)).resolves.toBe(installed(resealed))
+    expect(system.calls).toContainEqual([
+      CODESIGN,
+      '--force',
+      '--sign',
+      '-',
+      '--options',
+      'runtime',
+      `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
+    ])
+    expect(system.entries.get(installed(resealed))?.signature?.runtime).toBe(
+      true,
+    )
+    // A copy that came out without the runtime flag is never installed.
+    const dropped = preview()
+    dropped.resealDropsRuntime = true
+    await expect(install(dropped)).rejects.toMatchObject({
+      code: 'DRIVER_UNAVAILABLE',
+      message: 'Invalid Preview helper identity',
+    })
+    expect(dropped.children(INSTALLED_ROOT)).toEqual([])
   })
 
   it('removes only idle, user-owned CDHash copies beside the verified one', async () => {

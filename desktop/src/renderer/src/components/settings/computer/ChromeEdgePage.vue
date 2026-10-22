@@ -20,6 +20,7 @@
  * Pairings are polled every 2 s while mounted (ComputerUseSection keeps it
  * mounted, hidden, for the summary).
  */
+import { confirm } from '../../ui/confirm'
 import type {
   BrowserExtensionStatus,
   BrowserPairingStatus,
@@ -37,13 +38,7 @@ import {
 } from '../../../api/backend'
 import Button from '../../ui/Button.vue'
 import { writeClipboard } from '../../ui/useCopyFeedback'
-import {
-  SettingsGroup,
-  SettingsHero,
-  SettingsNotice,
-  SettingsRow,
-  StatusBadge,
-} from '../ui'
+import { SettingsGroup, SettingsHero, Notice, SettingsRow, Badge } from '../ui'
 import ExtensionInstallSteps from './ExtensionInstallSteps.vue'
 import {
   browserName,
@@ -221,11 +216,14 @@ function install(showSteps = false): void {
   })
 }
 
-function remove(): void {
+async function remove(): Promise<void> {
   if (
-    !window.confirm(
-      '移除扩展程序？已连接的浏览器会自动卸载它，Emperor 会删除扩展文件夹和所有配对。没打开的浏览器，请之后在它的扩展页手动移除。',
-    )
+    !(await confirm({
+      title: '移除扩展程序？',
+      body: '已连接的浏览器会自动卸载它，Emperor 会删除扩展文件夹和所有配对。没打开的浏览器，请之后在它的扩展页手动移除。',
+      confirmLabel: '移除',
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {
@@ -279,17 +277,21 @@ function deny(pairingId: string): void {
   })
 }
 
-function rowAction(row: ConnectionRow): void {
+async function rowAction(row: ConnectionRow): Promise<void> {
   if (row.action === 'setup') {
     stepsWanted.value = true
     return
   }
   if (!row.pairingId) return
   const pairingId = row.pairingId
+  const verb = row.action === 'disconnect' ? '断开' : '撤销'
   if (
-    !window.confirm(
-      `${row.action === 'disconnect' ? '断开' : '撤销'} ${row.title}？之后要在扩展里重新连接 Emperor。`,
-    )
+    !(await confirm({
+      title: `${verb} ${row.title}？`,
+      body: '之后要在扩展里重新连接 Emperor。',
+      confirmLabel: verb,
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {
@@ -341,17 +343,17 @@ onBeforeUnmount(() => {
   <div class="chrome-edge" data-testid="chrome-edge-page">
     <SettingsHero title="Chrome 和 Edge" :description="hero.description">
       <template #badge>
-        <StatusBadge
+        <Badge
           :tone="hero.tone"
-          :dot="hero.dot"
+          :variant="hero.dot ? 'dot-label' : 'soft'"
           data-testid="chrome-status"
-          >{{ hero.badge }}</StatusBadge
+          >{{ hero.badge }}</Badge
         >
       </template>
       <template #actions>
         <Button
           size="sm"
-          :variant="hero.installPrimary ? 'primary' : 'outline'"
+          :variant="hero.installPrimary ? 'primary' : 'secondary'"
           :disabled="busy"
           data-action="install-extension"
           @click="install()"
@@ -370,14 +372,14 @@ onBeforeUnmount(() => {
     </SettingsHero>
 
     <div v-if="notice || elsewhere" class="notices">
-      <SettingsNotice
+      <Notice
         v-if="notice"
         :tone="notice.tone"
         :title="notice.title"
         :description="notice.description"
         data-testid="chrome-notice"
       />
-      <SettingsNotice
+      <Notice
         v-if="elsewhere"
         title="扩展是从另一个文件夹加载的"
         data-testid="chrome-elsewhere"
@@ -388,14 +390,14 @@ onBeforeUnmount(() => {
         <template #actions>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             data-action="reinstall-extension"
             @click="install(true)"
             >重新安装</Button
           >
         </template>
-      </SettingsNotice>
+      </Notice>
     </div>
 
     <ExtensionInstallSteps
@@ -423,7 +425,7 @@ onBeforeUnmount(() => {
         :data-pending="item.pairingId"
       >
         <template #badge>
-          <StatusBadge tone="warn">等待确认</StatusBadge>
+          <Badge tone="warn">等待确认</Badge>
         </template>
         <template #description>
           {{ browserName(item.browser) }} ·
@@ -441,7 +443,7 @@ onBeforeUnmount(() => {
         >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`拒绝配对 ${browserName(item.browser)}`"
           @click="deny(item.pairingId)"
@@ -466,7 +468,7 @@ onBeforeUnmount(() => {
         <Button
           v-if="row.action"
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`${ROW_ACTIONS[row.action]} ${row.title}`"
           @click="rowAction(row)"
@@ -498,7 +500,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   font-size: var(--fs-md);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

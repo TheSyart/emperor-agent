@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, isProxy, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
@@ -26,9 +26,14 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
         projectRoot: '/tmp/demo',
         entries: [{ name: 'deep.ts', path: 'src/lib/deep.ts', kind: 'file' }],
       })
-    case 'files.read': {
-      const path = String(payload?.relativePath)
+    case 'files.read':
+    case 'files.preview': {
+      const path = String(payload?.path ?? payload?.relativePath ?? 'draft.txt')
       return Promise.resolve({
+        id: `file:/tmp/demo/${path}`,
+        path: `/tmp/demo/${path}`,
+        relativePath: path,
+        mimeType: 'text/plain',
         kind: 'text',
         name: path.split('/').pop(),
         content: 'const a = 1\nconst b = 2\n',
@@ -46,8 +51,12 @@ let container: HTMLDivElement | null = null
 let exposed: {
   openPath: (path: string, line?: number) => Promise<void>
   openDirectory: (path: string) => Promise<void>
+  openPreview: (
+    request: import('./workspaceState').WorkspaceFileRequest,
+  ) => Promise<void>
 }
 const treeWidths: number[] = []
+const owner = ref('s1')
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 6; i += 1) {
@@ -56,7 +65,7 @@ async function flush(): Promise<void> {
   }
 }
 
-function mount(): HTMLDivElement {
+function mount(projectPath = '/tmp/demo'): HTMLDivElement {
   container = document.createElement('div')
   document.body.append(container)
   app = createApp({
@@ -65,8 +74,8 @@ function mount(): HTMLDivElement {
         ref: (instance: unknown) => {
           if (instance) exposed = instance as typeof exposed
         },
-        sessionId: 's1',
-        projectPath: '/tmp/demo',
+        sessionId: owner.value,
+        projectPath,
         treeWidth: 300,
         onTreeWidth: (width: number) => treeWidths.push(width),
       }),
@@ -76,8 +85,14 @@ function mount(): HTMLDivElement {
 }
 
 function tabLabels(root: HTMLElement): string[] {
-  return [...root.querySelectorAll('.file-tab [role="tab"]')].map(
-    (tab) => tab.textContent?.trim() ?? '',
+  return [
+    ...root.querySelectorAll('.files-main .workspace-tab-bar [role="tab"]'),
+  ].map((tab) => tab.textContent?.trim() ?? '')
+}
+
+function activeTab(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    '.files-main .workspace-tab-bar .tab-item[data-active]',
   )
 }
 
@@ -103,6 +118,7 @@ function pressCloseTab(target: EventTarget): KeyboardEvent {
 }
 
 beforeEach(() => {
+  owner.value = 's1'
   core.mockImplementation(fakeCore)
   treeWidths.length = 0
 })
@@ -117,7 +133,128 @@ afterEach(() => {
 })
 
 describe('FilesPane', () => {
-  it('puts the tree in a right column and shows the 打开文件 draft', async () => {
+  it('opens Chat and unsent attachment previews in tabs without listing a workspace', async () => {
+    const root = mount('')
+    await flush()
+    expect(core).not.toHaveBeenCalledWith('files.list', expect.anything())
+    expect(root.querySelector('.file-tree-column')).toBeNull()
+    const request = {
+      owner: 's1',
+      target: {
+        source: 'attachment' as const,
+        attachmentId: 'att_2026-10_12345678',
+      },
+    }
+    await exposed.openPreview(request)
+    await exposed.openPreview(request)
+    await flush()
+    expect(tabLabels(root)).toEqual(['draft.txt'])
+    expect(root.querySelector('[role="dialog"]')).toBeNull()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(
+      core.mock.calls.filter(([op]) => op === 'files.preview'),
+    ).toHaveLength(2)
+    await exposed.openPreview({ ...request, owner: 'other' })
+    expect(
+      core.mock.calls.filter(([op]) => op === 'files.preview'),
+    ).toHaveLength(2)
+  })
+
+  it('sends plain cloneable preview inputs across the Electron boundary', async () => {
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.preview' && isProxy(payload))
+        return Promise.reject(new Error('IPC cannot clone a Vue proxy'))
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'attachment', attachmentId: 'att_2026-10_12345678' },
+    })
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(root.querySelector('[role="alert"]')).toBeNull()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+  })
+
+  it('refreshes the visible file after closing the active tab', async () => {
+    const root = mount('')
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'project', sessionId: 's1', path: 'a.ts' },
+    })
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'project', sessionId: 's1', path: 'b.ts' },
+    })
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="关闭 b.ts"]')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(core).toHaveBeenLastCalledWith('files.preview', {
+      source: 'project',
+      sessionId: 's1',
+      path: 'a.ts',
+    })
+    expect(tabLabels(root)).toEqual(['a.ts'])
+  })
+
+  it('keeps at most twelve file tabs, dropping the oldest', async () => {
+    const root = mount('')
+    for (let i = 1; i <= 13; i++)
+      await exposed.openPreview({
+        owner: 's1',
+        target: { source: 'project', sessionId: 's1', path: `f${i}.ts` },
+      })
+    await flush()
+    const labels = tabLabels(root)
+    expect(labels).toHaveLength(12)
+    expect(labels[0]).toBe('f2.ts')
+    expect(labels.at(-1)).toBe('f13.ts')
+    expect(activeTab(root)?.textContent).toContain('f13.ts')
+  })
+
+  it('drops a file response after the viewed session changes', async () => {
+    let resolveRead!: (value: unknown) => void
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) =>
+      op === 'files.preview'
+        ? new Promise((resolve) => {
+            resolveRead = resolve
+          })
+        : fakeCore(op, payload),
+    )
+    const root = mount('')
+    const opening = exposed.openPreview({
+      owner: 's1',
+      target: { source: 'attachment', attachmentId: 'att_2026-10_12345678' },
+    })
+    owner.value = 's2'
+    await flush()
+    resolveRead({
+      id: 'old',
+      path: '/old.txt',
+      name: 'old.txt',
+      mimeType: 'text/plain',
+      kind: 'text',
+      content: 'old session secret',
+      bytes: 18,
+      truncated: false,
+    })
+    await opening
+    await flush()
+    expect(root.textContent).not.toContain('old session secret')
+    expect(tabLabels(root)).toHaveLength(0)
+  })
+
+  it('puts the tree in a right column; with nothing open there is no tab, only the empty state', async () => {
     const root = mount()
     await flush()
     const pane = root.querySelector('.files-pane')!
@@ -130,9 +267,9 @@ describe('FilesPane', () => {
     expect(
       root.querySelector<HTMLInputElement>('.files-search input')!.placeholder,
     ).toBe('筛选文件…')
-    expect(tabLabels(root)).toEqual(['打开文件'])
-    // Nothing to close while the draft is the only tab.
-    expect(root.querySelector('.file-tab.draft .file-tab-close')).toBeNull()
+    // No 「打开文件」 draft tab (UI-S06): the strip is empty until a file opens.
+    expect(tabLabels(root)).toEqual([])
+    expect(root.querySelector('.files-main .workspace-tab-bar')).not.toBeNull()
     expect(root.querySelector('.file-crumbs')?.textContent?.trim()).toBe('/')
     const empty = root.querySelector('.files-empty')!
     expect(empty.textContent).toContain('打开文件')
@@ -140,7 +277,7 @@ describe('FilesPane', () => {
     expect(root.querySelectorAll('.file-tree-row')).toHaveLength(3)
   })
 
-  it('opens files as tabs with a breadcrumb; 「+」 adds a draft and focuses the filter', async () => {
+  it('opens files as tabs with a breadcrumb; 「+」 only focuses the filter', async () => {
     const root = mount()
     await flush()
     treeRow(root, 'README.md').click()
@@ -153,18 +290,16 @@ describe('FilesPane', () => {
       .querySelector<HTMLButtonElement>('button[aria-label="打开文件"]')!
       .click()
     await flush()
-    expect(tabLabels(root)).toEqual(['README.md', '打开文件'])
+    // No draft tab: the open file stays on screen, the caret is in the filter.
+    expect(tabLabels(root)).toEqual(['README.md'])
     expect(document.activeElement).toBe(
       root.querySelector('.files-search input'),
     )
-    expect(root.querySelector('.files-empty')).not.toBeNull()
-    // Picking a file while the draft is active replaces the draft.
+    expect(activeTab(root)?.textContent).toContain('README.md')
     treeRow(root, 'a.ts').click()
     await flush()
     expect(tabLabels(root)).toEqual(['README.md', 'a.ts'])
-    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
-      'a.ts',
-    )
+    expect(activeTab(root)?.textContent).toContain('a.ts')
   })
 
   it('openPath opens nested files at a line and expands the tree', async () => {
@@ -220,8 +355,8 @@ describe('FilesPane', () => {
       relativePath: 'src',
       limit: 500,
     })
-    // No file tab opens; the draft stays.
-    expect(tabLabels(root)).toEqual(['打开文件'])
+    // No file tab opens.
+    expect(tabLabels(root)).toEqual([])
   })
 
   it('closes the active tab on Ctrl/⌘W only while focus is inside the pane', async () => {
@@ -247,7 +382,74 @@ describe('FilesPane', () => {
     expect(root.contains(document.activeElement)).toBe(true)
     pressCloseTab(document.activeElement!)
     await flush()
-    expect(tabLabels(root)).toEqual(['打开文件'])
+    expect(tabLabels(root)).toEqual([])
+  })
+
+  it('6 · draws its tabs with the shared editor tab bar (the terminal uses the same one)', async () => {
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    const strip = root.querySelector<HTMLElement>(
+      '.files-main .workspace-tab-bar .ds-tabs',
+    )!
+    expect(strip.dataset.variant).toBe('editor')
+    // The full path shows on hover; the tab closes with its own ×.
+    expect(activeTab(root)?.getAttribute('title')).toBe('README.md')
+    expect(
+      root.querySelector(
+        '.workspace-tab-bar button[aria-label="关闭 README.md"]',
+      ),
+    ).not.toBeNull()
+    expect(root.querySelector('.file-tab')).toBeNull()
+  })
+
+  it('copies the relative or the absolute path from one menu', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    // One button, not two.
+    expect(root.querySelector('button[aria-label="复制相对路径"]')).toBeNull()
+    expect(root.querySelector('button[aria-label="复制绝对路径"]')).toBeNull()
+    const copy = () =>
+      root.querySelector<HTMLButtonElement>('button[aria-label="复制路径"]')!
+    copy().click()
+    await flush()
+    const items = () => [
+      ...document.body.querySelectorAll<HTMLButtonElement>(
+        '[role="menu"][aria-label="复制路径"] [role="menuitem"]',
+      ),
+    ]
+    expect(items().map((item) => item.textContent?.trim())).toEqual([
+      '复制相对路径',
+      '复制绝对路径',
+    ])
+    items()[0]!.click()
+    await flush()
+    expect(writeText).toHaveBeenLastCalledWith('README.md')
+    copy().click()
+    await flush()
+    items()[1]!.click()
+    await flush()
+    expect(writeText).toHaveBeenLastCalledWith('/tmp/demo/README.md')
+  })
+
+  it('names the Finder action and the size in Chinese', async () => {
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+      '24 字节',
+    )
+    expect(root.textContent).not.toContain('bytes')
+    expect(root.textContent).not.toContain('Finder')
   })
 
   it('filters through files.search as you type', async () => {
@@ -273,6 +475,98 @@ describe('FilesPane', () => {
     await flush()
     expect(filter.value).toBe('')
     expect(root.querySelectorAll('.file-tree-row')).toHaveLength(3)
+  })
+
+  it('8 · reopening an open tab rereads the file once its size or mtime changed', async () => {
+    const disk = { content: 'const v = 1\n', bytes: 12, modifiedAt: 1_000 }
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.stat')
+        return Promise.resolve({
+          bytes: disk.bytes,
+          modifiedAt: disk.modifiedAt,
+        })
+      if (op === 'files.preview')
+        return Promise.resolve({
+          id: 'file:/tmp/demo/src/a.ts',
+          path: '/tmp/demo/src/a.ts',
+          relativePath: 'src/a.ts',
+          mimeType: 'text/plain',
+          kind: 'text',
+          name: 'a.ts',
+          content: disk.content,
+          truncated: false,
+          bytes: disk.bytes,
+          modifiedAt: disk.modifiedAt,
+        })
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    // A reply link to src/a.ts:1 (a reference) opens the tab.
+    const link = {
+      owner: 's1',
+      target: {
+        source: 'reference' as const,
+        sessionId: 's1',
+        referenceId: 'ref_src_a',
+      },
+    }
+    await exposed.openPreview({ ...link, line: 1 })
+    await flush()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const v = 1',
+    )
+    const reads = () =>
+      core.mock.calls.filter(([op]) => op === 'files.preview').length
+    // Unchanged on disk: the tab shows again without a new read.
+    await exposed.openPreview({ ...link, line: 1 })
+    await flush()
+    expect(core).toHaveBeenLastCalledWith('files.stat', link.target)
+    expect(reads()).toBe(1)
+    // Edited on disk: following a link to line 2 shows the new text there.
+    disk.content = 'const v = 1\nconst w = 2\n'
+    disk.bytes = 24
+    disk.modifiedAt = 2_000
+    await exposed.openPreview({ ...link, line: 2 })
+    await flush()
+    expect(reads()).toBe(2)
+    expect(tabLabels(root)).toEqual(['a.ts'])
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const w = 2',
+    )
+    expect(
+      root
+        .querySelector('.file-code-line.reference-line-active')
+        ?.getAttribute('data-line'),
+    ).toBe('2')
+    // Same size, newer mtime: still a change.
+    disk.modifiedAt = 3_000
+    await exposed.openPreview({ ...link, line: 2 })
+    await flush()
+    expect(reads()).toBe(3)
+  })
+
+  it('reopens a project tab after a failed stat by reading it (the reason shows)', async () => {
+    let gone = false
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.stat')
+        return gone
+          ? Promise.reject(new Error('文件或目录不存在。'))
+          : Promise.resolve({ bytes: 24, modifiedAt: 1 })
+      if (op === 'files.preview' && gone)
+        return Promise.reject(new Error('文件或目录不存在。'))
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    const request = {
+      owner: 's1',
+      target: { source: 'project' as const, sessionId: 's1', path: 'a.ts' },
+    }
+    await exposed.openPreview(request)
+    await flush()
+    gone = true
+    await exposed.openPreview(request)
+    await flush()
+    expect(root.textContent).toContain('文件或目录不存在。')
   })
 
   it('reports the tree width once a keyboard resize settles', async () => {

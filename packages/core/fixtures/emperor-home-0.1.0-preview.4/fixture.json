@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "appVersion": "0.1.0-preview.4",
+  "source": {
+    "tag": "v0.1.0-preview.4",
+    "commit": "112f64d4dfd7c5ef7bb5646c9140e00e5588c1e7"
+  },
+  "writtenBy": "generate.ts with Emperor 0.1.0-preview.4's own Core (git archive v0.1.0-preview.4), scripted model replies, no network",
+  "tokens": {
+    "__EMPEROR_HOME__": "the Emperor Home the fixture is copied to",
+    "__PREVIEW4_RUNTIME__": "the runtime root preview.4 recorded; filled with a path that does not exist"
+  },
+  "expect": {
+    "sessions": [
+      {
+        "id": "957ac61612e3492e",
+        "title": "升级测试会话",
+        "userMessages": 2,
+        "assistantMessages": 2,
+        "lastAssistantText": "记住了：升级后这段对话仍然可以打开。"
+      },
+      {
+        "id": "f666ea3e5d514196",
+        "title": "第二个会话",
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "lastAssistantText": "第二个会话的回复，同样写于 0.1.0-preview.4。"
+      }
+    ],
+    "model": {
+      "modelId": "deepseek-chat",
+      "displayName": "DeepSeek（夹具）"
+    },
+    "memoryLine": "- 升级测试夹具：验证 0.1.0-preview.4 的数据升级后仍可读。"
+  },
+  "modes": {
+    "environment/registry.v1.json": "600",
+    "installation.json": "600",
+    "memory/MEMORY.local.md": "644",
+    "memory/patch-ledger.jsonl": "644",
+    "memory/profile/USER.local.md": "644",
+    "memory/versions/index.json": "644",
+    "memory/versions/snapshots/memv_1792516225874_45bd5293_1ddabd.json": "644",
+    "memory/watchlist.md": "644",
+    "migrations/skill-plugin-semantics.v1.json": "600",
+    "migrations/state-root-migration.json": "644",
+    "model_config.json": "600",
+    "onboarding.json": "644",
+    "plugins/installed_plugins.json": "600",
+    "plugins/known_marketplaces.json": "600",
+    "scheduler/jobs.json": "600",
+    "sessions/.harness-kernel-v1": "644",
+    "sessions/957ac61612e3492e/log.jsonl": "600",
+    "sessions/957ac61612e3492e/meta.jsonl": "600",
+    "sessions/f666ea3e5d514196/log.jsonl": "600",
+    "sessions/f666ea3e5d514196/meta.jsonl": "600",
+    "sessions/index.json": "600",
+    "settings.json": "600",
+    "tokens/tokens.jsonl": "644"
+  }
+}

@@ -56,8 +56,10 @@ describe('MarkdownBlock link chips', () => {
     window.removeEventListener('emperor:resolve-reference', listener)
   })
 
-  it('ignores clicks on non-chip links', async () => {
+  it('hands a mailto link to the system instead of navigating', async () => {
     const listener = vi.fn()
+    const openExternal = vi.fn(async () => ({ ok: true }))
+    ;(window as { emperor?: unknown }).emperor = { openExternal }
     window.addEventListener('emperor:resolve-reference', listener)
     const root = mount('[mail](mailto:a@b.c)')
     const anchor = root.querySelector<HTMLAnchorElement>('a')
@@ -66,7 +68,9 @@ describe('MarkdownBlock link chips', () => {
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
     anchor!.dispatchEvent(event)
     await nextTick()
+    expect(event.defaultPrevented).toBe(true)
     expect(listener).not.toHaveBeenCalled()
+    expect(openExternal).toHaveBeenCalledWith('mailto:a@b.c')
     window.removeEventListener('emperor:resolve-reference', listener)
   })
 })

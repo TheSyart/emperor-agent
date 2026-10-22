@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：源码维护者、ACP 客户端开发者、自动化操作者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/acp/`、`packages/core/src/api/core-api.ts`、`scripts/build-acp.mjs`、`scripts/test-acp-bundle.mjs`
 
 Emperor Agent 提供一个源码级、默认不随桌面安装包开放的 ACP V1 stdio 入口。它不是旧 Python CLI、HTTP server 或 WebSocket backend 的恢复，而是与 Electron host 并列地创建同一个 TypeScript `CoreApi`，复用同一个 `HarnessHost` 内核、session log、权限预设、模型配置、记忆和 `stateRoot`。
@@ -50,7 +50,8 @@ EMPEROR_CONFIG_DIR=/absolute/private/state \
 - 请求正文、单条 NDJSON 和投影输出都有硬上限。超限或非法 UTF-8 / JSON 会关闭连接，防止无界缓冲。
 - JSON-RPC 请求 ID 的精确重试共享同一结果和副作用；同一 method 与 ID 若改用不同参数会被拒绝。终态 ledger 有界，不是永久幂等存储。
 - ACP 的工具状态没有 `cancelled` 枚举，因此 Emperor 的工具取消投影为 `failed`，并在 `_meta.emperor.terminalReason` 保留 `cancelled`。prompt 取消使用标准 `stopReason: "cancelled"`。
-- ACP 不能回答交互。turn 中出现问题、提权审批或 Plan 审阅时，adapter 立即取消该交互（对应工具调用得到 `cancelled` 结果），本次 prompt 最终返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 与 `interactionId` 标记需要回到 Emperor 桌面处理。默认权限预设 `workspace-write` 下，workspace 外的写入因此无法在 ACP 中完成。
+- prompt 排在桌面端同一会话正在运行的 turn 后面、而那个 turn 失败或被停止时，这条 prompt 不会运行：它从队列中撤回，响应 `stopReason: "refusal"` 并在 `_meta.emperor.notConsumed` 写明原因（如 `previous-turn-failed`）。`session/cancel` 只取消本 prompt：还在排队时把它移出队列，桌面端正在运行的 turn 不受影响。
+- ACP 不能回答交互。turn 中出现问题、提权审批或 Plan 审阅时，adapter 立即取消该交互（问题与审批的工具调用得到 `cancelled` 结果，Plan 审阅按用户关闭审阅处理，本轮直接结束），本次 prompt 最终返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 与 `interactionId` 标记需要回到 Emperor 桌面处理。默认权限预设 `workspace-write` 下，workspace 外的写入因此无法在 ACP 中完成。
 - 当前没有 ACP client 文件系统、terminal、权限请求或会话模式切换能力，也没有桌面设置页中的启用开关。
 
 ## 开发与验证

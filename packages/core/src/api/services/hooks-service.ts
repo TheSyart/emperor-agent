@@ -8,12 +8,13 @@
  * atomically, and reloads the live bridge.
  */
 
+import type { ViewScope } from '../../harness/host/scope'
 import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, open, rename, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { OperationRetiredError, ValidationError } from '../../errors'
-import type { ClaudeCodeHooks } from '../../harness/hooks/claude-code'
+import type { HookConfigPort } from '../../harness/host/host'
 import {
   CLAUDE_HOOK_EVENTS,
   parseClaudeCodeConfig,
@@ -30,13 +31,14 @@ export interface CoreHooksServiceDeps {
   /** Emperor Home; the editable config is `<stateRoot>/hooks.json`. */
   stateRoot: string
   /** The live bridge; reloaded after every successful save. */
-  hooks: ClaudeCodeHooks
-  /** Active Build project root (substitutes `${CLAUDE_PROJECT_DIR}`, test-run cwd). */
-  activeProjectRoot(): string | null
-  /** Mutation gate (read-only mode etc.); throws to reject. */
-  assertMutation(area: string, action: string): void
-  /** Events of the active session log (for the `hook/*` audit); empty when none. */
-  sessionEvents?(): readonly SessionEvent[]
+  hooks: HookConfigPort
+  /**
+   * The Build project of the session the caller shows (substitutes
+   * `${CLAUDE_PROJECT_DIR}`, test-run cwd); null for Chat (KRN-01).
+   */
+  projectRoot(view: ViewScope): string | null
+  /** Events of the session in view (for the `hook/*` audit); empty when none. */
+  sessionEvents?(view: ViewScope): readonly SessionEvent[]
 }
 
 export interface CoreHooksConfigPayload {
@@ -175,14 +177,18 @@ export class CoreHooksService {
    * Accepts raw JSON text, `{ content: string }`, or a config object. Rejects
    * anything the harness parser would drop as a whole file.
    */
-  async saveConfig(raw: unknown): Promise<CoreHooksConfigPayload> {
-    this.deps.assertMutation('hooks', 'saveConfig')
+  async saveConfig(
+    raw: unknown,
+    view: ViewScope,
+  ): Promise<CoreHooksConfigPayload> {
     const text = configText(raw)
-    const validation = this.validateText(text)
+    const validation = this.validateText(text, view)
     if (!validation.valid)
       throw new ValidationError(
         `hooks.json 无效：${validation.errors.join('；')}`,
       )
+    // The user's own file, saved as typed: Emperor never adds a version to
+    // it nor reads one out of it (PL-10, FIX-08).
     await writeTextAtomic(
       this.configPath,
       text.endsWith('\n') ? text : `${text}\n`,
@@ -195,13 +201,13 @@ export class CoreHooksService {
   async authorizeConfigChange(_op: string, _payload: unknown): Promise<void> {}
 
   /** Accepts `{ content }` (raw text), `{ config }` (object), or a bare config. */
-  validateConfig(input: unknown): CoreHooksValidationPayload {
+  validateConfig(input: unknown, view?: ViewScope): CoreHooksValidationPayload {
     const record = isRecord(input) ? input : null
     if (record && typeof record.content === 'string')
-      return this.validateText(record.content)
-    if (typeof input === 'string') return this.validateText(input)
+      return this.validateText(record.content, view)
+    if (typeof input === 'string') return this.validateText(input, view)
     const value = record && 'config' in record ? record.config : input
-    return this.validateText(JSON.stringify(value ?? null))
+    return this.validateText(JSON.stringify(value ?? null), view)
   }
 
   getMetadata(): CoreHooksMetadataPayload {
@@ -233,8 +239,11 @@ export class CoreHooksService {
       sourceId?: string | null
       runId?: string | null
     } = {},
+    view?: ViewScope,
   ): Promise<CoreHooksAuditPayload> {
-    const all = auditRecords(this.deps.sessionEvents?.() ?? [])
+    const all = auditRecords(
+      view === undefined ? [] : (this.deps.sessionEvents?.(view) ?? []),
+    )
       .filter((record) => {
         if (opts.eventName && record.eventName !== opts.eventName) return false
         if (opts.outcome && record.outcome !== opts.outcome) return false
@@ -265,10 +274,13 @@ export class CoreHooksService {
    * Which loaded command hooks an event would run for `query` (tool name,
    * SessionStart source, or subagent type). `content` tests a draft instead.
    */
-  async testMatch(input: Dict): Promise<CoreHooksMatchPayload> {
+  async testMatch(
+    input: Dict,
+    view?: ViewScope,
+  ): Promise<CoreHooksMatchPayload> {
     const eventName = requiredEvent(input)
     const query = matchQuery(eventName, input)
-    const { items, errors } = this.matchItems(eventName, query, input)
+    const { items, errors } = this.matchItems(eventName, query, input, view)
     return { eventName, query, items, errors }
   }
 
@@ -276,8 +288,10 @@ export class CoreHooksService {
    * Run one command hook once with a sample payload (short timeout). Select
    * by `index` from testMatch, or pass an explicit `command`.
    */
-  async testRun(input: Dict): Promise<CoreHooksTestRunPayload> {
-    this.deps.assertMutation('hooks', 'testRun')
+  async testRun(
+    input: Dict,
+    view: ViewScope,
+  ): Promise<CoreHooksTestRunPayload> {
     if (input.confirmExecution !== true && input.confirm_execution !== true) {
       throw new ValidationError('需要 confirmExecution=true 才能执行 Hook 命令')
     }
@@ -291,6 +305,7 @@ export class CoreHooksService {
         eventName,
         matchQuery(eventName, input),
         input,
+        view,
       )
       const index = Number(input.index ?? 0)
       const selected = items.find((item) => item.index === index)
@@ -298,7 +313,7 @@ export class CoreHooksService {
       command = selected.command
       timeoutSec = selected.timeoutSec ?? undefined
     }
-    const projectRoot = this.deps.activeProjectRoot()
+    const projectRoot = this.deps.projectRoot(view)
     const cwd = projectRoot ?? this.stateRoot
     const payload = samplePayload(eventName, cwd, input)
     const requested = Number(input.timeoutMs ?? input.timeout_ms ?? 0)
@@ -340,7 +355,10 @@ export class CoreHooksService {
     )
   }
 
-  private validateText(text: string): CoreHooksValidationPayload {
+  private validateText(
+    text: string,
+    view?: ViewScope,
+  ): CoreHooksValidationPayload {
     const invalid = (message: string): CoreHooksValidationPayload => ({
       valid: false,
       events: {},
@@ -365,7 +383,7 @@ export class CoreHooksService {
     }
     let parsed
     try {
-      parsed = parseClaudeCodeConfig(raw, this.substitutionVars())
+      parsed = parseClaudeCodeConfig(raw, this.substitutionVars(view))
     } catch (error) {
       return invalid(errorText(error))
     }
@@ -381,7 +399,7 @@ export class CoreHooksService {
       events,
       skipped: parsed.skipped,
       unknownEvents: Object.keys(hooksMap).filter(
-        (event) => !isSupportedEvent(event),
+        (event) => !isSupportedEvent(event) && event !== 'version',
       ),
       errors,
     }
@@ -391,6 +409,7 @@ export class CoreHooksService {
     eventName: ClaudeHookEvent,
     query: string,
     input: Dict,
+    view: ViewScope | undefined,
   ): { items: CoreHookMatchItemPayload[]; errors: string[] } {
     const sources: Array<{ file: string; raw: unknown }> = []
     const errors: string[] = []
@@ -414,7 +433,7 @@ export class CoreHooksService {
       let groups
       try {
         groups =
-          parseClaudeCodeConfig(raw, this.substitutionVars()).config[
+          parseClaudeCodeConfig(raw, this.substitutionVars(view)).config[
             eventName
           ] ?? []
       } catch (error) {
@@ -439,8 +458,10 @@ export class CoreHooksService {
     return { items, errors }
   }
 
-  private substitutionVars(): { projectDir?: string } {
-    const projectDir = this.deps.activeProjectRoot()
+  private substitutionVars(view: ViewScope | undefined): {
+    projectDir?: string
+  } {
+    const projectDir = view === undefined ? null : this.deps.projectRoot(view)
     return projectDir ? { projectDir } : {}
   }
 }

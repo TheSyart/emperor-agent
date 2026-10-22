@@ -13,11 +13,13 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { availableParallelism } from 'node:os'
+import { availableParallelism, tmpdir } from 'node:os'
 import * as vm from 'node:vm'
 import { logger } from '../../util/log'
 import { WorkflowError } from './errors'
+import { ContainmentBackend } from '../../sandbox/policy'
 import { WorkerRun } from './host'
+import { DEFAULT_WORKFLOW_MAX_OLD_SPACE_MB } from './process-worker'
 import { validateMeta } from './meta'
 import { realm } from './realm'
 import type {
@@ -43,7 +45,18 @@ export interface WorkflowEngineConfig {
   syncTimeoutMs?: number
   /** Cancellation grace before force-settle + worker termination (default 5000 ms). */
   disposeGraceMs?: number
+  /** Wall-clock limit of one run (default 30 minutes; KRN-09). */
+  wallClockMs?: number
+  /** Heap ceiling of the script process in MB (default 512; KRN-09). */
+  maxOldSpaceMb?: number
+  /** Where runs get their temp folder (default the OS temp folder). */
+  tempRoot?: string
+  /** Emperor Home, hidden from the script process. */
+  stateRoot?: string | null
 }
+
+/** The SEC-08 backend the script processes are contained by. */
+let sharedContainment: ContainmentBackend | undefined
 
 export const WORKFLOW_ENGINE_DEFAULTS: Required<WorkflowEngineConfig> = {
   provider: 'spawn',
@@ -52,6 +65,10 @@ export const WORKFLOW_ENGINE_DEFAULTS: Required<WorkflowEngineConfig> = {
   maxItemsPerCall: 4096,
   syncTimeoutMs: 5000,
   disposeGraceMs: 5000,
+  wallClockMs: 30 * 60_000,
+  maxOldSpaceMb: DEFAULT_WORKFLOW_MAX_OLD_SPACE_MB,
+  tempRoot: '',
+  stateRoot: null,
 }
 
 /** A body that still carries the Claude Code-style meta header. */
@@ -130,6 +147,8 @@ export class WorkflowEngine {
     positiveInteger('maxItemsPerCall', this.config.maxItemsPerCall)
     positiveInteger('syncTimeoutMs', this.config.syncTimeoutMs)
     positiveInteger('disposeGraceMs', this.config.disposeGraceMs, true)
+    positiveInteger('wallClockMs', this.config.wallClockMs, true)
+    positiveInteger('maxOldSpaceMb', this.config.maxOldSpaceMb)
   }
 
   getProvider(name: string): ChildProvider | undefined {
@@ -215,6 +234,13 @@ export class WorkflowEngine {
       init,
       provider,
       disposeGraceMs: this.config.disposeGraceMs,
+      wallClockMs: this.config.wallClockMs,
+      process: {
+        containment: (sharedContainment ??= new ContainmentBackend()),
+        tempRoot: this.config.tempRoot || tmpdir(),
+        stateRoot: this.config.stateRoot,
+        maxOldSpaceMb: this.config.maxOldSpaceMb,
+      },
       observer: {
         phase: (title) => {
           emit('phase', info, title)

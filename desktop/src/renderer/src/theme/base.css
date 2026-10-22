@@ -1,6 +1,6 @@
 /* ── Token-agnostic global base ─────────────────────────────────────────────
-   与主题无关的全局基础样式(盒模型、body)。表单控件默认样式在 styles.css 的
-   @layer base 中;主题 token 定义见 theme/dark.css 与 theme/light.css。 */
+   与主题无关的全局基础样式(盒模型、body)。元素重置与表单控件默认样式在
+   styles.css;主题令牌见 theme/primitives.css、semantic.*.css、components.css。 */
 * {
   box-sizing: border-box;
 }
@@ -14,9 +14,27 @@ body,
 body {
   margin: 0;
   overflow-x: hidden;
-  background: rgb(var(--bg));
-  color: rgb(var(--fg));
-  font-family: theme('fontFamily.body');
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* A thin space between Chinese and Latin text (DS-01; ignored where unsupported). */
+  text-autospace: normal;
+}
+
+/* Image lightboxes use a constant dark viewing surface in both themes. */
+:root {
+  --image-viewer-bg: 9 10 12;
+  --image-viewer-veil: 0.94; /* alpha of the viewer backdrop (0.98 with reduced transparency) */
+  --image-viewer-ink: 243 243 244;
+  --image-viewer-muted: 169 171 177;
+  --image-viewer-control-ink: 227 228 232;
+  --image-viewer-control: 36 38 45;
+  --image-viewer-toolbar: 41 43 50;
+  --image-viewer-secondary: 212 213 218;
+  --image-viewer-subtle: 151 154 164;
+  --image-viewer-counter: 197 199 206;
+  --image-viewer-white: 255 255 255;
+  --image-viewer-shadow: 0 0 0;
 }

@@ -20,7 +20,7 @@ export interface SlashPaletteItem {
 }
 
 export interface SlashPaletteGroup {
-  label: 'Commands' | 'Skills'
+  label: '命令' | 'Skills'
   items: SlashPaletteItem[]
 }
 
@@ -37,15 +37,15 @@ const BUILTIN_ORDER = [
 ] as const
 
 const BUILTIN_TITLES = new Map<string, string>([
-  ['new', 'New chat'],
-  ['compact', 'Compact'],
-  ['model', 'Model'],
-  ['reasoning', 'Reasoning'],
-  ['permissions', 'Permissions'],
-  ['plan', 'Plan mode'],
-  ['goal', 'Goal'],
-  ['stop', 'Stop'],
-  ['continue', 'Continue'],
+  ['new', '新对话'],
+  ['compact', '压缩上下文'],
+  ['model', '模型'],
+  ['reasoning', '思考强度'],
+  ['permissions', '执行权限'],
+  ['plan', '计划模式'],
+  ['goal', '目标'],
+  ['stop', '停止'],
+  ['continue', '继续'],
 ])
 
 export interface ResolvedSlashInvocation {
@@ -79,9 +79,7 @@ export function buildSlashPaletteGroups(
   const commands = visible.filter((item) => item.kind === 'command')
   const skills = visible.filter((item) => item.kind === 'skill')
   return [
-    ...(commands.length
-      ? [{ label: 'Commands' as const, items: commands }]
-      : []),
+    ...(commands.length ? [{ label: '命令' as const, items: commands }] : []),
     ...(skills.length ? [{ label: 'Skills' as const, items: skills }] : []),
   ]
 }
@@ -167,14 +165,14 @@ function descriptorToPaletteItem(
     skillName: descriptor.skill?.name,
     tags:
       descriptor.source === 'project_skill'
-        ? 'Project Skill'
+        ? '项目 Skill'
         : descriptor.source === 'user_skill'
-          ? 'User Skill'
+          ? '个人 Skill'
           : descriptor.source === 'plugin' ||
               descriptor.source === 'verified_plugin'
-            ? 'Plugin Skill'
+            ? '插件 Skill'
             : descriptor.kind === 'agent_prompt'
-              ? 'Built-in Skill'
+              ? '内置 Skill'
               : undefined,
     requiresArguments: descriptor.argumentSchema.some(
       (argument) => argument.required,
@@ -190,10 +188,10 @@ function builtinOrder(name: string): number {
 }
 
 function sourceLabel(source: CommandDescriptor['source']): string {
-  if (source === 'project_skill') return 'Project'
-  if (source === 'user_skill') return 'Personal'
-  if (source === 'plugin' || source === 'verified_plugin') return 'Plugin'
-  if (source === 'builtin_skill') return 'Built-in'
+  if (source === 'project_skill') return '项目'
+  if (source === 'user_skill') return '个人'
+  if (source === 'plugin' || source === 'verified_plugin') return '插件'
+  if (source === 'builtin_skill') return '内置'
   return ''
 }
 

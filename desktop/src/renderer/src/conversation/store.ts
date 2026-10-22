@@ -2,9 +2,11 @@
 // session, published to Vue through shallow refs.
 //
 // - `order` and `snapshot` refs change only when the chat order/snapshot
-//   changes; `node(key)` returns a per-key shallowRef triggered only when
-//   that node's materialized value changes, so a streaming delta re-renders
-//   exactly one row.
+//   changes (a flush that only grows streaming text publishes no snapshot);
+//   `running`, `turnCount` and `planSummary` are their own refs, triggered
+//   only when their value changes; `node(key)` returns a per-key shallowRef
+//   triggered only when that node's materialized value changes, so a
+//   streaming delta re-renders exactly one row.
 // - Flushes are batched: 'immediate' publications flush in a microtask,
 //   streaming ('animation-frame') publications once per frame. The
 //   scheduler is injectable for tests.
@@ -15,7 +17,9 @@
 //   the open windows.
 // - Extra targets (the trajectory) are lazy: a window assembles only chat
 //   until `activate(target)` / `target(target)` first asks for one, so the
-//   chat path pays nothing for an unopened trajectory tab.
+//   chat path pays nothing for an unopened trajectory tab. A view holds its
+//   target with `retainTarget`; LAZY_TARGET_IDLE_MS after the last holder
+//   lets go, the target is dropped again (UI-39).
 import {
   getCurrentScope,
   onScopeDispose,
@@ -39,6 +43,7 @@ import {
   createConversationAssembler,
   type ConversationExtensions,
 } from './chatSnapshot'
+import type { PlanSummary } from './planSummary'
 import {
   inspectRequests,
   type RequestInspectionSnapshot,
@@ -53,12 +58,22 @@ import type { ChatNode, ChatSnapshot } from './types'
 /** Default number of simultaneously open session windows. */
 export const CONVERSATION_WINDOW_CAPACITY = 4
 
+/** How long a lazy target stays assembled after its last holder leaves. */
+export const LAZY_TARGET_IDLE_MS = 30_000
+
 /** Flush scheduling primitives (injectable for tests). */
 export interface ConversationScheduler {
   /** Run once before the next paint (streaming cadence). */
   frame(callback: () => void): void
   /** Run after the current task (state changes). */
   microtask(callback: () => void): void
+  /** Run once after `ms` (idle lazy targets); returns a cancel. */
+  delay?(callback: () => void, ms: number): () => void
+}
+
+function timeoutDelay(callback: () => void, ms: number): () => void {
+  const timer = setTimeout(callback, ms)
+  return () => clearTimeout(timer)
 }
 
 export const browserScheduler: ConversationScheduler = {
@@ -68,6 +83,7 @@ export const browserScheduler: ConversationScheduler = {
     else setTimeout(callback, 16)
   },
   microtask: (callback) => queueMicrotask(callback),
+  delay: timeoutDelay,
 }
 
 export interface ConversationStoreDeps {
@@ -105,13 +121,28 @@ export function registerLazyConversationTarget(
   LAZY_TARGET_REGISTRY.set(target, extensions)
 }
 
+/** Test seam: the lazy targets registered so far (UI-S09 visual checks). */
+export function lazyConversationTargetsForTest(): string[] {
+  return [...LAZY_TARGET_REGISTRY.keys()]
+}
+
 /** Reactive view of one open session conversation. */
 export interface ConversationHandle {
   readonly sessionId: string
   /** Visible node keys in render order. */
   readonly order: Readonly<ShallowRef<readonly string[]>>
-  /** Latest chat snapshot (running, turnStatus, todos, contextUsage...). */
+  /**
+   * Latest chat snapshot (running, turnStatus, todos, contextUsage...).
+   * Republished only when something derived from it can change: a flush
+   * that only grows the text of streaming rows leaves it as it is.
+   */
   readonly snapshot: Readonly<ShallowRef<ChatSnapshot>>
+  /** A turn is open in the window (snapshot `running`). */
+  readonly running: Readonly<ShallowRef<boolean>>
+  /** Turns in the loaded window. */
+  readonly turnCount: Readonly<ShallowRef<number>>
+  /** Latest plan of the window (environment card 计划 row). */
+  readonly planSummary: Readonly<ShallowRef<PlanSummary | null>>
   /** Window facts: open state, header, hasMore, loadingOlder, error. */
   readonly window: Readonly<ShallowRef<SessionWindowState>>
   /** Bumps on every published flush (trajectory and other targets). */
@@ -126,11 +157,21 @@ export interface ConversationHandle {
   target<Snapshot>(target: string): Snapshot | undefined
   /** Register a lazy target now and publish its first snapshot. */
   activate(target: string): void
+  /** Whether a target is assembled right now (never activates it). */
+  hasTarget(target: string): boolean
+  /**
+   * Activate a lazy target for one holder (a mounted view). The returned
+   * release is idempotent; LAZY_TARGET_IDLE_MS after the last release the
+   * target is dropped, unless someone holds it again meanwhile.
+   */
+  retainTarget(target: string): () => void
   /** Provider requests of the loaded window (cached per revision). */
   requests(): RequestInspectionSnapshot
   /** Loaded raw events (seq ascending, wire-sanitized; read-only). */
   rawEvents(): readonly WireSessionEvent[]
   loadOlder(): Promise<void>
+  /** Read the history again after a failed read (FIX-03). */
+  retry(): Promise<void>
   /** Flush pending publications synchronously (tests, imperative reads). */
   flushNow(): void
 }
@@ -141,6 +182,9 @@ interface Entry {
   readonly assembler: ConversationAssembler
   readonly order: ShallowRef<readonly string[]>
   readonly snapshot: ShallowRef<ChatSnapshot>
+  readonly running: ShallowRef<boolean>
+  readonly turnCount: ShallowRef<number>
+  readonly planSummary: ShallowRef<PlanSummary | null>
   readonly windowState: ShallowRef<SessionWindowState>
   readonly revision: ShallowRef<number>
   readonly nodeRefs: Map<string, ShallowRef<ChatNode | undefined>>
@@ -150,6 +194,9 @@ interface Entry {
   scheduleGeneration: number
   requestsCache: { revision: number; value: RequestInspectionSnapshot } | null
   opened: Promise<void> | null
+  /** Holders per lazy target, and the pending drop of an idle one. */
+  readonly targetHolders: Map<string, number>
+  readonly targetDrops: Map<string, () => void>
 }
 
 export class ConversationStore {
@@ -214,6 +261,8 @@ export class ConversationStore {
   dispose(): void {
     this.unsubscribe?.()
     this.unsubscribe = null
+    for (const entry of this.entries.values())
+      for (const cancel of entry.targetDrops.values()) cancel()
     this.entries.clear()
     this.syncWatch()
   }
@@ -225,8 +274,20 @@ export class ConversationStore {
     })
   }
 
+  /**
+   * Reopen every open window from its tail (FIX-03: after 「重新连接」, when
+   * live events may have been missed).
+   */
+  async resyncAll(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()].map((entry) => entry.window.resync()),
+    )
+  }
+
   private startOpen(entry: Entry): void {
-    if (entry.opened !== null) return
+    // A failed read is read again when the session is opened again.
+    if (entry.opened !== null && entry.window.snapshot.openState !== 'error')
+      return
     // Watch first so no live event falls between the history cut and the
     // subscription; events that race the fetch are buffered by the window.
     entry.opened = this.watchChain
@@ -261,7 +322,11 @@ export class ConversationStore {
       }
       if (victim === undefined) return
       const entry = this.entries.get(victim)
-      if (entry !== undefined) entry.scheduleGeneration++
+      if (entry !== undefined) {
+        entry.scheduleGeneration++
+        for (const cancel of entry.targetDrops.values()) cancel()
+        entry.targetDrops.clear()
+      }
       this.entries.delete(victim)
     }
   }
@@ -270,6 +335,9 @@ export class ConversationStore {
     const assembler = createConversationAssembler(this.deps.extensions)
     const order = shallowRef<readonly string[]>(EMPTY_CHAT_SNAPSHOT.order)
     const snapshot = shallowRef<ChatSnapshot>(EMPTY_CHAT_SNAPSHOT)
+    const running = shallowRef(false)
+    const turnCount = shallowRef(0)
+    const planSummary = shallowRef<PlanSummary | null>(null)
     const revision = shallowRef(0)
     const nodeRefs = new Map<string, ShallowRef<ChatNode | undefined>>()
     // The window's onChange and the handle close over the entry built below.
@@ -287,6 +355,9 @@ export class ConversationStore {
       sessionId,
       order,
       snapshot,
+      running,
+      turnCount,
+      planSummary,
       window: windowState,
       revision,
       node: (key) => {
@@ -303,11 +374,41 @@ export class ConversationStore {
       },
       activate: (target) => {
         if (assembler.hasTarget(target)) return
-        const extension =
-          this.lazyTargets?.[target] ?? LAZY_TARGET_REGISTRY.get(target)
+        const extension = this.lazyExtension(target)
         if (extension === undefined) return
         assembler.extend(extension.definitions ?? [], extension.views ?? [])
         if (box.entry !== null) this.flush(box.entry)
+      },
+      hasTarget: (target) => assembler.hasTarget(target),
+      retainTarget: (target) => {
+        const entry = box.entry
+        if (entry === null || this.lazyExtension(target) === undefined)
+          return () => {}
+        entry.targetDrops.get(target)?.()
+        entry.targetDrops.delete(target)
+        entry.targetHolders.set(
+          target,
+          (entry.targetHolders.get(target) ?? 0) + 1,
+        )
+        handle.activate(target)
+        let released = false
+        return () => {
+          if (released) return
+          released = true
+          const holders = (entry.targetHolders.get(target) ?? 1) - 1
+          if (holders > 0) {
+            entry.targetHolders.set(target, holders)
+            return
+          }
+          entry.targetHolders.delete(target)
+          entry.targetDrops.set(
+            target,
+            this.delay(() => {
+              entry.targetDrops.delete(target)
+              this.dropTarget(entry, target)
+            }, LAZY_TARGET_IDLE_MS),
+          )
+        }
       },
       requests: () => {
         const cache = box.entry?.requestsCache ?? null
@@ -320,6 +421,13 @@ export class ConversationStore {
       },
       rawEvents: () => window.window,
       loadOlder: () => window.loadOlder(),
+      retry: () => {
+        const entry = box.entry
+        if (entry === null) return Promise.resolve()
+        entry.opened = null
+        this.startOpen(entry)
+        return entry.opened ?? Promise.resolve()
+      },
       flushNow: () => {
         if (box.entry !== null) this.flush(box.entry)
       },
@@ -330,6 +438,9 @@ export class ConversationStore {
       assembler,
       order,
       snapshot,
+      running,
+      turnCount,
+      planSummary,
       windowState,
       revision,
       nodeRefs,
@@ -339,9 +450,34 @@ export class ConversationStore {
       scheduleGeneration: 0,
       requestsCache: null,
       opened: null,
+      targetHolders: new Map(),
+      targetDrops: new Map(),
     }
     box.entry = entry
     return entry
+  }
+
+  private delay(callback: () => void, ms: number): () => void {
+    return this.scheduler.delay
+      ? this.scheduler.delay(callback, ms)
+      : timeoutDelay(callback, ms)
+  }
+
+  private lazyExtension(target: string): ConversationExtensions | undefined {
+    return this.lazyTargets?.[target] ?? LAZY_TARGET_REGISTRY.get(target)
+  }
+
+  /** Stop assembling an idle lazy target (UI-39). */
+  private dropTarget(entry: Entry, target: string): void {
+    if (entry.targetHolders.has(target)) return
+    const extension = this.lazyExtension(target)
+    if (extension === undefined) return
+    const publication = entry.assembler.retract(
+      extension.definitions ?? [],
+      extension.views ?? [],
+    )
+    if (publication !== 'none' && this.entries.get(entry.sessionId) === entry)
+      this.flush(entry)
   }
 
   private schedule(entry: Entry, publication: ConversationPublication): void {
@@ -388,7 +524,15 @@ export class ConversationStore {
       }
     }
     if (entry.order.value !== next.order) entry.order.value = next.order
-    if (entry.snapshot.value !== next) entry.snapshot.value = next
+    if (entry.snapshot.value !== next) {
+      entry.snapshot.value = next
+      if (entry.running.value !== next.running)
+        entry.running.value = next.running
+      const turns = next.timeline.turnOrder.length
+      if (entry.turnCount.value !== turns) entry.turnCount.value = turns
+      const plan = next.planSummary ?? null
+      if (entry.planSummary.value !== plan) entry.planSummary.value = plan
+    }
     entry.revision.value++
   }
 }

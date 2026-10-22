@@ -1,12 +1,13 @@
 import type { ServerConfig } from './config'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { ExecutionEnvironment } from '../environment/snapshot'
-import { EmperorError } from '../errors'
+import { MCPConnectionError } from './errors'
 import type { OwnedProcessRuntime } from '../processes/runtime'
+import type { UnsandboxedConsentPort } from '../sandbox/consent'
+import type { McpServerSource } from './containment'
 import { logger } from '../util/log'
 import { OwnedStdioClientTransport } from './owned-stdio-transport'
 
@@ -24,25 +25,7 @@ export interface MCPCallToolResult {
   clientId?: string
 }
 
-export type MCPConnectionErrorCode =
-  | 'mcp_aborted'
-  | 'mcp_auth_failed'
-  | 'mcp_config_invalid'
-  | 'mcp_connection_failed'
-  | 'mcp_protocol_error'
-  | 'mcp_restart_exhausted'
-  | 'mcp_transport_timeout'
-  | 'mcp_unavailable'
-
-export class MCPConnectionError extends EmperorError {
-  constructor(
-    code: MCPConnectionErrorCode,
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(message, code, options)
-  }
-}
+export { MCPConnectionError, type MCPConnectionErrorCode } from './errors'
 
 export type MCPConnectionLifecycleEvent =
   | { type: 'closed'; reason?: string; intentional?: boolean }
@@ -101,6 +84,11 @@ export abstract class MCPConnection {
 
   get lastConnectionFailure(): unknown {
     return this.connectionFailure
+  }
+
+  /** The server's last stderr lines; only stdio servers have any. */
+  stderrTail(_lines = 200): string {
+    return ''
   }
 
   setLifecycleListener(
@@ -194,12 +182,16 @@ export function buildStdioEnv(
 export class StdioConnection extends MCPConnection {
   config: ServerConfig
   private client: Client | null = null
+  /** The transport of the last start: its stderr ring outlives a failure. */
+  private transport: OwnedStdioClientTransport | null = null
   private executionEnvironment: ExecutionEnvironment | null
   private intentionalDisconnect = false
   private readonly processRuntime: OwnedProcessRuntime | null
   private readonly workspaceRoot: string | null
   private readonly stateRoot: string | null
   private readonly ownerSessionId: string | null
+  private readonly source: McpServerSource
+  private readonly consent: UnsandboxedConsentPort | null
   private readonly configResolver:
     | ((
         snapshot: ExecutionEnvironment,
@@ -220,6 +212,9 @@ export class StdioConnection extends MCPConnection {
       workspaceRoot?: string | null
       stateRoot?: string | null
       ownerSessionId?: string | null
+      /** A plugin's server (the default) is never run unconfined. */
+      source?: McpServerSource
+      consent?: UnsandboxedConsentPort | null
     } = {},
   ) {
     super(serverName)
@@ -230,6 +225,8 @@ export class StdioConnection extends MCPConnection {
     this.workspaceRoot = opts.workspaceRoot ?? null
     this.stateRoot = opts.stateRoot ?? null
     this.ownerSessionId = opts.ownerSessionId ?? null
+    this.source = opts.source ?? 'plugin'
+    this.consent = opts.consent ?? null
     if (this.executionEnvironment)
       this.adoptExecutionEnvironment(this.executionEnvironment)
   }
@@ -254,22 +251,30 @@ export class StdioConnection extends MCPConnection {
       const params = this.stdioParams(
         this.executionEnvironment?.env ?? process.env,
       )
-      const transport = this.processRuntime
-        ? new OwnedStdioClientTransport({
-            runtime: this.processRuntime,
-            serverName: this.serverName,
-            ownerSessionId: this.ownerSessionId,
-            workspaceRoot: this.workspaceRoot ?? process.cwd(),
-            stateRoot: this.stateRoot ?? this.workspaceRoot ?? process.cwd(),
-            command: params.command,
-            args: params.args,
-            ...(params.env ? { env: params.env } : {}),
-            ...(params.cwd ? { cwd: params.cwd } : {}),
-            ...(this.config.stateGrants
-              ? { stateGrants: this.config.stateGrants }
-              : {}),
-          })
-        : new StdioClientTransport({ ...params, stderr: 'inherit' })
+      // SEC-08: a stdio server only ever starts inside the owned runtime
+      // and its containment; there is no unconfined path.
+      if (!this.processRuntime)
+        throw new MCPConnectionError(
+          'mcp_sandbox_refused',
+          `MCP server '${this.serverName}' has no owned process runtime to contain it`,
+        )
+      const transport = new OwnedStdioClientTransport({
+        runtime: this.processRuntime,
+        serverName: this.serverName,
+        ownerSessionId: this.ownerSessionId,
+        workspaceRoot: this.workspaceRoot ?? process.cwd(),
+        stateRoot: this.stateRoot ?? this.workspaceRoot ?? process.cwd(),
+        command: params.command,
+        args: params.args,
+        ...(params.env ? { env: params.env } : {}),
+        ...(params.cwd ? { cwd: params.cwd } : {}),
+        ...(this.config.stateGrants
+          ? { stateGrants: this.config.stateGrants }
+          : {}),
+        source: this.source,
+        consent: this.consent,
+      })
+      this.transport = transport
       const client = new Client({ name: 'emperor-agent', version: '0.0.0' })
       client.onclose = () => {
         if (this.client === client) this.client = null
@@ -286,8 +291,14 @@ export class StdioConnection extends MCPConnection {
         this.connectionFailure = error
         this.reportLifecycle({ type: 'error', error })
       }
-      await client.connect(transport)
+      // Known before the handshake, so a disconnect meanwhile kills the
+      // process at once instead of when the handshake lands (KRN-04).
       this.client = client
+      await client.connect(transport)
+      if (this.client !== client) {
+        await client.close().catch(() => {})
+        return false
+      }
       this.connected = true
       this.connectionFailure = null
       return true
@@ -297,6 +308,10 @@ export class StdioConnection extends MCPConnection {
       this.connected = false
       return false
     }
+  }
+
+  override stderrTail(lines = 200): string {
+    return this.transport?.stderrTail(lines) ?? ''
   }
 
   async disconnect(): Promise<void> {

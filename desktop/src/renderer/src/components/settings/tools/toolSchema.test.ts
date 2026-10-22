@@ -115,7 +115,7 @@ describe('tool schema helpers', () => {
       ['basic', '基础工具', ['bash', 'read']],
       ['network', '网络', ['web_search']],
       ['planning', '任务与规划', ['todo_write']],
-      ['agents', '子代理与工作流', ['subagent']],
+      ['agents', '子智能体与工作流', ['subagent']],
       ['config', '技能、记忆与配置', ['skill']],
       ['other', '其他', ['mystery', 'newer']],
     ])

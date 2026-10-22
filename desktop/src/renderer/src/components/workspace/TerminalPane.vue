@@ -1,14 +1,52 @@
 <script setup lang="ts">
+/**
+ * TerminalPane — the right workspace's 终端 pane: tabs of the session's PTYs
+ * (WorkspaceTabBar, the strip 文件 uses too; 「+」 opens another) over one
+ * xterm surface (the active tab, replayed from Core on activation). With no
+ * terminal the surface says so; 「+」 is the only way to start one.
+ *
+ * Sizing (FIX-05): fits wait until the surface size has settled for 100 ms,
+ * are skipped while the column is closed (`visible` false) or the surface is
+ * below 20 × 5 cells, and the PTY hears only about a size it has not been
+ * sent yet (terminalFit.ts). Focus: only an explicit activation — the pane
+ * picked (`focusRequest`), a tab clicked, 新建终端 — moves keyboard focus
+ * into the terminal; restoring after a session switch, or arrowing along the
+ * tabs, never does.
+ *
+ * Props:
+ * - sessionId.
+ * - visible?: the workspace column is open (default true).
+ * - focusRequest?: nonce; a new non-zero value focuses the terminal once it
+ *   is ready (WorkspacePanel sends one when the user shows this pane).
+ */
+import { confirmTerminalClose } from './terminalClose'
+import { terminalExitLine } from './terminalExit'
+import EmptyState from '../ui/EmptyState.vue'
+import IconButton from '../ui/IconButton.vue'
+import type { TabItem } from '../ui/blockTypes'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalEvent, TerminalSummary } from '@emperor/core/api'
-import { Plus, TerminalSquare, X } from 'lucide-vue-next'
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Plus, SquareTerminal } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WorkspaceTabBar from './WorkspaceTabBar.vue'
 import { onTerminalEvent } from '../../api/backend'
 import { core } from '../../api/http'
+import {
+  TERMINAL_RESIZE_DEBOUNCE_MS,
+  fitAllowed,
+  terminalFontFamily,
+} from './terminalFit'
 
-const props = defineProps<{ sessionId: string }>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    visible?: boolean
+    focusRequest?: number
+  }>(),
+  { visible: true, focusRequest: 0 },
+)
 const container = ref<HTMLElement | null>(null)
 const terminals = ref<TerminalSummary[]>([])
 const activeId = ref('')
@@ -24,13 +62,52 @@ let initializing = false
 let pendingEvents: TerminalEvent[] = []
 let pendingEventBytes = 0
 let pendingOverflow = false
+let resizeTimer: ReturnType<typeof setTimeout> | undefined
+/** `cols×rows` last sent to the active PTY ('' = nothing yet). */
+let sentSize = ''
+/** The user asked for the terminal; focus it once it is ready. */
+let focusPending = false
+/** A tab is being picked with the keyboard (focus stays on the strip). */
+let pickingByKey = false
+
+const tabItems = computed<TabItem[]>(() =>
+  terminals.value.map((item, index) => {
+    const label = item.title || `终端 ${index + 1}`
+    return {
+      id: item.id,
+      label: item.exited ? `${label} · 已退出` : label,
+      icon: SquareTerminal,
+      closable: true,
+    }
+  }),
+)
 
 onMounted(async () => {
   await restore()
 })
 watch(
   () => props.sessionId,
-  () => void restore(),
+  () => {
+    // Restoring another session's terminals is not an activation.
+    focusPending = false
+    void restore()
+  },
+)
+watch(
+  () => props.focusRequest,
+  (nonce) => {
+    focusPending = Boolean(nonce)
+    if (focusPending && terminal && !initializing) {
+      focusPending = false
+      terminal.focus()
+    }
+  },
+  { immediate: true },
+)
+// The column opened again: fit once its animation has settled.
+watch(
+  () => props.visible,
+  (visible) => visible && scheduleFit(),
 )
 onBeforeUnmount(() => {
   ownerGeneration += 1
@@ -61,9 +138,25 @@ async function restore(): Promise<void> {
   }
 }
 
+/** 新建终端: an explicit activation, so the new terminal takes focus. */
+function newTerminal(): void {
+  void createTerminal(props.sessionId, ownerGeneration, true)
+}
+
+function setKeyPick(picking: boolean): void {
+  pickingByKey = picking
+}
+
+/** A tab picked: clicked is an explicit activation, arrowed to is not. */
+function selectTerminal(terminalId: string): void {
+  if (terminalId === activeId.value) return
+  void activate(terminalId, props.sessionId, ownerGeneration, !pickingByKey)
+}
+
 async function createTerminal(
   owner = props.sessionId,
   generation = ownerGeneration,
+  focus = false,
 ): Promise<void> {
   if (terminals.value.length >= 8) return
   try {
@@ -80,7 +173,7 @@ async function createTerminal(
       return
     }
     terminals.value = [...terminals.value, created]
-    await activate(created.id, owner, generation)
+    await activate(created.id, owner, generation, focus)
   } catch (cause) {
     if (isCurrentOwner(owner, generation)) error.value = message(cause)
   }
@@ -90,6 +183,7 @@ async function activate(
   terminalId: string,
   owner = props.sessionId,
   generation = ownerGeneration,
+  focus = false,
 ): Promise<void> {
   if (!terminalId || !isCurrentOwner(owner, generation)) return
   disposeTerminal()
@@ -118,12 +212,14 @@ async function activate(
   terminal = new Terminal({
     cursorBlink: true,
     convertEol: false,
-    fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
+    // Canvas measuring cannot resolve var(): pass the computed family.
+    fontFamily: terminalFontFamily(container.value),
     fontSize: 12,
     scrollback: 10_000,
     theme: {
-      background: cssColor(style, '--bg', 'rgb(12 12 14)'),
-      foreground: cssColor(style, '--fg', 'rgb(238 238 241)'),
+      // The workspace panel's surface (UI-S01).
+      background: cssColor(style, '--surface-base', 'rgb(26 26 25)'),
+      foreground: cssColor(style, '--text-1', 'rgb(238 238 241)'),
       cursor: cssColor(style, '--accent', 'rgb(99 153 255)'),
       selectionBackground: 'rgba(103, 167, 255, 0.28)',
     },
@@ -141,7 +237,7 @@ async function activate(
         error.value = message(cause)
     })
   })
-  resizeObserver = new ResizeObserver(() => fitAndResize())
+  resizeObserver = new ResizeObserver(() => scheduleFit())
   resizeObserver.observe(container.value)
   fitAndResize()
   try {
@@ -181,10 +277,11 @@ async function activate(
     initializing = false
     for (const event of buffered) applyTerminalEvent(event)
     if (replay.terminal.exited)
-      terminal.writeln(
-        `\r\n[process exited: ${replay.terminal.exitCode ?? 'signal'}]`,
-      )
-    terminal.focus()
+      terminal.writeln(terminalExitLine(replay.terminal.exitCode))
+    if (focus || focusPending) {
+      focusPending = false
+      terminal.focus()
+    }
   } catch (cause) {
     if (isCurrentActivation(owner, generation, activation, terminalId))
       error.value = message(cause)
@@ -197,6 +294,12 @@ async function activate(
 async function closeTerminal(terminalId: string): Promise<void> {
   const owner = props.sessionId
   const generation = ownerGeneration
+  if (
+    !(await confirmTerminalClose(terminalId, () =>
+      core('terminals.list', { sessionId: owner }),
+    ))
+  )
+    return
   try {
     await core('terminals.close', { sessionId: owner, terminalId })
     if (!isCurrentOwner(owner, generation)) return
@@ -248,37 +351,56 @@ function applyTerminalEvent(event: TerminalEvent): void {
         ? { ...item, exited: true, exitCode: event.exitCode }
         : item,
     )
-    terminal?.writeln(`\r\n[process exited: ${event.exitCode ?? 'signal'}]`)
+    terminal?.writeln(terminalExitLine(event.exitCode))
   }
 }
 
+/** The surface changed size: fit once it has settled. */
+function scheduleFit(): void {
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(fitAndResize, TERMINAL_RESIZE_DEBOUNCE_MS)
+}
+
 function fitAndResize(): void {
-  if (!terminal || !fitAddon || !activeId.value) return
+  clearTimeout(resizeTimer)
+  resizeTimer = undefined
+  if (!terminal || !fitAddon || !activeId.value || !props.visible) return
   const owner = props.sessionId
   const terminalId = activeId.value
   const activation = activationGeneration
   try {
+    // A closing column or a squeezed window: keep the size the PTY has.
+    if (!fitAllowed(fitAddon.proposeDimensions())) return
     fitAddon.fit()
-    void core('terminals.resize', {
-      sessionId: owner,
-      terminalId,
-      cols: terminal.cols,
-      rows: terminal.rows,
-    }).catch((cause) => {
-      if (
-        props.sessionId === owner &&
-        activeId.value === terminalId &&
-        activationGeneration === activation
-      )
-        error.value = message(cause)
-    })
   } catch {
-    // Hidden panels can briefly report zero bounds; the next observer tick retries.
+    // Hidden panels can briefly report zero bounds; the next change retries.
+    return
   }
+  const size = `${terminal.cols}x${terminal.rows}`
+  if (size === sentSize) return
+  sentSize = size
+  void core('terminals.resize', {
+    sessionId: owner,
+    terminalId,
+    cols: terminal.cols,
+    rows: terminal.rows,
+  }).catch((cause) => {
+    if (
+      props.sessionId === owner &&
+      activeId.value === terminalId &&
+      activationGeneration === activation
+    ) {
+      sentSize = ''
+      error.value = message(cause)
+    }
+  })
 }
 
 function disposeTerminal(): void {
   activationGeneration += 1
+  clearTimeout(resizeTimer)
+  resizeTimer = undefined
+  sentSize = ''
   resizeObserver?.disconnect()
   resizeObserver = null
   terminal?.dispose()
@@ -307,22 +429,6 @@ function isCurrentActivation(
   )
 }
 
-function selectAdjacentTerminal(index: number, key: string): void {
-  if (!terminals.value.length) return
-  let target = index
-  if (key === 'ArrowLeft')
-    target = (index - 1 + terminals.value.length) % terminals.value.length
-  else if (key === 'ArrowRight') target = (index + 1) % terminals.value.length
-  else if (key === 'Home') target = 0
-  else if (key === 'End') target = terminals.value.length - 1
-  else return
-  const item = terminals.value[target]
-  if (!item) return
-  void activate(item.id).then(() => {
-    document.getElementById(`terminal-tab-${item.id}`)?.focus()
-  })
-}
-
 function cssColor(
   style: CSSStyleDeclaration,
   property: string,
@@ -339,66 +445,46 @@ function message(value: unknown): string {
 
 <template>
   <div class="terminal-pane">
-    <div class="terminal-tabs" role="tablist" aria-label="项目终端">
-      <div
-        v-for="(item, index) in terminals"
-        :key="item.id"
-        class="terminal-tab-item"
-        :class="{ active: activeId === item.id, exited: item.exited }"
+    <!-- The strip's keydown runs between these two: arrowing keeps focus. -->
+    <div
+      class="terminal-tabs"
+      @keydown.capture="setKeyPick(true)"
+      @keydown="setKeyPick(false)"
+    >
+      <WorkspaceTabBar
+        :model-value="activeId"
+        :tabs="tabItems"
+        label="项目终端"
+        @update:model-value="selectTerminal"
+        @close="closeTerminal"
       >
-        <button
-          :id="`terminal-tab-${item.id}`"
-          type="button"
-          role="tab"
-          class="terminal-tab-button"
-          :aria-selected="activeId === item.id"
-          :aria-controls="`terminal-panel-${item.id}`"
-          :tabindex="activeId === item.id ? 0 : -1"
-          :class="{ active: activeId === item.id }"
-          @click="activate(item.id)"
-          @keydown="selectAdjacentTerminal(index, $event.key)"
-        >
-          <TerminalSquare :size="13" />
-          <span>{{ item.title || `Terminal ${index + 1}` }}</span>
-          <span v-if="item.exited" class="sr-only">已退出</span>
-        </button>
-        <button
-          type="button"
-          class="terminal-tab-close"
-          :aria-label="`关闭 ${item.title || `Terminal ${index + 1}`}`"
-          @click="closeTerminal(item.id)"
-        >
-          <X :size="12" />
-        </button>
-      </div>
-      <button
-        type="button"
-        class="terminal-new-tab"
-        :disabled="terminals.length >= 8"
-        aria-label="新建终端"
-        @click="createTerminal()"
-      >
-        <Plus :size="14" />
-      </button>
+        <template #after>
+          <IconButton
+            label="新建终端"
+            :disabled="terminals.length >= 8"
+            @click="newTerminal"
+          >
+            <Plus :size="16" />
+          </IconButton>
+        </template>
+      </WorkspaceTabBar>
     </div>
     <div v-if="error" class="terminal-error" role="alert">{{ error }}</div>
-    <button
-      v-if="!terminals.length"
-      type="button"
-      class="terminal-empty-action"
-      @click="createTerminal()"
-    >
-      <TerminalSquare :size="16" />
-      新建终端
-    </button>
-    <div
-      ref="container"
-      class="terminal-surface"
-      role="tabpanel"
-      :id="activeId ? `terminal-panel-${activeId}` : undefined"
-      :aria-labelledby="activeId ? `terminal-tab-${activeId}` : undefined"
-      aria-label="交互式系统终端"
-    ></div>
+    <div class="terminal-body">
+      <div
+        ref="container"
+        class="terminal-surface"
+        role="tabpanel"
+        aria-label="交互式系统终端"
+      ></div>
+      <EmptyState
+        v-if="!terminals.length"
+        class="terminal-empty"
+        title="没有打开的终端"
+        description="用标签栏的 + 新建一个"
+        :icon="SquareTerminal"
+      />
+    </div>
   </div>
 </template>
 
@@ -409,134 +495,45 @@ function message(value: unknown): string {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .terminal-tabs {
-  display: flex;
-  min-height: calc(var(--space-8) + var(--space-2));
   flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: 0 var(--space-2);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border-l1);
-  scrollbar-width: none;
-}
-
-.terminal-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.terminal-tab-item {
-  display: inline-flex;
-  max-width: 140px;
-  flex: none;
-  align-items: center;
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
-}
-
-.terminal-tab-item:hover {
-  color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-tab-item.active {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-active);
-}
-
-.terminal-tab-item.exited {
-  opacity: 0.6;
-}
-
-.terminal-tab-button {
-  display: inline-flex;
   min-width: 0;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
-  color: inherit;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-}
-
-.terminal-tab-button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminal-tab-close {
-  display: inline-grid;
-  place-items: center;
-  margin-right: var(--space-1);
-  padding: 2px;
-  border-radius: var(--radius-xs);
-  color: inherit;
-}
-
-.terminal-tab-close:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-new-tab {
-  display: inline-grid;
-  width: var(--space-7);
-  height: var(--space-7);
-  flex: none;
-  place-items: center;
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
-}
-
-.terminal-new-tab:hover:not(:disabled) {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-new-tab:disabled {
-  opacity: 0.4;
 }
 
 .terminal-error {
   flex: none;
   margin: var(--space-2) var(--space-3) 0;
-  padding: var(--space-1-5) var(--space-2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--danger));
-  background: rgb(var(--danger-soft));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  padding: var(--space-1-5) var(--space-2-5);
+  border-radius: var(--r-sm);
+  color: rgb(var(--error));
+  background: rgb(var(--error-soft));
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
-.terminal-empty-action {
-  display: inline-flex;
-  align-self: center;
-  align-items: center;
-  gap: var(--space-2);
-  margin: var(--space-6);
-  padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-pill);
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+.terminal-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
-.terminal-empty-action:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+.terminal-empty {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
 }
 
 .terminal-surface {
   min-height: 0;
   flex: 1;
+  font-family: var(--font-mono), monospace;
   padding: var(--space-2) var(--space-1) var(--space-1) var(--space-2);
   overflow: hidden;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .terminal-surface :deep(.xterm) {

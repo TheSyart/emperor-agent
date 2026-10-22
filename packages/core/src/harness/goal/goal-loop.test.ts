@@ -5,7 +5,12 @@ import { contextMessage, messageText, userText } from '../../llm/message'
 import type { GenerateOptions } from '../../llm/types'
 import type { SessionEvent } from '../../session-log/types'
 import type { Agent } from '../agent/agent'
-import { createTestHarness, replyChunks, type ScriptedReply } from '../testing'
+import {
+  createTestHarness,
+  replyChunks,
+  withTaskBudget,
+  type ScriptedReply,
+} from '../testing'
 import {
   createGoalTools,
   GoalService,
@@ -577,6 +582,29 @@ describe('same-session goal driving', () => {
     expect(t.h.adapter.requests).toHaveLength(1)
   })
 
+  it('disarms automatic continuation after a round reaches its step budget (KRN-03)', async () => {
+    const t = setup([{ tools: [{ name: 'missing_tool' }] }, { text: 'never' }])
+    withTaskBudget(t.h, t.agent.id, { maxSteps: 1 })
+    t.goals.create(t.agent, {
+      objective: 'stop at the budget',
+      maxGoalRounds: 8,
+    })
+    const goal = await waitForGoal(
+      t.goals,
+      t.agent,
+      (current) =>
+        current?.phase === 'active' && current.activation === 'disarmed',
+    )
+    await settle(t.agent)
+    expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
+    expect(t.h.adapter.requests).toHaveLength(1)
+    expect(t.agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'budget',
+      limit: 'steps',
+      maxSteps: 1,
+    })
+  })
+
   it('maps a downstream step rejection to blocked without entering the round', async () => {
     const t = setup()
     t.h.middleware.preStep.push(({ messages }) =>
@@ -863,4 +891,71 @@ describe('same-session goal driving', () => {
     })
     expect(t.h.adapter.requests).toHaveLength(1)
   })
+})
+
+describe('external delegation goal boundary', () => {
+  it('waits without empty model rounds while direct user work bypasses the wait gate', async () => {
+    let outstanding = true
+    const h = createTestHarness({
+      replies: [{ text: 'user response' }, { text: 'after child' }],
+    })
+    const goals = new GoalService()
+    const { driver } = installGoal(
+      { prompt: h.prompt, middleware: h.middleware },
+      goals,
+      {
+        driverOptions: { hasOutstandingDelegations: () => outstanding },
+      },
+    )
+    const agent = h.agent(),
+      detach = driver.attach(agent)
+    goals.create(agent, { objective: 'fixture goal', maxGoalRounds: 1 })
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(0)
+    agent.followup(userText('direct user input'))
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(1)
+    expect(roundEvents(agent)).toEqual([])
+    outstanding = false
+    driver.delegationSettled(agent.id)
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(2)
+    expect(roundEvents(agent)).toEqual([1])
+    driver.delegationSettled(agent.id)
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(2)
+    detach()
+  })
+  it('rejects a required unverified child at the domain completion boundary, including revised goals', async () => {
+    let accepted = false
+    const h = createTestHarness(),
+      agent = h.agent()
+    const goals = new GoalService({
+      verifyCompletion: async () => {
+        if (!accepted) throw new Error('required delegation unverified')
+      },
+    })
+    let goal = goals.create(agent, { objective: 'fixture goal' })
+    await expect(goals.verifyCompletion(agent, goal)).rejects.toThrow(
+      'unverified',
+    )
+    expect(() => goals.complete(agent, goal)).toThrow('verification')
+    goal = goals.edit(agent, goal, { objective: 'edited fixture' })
+    accepted = true
+    await goals.verifyCompletion(agent, goal)
+    expect(goals.complete(agent, goal).phase).toBe('complete')
+  })
+})
+it('rejects a completion proof if required delegation state changed during its async boundary', async () => {
+  let current = true
+  const h = createTestHarness(),
+    agent = h.agent(),
+    goals = new GoalService({
+      verifyCompletion: async () => {},
+      completionCurrent: () => current,
+    })
+  const goal = goals.create(agent, { objective: 'fixture proof race' })
+  await goals.verifyCompletion(agent, goal)
+  current = false
+  expect(() => goals.complete(agent, goal)).toThrow('verification')
 })

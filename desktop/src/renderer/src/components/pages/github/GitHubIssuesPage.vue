@@ -31,12 +31,7 @@ import {
 import { useAppContext } from '../../../composables/useAppContext'
 import { DsChevronLeft, DsChevronRight, DsGlobe } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
-import {
-  EmptyState,
-  SearchField,
-  Segmented,
-  StatusBadge,
-} from '../../settings/ui'
+import { EmptyState, SearchField, Segmented, Badge } from '../../settings/ui'
 import { refreshAction } from '../../settings/settingsHeader'
 import PageShell from '../PageShell.vue'
 import { onPageReactivated } from '../pageLifecycle'
@@ -200,7 +195,7 @@ const actions = computed(() =>
           <Button
             v-if="shown"
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="openOnGitHub(shown.url)"
           >
             <template #icon><DsGlobe :size="14" /></template>
@@ -211,17 +206,20 @@ const actions = computed(() =>
           v-if="detailError && !shown"
           title="无法读取这个 Issue"
           :description="detailError"
+          framed
         >
-          <Button size="sm" variant="outline" @click="loadDetail">重试</Button>
+          <Button size="sm" variant="secondary" @click="loadDetail"
+            >重试</Button
+          >
         </EmptyState>
         <p v-else-if="!shown" class="hint" role="status">正在读取…</p>
         <template v-else>
           <header class="head">
             <h2 class="title">{{ shown.title }}</h2>
             <div class="meta">
-              <StatusBadge v-if="badge" :tone="badge.tone" dot>
+              <Badge v-if="badge" :tone="badge.tone" variant="dot-label">
                 {{ badge.label }}
-              </StatusBadge>
+              </Badge>
               <span>{{ shown.repo }}#{{ shown.number }}</span>
               <span>
                 {{ shown.author }} 创建于
@@ -237,7 +235,7 @@ const actions = computed(() =>
           <section class="comments" data-issue-comments>
             <h3 class="section-title">
               评论
-              <span class="count">{{ shown.commentCount }}</span>
+              <Badge variant="count" :label="shown.commentCount" />
             </h3>
             <p v-if="shown.commentCount > shown.comments.length" class="hint">
               只显示最近 {{ shown.comments.length }} 条，其余在 GitHub 上查看。
@@ -283,8 +281,7 @@ const actions = computed(() =>
               ? '别人在你名下仓库里开的 Issue，在「我的仓库」里查看。'
               : undefined
           "
-          variant="plain"
-          compact
+          variant="inline"
         />
         <ul v-else-if="list" class="rows" :aria-busy="listLoading || undefined">
           <li v-for="item in list.items" :key="`${item.repo}#${item.number}`">
@@ -348,13 +345,13 @@ const actions = computed(() =>
   padding: 0;
   overflow: hidden;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row {
@@ -373,7 +370,7 @@ const actions = computed(() =>
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {
@@ -393,8 +390,8 @@ const actions = computed(() =>
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -402,8 +399,8 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -415,7 +412,7 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -432,7 +429,7 @@ const actions = computed(() =>
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .bar {
@@ -456,7 +453,7 @@ const actions = computed(() =>
 
 .comments {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .section-title {
@@ -466,13 +463,8 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
-}
-
-.count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .comment-list {
@@ -490,7 +482,7 @@ const actions = computed(() =>
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 </style>

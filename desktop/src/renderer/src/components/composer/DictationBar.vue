@@ -12,10 +12,11 @@
  * first), shortcut (a label such as ⇧⌘D).
  * Emits: cancel, stop.
  */
+import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { computed } from 'vue'
 import { useReducedMotion } from '../../composables/useReducedMotion'
-import { DsClose, DsLoading, DsStopSquare } from '../icons/ds'
-import Tooltip from '../ui/Tooltip.vue'
+import { DsClose, DsStopSquare } from '../icons/ds'
 import type { DictationPhase } from './composerDictation'
 import { dictationWaveSlots } from './dictationWave'
 
@@ -42,16 +43,14 @@ const live = computed(() =>
 
 <template>
   <div class="dictation-bar" :data-phase="phase">
-    <Tooltip label="取消听写">
-      <button
-        type="button"
-        class="dictation-cancel"
-        aria-label="取消听写"
-        @click="emit('cancel')"
-      >
-        <DsClose :size="14" />
-      </button>
-    </Tooltip>
+    <IconButton
+      class="dictation-cancel"
+      label="取消听写"
+      shape="circle"
+      @click="emit('cancel')"
+    >
+      <DsClose :size="14" />
+    </IconButton>
     <div class="dictation-wave" aria-hidden="true">
       <i
         v-for="(level, index) in slots"
@@ -60,18 +59,18 @@ const live = computed(() =>
         :style="level === null ? undefined : { '--dictation-level': level }"
       />
     </div>
-    <Tooltip label="停止听写" :shortcut="shortcut">
-      <button
-        type="button"
-        class="dictation-stop"
-        aria-label="停止听写"
-        :disabled="!listening"
-        @click="emit('stop')"
-      >
-        <DsStopSquare v-if="listening" :size="12" />
-        <DsLoading v-else :size="14" class="dictation-spin" />
-      </button>
-    </Tooltip>
+    <IconButton
+      class="dictation-stop"
+      label="停止听写"
+      :shortcut="shortcut"
+      shape="circle"
+      variant="tonal"
+      :disabled="!listening"
+      @click="emit('stop')"
+    >
+      <DsStopSquare v-if="listening" :size="12" />
+      <Spinner v-else size="sm" />
+    </IconButton>
     <span class="dictation-live" aria-live="polite">{{ live }}</span>
   </div>
 </template>
@@ -97,27 +96,27 @@ const live = computed(() =>
   border: none;
   border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .dictation-cancel {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .dictation-cancel:hover {
-  background: var(--interactive-bg-active);
-  color: rgb(var(--label-primary));
+  background: var(--surface-active);
+  color: rgb(var(--text-1));
 }
 
 .dictation-stop {
-  background: rgb(var(--label-primary));
-  color: rgb(var(--input-major));
+  background: rgb(var(--text-1));
+  color: rgb(var(--composer-fill));
 }
 
 .dictation-stop:disabled {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -148,17 +147,13 @@ const live = computed(() =>
 .dictation-wave > .bar {
   height: calc(var(--space-1) + var(--dictation-level) * var(--space-6));
   border-radius: 2px;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .dictation-wave > .dot {
   height: 3px;
   border-radius: var(--radius-pill);
-  background: rgb(var(--label-caption));
-}
-
-.dictation-spin {
-  animation: dictation-spin 1s linear infinite;
+  background: rgb(var(--text-3));
 }
 
 .dictation-live {
@@ -168,11 +163,5 @@ const live = computed(() =>
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-@keyframes dictation-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

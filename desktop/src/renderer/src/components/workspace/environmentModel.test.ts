@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   AVATAR_COLORS,
   avatarIndex,
-  avatarToken,
   backgroundTaskDetail,
   backgroundTaskLines,
   backgroundTaskSummary,
@@ -76,7 +75,6 @@ describe('Environment subagent projection', () => {
 describe('avatar colors', () => {
   it('hashes an id to a stable slot', () => {
     expect(avatarIndex('sub-a')).toBe(avatarIndex('sub-a'))
-    expect(avatarToken('sub-a')).toBe(`--avatar-${avatarIndex('sub-a') + 1}`)
     for (const id of ['', 'a', 'sub-123', '子代理'])
       expect(avatarIndex(id)).toBeGreaterThanOrEqual(0)
   })
@@ -261,7 +259,7 @@ describe('background task lines', () => {
       backgroundTaskDetail(
         task({ ...workflow, workflow_tool: 'workflow', rounds: 4 }),
       ),
-    ).toBe('4 个代理')
+    ).toBe('4 个子智能体')
     expect(
       backgroundTaskDetail(task({ ...workflow, workflow_tool: 'workflow' })),
     ).toBe('工作流')
@@ -295,7 +293,7 @@ describe('transcriptText', () => {
         { role: 'agent', content: '#1 completed' },
         { role: 'custom', content: 'x' },
       ]),
-    ).toBe('[阶段] 实现\n[代理] #1 completed\n[custom] x')
+    ).toBe('[阶段] 实现\n[子智能体] #1 completed\n[custom] x')
     expect(transcriptText([])).toBe('')
   })
 })

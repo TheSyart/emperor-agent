@@ -4,7 +4,8 @@
  *
  * 1. `runtimeNoticeFromEvent` — which live runtime events are worth a
  *    notice (scheduler run done / failed, a question / approval / plan
- *    waiting, a finished turn, a finished git operation).
+ *    waiting, a finished turn, a finished git operation, a newer Emperor
+ *    on GitHub).
  * 2. `notificationFromNotice` — the attention policy against what the user
  *    is looking at: a waiting question or a finished turn in the session on
  *    screen is dropped (the conversation already shows it); a scheduler run
@@ -22,7 +23,13 @@ import {
 
 export const MAX_NOTIFICATIONS = 50
 
-export type NotificationKind = 'scheduler' | 'pending' | 'turn' | 'git'
+export type NotificationKind =
+  | 'scheduler'
+  | 'pending'
+  | 'turn'
+  | 'git'
+  /** A newer Emperor on GitHub (REL-02). */
+  | 'update'
 export type NotificationTone = 'info' | 'success' | 'warning' | 'error'
 
 /** Where clicking the notification goes. */
@@ -31,6 +38,8 @@ export type NotificationTarget =
   | { type: 'scheduler' }
   /** The session's conversation with the workspace 「审查」 pane open. */
   | { type: 'review'; sessionId: string }
+  /** 设置 › 常规, where 更新 is (REL-02). */
+  | { type: 'settings' }
 
 export interface AppNotification {
   /** Identity and dedupe key (one real occurrence ⇒ one key). */
@@ -116,20 +125,27 @@ export function unreadNotificationCount(state: NotificationsState): number {
   return state.items.filter((item) => !item.read).length
 }
 
-/** Session a notification points at ('' for scheduler notifications). */
+/** Session a notification points at ('' for scheduler and update ones). */
 export function notificationSessionId(item: AppNotification): string {
-  return item.target.type === 'scheduler' ? '' : item.target.sessionId
+  return 'sessionId' in item.target ? item.target.sessionId : ''
 }
 
 // ── persistence shape ───────────────────────────────────────────────────
 
-const KINDS = new Set<NotificationKind>(['scheduler', 'pending', 'turn', 'git'])
+const KINDS = new Set<NotificationKind>([
+  'scheduler',
+  'pending',
+  'turn',
+  'git',
+  'update',
+])
 const TONES = new Set<NotificationTone>(['info', 'success', 'warning', 'error'])
 
 function normalizeTarget(value: unknown): NotificationTarget | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as { type?: unknown; sessionId?: unknown }
-  if (raw.type === 'scheduler') return { type: 'scheduler' }
+  if (raw.type === 'scheduler' || raw.type === 'settings')
+    return { type: raw.type }
   const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId : ''
   if (!sessionId) return null
   if (raw.type === 'session') return { type: 'session', sessionId }
@@ -209,7 +225,8 @@ export type RuntimeNotice =
       kind: 'turn'
       key: string
       sessionId: string
-      outcome: 'completed' | 'error'
+      /** `budget`: the task budget stopped it (KRN-03). */
+      outcome: 'completed' | 'error' | 'budget'
       at: number
     }
   | {
@@ -219,6 +236,7 @@ export type RuntimeNotice =
       summary: string
       at: number
     }
+  | { kind: 'update'; key: string; version: string; at: number }
 
 function eventTime(event: WsEvent, now: number): number {
   const ts = Number(event.ts)
@@ -282,16 +300,33 @@ export function runtimeNoticeFromEvent(
     case 'assistant_done': {
       if (!owner) return null
       const reason = text(event.stop_reason)
-      // A stopped or crash-closed turn is not news; everything else is.
-      if (reason === 'aborted' || reason === 'interrupted') return null
+      // A stopped or crash-closed turn, or one the user ended by dismissing
+      // the plan review to reply, is not news; everything else is.
+      if (
+        reason === 'aborted' ||
+        reason === 'interrupted' ||
+        reason === 'plan-dismissed'
+      )
+        return null
       const turn = seq > 0 ? String(seq) : text(event.turn_id) || String(at)
       return {
         kind: 'turn',
         key: `turn:${owner}:${turn}`,
         sessionId: owner,
-        outcome: reason === 'error' ? 'error' : 'completed',
+        outcome:
+          reason === 'error'
+            ? 'error'
+            : reason === 'budget'
+              ? 'budget'
+              : 'completed',
         at,
       }
+    }
+    case 'update_available': {
+      const version = text(event.version)
+      return version
+        ? { kind: 'update', key: `update:${version}`, version, at }
+        : null
     }
     default:
       break
@@ -343,6 +378,16 @@ export function notificationFromNotice(
       read: context.schedulerPageOpen,
       target: { type: 'scheduler' },
     }
+  if (notice.kind === 'update')
+    return {
+      key: notice.key,
+      kind: 'update',
+      tone: 'info',
+      title: `Emperor ${notice.version} 可用`,
+      detail: '查看更新说明 · 下载',
+      createdAt: notice.at,
+      target: { type: 'settings' },
+    }
   const viewed = notice.sessionId === context.viewedSessionId
   const title = context.sessionTitle(notice.sessionId) || '新会话'
   if (notice.kind === 'pending') {
@@ -364,9 +409,19 @@ export function notificationFromNotice(
     return {
       key: notice.key,
       kind: 'turn',
-      tone: notice.outcome === 'error' ? 'error' : 'success',
+      tone:
+        notice.outcome === 'error'
+          ? 'error'
+          : notice.outcome === 'budget'
+            ? 'warning'
+            : 'success',
       title,
-      detail: notice.outcome === 'error' ? '回合出错' : '回合已完成',
+      detail:
+        notice.outcome === 'error'
+          ? '回合出错'
+          : notice.outcome === 'budget'
+            ? '已达到任务预算，已停止'
+            : '回合已完成',
       createdAt: notice.at,
       target: { type: 'session', sessionId: notice.sessionId },
     }

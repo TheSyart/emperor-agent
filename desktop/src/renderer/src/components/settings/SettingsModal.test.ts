@@ -3,14 +3,19 @@ import { createApp, defineComponent, h, nextTick, ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
+import {
+  activeConfirm,
+  answerConfirmsForTest,
+  settleConfirm,
+} from '../ui/confirm'
 import Modal from '../ui/Modal.vue'
 import SettingsModal from './SettingsModal.vue'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../api/http', () => ({ core }))
 
-// 桌宠 stands in for a section with a sub page.
-vi.mock('./PetSection.vue', async () => {
+// 高级 stands in for a section with a sub page.
+vi.mock('./AdvancedSection.vue', async () => {
   const { defineComponent, h } = await import('vue')
   const { useSettingsPages } = await import('./settingsHeader')
   return {
@@ -35,6 +40,11 @@ vi.mock('./PetSection.vue', async () => {
   }
 })
 
+// Sections are async chunks: on a cold transform cache (CI) the first one
+// can take seconds to load, more than vi.waitFor's default second.
+const SECTION_LOAD = { timeout: 10_000 }
+vi.setConfig({ testTimeout: 20_000 })
+
 async function flushPromises(): Promise<void> {
   for (let i = 0; i < 5; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -47,7 +57,21 @@ let app: App | null = null
 
 function makeContext() {
   return {
-    boot: ref({ model: 'demo-model', projects: [], tools: [], skills: [] }),
+    boot: ref({
+      model: 'demo-model',
+      projects: [],
+      tools: [],
+      skills: [],
+      memory: {
+        long_term: '长期记忆原文',
+        episodes: [],
+        versions: { versions: [] },
+      },
+    }),
+    configContent: ref(''),
+    loadConfig: vi.fn(async () => {}),
+    saveMemory: vi.fn(async () => {}),
+    refreshMemory: vi.fn(async () => {}),
     runtimeText: () => '运行中',
     showToast: vi.fn(),
     refreshAll: vi.fn(async () => {}),
@@ -96,7 +120,30 @@ afterEach(() => {
   container?.remove()
   container = null
   core.mockReset()
+  answerConfirmsForTest(null)
 })
+
+/** Type into the open 长期记忆 editor. */
+async function editMemory(text: string): Promise<void> {
+  await vi.waitFor(
+    () => expect(modal()?.querySelector('textarea')).not.toBeNull(),
+    SECTION_LOAD,
+  )
+  const textarea = modal()!.querySelector('textarea')!
+  textarea.value = text
+  textarea.dispatchEvent(new Event('input'))
+  await nextTick()
+}
+
+function pressEscape(): void {
+  modal()?.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+}
 
 describe('SettingsModal', () => {
   it('stays closed without the settings query', async () => {
@@ -110,33 +157,99 @@ describe('SettingsModal', () => {
     expect(dialog).not.toBeNull()
     expect(dialog?.getAttribute('role')).toBe('dialog')
     expect(dialog?.textContent).toContain('设置')
-    // 定时任务 and the 能力 tabs are full pages now; 配置 folded into 记忆;
-    // 电脑操作, 浏览器 and 语音 joined.
-    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(10)
-    for (const joined of ['computer', 'browser', 'voice'])
-      expect(
-        dialog?.querySelector(`.nav-cell[data-section="${joined}"]`),
-      ).not.toBeNull()
-    for (const moved of [
-      'scheduler',
-      'plugins',
-      'skills',
-      'mcp',
-      'tools',
-      'configs',
-    ])
-      expect(
-        dialog?.querySelector(`.nav-cell[data-section="${moved}"]`),
-      ).toBeNull()
-    expect(
-      dialog?.querySelector('.nav-cell[data-section="hooks"]'),
-    ).not.toBeNull()
     expect(
       dialog?.querySelector('.nav-cell.active')?.getAttribute('data-section'),
     ).toBe('general')
-    await vi.waitFor(() => expect(dialog?.textContent).toContain('demo-model'))
-    expect(dialog?.textContent).toContain('已归档对话')
+    await vi.waitFor(
+      () =>
+        expect(
+          dialog?.querySelector('[data-group="appearance"]'),
+        ).not.toBeNull(),
+      SECTION_LOAD,
+    )
     expect(document.activeElement).toBe(dialog)
+  })
+
+  it('marks 子智能体 while Claude Code or Codex has a new version (AGT-13)', async () => {
+    const { resetExecutorUpgrades } =
+      await import('./executors/executorUpgrades')
+    resetExecutorUpgrades()
+    core.mockImplementation(async (operation: string) =>
+      operation === 'executors.versions'
+        ? {
+            checkedAt: 1,
+            checking: false,
+            error: null,
+            dismissed: false,
+            upgrades: [],
+            executors: [
+              {
+                profileId: 'codex-default',
+                backend: 'codex',
+                enabled: true,
+                installed: '0.153.4',
+                install: { kind: 'npm', location: null },
+                latest: '0.163.0',
+                verified: ['0.153', '0.163'],
+                target: '0.163.0',
+                unverified: null,
+                upgrade: {
+                  oneClick: true,
+                  command: 'npm install -g @openai/codex@0.163.0',
+                },
+                activeRuns: 0,
+              },
+            ],
+          }
+        : [],
+    )
+    await mount('/chat/s1?settings=general')
+    // Read when the settings open, without asking npm.
+    await vi.waitFor(
+      () =>
+        expect(
+          modal()?.querySelector(
+            '.nav-cell[data-section="executors"] [data-nav-mark]',
+          ),
+        ).not.toBeNull(),
+      SECTION_LOAD,
+    )
+    expect(core).toHaveBeenCalledWith('executors.versions', {})
+    expect(modal()!.querySelectorAll('[data-nav-mark]')).toHaveLength(1)
+    resetExecutorUpgrades()
+  })
+
+  it('groups nine sections under 常规, 智能, 操控 and 系统 (UI-S07)', async () => {
+    await mount('/chat/s1?settings=general')
+    const dialog = modal()
+    const groups = [...(dialog?.querySelectorAll('.nav-group') ?? [])]
+    expect(groups.length).toBe(4)
+    expect(
+      groups.map((group) => [
+        group.querySelector('.nav-group-label')?.textContent?.trim() ?? null,
+        [...group.querySelectorAll('.nav-cell')].map((cell) =>
+          cell.getAttribute('data-section'),
+        ),
+      ]),
+    ).toEqual([
+      [null, ['general']],
+      ['智能', ['model', 'executors', 'memory']],
+      ['操控', ['computer', 'browser', 'voice']],
+      ['系统', ['tokens', 'advanced']],
+    ])
+    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(9)
+    for (const gone of ['hooks', 'pet', 'diagnostics', 'scheduler', 'mcp'])
+      expect(
+        dialog?.querySelector(`.nav-cell[data-section="${gone}"]`),
+      ).toBeNull()
+  })
+
+  it('opens a folded section where it lives now', async () => {
+    await mount('/chat/s1?settings=hooks')
+    const dialog = modal()
+    expect(
+      dialog?.querySelector('.nav-cell.active')?.getAttribute('data-section'),
+    ).toBe('advanced')
   })
 
   it('shows general for a moved section key the router did not redirect', async () => {
@@ -164,7 +277,7 @@ describe('SettingsModal', () => {
   })
 
   it('opens a sub page with the section name as a way back', async () => {
-    const { router } = await mount('/chat/s1?settings=pet')
+    const { router } = await mount('/chat/s1?settings=advanced')
     const dialog = modal()
     await vi.waitFor(() =>
       expect(dialog?.querySelector('[data-testid="pet-open"]')).not.toBeNull(),
@@ -179,13 +292,13 @@ describe('SettingsModal', () => {
     manage?.click()
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({
-      settings: 'pet',
+      settings: 'advanced',
       page: 'detail',
     })
     const crumb = dialog?.querySelector<HTMLButtonElement>(
       '[data-testid="settings-crumb"]',
     )
-    expect(crumb?.textContent?.trim()).toBe('桌宠')
+    expect(crumb?.textContent?.trim()).toBe('高级')
     expect(
       dialog?.querySelector('[data-testid="settings-page-title"]')?.textContent,
     ).toBe('动画详情')
@@ -198,16 +311,16 @@ describe('SettingsModal', () => {
     crumb?.focus()
     crumb?.click()
     await flushPromises()
-    expect(router.currentRoute.value.query).toEqual({ settings: 'pet' })
+    expect(router.currentRoute.value.query).toEqual({ settings: 'advanced' })
     expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
     expect(dialog?.querySelector('.section-title')?.textContent?.trim()).toBe(
-      '桌宠',
+      '高级',
     )
     expect(document.activeElement).toBe(dialog)
   })
 
   it('deep links to a sub page; the nav leaves it', async () => {
-    const { router } = await mount('/chat/s1?settings=pet&page=detail')
+    const { router } = await mount('/chat/s1?settings=advanced&page=detail')
     const dialog = modal()
     await vi.waitFor(() =>
       expect(
@@ -222,12 +335,12 @@ describe('SettingsModal', () => {
 
     // The section's own nav cell leads back to its main page.
     dialog
-      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="pet"]')
+      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="advanced"]')
       ?.click()
     await flushPromises()
-    expect(router.currentRoute.value.query).toEqual({ settings: 'pet' })
+    expect(router.currentRoute.value.query).toEqual({ settings: 'advanced' })
 
-    await router.replace('/chat/s1?settings=pet&page=detail')
+    await router.replace('/chat/s1?settings=advanced&page=detail')
     await flushPromises()
     dialog
       ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="tokens"]')
@@ -237,14 +350,14 @@ describe('SettingsModal', () => {
   })
 
   it('shows the main page for a sub page the section does not have', async () => {
-    await mount('/chat/s1?settings=pet&page=nope')
+    await mount('/chat/s1?settings=advanced&page=nope')
     const dialog = modal()
     await vi.waitFor(() =>
       expect(dialog?.querySelector('[data-testid="pet-open"]')).not.toBeNull(),
     )
     expect(dialog?.querySelector('[data-testid="settings-crumb"]')).toBeNull()
     expect(dialog?.querySelector('.section-title')?.textContent?.trim()).toBe(
-      '桌宠',
+      '高级',
     )
   })
 
@@ -317,39 +430,93 @@ describe('SettingsModal', () => {
   })
 
   it('renders section header actions in the shell header and drops them on switch', async () => {
-    const { router } = await mount('/chat/s1?settings=general')
+    const { router } = await mount('/chat/s1?settings=tokens')
     const header = () => modal()?.querySelector('.settings-header')
-    await vi.waitFor(() =>
-      expect(header()?.querySelector('[data-action="refresh"]')).not.toBeNull(),
+    await vi.waitFor(
+      () =>
+        expect(
+          [
+            ...(header()?.querySelectorAll('[data-action="refresh"]') ?? []),
+          ].map((button) => button.getAttribute('aria-label')),
+        ).toEqual(['刷新 Token 统计']),
+      SECTION_LOAD,
     )
-    expect(
-      header()
-        ?.querySelector('[data-action="refresh"]')
-        ?.getAttribute('aria-label'),
-    ).toBe('刷新归档对话')
 
-    await router.replace('/chat/s1?settings=tokens')
+    await router.replace('/chat/s1?settings=general')
     await flushPromises()
     expect(header()?.querySelector('.section-title')?.textContent).toContain(
-      '用量',
+      '常规',
     )
-    // The general section's action is gone; the tokens section brings its own.
+    // 常规 brings no header action of its own.
+    expect(header()?.querySelector('[data-action="refresh"]')).toBeNull()
+  })
+
+  it('asks before Escape drops an edited memory draft', async () => {
+    const { router } = await mount('/chat/s1?settings=memory')
+    await editMemory('没保存的修改')
+
+    pressEscape()
+    await flushPromises()
+    expect(activeConfirm.value?.confirmLabel).toBe('放弃')
+    settleConfirm(activeConfirm.value!.id, false)
+    await flushPromises()
+    expect(modal()).not.toBeNull()
+    expect(router.currentRoute.value.query.settings).toBe('memory')
+    expect(modal()?.querySelector('textarea')?.value).toBe('没保存的修改')
+
+    pressEscape()
+    await flushPromises()
+    settleConfirm(activeConfirm.value!.id, true)
+    await flushPromises()
+    expect(modal()).toBeNull()
+    expect(router.currentRoute.value.query.settings).toBeUndefined()
+  })
+
+  it('asks before switching sections with unsaved edits', async () => {
+    const { router } = await mount('/chat/s1?settings=memory')
+    await editMemory('没保存的修改')
+
+    modal()
+      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="tokens"]')
+      ?.click()
+    await flushPromises()
+    expect(activeConfirm.value?.title).toBe('放弃未保存的修改？')
+    settleConfirm(activeConfirm.value!.id, false)
+    await flushPromises()
+    expect(router.currentRoute.value.query.settings).toBe('memory')
+
+    modal()
+      ?.querySelector<HTMLButtonElement>('.nav-cell[data-section="tokens"]')
+      ?.click()
+    await flushPromises()
+    settleConfirm(activeConfirm.value!.id, true)
+    await flushPromises()
+    expect(router.currentRoute.value.query.settings).toBe('tokens')
+  })
+
+  it('closes without asking when nothing was edited', async () => {
+    const { router } = await mount('/chat/s1?settings=memory')
     await vi.waitFor(() =>
-      expect(
-        [...(header()?.querySelectorAll('[data-action="refresh"]') ?? [])].map(
-          (button) => button.getAttribute('aria-label'),
-        ),
-      ).toEqual(['刷新 Token 统计']),
+      expect(modal()?.querySelector('textarea')).not.toBeNull(),
     )
+    pressEscape()
+    await flushPromises()
+    expect(activeConfirm.value).toBeNull()
+    expect(router.currentRoute.value.query.settings).toBeUndefined()
   })
 
   it('offers the follow-system appearance option', async () => {
     await mount('/chat/s1?settings=general')
     await vi.waitFor(() =>
-      expect(modal()?.querySelectorAll('[data-theme-option]').length).toBe(3),
+      expect(
+        modal()?.querySelectorAll('[aria-label="主题"] [role="radio"]').length,
+      ).toBe(3),
     )
     expect(
-      modal()?.querySelector('[data-theme-option="system"]')?.textContent,
-    ).toContain('跟随系统')
+      [
+        ...(modal()?.querySelectorAll('[aria-label="主题"] [role="radio"]') ??
+          []),
+      ].map((option) => option.textContent?.trim()),
+    ).toEqual(['跟随系统', '浅色', '深色'])
   })
 })

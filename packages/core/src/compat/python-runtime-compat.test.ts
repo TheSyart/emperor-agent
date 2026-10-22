@@ -28,8 +28,14 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
+      'taskBudget',
+      'updates',
+      'webTools',
       'webui',
     ])
+    // …and both network tool switches on.
+    expect(settings.webTools).toEqual({ webFetch: true, webSearch: true })
     // Settings from before the 浏览器 section get its defaults.
     expect(settings.browser).toEqual({
       linkTarget: 'system',

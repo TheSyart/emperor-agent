@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import {
+  PET_EVENT_CHANNEL,
+  PET_RENDERER_BOOTSTRAP_CHANNEL,
+  PET_RENDERER_CLOSE_CHANNEL,
+} from '../shared/ipc-contract'
 
 const mainSource = readFileSync(resolve(__dirname, 'index.ts'), 'utf8')
 const preloadSource = readFileSync(
@@ -25,9 +30,13 @@ describe('desktop pet renderer sandbox', () => {
     expect(preloadSource).not.toContain('emperor:core:bootstrap')
     expect(preloadSource).not.toContain('emperor:core:event')
     expect(preloadSource).not.toContain('emperor:pet:close')
-    expect(preloadSource).toContain('emperor:pet:renderer-bootstrap')
-    expect(preloadSource).toContain('emperor:pet:renderer-close')
-    expect(preloadSource).toContain('emperor:pet:event')
+    // Plain JS keeps the contract's channel names literally (MAIN-27).
+    expect(preloadSource).toContain(`'${PET_RENDERER_BOOTSTRAP_CHANNEL}'`)
+    expect(preloadSource).toContain(`'${PET_RENDERER_CLOSE_CHANNEL}'`)
+    expect(preloadSource).toContain(`'${PET_EVENT_CHANNEL}'`)
+    expect(mainSource).toMatch(
+      /createPetWindow[\s\S]*?webPreferences:\s*\{[\s\S]*?devTools:\s*!app\.isPackaged/,
+    )
     expect(mainSource).toContain('const petContents = win.webContents')
     expect(mainSource).toContain('coreEventBridge.attachPet(petContents)')
     expect(mainSource).not.toContain('coreEventBridge.attach(petContents)')

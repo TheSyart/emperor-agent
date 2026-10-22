@@ -296,4 +296,89 @@ describe('SchedulerPage', () => {
     )
     expect(ctx.showToast).toHaveBeenCalledWith('定时任务已创建：每周回顾')
   })
+
+  it('says why the scheduler did not start and which jobs were set aside (KRN-10 1, 2)', async () => {
+    const broken = payload(JOBS)
+    broken.status = {
+      ...broken.status,
+      running: false,
+      startError:
+        '另一个 Emperor 进程（pid 4242）正在运行定时任务，本进程不启动定时任务',
+      rejectedJobs: 2,
+    }
+    core.mockImplementation(async (op: string) =>
+      op === 'scheduler.get' ? broken : {},
+    )
+    await mount()
+    const alerts = [
+      ...document.querySelectorAll<HTMLElement>('[data-scheduler-notice]'),
+    ].map((el) => [el.dataset.schedulerNotice, el.textContent ?? ''])
+    expect(alerts).toEqual([
+      ['start', expect.stringContaining('pid 4242')],
+      ['rejected', expect.stringContaining('2 个定时任务无法读取')],
+    ])
+    expect(alerts[1]![1]).toContain('jobs.rejected.json')
+    // The other jobs are still listed.
+    expect(rows()).toContain('job_digest')
+  })
+
+  it('cannot create a 指定时间 job without a date or in the past (KRN-10 7, 8)', async () => {
+    await mount()
+    document.querySelector<HTMLButtonElement>('[data-action="create"]')!.click()
+    await flush()
+    document
+      .querySelector<HTMLButtonElement>('[data-menu-item="blank"]')!
+      .click()
+    await flush()
+    const dialog = document.querySelector<HTMLElement>(
+      '[data-testid="scheduler-job-dialog"]',
+    )!
+    const message = dialog.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = '提醒我发版'
+    message.dispatchEvent(new Event('input'))
+    await flush()
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"], button')]
+      .find((el) => el.textContent?.trim() === '指定时间')!
+      .click()
+    await flush()
+    const create = () =>
+      document.querySelector<HTMLButtonElement>('[data-action="create-job"]')!
+    expect(create().disabled).toBe(true)
+    expect(dialog.textContent).toContain('请选择日期和时间')
+
+    const at = dialog.querySelector<HTMLInputElement>(
+      'input[type="datetime-local"]',
+    )!
+    const local = (ms: number) => {
+      const d = new Date(ms)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+    at.value = local(Date.now() - HOUR)
+    at.dispatchEvent(new Event('input'))
+    await flush()
+    expect(create().disabled).toBe(true)
+    expect(dialog.textContent).toContain('指定时间必须晚于现在')
+
+    at.value = local(Date.now() + 2 * HOUR)
+    at.dispatchEvent(new Event('input'))
+    await flush()
+    expect(create().disabled).toBe(false)
+    expect(dialog.textContent).not.toContain('指定时间必须晚于现在')
+  })
+
+  it('keeps the service note behind ⓘ (UI-S08 5)', async () => {
+    await mount()
+    const footer = document.querySelector<HTMLElement>(
+      '[data-testid="scheduler-summary"]',
+    )!
+    expect(footer.textContent).toContain('服务运行中')
+    expect(document.body.textContent).not.toContain('最多补跑一次')
+    const info = document.querySelector<HTMLButtonElement>(
+      '[aria-label="关于定时任务服务"]',
+    )!
+    info.click()
+    await flush()
+    expect(document.body.textContent).toContain('最多补跑一次')
+  })
 })

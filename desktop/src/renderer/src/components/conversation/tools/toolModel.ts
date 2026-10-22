@@ -34,6 +34,69 @@ export function parseToolArgs(argsRaw: string): ToolArgs | null {
   return parsed
 }
 
+/** Cut points tried (from the end) before giving up on a streamed draft. */
+const PARTIAL_JSON_ATTEMPTS = 8
+
+/**
+ * The fields of a streamed, unfinished JSON object that are already readable
+ * (DSH-23 preparing rows): an open string is closed where it stops, then the
+ * draft is cut back to the last complete member until it parses. Null when
+ * the draft is not an object yet.
+ */
+export function partialJsonObject(raw: string): ToolArgs | null {
+  const text = raw.trim()
+  if (!text.startsWith('{')) return null
+  const parse = (candidate: string): ToolArgs | null => {
+    try {
+      const value: unknown = JSON.parse(candidate)
+      return typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(value)
+        ? (value as ToolArgs)
+        : null
+    } catch {
+      return null
+    }
+  }
+  const whole = parse(text)
+  if (whole !== null) return whole
+  // One pass: the open containers at every member boundary outside strings.
+  const closers: string[] = []
+  const cuts: { at: number; closing: string }[] = []
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === '{' || char === '[') {
+      closers.push(char === '{' ? '}' : ']')
+      cuts.push({ at: index + 1, closing: [...closers].reverse().join('') })
+    } else if (char === '}' || char === ']') closers.pop()
+    else if (char === ',')
+      cuts.push({ at: index, closing: [...closers].reverse().join('') })
+  }
+  const tail = [...closers].reverse().join('')
+  if (inString) {
+    const open = escaped ? text.slice(0, -1) : text
+    const closed = parse(`${open}"${tail}`)
+    if (closed !== null) return closed
+  } else {
+    const closed = parse(`${text}${tail}`)
+    if (closed !== null) return closed
+  }
+  for (const cut of cuts.reverse().slice(0, PARTIAL_JSON_ATTEMPTS)) {
+    const value = parse(`${text.slice(0, cut.at)}${cut.closing}`)
+    if (value !== null) return value
+  }
+  return null
+}
+
 export function argsOf(data: ToolChatData): ToolArgs {
   return parseToolArgs(data.argsRaw) ?? {}
 }
@@ -60,6 +123,16 @@ export function metaOf(
   const meta: unknown = data.result?.meta
   return typeof meta === 'object' && meta !== null && !Array.isArray(meta)
     ? (meta as Record<string, unknown>)
+    : undefined
+}
+
+/** Native followups do not emit subagent/started. Resolve only their native target, never dlg/run IDs. */
+export function nativeAgentTarget(data: ToolChatData): string | undefined {
+  if (data.name !== 'send_message' || data.externalAgent) return undefined
+  const meta = metaOf(data)
+  const id = meta?.subagentId ?? stringArg(argsOf(data), 'subagent_id')
+  return typeof id === 'string' && id.startsWith('sub-') && id.length > 4
+    ? id
     : undefined
 }
 
@@ -468,6 +541,8 @@ export function planOutcome(data: ToolChatData): {
   if (data.status === 'interrupted') return { outcome: 'stopped' }
   const meta = metaOf(data)
   if (meta?.approved === true) return { outcome: 'approved' }
+  // Dismissed to reply: a successful, turn-ending result (older logs used PLAN_REVIEW_CANCELLED).
+  if (meta?.dismissed === true) return { outcome: 'cancelled' }
   const code = data.result?.error?.code
   const text = resultText(data)
   if (code === 'PLAN_REJECTED') {
