@@ -427,3 +427,63 @@ it.each([
     expect(body.textContent).not.toContain('子智能体报告：准备工作区失败')
   },
 )
+
+// FIX-16: Codex refused the model nobody in Emperor chose (Codex's own
+// default); 任务详情 says which model, where to change it, and — when the
+// run used another model instead — which one.
+const MODEL_REASON =
+  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+it('FIX-16 · 2 · a refused model reads in Chinese, with the next step, the reason and the way to settings', async () => {
+  const s = state('codex', 'failed')
+  Object.assign(s.runs['dgr-one'], {
+    failureCode: 'EXECUTOR_MODEL_UNSUPPORTED',
+    summary: MODEL_REASON,
+  })
+  api.getDelegation.mockResolvedValue(s)
+  const body = await mount()
+  const note = body.querySelector<HTMLElement>('[data-failure-code]')!
+  expect(note.dataset.failureCode).toBe('EXECUTOR_MODEL_UNSUPPORTED')
+  expect(note.textContent).toContain('不支持这个模型')
+  expect(note.textContent).not.toContain('EXECUTOR_MODEL_UNSUPPORTED')
+  expect(note.querySelector('[data-failure-next]')!.textContent).toContain(
+    '默认模型',
+  )
+  expect(
+    body.querySelector<HTMLElement>('[data-run-reason]')!.textContent?.trim(),
+  ).toBe(`原因：${MODEL_REASON}`)
+  const settings = [...note.querySelectorAll('button')].find(
+    (button) => button.textContent === '打开子智能体设置',
+  )!
+  settings.click()
+  expect(configure).toHaveBeenCalled()
+})
+it.each([
+  [
+    'default-unavailable',
+    '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，本次改用 gpt-5.6-sol。',
+  ],
+  [
+    'retried',
+    '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，第一次运行被拒绝，已改用 gpt-5.6-sol 重新运行。',
+  ],
+])(
+  'FIX-16 · 3 · a run that used another model than Codex’s default says so (%s)',
+  async (reason, text) => {
+    const s = state('codex', 'completed')
+    Object.assign(s.runs['dgr-one'], {
+      modelChoice: { configured: 'gpt-6.1-sol', used: 'gpt-5.6-sol', reason },
+    })
+    api.getDelegation.mockResolvedValue(s)
+    const body = await mount()
+    expect(
+      body
+        .querySelector<HTMLElement>('[data-model-choice]')!
+        .textContent?.trim(),
+    ).toBe(text)
+  },
+)
+it('FIX-16 · 3 · a run on the configured model says nothing about models', async () => {
+  api.getDelegation.mockResolvedValue(state('codex', 'completed'))
+  const body = await mount()
+  expect(body.querySelector('[data-model-choice]')).toBeNull()
+})

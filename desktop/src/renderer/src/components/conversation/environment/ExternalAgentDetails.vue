@@ -312,6 +312,11 @@ const FAILURE: Record<string, [reason: string, next: string]> = {
     '子智能体这一轮执行失败。',
     '查看下面的子智能体报告和输出，修正后让主会话重试。',
   ],
+  // FIX-16: the provider refused the model; the reason names it.
+  EXECUTOR_MODEL_UNSUPPORTED: [
+    '子智能体的账号不支持这个模型。',
+    '在「设置 › 子智能体」打开它的详情页，在「默认模型」里换一个这个账号可用的模型，然后让主会话重试。',
+  ],
   // FIX-15: failures outside the subagent's own report; the run's summary
   // carries Core's reason.
   WORKSPACE_GIT_UNAVAILABLE: [
@@ -337,7 +342,22 @@ const CORE_REASON = new Set([
   'WORKSPACE_GIT_FAILED',
   'WORKSPACE_PREPARE_FAILED',
   'EXECUTOR_ERROR',
+  'EXECUTOR_MODEL_UNSUPPORTED',
 ])
+/**
+ * The model a run used instead of Codex's own default (FIX-16): before the
+ * turn, or after the provider refused the default.
+ */
+function modelChoiceText(choice: {
+  configured: string
+  used: string
+  reason: 'default-unavailable' | 'retried'
+}): string {
+  const name = agentSourceLabel(record.value?.backend ?? 'codex')
+  return choice.reason === 'retried'
+    ? `你的 ${name} 默认模型 ${choice.configured} 这个账号用不了，第一次运行被拒绝，已改用 ${choice.used} 重新运行。`
+    : `你的 ${name} 默认模型 ${choice.configured} 这个账号用不了，本次改用 ${choice.used}。`
+}
 function failureLabel(code: string): string {
   return LIMIT_LABEL[code] ?? FAILURE[code]?.[0] ?? code
 }
@@ -429,6 +449,9 @@ function costText(usage: {
       </p>
       <p v-else-if="run?.summary" class="external-note">
         子智能体报告：{{ run.summary }}
+      </p>
+      <p v-if="run?.modelChoice" class="external-note" data-model-choice>
+        {{ modelChoiceText(run.modelChoice) }}
       </p>
       <p class="external-path">成果目录 · {{ record?.cwd }}</p>
       <p v-if="run?.usage" class="external-note" data-run-usage>
