@@ -2,17 +2,25 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-22（对照 `84245509`）<br>
-> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
+> 最后核验：2026-10-22（对照 `5b9583f4`）<br>
+> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/codex-protocol-handshake.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
 
 兼容性不再按配置里的精确版本判断；旧配置的 `expectedVersion` 读取时忽略，并从 `config.json` 中删除一次（修订号不变）。
 
 - **Claude Code**：运行用户本机安装的、未经修改的 `claude`（AGT-12；安装包不附带 Claude Code）。`executable.ts` 的 `locateExecutable` 依次在运行环境的 `PATH`（启动 Emperor 时的 `PATH` 加常见安装位置，见 `environment/path.ts`）与登录 shell 的 `PATH` 里找 `profile.executablePath`（默认 `claude`，也可以是绝对路径）；只在登录 shell 里找到时，运行时把它所在的目录加到子进程 `PATH` 末尾。检测要求 `>= 2.1.79`（`CLAUDE_MINIMUM_VERSION`：`claude auth status` 自 2.1.41，`claude auth login --console` 自 2.1.79），运行时再检查 SDK `system/init` 消息：必须报告 `claude_code_version` 且不低于 2.1.79，`permissionMode` 必须是请求的 `default`，工具列表必须可读；不满足即 `EXECUTOR_INCOMPATIBLE`。Emperor 用 Claude Agent SDK 0.3.281（`CLAUDE_SDK_VERSION`，`registry.test.ts` 对照 SDK 的 `package.json`）驱动它。登录、`claude auth status` 与专用配置目录见[架构文档](../architecture/external-agent-delegation.md)。测试一律用 `testing.ts` 的 `fakeClaude`（打印 `auth status` JSON 的脚本），放在 `PATH` 最前面，从不运行真实的 `claude`。
-- **Codex**：使用本机 CLI。版本与某个已验证协议不同 major.minor 时为 `incompatible`，诊断与 `requiredVersion` 给出支持范围（如 `0.153.x`）。同一 minor 时，检测在私有 `CODEX_HOME` 下运行 `codex app-server generate-json-schema`（不调用模型），对适配器依赖的 19 个 schema 文件计算摘要（键排序后的 JSON，与格式无关），按可执行文件身份缓存：摘要已知为 `compatibility: 'verified'`；不同为 `unverified`，仍可运行，设置页显示「可能不兼容」，运行失败时结果末尾注明协议差异可能是原因。`initialize` 返回的 user agent 只再核对 minor。
+- **Codex**：使用本机 CLI。已验证的协议是 0.153.4 与 0.163.0（`KNOWN_CODEX_PROTOCOLS`）。版本与每个已验证协议都不同 major.minor 时为 `incompatible`，诊断与 `requiredVersion` 给出支持范围（`0.153.x / 0.163.x`）。同一 minor 时，检测在私有 `CODEX_HOME` 下运行 `codex app-server generate-json-schema`（不调用模型），对适配器依赖的 21 个 schema 文件计算摘要（键排序后的 JSON，与格式无关），按可执行文件身份缓存：摘要已知为 `compatibility: 'verified'`；不同为 `unverified`，仍可运行，设置页显示「可能不兼容」，运行失败时结果末尾注明协议差异可能是原因。`initialize` 返回的 user agent 只再核对 minor。
 
-新增 Codex 版本：`node scripts/codex-protocol-digest.mjs` 检查本机 codex 的摘要是否已知；协议有变化且适配器已按新 schema 更新、contract 测试与真实两轮/问题/干预/取消/恢复证据通过后，`--write` 把依赖的 schema 文件与 `digest.json` 写入 `protocol/codex-<version>/`，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 注册。同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致。
+新增 Codex 版本（0.163 按这个流程加入，差异见[架构文档](../architecture/external-agent-delegation.md)「Codex 0.163 与 0.153 的差异」）：
+
+1. 把官方包装进临时前缀：`npm install --prefix "$TMP/codex-<version>" @openai/codex@<version>`。不全局安装，不用你自己的 codex，也不登录。
+2. `node scripts/codex-protocol-digest.mjs --codex "$TMP/codex-<version>/node_modules/.bin/codex"` 看摘要是否已知（schema 在私有 HOME 与 CODEX_HOME 里生成）。摘要不同时，把完整 schema 与上一版对比，逐项检查适配器发送的请求与回复、读取的字段、启动时设的 feature（`codex features list` 加同样的 `-c`）。
+3. 按差异更新适配器；`adapters/codex-contract.test.ts` 对每份已记录的协议（`VERIFIED`）校验适配器发出的每个请求和回复、读取的每个字段，`adapters/codex-schema-test-fixture.ts` 是它用的 JSON Schema 校验。需要模拟新协议时，`testing.ts` 的假 app-server 有 `version`（真实格式的 user agent、该版本的 turn 结构）与 `answer`（带 MessagePhase 的消息）。
+4. `node scripts/codex-protocol-handshake.mjs --codex <同一个 codex>`：在 Seatbelt 断网、不登录、私有 HOME/CODEX_HOME 下经真实适配器跑探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`，输出一份 JSON 回执；只能在 macOS 上运行。
+5. `--write` 把依赖的 schema 文件与 `digest.json` 写入 `protocol/codex-<version>/`（适配器新依赖的文件用 `--file <path>` 加入，之后的版本沿用最新一份的清单），用 prettier 格式化，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 按版本顺序注册，并把版本加入 contract 测试的 `VERIFIED`。需要登录的真实两轮/问题/干预/取消/恢复证据由维护者在真机上补齐。
+
+同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致，`compatibility.test.ts` 要求维护脚本与运行时对每份协议算出同一个摘要。
 
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。中断先发协议 interrupt（最多等 5 秒），之后 `session.close()` 调用 `handle.terminate()`；未知协议请求默认拒绝。
 
