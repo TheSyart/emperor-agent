@@ -25,6 +25,7 @@ import type {
   ClaudeLogin,
   ClaudeLoginOutcome,
 } from '../../harness/delegation/claude-sign-in'
+import type { ExecutorUpgradeService } from '../../harness/delegation/upgrade-service'
 import { logger } from '../../util/log'
 
 const log = logger.child({ component: 'executors' })
@@ -73,13 +74,46 @@ export class CoreExecutorService {
         signIn: ClaudeSignInView
         probe?: ExecutorProbe
       }) => void
+      /** 版本 and 升级 (AGT-13). */
+      upgrades?: ExecutorUpgradeService
     },
   ) {}
   async close() {
     // A sign-in still waiting for the browser ends with Emperor.
     await this.signInStarting?.catch(() => undefined)
     await this.signInRun?.login.cancel()
+    // So does an upgrade command (its whole process group).
+    await this.options.upgrades?.close()
     return this.options.modelCatalog.close()
+  }
+  private upgradesOf(): ExecutorUpgradeService {
+    const upgrades = this.options.upgrades
+    if (!upgrades)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'this Emperor does not check executor versions',
+      )
+    return upgrades
+  }
+  /**
+   * 版本 (AGT-13): installed, install source, npm's latest, what 升级
+   * installs, running upgrades. `refresh`: true asks npm now (检查更新),
+   * 'auto' when the page opens (at most once a minute).
+   */
+  versions(input: { refresh?: boolean | 'auto' }) {
+    return this.upgradesOf().versions(input)
+  }
+  /** 升级 after the confirmation: `target` must be the version offered. */
+  upgrade(input: { profileId: string; target: string }, _view: ViewScope) {
+    this.profile(input.profileId)
+    return this.upgradesOf().upgrade(input)
+  }
+  cancelUpgrade(input: { profileId: string }, _view: ViewScope) {
+    return this.upgradesOf().cancel(input)
+  }
+  /** 稍后 on the notice. */
+  dismissUpgrades(_input: Record<string, never>, _view: ViewScope) {
+    return this.upgradesOf().dismiss()
   }
   async models(input: { profileId: string; refresh?: boolean }) {
     const profile = this.profile(input.profileId)

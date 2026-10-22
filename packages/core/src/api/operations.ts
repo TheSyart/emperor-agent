@@ -1187,6 +1187,47 @@ export const CORE_OPERATION_REGISTRY = {
         viewOf(ctx, 'executors.dismissNotice'),
       ),
   ),
+  // AGT-13: 版本 and 升级. versions reads npm's public version numbers;
+  // upgrade runs the install source's own command once the user confirmed
+  // (the target must be the one offered); 稍后 hides the notice.
+  'executors.versions': operation(
+    z.tuple([
+      z
+        .object({
+          refresh: z.union([z.boolean(), z.literal('auto')]).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.versions(input),
+  ),
+  'executors.upgrade': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          target: z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.upgrade(input, viewOf(ctx, 'executors.upgrade')),
+  ),
+  'executors.cancelUpgrade': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.cancelUpgrade(
+        input,
+        viewOf(ctx, 'executors.cancelUpgrade'),
+      ),
+  ),
+  'executors.dismissUpgrades': operation(
+    z.tuple([z.object({}).strict()]),
+    (api, [input], ctx) =>
+      api.executors.dismissUpgrades(
+        input,
+        viewOf(ctx, 'executors.dismissUpgrades'),
+      ),
+  ),
   'delegations.get': operation(z.tuple([externalRef]), (api, [input], ctx) =>
     api.delegations.get(withSession(input, ctx, 'delegations.get')),
   ),

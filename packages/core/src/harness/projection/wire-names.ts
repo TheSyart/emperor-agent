@@ -56,6 +56,8 @@ export const RUNTIME_EVENT_NAMES = [
   'environment_install_progress',
   'environment_install_started',
   'executor_sign_in',
+  'executor_upgrade',
+  'executor_versions',
   'git_operation_completed',
   'mcp_connection_state',
   'plugins_changed',

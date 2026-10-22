@@ -13,6 +13,8 @@ import type { UpdateStatus } from '../updates/types'
 import type {
   ClaudeSignInView,
   ExecutorProbe,
+  ExecutorUpgradeView,
+  ExecutorVersionsView,
 } from '../harness/delegation/types'
 
 export type RuntimeEventPayload = Record<string, unknown>
@@ -341,6 +343,20 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         event: 'executor_sign_in'
         signIn: ClaudeSignInView
         probe?: ExecutorProbe
+      }
+    | {
+        /**
+         * 升级 (AGT-13) changed: waiting, running (output), or ended; at
+         * the end, the probe that followed.
+         */
+        event: 'executor_upgrade'
+        upgrade: ExecutorUpgradeView
+        probe?: ExecutorProbe
+      }
+    | {
+        /** 子智能体 › 版本 after a check, an upgrade or 稍后 (AGT-13). */
+        event: 'executor_versions'
+        versions: ExecutorVersionsView
       }
     | {
         /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */

@@ -1,8 +1,10 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -99,7 +101,12 @@ export const FAKE_LOGIN_CODE = 'FAKE-CODE-9c1d8b7a'
  */
 export function fakeClaude(
   dir: string,
-  options: { version?: string; status?: 'fail' | 'garbage' } = {},
+  options: {
+    version?: string
+    status?: 'fail' | 'garbage'
+    /** `--version` reads this package.json's version (AGT-13). */
+    versionFrom?: string
+  } = {},
 ): string {
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'claude')
@@ -132,7 +139,9 @@ export function fakeClaude(
       'if [ -n "$dir" ] && [ -d "$dir" ]; then',
       `  { printf '\\036ARGS %s\\n' "$*"; env; } >> "$dir/fake-claude.log"`,
       'fi',
-      `if [ "$1" = "--version" ]; then echo "${options.version ?? '2.1.300'} (Claude Code)"; exit 0; fi`,
+      options.versionFrom
+        ? `if [ "$1" = "--version" ]; then v=$(sed -n 's/.*"version": *"\\([^"]*\\)".*/\\1/p' "${options.versionFrom}"); echo "$v (Claude Code)"; exit 0; fi`
+        : `if [ "$1" = "--version" ]; then echo "${options.version ?? '2.1.300'} (Claude Code)"; exit 0; fi`,
       'if [ "$1" = "auth" ]; then',
       '  case "$2" in',
       '    status)',
@@ -404,5 +413,84 @@ export function fakeCodexRequests(tempRoot: string): Array<{
       .map((line) => JSON.parse(line))
   } catch {
     return []
+  }
+}
+
+/**
+ * A global npm prefix (AGT-13) with Claude Code and Codex installed the way
+ * npm links them (`<prefix>/bin/claude` → `../lib/node_modules/…`), each
+ * reporting the version in its package.json, and a fake `npm` following
+ * `<root>/npm-mode`: empty writes the requested version into the package
+ * (an upgrade), `eacces` fails as npm does without write permission,
+ * `hang` waits on a child `sleep` (pids in `<root>/npm-pids`), `noop`
+ * changes nothing. Every call is appended to `<root>/npm-calls`. Tests
+ * never run the real npm.
+ */
+export function fakeNpmPrefix(
+  root: string,
+  versions: { 'claude-code': string; codex: string } = {
+    'claude-code': '2.1.281',
+    codex: '0.153.4',
+  },
+): { prefix: string; mode(mode: '' | 'eacces' | 'hang' | 'noop'): void } {
+  const prefix = join(root, 'prefix')
+  mkdirSync(join(prefix, 'bin'), { recursive: true })
+  const pkg = (name: string, version: string) => {
+    const dir = join(prefix, 'lib/node_modules', name)
+    mkdirSync(join(dir, 'bin'), { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version }))
+    return dir
+  }
+  const claude = pkg('@anthropic-ai/claude-code', versions['claude-code'])
+  fakeClaude(join(claude, 'bin'), {
+    versionFrom: join(claude, 'package.json'),
+  })
+  symlinkSync(
+    '../lib/node_modules/@anthropic-ai/claude-code/bin/claude',
+    join(prefix, 'bin/claude'),
+  )
+  const codex = pkg('@openai/codex', versions.codex)
+  writeFileSync(
+    join(codex, 'bin/codex.js'),
+    [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then',
+      `  v=$(sed -n 's/.*"version": *"\\([^"]*\\)".*/\\1/p' "${codex}/package.json")`,
+      '  echo "codex-cli $v"; exit 0',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'),
+  )
+  chmodSync(join(codex, 'bin/codex.js'), 0o755)
+  symlinkSync(
+    '../lib/node_modules/@openai/codex/bin/codex.js',
+    join(prefix, 'bin/codex'),
+  )
+  writeFileSync(
+    join(prefix, 'bin/npm'),
+    [
+      '#!/bin/sh',
+      `echo "$*" >> "${root}/npm-calls"`,
+      `mode=$(cat "${root}/npm-mode" 2>/dev/null)`,
+      'spec=""',
+      'for a in "$@"; do case "$a" in *@[0-9]*) spec="$a";; esac; done',
+      'pkg="${spec%@*}"; ver="${spec##*@}"',
+      'case "$mode" in',
+      '  eacces) echo "npm error code EACCES" >&2',
+      '    echo "npm error path $npm_config_prefix/lib/node_modules/$pkg" >&2',
+      '    echo "npm error Error: EACCES: permission denied, rename" >&2; exit 243;;',
+      `  hang) sleep 600 & echo "$$ $!" > "${root}/npm-pids"; wait; exit 0;;`,
+      '  noop) echo "up to date in 1s"; exit 0;;',
+      'esac',
+      'printf \'{"name":"%s","version":"%s"}\\n\' "$pkg" "$ver" > "$npm_config_prefix/lib/node_modules/$pkg/package.json"',
+      'echo "changed 1 package in 1s"',
+      '',
+    ].join('\n'),
+  )
+  chmodSync(join(prefix, 'bin/npm'), 0o755)
+  return {
+    prefix,
+    mode: (mode) => writeFileSync(join(root, 'npm-mode'), mode),
   }
 }

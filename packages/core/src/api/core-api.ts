@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
@@ -109,7 +110,11 @@ import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { loadLocalConfig, saveLocalConfig } from '../config/local-config'
 import { CoreUpdateService } from '../updates/service'
 import { createGhAttestation } from '../updates/attestation'
-import type { UpdateHostOptions, UpdateStatus } from '../updates/types'
+import type {
+  UpdateHostOptions,
+  UpdateStatus,
+  UpdateTransport,
+} from '../updates/types'
 import { ghProcessEnvironment } from '../workspace/git-pull-requests'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
@@ -218,6 +223,16 @@ import { agentTitle } from '../runtime/agent-view'
 
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
+import { ExecutorDispatchGate } from '../harness/delegation/dispatch-gate'
+import { executorEnvironment } from '../harness/delegation/environment'
+import {
+  NPM_REGISTRY_URL,
+  PublishedVersionStore,
+  registryFetcher,
+  registryOverrideUrl,
+} from '../harness/delegation/published-versions'
+import { ExecutorUpgradeService } from '../harness/delegation/upgrade-service'
+import { nodeUpdateTransport } from '../updates/http'
 import { sanitizeFailureMessage } from '../harness/delegation/failure'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
 import { ExecutorConsentStore } from '../harness/delegation/consent'
@@ -284,6 +299,17 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
    * and whether checks may run. Omitted: Core never checks.
    */
   updates?: UpdateHostOptions | null
+  /**
+   * 子智能体 › 版本 (AGT-13): the host's HTTP for npm's public registry
+   * (Electron's net; Node's https when omitted), a test registry on this
+   * Mac (EMPEROR_EXECUTOR_REGISTRY_URL), and whether the check once a day
+   * at startup may run (the packaged app, or with a test registry).
+   */
+  executorVersions?: {
+    transport?: UpdateTransport
+    registry?: string | null
+    automatic: boolean
+  } | null
   /**
    * Test hook: the home, environment and login shell external executors
    * read sign-ins from (defaults: the user's own).
@@ -407,6 +433,8 @@ export class CoreApi {
   private readonly agentIndexSubscriptions: Array<() => void> = []
   private readonly delegationStates = new Map<string, DelegationState>()
   readonly executors: CoreExecutorService
+  /** 子智能体 › 版本 and 升级 (AGT-13). */
+  readonly executorUpgrades: ExecutorUpgradeService
   readonly delegationReceipts: DelegationReceipts
   readonly delegationAcceptance: DelegationAcceptance
   readonly delegationIntegration: DelegationIntegration
@@ -977,11 +1005,14 @@ export class CoreApi {
       runner: turnGit,
       mutations: this.workspaceMutations,
     })
+    // An executor being upgraded takes no new delegations (AGT-13).
+    const executorGate = new ExecutorDispatchGate()
     this.delegationRuntime = new DelegationService({
       facts: this.executorFacts,
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
+      dispatchGate: executorGate,
       checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [
@@ -1163,7 +1194,55 @@ export class CoreApi {
       },
     })
     this.delegations = this.delegationService
+    // 版本 and 升级 (AGT-13): npm's public version numbers; the upgrade
+    // command of the install source, after the user confirmed.
+    const versionHost = opts.executorVersions ?? null
+    let registry = new URL(NPM_REGISTRY_URL)
+    try {
+      registry = registryOverrideUrl(versionHost?.registry) ?? registry
+    } catch {
+      logger.warn(
+        'EMPEROR_EXECUTOR_REGISTRY_URL ignored: not a registry on this Mac',
+      )
+    }
+    const executorUpgrades = new ExecutorUpgradeService({
+      root: this.paths.delegationsRoot,
+      home: executorHome.home ?? homedir(),
+      profiles: () => {
+        try {
+          return this.executorConfig.read().profiles
+        } catch {
+          return []
+        }
+      },
+      locate: (profile) => this.executorRegistry.locate(profile),
+      lastProbe: (profile) => this.executorFacts.probe(profile),
+      probe: (profileId) => this.executors.probe({ profileId }),
+      environment: () =>
+        executorEnvironment(executorHome.environment, executorHome.home),
+      // claudeDirectories(…).config: `claude install` keeps its records in
+      // Emperor's dedicated folder, never ~/.claude.
+      claudeConfigDir: () =>
+        join(this.paths.delegationsRoot, 'claude-code', 'config'),
+      published: new PublishedVersionStore({
+        root: this.paths.delegationsRoot,
+        fetch: registryFetcher({
+          transport:
+            versionHost?.transport ??
+            opts.updates?.transport ??
+            nodeUpdateTransport,
+          registry,
+          userAgent: `Emperor-Agent/${this.appVersion}`,
+        }),
+      }),
+      activeRuns: (backend) => this.delegationRuntime.activeRuns(backend),
+      gate: executorGate,
+      emit: (event) => host.emitHost(event),
+      automatic: versionHost?.automatic ?? false,
+    })
+    this.executorUpgrades = executorUpgrades
     this.executors = new CoreExecutorService({
+      upgrades: executorUpgrades,
       modelCatalog: new ExecutorModelCatalogService({
         root: this.paths.delegationsRoot,
         runtime: executorRuntime,
@@ -1657,6 +1736,8 @@ export class CoreApi {
         )
       api.startRetention()
       await api.updateService.start()
+      // 子智能体 › 版本: npm once a day, at startup (AGT-13).
+      api.executorUpgrades.start()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
