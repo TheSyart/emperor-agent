@@ -549,17 +549,18 @@ export async function installVisualCoreBridge(
         session('chat-main', '普通对话', 'chat'),
       ]
       const modelUnavailable = visualParams.get('visualModel') === 'unavailable'
+      const visualProfile = visualParams.get('visualProfile')
       const profileOnboarding = {
-        status:
-          visualParams.get('visualProfile') === 'pending'
-            ? 'pending'
-            : 'completed',
+        status: visualProfile === 'pending' ? 'pending' : 'completed',
         sessionId: null as string | null,
         interactionId: null as string | null,
         attemptCount: 0,
         lastError: null as string | null,
         canStart: true,
         canSkip: true,
+        // UI-S17: visualProfile=named — the profile's 称呼 greets on the hero.
+        addressName:
+          visualProfile === 'named' ? '小周' : (null as string | null),
       }
       const profileOnboardingQuestions = [
         {
@@ -6685,6 +6686,13 @@ export async function installVisualCoreBridge(
                 })
                 savedEntryIds.push(entryId)
               }
+              // The first-run guide's first model (UI-S17): usable now.
+              if (modelConfig.models.length && !modelConfig.availability.usable)
+                modelConfig.availability = {
+                  usable: true,
+                  message: '模型已配置',
+                  provider: input.connection.provider,
+                }
               if (input.activateEntryId) {
                 modelConfig.activeModelId = input.activateEntryId
                 const active = modelConfig.models.find(

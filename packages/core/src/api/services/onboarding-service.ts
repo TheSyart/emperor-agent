@@ -3,7 +3,8 @@
  * hidden turn in a chat session: the model asks through
  * `ask_user_question` (which blocks inside the turn until the user answers
  * from the control panel) and saves the profile with `memory_edit`
- * (target `user`). The coordinator's latch decides whether it may start.
+ * (target `user`). It starts only when the user asks for it (UI-S17); the
+ * coordinator's state decides whether it may.
  */
 
 import {
@@ -18,7 +19,6 @@ export interface OnboardingServiceDeps {
   stateRoot: string
   templatesDir: string
   userFile: string
-  enabled: boolean
   readUserProfile(): string
   modelAvailable(): boolean
   anyBusy(): boolean
@@ -26,6 +26,8 @@ export interface OnboardingServiceDeps {
   /** Pending interaction id of a session, if any. */
   pendingInteractionId(sessionId: string): string | null
   onPendingChange(listener: (sessionId: string) => void): () => void
+  /** After the agent writes the profile (memory_edit, target user). */
+  onProfileWrite(listener: () => void): () => void
   sessions: {
     list(opts?: { includeArchived?: boolean }): SessionEntry[]
     create(title: string, opts: { mode: string }): SessionEntry
@@ -38,6 +40,9 @@ export interface OnboardingServiceDeps {
 export class OnboardingService {
   readonly coordinator: ProfileOnboardingCoordinator
   private readonly unsubscribe: () => void
+  private readonly unsubscribeProfile: () => void
+  /** The 称呼 the renderer last heard about. */
+  private addressName: string | null
 
   constructor(private readonly deps: OnboardingServiceDeps) {
     this.coordinator = new ProfileOnboardingCoordinator({
@@ -57,6 +62,10 @@ export class OnboardingService {
         this.emitStatus('awaiting_answers')
       }
     })
+    this.addressName = this.coordinator.payload().addressName
+    this.unsubscribeProfile = deps.onProfileWrite(() => {
+      this.profileWritten()
+    })
   }
 
   payload(): ProfileOnboardingPayload {
@@ -67,8 +76,23 @@ export class OnboardingService {
   reconcile(): ProfileOnboardingPayload {
     const before = this.coordinator.payload().status
     const state = this.coordinator.reconcileProfile()
-    if (before !== state.status) this.emitStatus('profile_saved')
+    if (before !== state.status || state.addressName !== this.addressName)
+      this.emitStatus('profile_saved')
     return state
+  }
+
+  /**
+   * The agent wrote the profile. A running interview keeps going (it may
+   * still ask and save more; it settles when its turn ends); otherwise the
+   * write counts like a config save. Either way a changed 称呼 is pushed.
+   */
+  private profileWritten(): void {
+    if (this.coordinator.payload().status !== 'in_progress') {
+      this.reconcile()
+      return
+    }
+    if (this.coordinator.payload().addressName !== this.addressName)
+      this.emitStatus('profile_saved')
   }
 
   isInterviewInteraction(interactionId: string): boolean {
@@ -78,19 +102,20 @@ export class OnboardingService {
     )
   }
 
-  start(opts: { manual?: boolean } = {}): ProfileOnboardingActionResult {
-    const manual = opts.manual === true
+  /**
+   * The user asked for the interview (the hero's 开始访谈, 设置 › 记忆). It
+   * never starts by itself (UI-S17: not even after the first model).
+   */
+  start(): ProfileOnboardingActionResult {
     const reconciled = this.coordinator.reconcileProfile()
     if (reconciled.status === 'completed')
-      return { started: false, state: reconciled }
-    if (!manual && !this.deps.enabled)
       return { started: false, state: reconciled }
     if (!this.deps.modelAvailable() || this.deps.anyBusy())
       return { started: false, state: reconciled }
     const session = this.interviewSession()
     if (this.deps.hasPending(session.id))
       return { started: false, state: reconciled }
-    const attempt = this.coordinator.beginAttempt(session.id, { manual })
+    const attempt = this.coordinator.beginAttempt(session.id, { manual: true })
     if (!attempt.started) return attempt
     this.emitStatus('started')
     const prompt = profileOnboardingAgentPrompt(
@@ -123,6 +148,7 @@ export class OnboardingService {
 
   dispose(): void {
     this.unsubscribe()
+    this.unsubscribeProfile()
   }
 
   private settle(error: unknown): void {
@@ -151,6 +177,7 @@ export class OnboardingService {
   }
 
   private emitStatus(reason: string): void {
+    this.addressName = this.coordinator.payload().addressName
     try {
       this.deps.emit({
         event: 'profile_onboarding_status_changed',

@@ -52,7 +52,6 @@ async function service(
   root: string,
   overrides: {
     refreshModelConfig?: () => void | Promise<void>
-    afterConfigSaved?: () => any
     replies?: ScriptedReply[]
     discovery?: ModelDiscovery
   } = {},
@@ -142,17 +141,13 @@ describe('CoreModelService schema v2', () => {
     })
   })
 
-  it('supports typed CRUD, preserves secrets and legacy fields, refreshes after each mutation, and onboards only the first usable model', async () => {
+  it('supports typed CRUD, preserves secrets and legacy fields, and refreshes after each mutation', async () => {
     const root = tmp('emperor-model-service-crud-')
     writeConfig(root, [])
     const lifecycle: string[] = []
     const modelService = await service(root, {
       refreshModelConfig: () => {
         lifecycle.push('refresh')
-      },
-      afterConfigSaved: () => {
-        lifecycle.push('onboarding')
-        return { started: true, state: { status: 'in_progress' } }
       },
     })
 
@@ -164,8 +159,7 @@ describe('CoreModelService schema v2', () => {
     )
     const firstId = first.activeModelId!
     expect(first.models).toHaveLength(1)
-    expect(first.profileOnboarding).toMatchObject({ started: true })
-    expect(lifecycle).toEqual(['refresh', 'onboarding'])
+    expect(lifecycle).toEqual(['refresh'])
 
     await modelService.saveEntry({
       entryId: firstId,
@@ -205,7 +199,6 @@ describe('CoreModelService schema v2', () => {
     expect(second.activeModelId).toBe(firstId)
     expect(lifecycle).toEqual([
       'refresh',
-      'onboarding',
       'refresh',
       'refresh',
       'refresh',
@@ -222,7 +215,6 @@ describe('CoreModelService schema v2', () => {
       activeModelId: firstId,
       models: [expect.objectContaining({ entryId: firstId })],
     })
-    expect(lifecycle.filter((item) => item === 'onboarding')).toHaveLength(1)
   })
 
   it('returns and saves explicit model execution policy without exposing credentials', async () => {
@@ -505,7 +497,7 @@ describe('CoreModelService schema v2', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('requests onboarding when activate or delete first transitions the active model to usable', async () => {
+  it('activating the first usable entry returns the config and starts nothing (UI-S17)', async () => {
     const invalid = entry({ entryId: 'invalid', apiKey: null })
     const local = entry({
       entryId: 'local',
@@ -516,31 +508,18 @@ describe('CoreModelService schema v2', () => {
       reasoningEffort: null,
     })
 
-    const activateRoot = tmp('emperor-model-service-activate-onboarding-')
+    const activateRoot = tmp('emperor-model-service-activate-first-')
     writeConfig(activateRoot, [invalid, local], 'invalid')
-    const activateHook = vi.fn(() => ({
-      started: true,
-      state: { status: 'in_progress' },
-    }))
-    const activated = await (
-      await service(activateRoot, {
-        afterConfigSaved: activateHook,
-      })
-    ).activate('local')
-    expect(activated.profileOnboarding).toMatchObject({ started: true })
-    expect(activateHook).toHaveBeenCalledOnce()
+    const activated = await (await service(activateRoot)).activate('local')
+    expect(activated.availability.usable).toBe(true)
+    expect(activated).not.toHaveProperty('profileOnboarding')
 
-    // Deleting the active entry is refused (MOD-03), so a delete can no
-    // longer be what first makes the active model usable.
-    const deleteRoot = tmp('emperor-model-service-delete-onboarding-')
+    // Deleting the active entry is refused (MOD-03).
+    const deleteRoot = tmp('emperor-model-service-delete-active-')
     writeConfig(deleteRoot, [invalid, local], 'invalid')
-    const deleteHook = vi.fn()
     await expect(
-      (await service(deleteRoot, { afterConfigSaved: deleteHook })).deleteEntry(
-        'invalid',
-      ),
+      (await service(deleteRoot)).deleteEntry('invalid'),
     ).rejects.toThrow('正在使用')
-    expect(deleteHook).not.toHaveBeenCalled()
   })
 
   it('keeps vision tests read-only and rejects descriptive negative answers', async () => {

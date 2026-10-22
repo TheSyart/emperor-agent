@@ -31,7 +31,6 @@ export async function serveEmperorAcpStdio(
     ...(opts.templatesDir ? { templatesDir: opts.templatesDir } : {}),
     ...(opts.appVersion ? { appVersion: opts.appVersion } : {}),
     ...(opts.runtimeRevision ? { runtimeRevision: opts.runtimeRevision } : {}),
-    enableFirstRunOnboarding: false,
   })
   const adapter = new EmperorAcpAdapter(api, { version: opts.appVersion })
   const connection = adapter.agentApp.connect(

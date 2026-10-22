@@ -59,7 +59,7 @@ Emperor Agent 里有几组名称看起来相似，实际处在不同层级：
 1. 打开 [GitHub Releases](https://github.com/TheSyart/emperor-agent/releases)，下载最新版本：Apple 芯片（M 系列）的 Mac 选 `Emperor-Agent-<版本>-macos-arm64.dmg`，Intel 芯片的 Mac 选 `-macos-x64.dmg`（也有同名的 `.zip`）。
 2. 公开安装包不做代码签名，正式版（Stable）也一样：没有 Apple Developer ID 签名，也没有经过 Apple 公证，第一次打开时 macOS 会拦下它。首次打开这样做：先用 Release 页附带的 SHA-256 校验和核对下载的文件；把 Emperor Agent 拖进「应用程序」文件夹，双击打开，系统提示无法打开时点「完成」；再到「系统设置 › 隐私与安全性」，在安全性一栏找到 Emperor Agent，点「仍要打开」并输入登录密码。之后就能像其他应用一样直接打开。不要为了打开 Emperor 而关闭整机的 Gatekeeper。核验构建来源的方法见[未签名版本安全说明](docs/release/unsigned-preview-notice.md)。
 3. 标为 Pre-release 的 Preview 版本用于提前测试，不是 Stable；没有特别需要时请下载最新的正式版。
-4. 第一次启动时会提示配置模型：点「去配置模型」，在「添加模型」里选供应商、填 API Key、勾选要用的模型，三步完成。
+4. 第一次启动时显示接入引导：选「使用本机模型」（Ollama、LM Studio）或「使用 API Key」，连接后勾选要用的模型即可开始。也可以「稍后配置」，之后从空会话的「开始接入」或「设置 › 模型」添加。
 5. 创建 Chat 开始普通对话，或者选择本地目录创建 Build 会话。
 
 Emperor 会检查 GitHub 上的新版本，替你下载并核对 DMG（「设置 › 常规 › 更新」可以关闭），替换旧版本由你来做。每个新版本的代码身份都会变：更新后，电脑操作要在「设置 › 电脑操作」重新允许辅助功能与屏幕录制，听写要在「设置 › 语音」重新允许麦克风与语音识别。完整步骤见[首次使用](docs/user/getting-started.md)。

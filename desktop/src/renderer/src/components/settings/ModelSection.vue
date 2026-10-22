@@ -19,14 +19,15 @@
  * The model a conversation uses is picked in the composer, not here.
  *
  * Every write returns the full model config payload, which is applied to the
- * bootstrap state (current model, provider, availability, profile
- * onboarding).
+ * bootstrap state (model/applyModelConfig: current model, provider,
+ * availability).
  */
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { deleteModelEntry, testModelEntry } from '../../api/model'
 import { addModelRequested, takeAddModelRequest } from './model/addModelRequest'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
+import { applyModelConfig } from '../../model/applyModelConfig'
 import type {
   ModelConfigPayload,
   ModelEntry,
@@ -246,7 +247,7 @@ function editAddress(entry: ModelEntry): void {
 }
 
 async function onConnectionSaved(next: ModelConfigPayload): Promise<void> {
-  await applyPayload(next)
+  applyPayload(next)
   notice.value =
     connectionDialog.value === 'refresh' ? '已更新模型资料' : '已更新连接'
 }
@@ -255,7 +256,7 @@ async function onConnectionSaved(next: ModelConfigPayload): Promise<void> {
 async function onDialogSaved(
   result: ModelConfigPayload & { savedEntryIds: string[] },
 ): Promise<void> {
-  await applyPayload(result)
+  applyPayload(result)
   const ids = result.savedEntryIds
   highlight.value = new Set(ids)
   clearTimeout(highlightTimer)
@@ -299,34 +300,21 @@ async function focusEditButton(entryId: string): Promise<void> {
   row?.querySelector<HTMLElement>('[aria-expanded]')?.focus()
 }
 
-/** Apply a model config payload to the bootstrap state (ex-ModelView). */
-async function applyPayload(next: ModelConfigPayload): Promise<void> {
-  const boot = ctx.boot.value
-  if (boot) {
-    boot.modelConfig = next
-    boot.model = next.current?.modelId || ''
-    boot.provider = next.current?.provider || undefined
-    boot.providerLabel = next.current?.providerLabel || undefined
-    if (next.profileOnboarding)
-      boot.profileOnboarding = next.profileOnboarding.state
-  }
-  if (next.profileOnboarding?.started)
-    await ctx.openProfileInterviewSession(
-      next.profileOnboarding.state.sessionId,
-    )
+function applyPayload(next: ModelConfigPayload): void {
+  applyModelConfig(ctx.boot.value, next)
 }
 
 async function onSaved(next: ModelConfigPayload, label: string): Promise<void> {
   editing.value = null
   notice.value = `已保存「${label}」`
-  await applyPayload(next)
+  applyPayload(next)
 }
 
 async function reload(options: { quiet?: boolean } = {}): Promise<void> {
   if (!options.quiet) listError.value = ''
   try {
     const next = await core('model.getConfig')
-    if (next && Array.isArray(next.models)) await applyPayload(next)
+    if (next && Array.isArray(next.models)) applyPayload(next)
   } catch (error) {
     if (!options.quiet)
       listError.value = error instanceof Error ? error.message : String(error)
@@ -363,7 +351,7 @@ async function replaceEntry(entry: ModelEntry, modelId: string): Promise<void> {
       entryId: entry.entryId,
       modelId,
     })
-    await applyPayload(result)
+    applyPayload(result)
     highlight.value = new Set([result.replacedEntryId])
     clearTimeout(highlightTimer)
     highlightTimer = setTimeout(() => (highlight.value = new Set()), 4000)
@@ -387,7 +375,7 @@ async function deleteEntry(entry: ModelEntry): Promise<void> {
   resetTransient()
   if (editing.value === entry.entryId) editing.value = null
   try {
-    await applyPayload(await deleteModelEntry(entry.entryId))
+    applyPayload(await deleteModelEntry(entry.entryId))
     notice.value = `已删除「${label}」`
   } catch (error) {
     listError.value = error instanceof Error ? error.message : String(error)
@@ -417,7 +405,7 @@ async function deleteProvider(group: ProviderGroup): Promise<void> {
     let next: ModelConfigPayload | null = null
     for (const entry of group.entries)
       next = await deleteModelEntry(entry.entryId)
-    if (next) await applyPayload(next)
+    if (next) applyPayload(next)
     notice.value = `已删除「${group.label}」`
   } catch (error) {
     listError.value = error instanceof Error ? error.message : String(error)
@@ -442,7 +430,7 @@ async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
     return
   listError.value = ''
   try {
-    await applyPayload(await core('model.discardRejected', { key: item.key }))
+    applyPayload(await core('model.discardRejected', { key: item.key }))
     notice.value = `已删除「${rejectedLabel(item)}」`
   } catch (error) {
     listError.value = error instanceof Error ? error.message : String(error)

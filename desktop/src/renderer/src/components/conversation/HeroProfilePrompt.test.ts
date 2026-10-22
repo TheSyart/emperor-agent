@@ -3,6 +3,8 @@
  * UI-S04: the profile-interview prompt no longer sits above the composer
  * of every chat. It shows once, on the hero of an empty chat, while the
  * interview is pending; after that it lives in 设置 › 记忆 › 用户档案.
+ * UI-S17: only once a model works (the interview needs one), so a first
+ * launch without a model does not use up the one showing.
  */
 import { createApp, h, nextTick, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,9 +19,10 @@ import { PROFILE_PROMPT_KEY, resetProfilePromptForTest } from './profilePrompt'
 let app: App | null = null
 let host: HTMLDivElement | null = null
 
-function context(status: ProfileOnboardingStatus = 'pending') {
+function context(status: ProfileOnboardingStatus = 'pending', usable = true) {
   return {
     boot: ref({
+      modelConfig: { availability: { usable } },
       profileOnboarding: {
         status,
         sessionId: null,
@@ -114,5 +117,17 @@ describe('the profile-interview prompt on the hero', () => {
     ).toBeNull()
     // None of those used up the one showing.
     expect(prompt(mount('chat-a').root)).not.toBeNull()
+  })
+
+  it('waits for a working model without using up the one showing (UI-S17)', async () => {
+    const ctx = context('pending', false)
+    const { root } = mount('chat-a', ctx)
+    await nextTick()
+    expect(prompt(root)).toBeNull()
+    expect(localStorage.getItem(PROFILE_PROMPT_KEY)).toBeNull()
+    // The first model is saved: the same hero now offers the interview.
+    ctx.boot.value.modelConfig.availability.usable = true
+    await nextTick()
+    expect(prompt(root)).not.toBeNull()
   })
 })

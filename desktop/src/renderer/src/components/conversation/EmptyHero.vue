@@ -4,10 +4,19 @@
  * medium) centered above the composer card, with the gold backdrop glow
  * centered on the card. The card itself is the shared ComposerCard rendered
  * by ConversationView in the same seat (no remount between phases).
+ * With the profile's 称呼 the headline greets the user by name (UI-S17).
+ *
+ * Props: projectName?, addressName? (the profile's 称呼, null: none).
  */
+import { computed } from 'vue'
 import BrandMark from '../brand/BrandMark.vue'
+import { heroHeadline } from './heroGreeting'
 
-defineProps<{ projectName?: string }>()
+const props = defineProps<{
+  projectName?: string
+  addressName?: string | null
+}>()
+const headline = computed(() => heroHeadline(props.addressName))
 </script>
 
 <template>
@@ -15,7 +24,7 @@ defineProps<{ projectName?: string }>()
     <div class="glow" aria-hidden="true" />
     <h1 class="headline">
       <BrandMark :size="34" class="mark" />
-      <span>今天想推进什么？</span>
+      <span>{{ headline }}</span>
     </h1>
     <p v-if="projectName" class="project">
       项目 · <strong>{{ projectName }}</strong>

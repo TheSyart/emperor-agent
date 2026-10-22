@@ -3,9 +3,11 @@
  * HeroProfilePrompt — the profile-interview offer under the composer on an
  * empty chat's hero (UI-S04): 「补充个人偏好 · 用一个简短访谈设置称呼、沟通
  * 方式和工作偏好」 with 开始访谈 and 不再提醒. Only while the interview is
- * pending and nothing waits for an answer, and only once (profilePrompt.ts:
- * the first such hero keeps it; later chats and later launches do not show
- * it). The interview always stays in 设置 › 记忆 › 用户档案.
+ * pending, a model works (UI-S17: the interview needs one; the first model
+ * no longer starts it by itself) and nothing waits for an answer, and only
+ * once (profilePrompt.ts: the first such hero keeps it; later chats and
+ * later launches do not show it). The interview always stays in 设置 ›
+ * 记忆 › 用户档案.
  *
  * Props: sessionId (the chat on screen), blocked? (a takeover card waits).
  */
@@ -20,6 +22,7 @@ const ctx = useAppContext()
 const shown = computed(
   () =>
     ctx.boot.value?.profileOnboarding?.status === 'pending' &&
+    ctx.boot.value?.modelConfig?.availability?.usable === true &&
     !props.blocked &&
     claimProfilePrompt(props.sessionId),
 )

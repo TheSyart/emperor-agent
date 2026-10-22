@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-10-21（对照 `79d2b7e6`）<br>
+> 最后核验：2026-10-22（对照 `b4b98b8c`）<br>
 > 事实源：`docs/release/stable-release-notes.md`、`desktop/electron-builder.release.cjs`、`desktop/src/renderer/src/components/settings/model/`（添加模型对话框）、`desktop/src/renderer/src/components/composer/ModelPicker.vue`、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
 
 ## 1. 安装
@@ -20,7 +20,17 @@
 
 ## 2. 添加并选择模型
 
-点击侧栏底部的「设置」（或菜单栏「Emperor Agent › 偏好设置…」，⌘,）打开设置弹窗，进入「模型」分区，点右上角「添加模型」。首次启动、还没有可用模型时会弹出提示，点「去配置模型」直接来到这里，还没有任何模型时这个对话框会自己打开；之后也可以从输入框模型菜单底部的「添加模型…」打开。对话框分三步：
+首次启动、还没有任何模型时，Emperor 先显示铺满窗口的接入引导，有两种方式：
+
+- 「使用本机模型」：Ollama、LM Studio 在本机运行时排在最前面，标「推荐」，不需要 Key；
+- 「使用 API Key」：DeepSeek、Kimi、通义千问、OpenAI、Anthropic 等。
+
+接下来的步骤和下面的「添加模型」相同：先连接，再选择模型。所有数值都已知时，选完模型就直接保存；有来源未知的数值才多一步「确认参数」。保存后显示「准备好了」，并在后台测试一次，点「开始使用」回到对话。
+
+- 右上角的「稍后配置」（或 Esc）：以后启动不再弹出。空会话的输入框下方会显示「还没有可用模型 · 开始接入」，随时可以重新打开引导。在引导里按 Esc 是返回上一步。
+- 已经有模型但用不了时（例如 Key 需要重新输入），不显示引导。那一行写明原因，并给出「去处理」。
+
+以后添加模型，点击侧栏底部的「设置」（或菜单栏「Emperor Agent › 偏好设置…」，⌘,）打开设置弹窗，进入「模型」分区，点右上角「添加模型」；也可以从输入框模型菜单底部的「添加模型…」打开。对话框分三步：
 
 1. **连接**：在「搜索供应商或粘贴 API 地址」里找到供应商（按国内、海外、本地、其他分组，其余在「更多」里），或直接粘贴服务商的 API 地址。填写 API Key（「获取 Key ↗」打开供应商的 Key 页面）；Ollama、LM Studio 等本机服务不需要 Key。供应商同时支持 OpenAI 兼容与 Anthropic 协议时可以在这里选；API 地址在「高级」里，一般不用改。点「连接并获取模型」，Emperor 先测试连接，再读取模型列表；Key 不对、地址不对或连不上时会写明原因。
 2. **选择模型**：勾选要加入的模型。列表按家族分组，标出能力（工具、识图、思考）、上下文与输出上限和数据来源；可以搜索、筛选和排序。列表里没有的，用「找不到？＋ 手动输入模型 ID」添加。

@@ -485,27 +485,3 @@ describe('Popover', () => {
     expect(document.activeElement).toBe(anchor)
   })
 })
-
-describe('first-run dialog', () => {
-  it('joins the modal stack: focus on 配置模型, app inert, Escape closes', async () => {
-    const { default: ModelSetupRequiredDialog } =
-      await import('../onboarding/ModelSetupRequiredDialog.vue')
-    const onClose = vi.fn()
-    const host = mount(() =>
-      h('div', { class: 'shell' }, [
-        h('button', { id: 'behind' }, 'Behind'),
-        h(ModelSetupRequiredDialog, {
-          open: true,
-          message: '',
-          onClose,
-          onConfigure: () => undefined,
-        }),
-      ]),
-    )
-    await settle()
-    expect(document.activeElement?.hasAttribute('data-autofocus')).toBe(true)
-    expect(host.querySelector('#behind')!.hasAttribute('inert')).toBe(true)
-    key('Escape')
-    expect(onClose).toHaveBeenCalledOnce()
-  })
-})

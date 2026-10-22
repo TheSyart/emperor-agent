@@ -646,6 +646,8 @@ export interface ProfileOnboardingPayload {
   lastError: string | null
   canStart: boolean
   canSkip: boolean
+  /** The profile's 称呼 (the hero greets with it), null when none. */
+  addressName?: string | null
 }
 
 export interface ProfileOnboardingActionResult {
@@ -661,7 +663,6 @@ export interface ModelConfigPayload {
   current: CurrentModelConfig | null
   availability: ModelAvailability
   providerOptions: ProviderOption[]
-  profileOnboarding?: ProfileOnboardingActionResult
   /** Entries in model_config.json that do not validate (MOD-03). */
   rejectedEntries?: RejectedModelEntryPayload[]
 }
