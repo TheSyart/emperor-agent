@@ -5,12 +5,14 @@
 import { assertRequestInvariant } from '../harness/agent/invariant'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fakeClaude, fakeCodexCli } from '../harness/delegation/testing'
 import { LlmClient } from '../llm/client'
 import type { RouteSpec } from '../llm/route'
 import type { GenerateOptions, StreamChunk } from '../llm/types'
 import type { SandboxBackend } from '../harness/sandbox/backend'
+import { loadBundledToolCatalog } from '../environment/catalog'
+import type { EnvironmentProcessRunner } from '../environment/process-runner'
 import {
   replyChunks,
   ScriptedAdapter,
@@ -36,6 +38,51 @@ export const passthroughBackend: SandboxBackend = {
     denialSignatures: ['operation not permitted'],
     runnerFailureRules: [],
   }),
+}
+
+/**
+ * The toolchain probe of a test Core. A tool found on PATH answers its
+ * `--version` at once with the catalog's pinned version, so it reads as ready
+ * where it is installed, as with a real probe, but without starting a process
+ * per tool for every Core: on a loaded CI runner those processes (each allowed
+ * 5 s) alone used up a test's 15 s (FIX-17). Tests about the probe itself pass
+ * their own runner in `extra`.
+ */
+export function catalogVersionProbe(): EnvironmentProcessRunner {
+  const tools = loadBundledToolCatalog().catalog.tools.map((tool) => ({
+    names: tool.probe.executables.map((executable) => basename(executable)),
+    output: sampleVersionOutput(tool.probe.versionPattern, tool.version.pinned),
+  }))
+  return {
+    run: async (request) => {
+      const name = basename(request.executable)
+      const tool = tools.find((candidate) =>
+        candidate.names.some(
+          (known) =>
+            name === known ||
+            name.startsWith(`${known}.`) ||
+            name.startsWith(`${known}-`),
+        ),
+      )
+      return {
+        status: 'completed',
+        exitCode: tool?.output ? 0 : 1,
+        stdout: tool?.output ?? '',
+        stderr: '',
+        durationMs: 0,
+        error: null,
+      }
+    },
+  }
+}
+
+/** `^gh version\s+(<version>)` with 2.101.0 reads `gh version 2.101.0`. */
+function sampleVersionOutput(pattern: string, version: string): string | null {
+  const output = pattern
+    .replace(/^\^/, '')
+    .replace(/\\s\+/g, ' ')
+    .replace('([0-9]+(?:\\.[0-9]+)+)', version)
+  return new RegExp(pattern).exec(output)?.[1] === version ? output : null
 }
 
 /** Scripted adapter that answers session-title requests out of band. */
@@ -101,6 +148,7 @@ export async function makeApi(
     templatesDir: TEMPLATES_DIR,
     llm,
     sandboxBackend: passthroughBackend,
+    environmentProbeRunner: catalogVersionProbe(),
     initializeMcp: false,
     eventSink: (event) => {
       events.push(event)

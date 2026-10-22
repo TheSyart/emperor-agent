@@ -24,6 +24,7 @@ import {
   EnvironmentProbe,
   missingSkillRequirementsFromStatus,
 } from '../../environment/probe'
+import type { EnvironmentProcessRunner } from '../../environment/process-runner'
 import { OsSandboxController } from '../../environment/sandbox'
 import { UnsandboxedConsentRegistry } from '../../sandbox/consent'
 import { ContainmentBackend } from '../../sandbox/policy'
@@ -108,6 +109,11 @@ export interface KeptServicesOptions {
    * plugin hooks and the environment installer; tests replace it.
    */
   containmentBackend?: ContainmentBackend
+  /**
+   * Runs the toolchain version probes (`git --version`, `gh --version`, …);
+   * tests answer them without starting processes.
+   */
+  environmentProbeRunner?: EnvironmentProcessRunner
 }
 
 export interface KeptServices {
@@ -216,6 +222,9 @@ export async function createKeptServices(
   const environmentProbe = new EnvironmentProbe({
     catalog: () => environmentCatalog,
     env: () => process.env,
+    ...(opts.environmentProbeRunner
+      ? { runner: opts.environmentProbeRunner }
+      : {}),
   })
   const executionEnvironmentService = new ExecutionEnvironmentService({
     probe: environmentProbe,
