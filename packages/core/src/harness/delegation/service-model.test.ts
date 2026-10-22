@@ -33,7 +33,7 @@ afterEach(async () => {
 })
 
 const REASON =
-  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
 /** The account's list as Emperor cached it for the user. */
 const ACCOUNT_MODELS = [
   { id: 'gpt-6-astra' },

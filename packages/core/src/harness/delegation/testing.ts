@@ -392,9 +392,7 @@ export function fakeCodexProcesses(
   return processes
 }
 /** What the fake Codex was asked, in order, under one temp folder. */
-export function fakeCodexRequests(
-  tempRoot: string,
-): Array<{
+export function fakeCodexRequests(tempRoot: string): Array<{
   method: string
   model: string | null
   includeHidden: boolean | null

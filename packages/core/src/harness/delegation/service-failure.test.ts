@@ -236,7 +236,7 @@ it.each([
 // and a 400 about the model); now the readable reason opens the summary.
 
 const REASON =
-  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
 
 function scripted(
   events: (base: {

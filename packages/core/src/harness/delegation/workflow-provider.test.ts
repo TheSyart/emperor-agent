@@ -285,16 +285,14 @@ it('keeps workflow concurrency inside the global/profile limits and records nati
     expect(result.stopReason, JSON.stringify(result)).toBe('completed')
     expect((result.value as unknown[])[0]).toBe(null)
     expect(
-      f.service
-        .list()
-        .some((state) =>
-          Object.values(state.runs).some(
-            (r) =>
-              r.failureCode === 'EXECUTOR_TURN_FAILED' &&
-              // The executor's error, after why the turn failed (FIX-16).
-              r.summary === 'Codex 这一轮失败：fixture native failure',
-          ),
+      f.service.list().some((state) =>
+        Object.values(state.runs).some(
+          (r) =>
+            r.failureCode === 'EXECUTOR_TURN_FAILED' &&
+            // The executor's error, after why the turn failed (FIX-16).
+            r.summary === 'Codex 这一轮失败：fixture native failure',
         ),
+      ),
     ).toBe(true)
   } finally {
     release()

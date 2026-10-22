@@ -432,7 +432,7 @@ it.each([
 // default); 任务详情 says which model, where to change it, and — when the
 // run used another model instead — which one.
 const MODEL_REASON =
-  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
 it('FIX-16 · 2 · a refused model reads in Chinese, with the next step, the reason and the way to settings', async () => {
   const s = state('codex', 'failed')
   Object.assign(s.runs['dgr-one'], {

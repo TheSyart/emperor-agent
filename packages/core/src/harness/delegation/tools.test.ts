@@ -651,7 +651,7 @@ it('FIX-16 · 7 · collect_agent and a foreground wait carry the refused model�
     }),
     f = fixture(runtime.service)
   const reason =
-    'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+    'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
   try {
     const started = await f.call('subagent', {
       backend: 'codex',

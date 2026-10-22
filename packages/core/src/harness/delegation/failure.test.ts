@@ -10,7 +10,7 @@ import { describeTurnError } from './failure'
 import { codexModelRejection } from './testing'
 
 const CODEX_SETTING =
-  '请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+  '请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
 
 it('2 · the 400 Codex gives a ChatGPT login for a model it does not offer names the model and where to change it', () => {
   expect(
@@ -42,7 +42,7 @@ it('2 · OpenAI’s model_not_found and Claude’s refusals of a model are the s
     reason: `Codex 不支持模型 gpt-9-preview。${CODEX_SETTING}`,
   })
   const claude =
-    '请在 设置 › 子智能体 › Claude Code › 默认模型 里换一个可用的模型。'
+    '请在「设置 › 子智能体 › Claude Code › 默认模型」里换一个可用的模型。'
   expect(
     describeTurnError(
       'API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-opus-9"},"request_id":"req_011CUx"}',

@@ -314,7 +314,7 @@ export function describeTurnError(
         (model
           ? `${name} 不支持模型 ${model}${account}。`
           : `${name} 不支持当前使用的模型${account}。`) +
-        `请在 设置 › 子智能体 › ${name} › 默认模型 里换一个可用的模型。`,
+        `请在「设置 › 子智能体 › ${name} › 默认模型」里换一个可用的模型。`,
     }
   }
   const opening = `${name} 这一轮失败：`
