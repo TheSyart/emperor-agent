@@ -18,6 +18,9 @@ import { HelperClient } from './helper-client'
  * loaded CI runner instead of the 1 s default (FIX-17). */
 const LOADED = { timeout: 10_000 }
 
+/** The heartbeat tests' client: a ping every 30 ms, lost after three. */
+const FAST_HEARTBEAT = { heartbeatMs: 30, maxMissedPings: 3 }
+
 const hello = {
   type: 'hello',
   protocol: 1,
@@ -43,7 +46,15 @@ function proof(label: string, server: string, client: string): string {
 async function fakeHelper(
   onMessage: (message: Record<string, unknown>, socket: Socket) => void,
   greeting: Record<string, unknown> = hello,
-  options: { prove?: boolean } = {},
+  options: {
+    prove?: boolean
+    /**
+     * The client's heartbeat. Most fake helpers never answer a ping, so by
+     * default it is out of the way; a fast one gave every test about 120 ms
+     * before "Helper heartbeat lost", which a loaded runner overran (FIX-17).
+     */
+    heartbeat?: { heartbeatMs: number; maxMissedPings: number }
+  } = {},
 ): Promise<{ client: HelperClient; socket: Socket; close(): Promise<void> }> {
   const path = `/tmp/emperor-cu-${randomUUID()}.sock`
   let peer!: Socket
@@ -88,8 +99,7 @@ async function fakeHelper(
   const client = new HelperClient(stream, {
     platform: 'macos',
     secret,
-    heartbeatMs: 30,
-    maxMissedPings: 3,
+    ...(options.heartbeat ?? { heartbeatMs: 60_000, maxMissedPings: 3 }),
   })
   return {
     client,
@@ -392,9 +402,13 @@ describe('HelperClient', () => {
 
   it('tolerates exactly three missed heartbeats before declaring the helper lost', async () => {
     const pings: unknown[] = []
-    const helper = await fakeHelper((message) => {
-      if (message.type === 'ping') pings.push(message.seq)
-    })
+    const helper = await fakeHelper(
+      (message) => {
+        if (message.type === 'ping') pings.push(message.seq)
+      },
+      hello,
+      { heartbeat: FAST_HEARTBEAT },
+    )
     try {
       await helper.client.ready
       const lost = new Promise((resolve) =>
@@ -411,15 +425,22 @@ describe('HelperClient', () => {
   })
 
   it('stays connected while the helper answers heartbeats', async () => {
-    const helper = await fakeHelper((message, socket) => {
-      if (message.type === 'ping')
+    let answered = 0
+    const helper = await fakeHelper(
+      (message, socket) => {
+        if (message.type !== 'ping') return
         socket.write(
           Buffer.from(encodeJsonFrame({ type: 'pong', seq: message.seq })),
         )
-    })
+        answered += 1
+      },
+      hello,
+      { heartbeat: FAST_HEARTBEAT },
+    )
     try {
       await helper.client.ready
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      // Well past three heartbeats, counted in pings rather than in time.
+      await vi.waitFor(() => expect(answered).toBeGreaterThanOrEqual(8), LOADED)
       expect(helper.client.diagnostics()).toMatchObject({
         connected: true,
         lastErrorCode: null,
@@ -452,7 +473,9 @@ describe('HelperClient', () => {
   })
 
   it('fails pending work after three missed heartbeats', async () => {
-    const helper = await fakeHelper(() => undefined)
+    const helper = await fakeHelper(() => undefined, hello, {
+      heartbeat: FAST_HEARTBEAT,
+    })
     try {
       await helper.client.ready
       const request = helper.client.request('target.release', {
