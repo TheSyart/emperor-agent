@@ -31,7 +31,7 @@ import {
   type DictationEvent,
 } from '../../api/dictation'
 import { acceleratorMatches, dictationRequest } from '../../dictation/model'
-import { isDraftPromotion } from '../../runtime/sessionDrafts'
+import { isDraftPromotion } from '../../composables/useComposerDrafts'
 import { useDictationSettings } from '../../dictation/settings'
 import { detectShortcutPlatform } from '../../shortcuts'
 import type { ComposerEditorHandle } from '../chat/composerController'

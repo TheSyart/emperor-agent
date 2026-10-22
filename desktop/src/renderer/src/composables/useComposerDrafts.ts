@@ -2,6 +2,7 @@ import {
   isEmptyDraft,
   type ComposerDraft,
 } from '../components/chat/composerDraft'
+import { draftPromotions } from '../runtime/sessionDrafts'
 
 /**
  * Unsent composer drafts, one per session, for this window: switching
@@ -29,6 +30,17 @@ export function takeComposerDraft(sessionId: string): ComposerDraft | null {
   const draft = drafts.get(sessionId) ?? null
   drafts.delete(sessionId)
   return draft
+}
+
+/**
+ * `next` is the session the draft `previous` became when its first message
+ * was sent: the same chat, whose composer and dictation carry on (FIX-13).
+ */
+export function isDraftPromotion(
+  previous: string | null | undefined,
+  next: string | null | undefined,
+): boolean {
+  return Boolean(previous && next && draftPromotions.get(previous) === next)
 }
 
 /** Test seam. */

@@ -266,14 +266,15 @@ async function onSessionActivate(id: string) {
   switchSession(id)
   // The start page shows its draft's own plan mode and preset, never the
   // previous chat's plan or goal (FIX-13).
-  if (sessionStore.isDraftSessionId(id)) {
-    const { showDraftControls } = await import('./runtime/draftControls')
-    return showDraftControls(
-      boot,
-      () => (sessionId.value === id ? sessionStore.getSession(id) : undefined),
-      () => core('control.get', null),
+  if (sessionStore.isDraftSessionId(id))
+    return import('./runtime/draftControls').then((controls) =>
+      controls.showDraftControls(
+        boot,
+        () =>
+          sessionId.value === id ? sessionStore.getSession(id) : undefined,
+        () => core('control.get', null),
+      ),
     )
-  }
   await bootstrap.loadBootstrap(false, sessionStore.backendSessionId())
   restoreRuntimeState()
 }
@@ -340,8 +341,8 @@ onMounted(async () => {
   startupDone.value = true
   // REL-03: an older Emperor than last time, or a restore just applied.
   // Loaded after start-up, outside the first-load budget.
-  void import('./appDataNotices').then(({ showDataNotices }) =>
-    showDataNotices({
+  void import('./appDataNotices').then((notices) =>
+    notices.showDataNotices({
       load: () => core('storage.versions'),
       toast: pushToast,
       openStorage: () => void settingsRoute.openSettings('advanced', 'storage'),

@@ -83,7 +83,7 @@ describe('App.vue on the start page (FIX-13)', () => {
   const app = readFileSync(join(__dirname, '../App.vue'), 'utf8')
 
   it('3 · shows the draft when it is activated, and the defaults from Core', () => {
-    expect(app).toContain("await import('./runtime/draftControls')")
+    expect(app).toContain("import('./runtime/draftControls')")
     expect(app).toContain("() => core('control.get', null)")
     // A real session still loads its own bootstrap.
     expect(app).toContain(

@@ -48,7 +48,6 @@ export function createDraftSession(
     control_pending: null,
     version: 1,
     draft: true,
-    plan: false,
   }
 }
 
@@ -73,16 +72,12 @@ export function draftSessionOf(
   }
 }
 
-/** Drafts promoted in this window: draft id → its session id (FIX-13). */
-const promotions = new Map<string, string>()
-
-/** `next` is the session the draft `previous` became: the same chat. */
-export function isDraftPromotion(
-  previous: string | null | undefined,
-  next: string | null | undefined,
-): boolean {
-  return Boolean(previous && next && promotions.get(previous) === next)
-}
+/**
+ * Drafts promoted in this window: draft id → its session id (FIX-13).
+ * Written here only; read through `isDraftPromotion` (useComposerDrafts.ts,
+ * in the chat chunk).
+ */
+export const draftPromotions = new Map<string, string>()
 
 export function applySessionCreated(
   sessions: SessionInfo[],
@@ -102,17 +97,10 @@ export function promoteDraftSession(
   const index = sessions.findIndex(
     (session) => session.id === draftId || session.id === incoming.id,
   )
-  if (isDraftSessionId(draftId)) promotions.set(draftId, incoming.id)
+  if (isDraftSessionId(draftId)) draftPromotions.set(draftId, incoming.id)
   if (index < 0) return [incoming, ...sessions]
   const next = sessions.slice()
-  // The draft's own settings now live in Core, with the session.
-  next[index] = {
-    ...sessions[index],
-    ...incoming,
-    draft: undefined,
-    plan: undefined,
-    preset: undefined,
-  }
+  next[index] = { ...sessions[index], ...incoming, draft: undefined }
   return dedupeSessions(next)
 }
 

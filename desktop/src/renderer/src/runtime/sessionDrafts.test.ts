@@ -127,7 +127,8 @@ describe('session draft helpers', () => {
       projectPath: '/p',
       projectName: 'P',
     })
-    expect(draft.plan).toBe(false)
+    // Unset: the global defaults (plan mode off).
+    expect(draft.plan).toBeUndefined()
     expect(draft.preset).toBeUndefined()
     const project = { project_id: 'p', project_path: '/p', project_name: 'P' }
     expect(draftSessionOf(draft)).toEqual({ mode: 'build', project })
@@ -146,9 +147,11 @@ describe('session draft helpers', () => {
     })
   })
 
-  it('1 · D3 · a promoted draft drops its own settings and is known as the same chat', async () => {
-    const { createDraftSession, isDraftPromotion, promoteDraftSession } =
+  it('D3 · a promoted draft is known as the same chat', async () => {
+    const { createDraftSession, promoteDraftSession } =
       await import('./sessionDrafts')
+    const { isDraftPromotion } =
+      await import('../composables/useComposerDrafts')
     const draft: SessionInfo = {
       ...createDraftSession(),
       plan: true,
@@ -160,8 +163,6 @@ describe('session draft helpers', () => {
       session({ id: 'real-1', title: '新会话' }),
     )
     expect(row).toMatchObject({ id: 'real-1' })
-    expect(row.plan).toBeUndefined()
-    expect(row.preset).toBeUndefined()
     expect(isDraftPromotion(draft.id, 'real-1')).toBe(true)
     expect(isDraftPromotion(draft.id, 'other')).toBe(false)
     expect(isDraftPromotion('real-1', draft.id)).toBe(false)

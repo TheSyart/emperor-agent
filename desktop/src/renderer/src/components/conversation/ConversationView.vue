@@ -108,10 +108,10 @@ import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import type { ComposerDraft } from '../chat/composerDraft'
 import {
+  isDraftPromotion,
   saveComposerDraft,
   takeComposerDraft,
 } from '../../composables/useComposerDrafts'
-import { isDraftPromotion } from '../../runtime/sessionDrafts'
 import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
 import {
   activeTurnTick,
