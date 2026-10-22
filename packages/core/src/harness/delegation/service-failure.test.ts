@@ -107,7 +107,7 @@ it('2 · a file-system error while preparing is WORKSPACE_PREPARE_FAILED; the ho
     const { run } = await failedRun(f)
     expect(run.failureCode).toBe('WORKSPACE_PREPARE_FAILED')
     expect(run.summary).toBe(
-      "准备工作区失败：EACCES: permission denied, open '~/.emperor/delegations/leases/x.json'",
+      "准备工作区失败：没有权限（EACCES）：EACCES: permission denied, open '~/.emperor/delegations/leases/x.json'",
     )
     expect(failures()[0]!.fields).toMatchObject({
       stage: 'workspace',
@@ -195,3 +195,36 @@ it('a DelegationError keeps its own code and is logged as a stop, not as an unex
     f.cleanup()
   }
 })
+
+it.each([
+  [
+    new WorkspaceOperationError(
+      'git_command_failed',
+      'spawn /usr/bin/git EMFILE',
+    ),
+    'WORKSPACE_GIT_FAILED',
+    '准备工作区失败：Git 命令失败：打开的文件太多（EMFILE）：spawn /usr/bin/git EMFILE',
+  ],
+  [
+    Object.assign(new Error('spawn /usr/bin/git EAGAIN'), {
+      code: 'EAGAIN',
+      syscall: 'spawn /usr/bin/git',
+    }),
+    'WORKSPACE_PREPARE_FAILED',
+    '准备工作区失败：系统暂时无法启动新进程（EAGAIN）：spawn /usr/bin/git EAGAIN',
+  ],
+])(
+  '1 · a spawn that runs out of files or processes says so in Chinese (%#)',
+  async (error, failureCode, summary) => {
+    capture()
+    const f = fixture()
+    f.prepare.mockRejectedValueOnce(error)
+    try {
+      const { run } = await failedRun(f)
+      expect(run).toMatchObject({ failureCode, summary })
+    } finally {
+      await f.service.shutdown()
+      f.cleanup()
+    }
+  },
+)

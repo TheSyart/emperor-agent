@@ -102,6 +102,28 @@ function stageLabel(stage: RunStage, backend: string): string {
   }
 }
 
+/** System error codes a spawn or file operation reports, in words. */
+const ERRNO_HINTS: Readonly<Record<string, string>> = {
+  EMFILE: '打开的文件太多',
+  ENFILE: '打开的文件太多',
+  EAGAIN: '系统暂时无法启动新进程',
+  EACCES: '没有权限',
+  EPERM: '没有权限',
+  ENOENT: '找不到文件或程序',
+  ENOSPC: '磁盘空间不足',
+}
+
+/** The system error behind an error: its code, or one its message names. */
+function errnoOf(
+  code: string | undefined,
+  message: string,
+): string | undefined {
+  if (code && code in ERRNO_HINTS) return code
+  return /\b(EMFILE|ENFILE|EAGAIN|EACCES|EPERM|ENOENT|ENOSPC)\b/.exec(
+    message,
+  )?.[1]
+}
+
 /**
  * A run's failure from an error that is not a DelegationError: its code
  * (workspace failures are specific, anything else stays EXECUTOR_ERROR),
@@ -115,12 +137,11 @@ export function describeRunFailure(
 ): RunFailure {
   const code = errorCode(error)
   const message = sanitizeFailureMessage(errorMessage(error), secrets)
-  const short = sanitizeFailureMessage(
-    errorMessage(error),
-    secrets,
-    REASON_LIMIT,
-  )
+  let short = sanitizeFailureMessage(errorMessage(error), secrets, REASON_LIMIT)
   const label = stageLabel(stage, backend)
+  // 「打开的文件太多（EMFILE）：spawn /usr/bin/git EMFILE」
+  const errno = errnoOf(code, short)
+  if (errno) short = `${ERRNO_HINTS[errno]}（${errno}）：${short}`
   let failureCode = 'EXECUTOR_ERROR',
     detail = short
   if (error instanceof WorkspaceOperationError) {
