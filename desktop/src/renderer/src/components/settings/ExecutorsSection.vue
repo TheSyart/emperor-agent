@@ -13,8 +13,22 @@
  *
  * Every change is saved at once (executors/useExecutorSettings.ts); the
  * header keeps only 重新检测.
+ *
+ * Versions (AGT-13): opening the page asks npm what is new (at most once a
+ * minute). A new version shows at the top (「Claude Code 和 Codex 有新版
+ * 本」 · 稍后 · 全部升级), as 「本机 x · 可升级到 y」 and 升级 on its row,
+ * and as a dot on 子智能体 in the nav; 升级 asks first
+ * (ExecutorUpgradeDialog), then runs in the row (升级中, a bar, 查看过程,
+ * 取消) and ends in a toast or a failure notice with the command to copy.
  */
-import { computed, defineAsyncComponent } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import type { ExecutorProfile } from '@emperor/core/runtime-contract'
 import Avatar from '../ui/Avatar.vue'
 import Badge from '../ui/Badge.vue'
@@ -36,14 +50,27 @@ import { useSettingsPages } from './settingsHeader'
 import ClaudeSignInNotice from './executors/ClaudeSignInNotice.vue'
 import ExecutorAdvancedPage from './executors/ExecutorAdvancedPage.vue'
 import ExecutorDetailPage from './executors/ExecutorDetailPage.vue'
+import ExecutorUpgradeDialog from './executors/ExecutorUpgradeDialog.vue'
+import ExecutorUpgradeNotice from './executors/ExecutorUpgradeNotice.vue'
+import ExecutorUpgradeProgress from './executors/ExecutorUpgradeProgress.vue'
 import {
   executorName,
   hasIssue,
   needsSignIn,
+  readyLead,
+  rowReady,
   rowSummary,
   statusLabel,
   statusTone,
 } from './executors/executorText'
+import { useExecutorUpgrades } from './executors/executorUpgrades'
+import {
+  activeRun,
+  failedRun,
+  rowUpgradeLine,
+  runningLine,
+  upgradeOffered,
+} from './executors/upgradeText'
 import { provideExecutorSettings } from './executors/useExecutorSettings'
 
 // 使用 API Key (AGT-12) loads when it is opened.
@@ -127,6 +154,64 @@ function setModel(profile: ExecutorProfile, id: string | null | undefined) {
     else delete p.defaultModel
   })
 }
+
+// ── 版本与升级 (AGT-13) ───────────────────────────────────────────────
+
+const upgrades = useExecutorUpgrades()
+const now = ref(Date.now())
+const logOpen = ref<Record<string, boolean>>({})
+const runOf = (profile: ExecutorProfile) => upgrades.runOf(profile.id)
+const upgrading = (profile: ExecutorProfile | undefined) =>
+  !!profile?.enabled && activeRun(upgrades.runOf(profile.id))
+/** The line under the name: while it upgrades, then with the version. */
+function summaryOf(profile: ExecutorProfile): {
+  text: string
+  highlight?: string
+} {
+  const facts = s.factsOf(profile)
+  const run = runOf(profile)
+  if (profile.enabled && activeRun(run))
+    return { text: runningLine(run, now.value) }
+  const version = upgrades.versionOf(profile.id)
+  return version && rowReady(profile, facts)
+    ? rowUpgradeLine(readyLead(profile, facts), version, run, now.value)
+    : { text: rowSummary(profile, facts) }
+}
+function offers(profile: ExecutorProfile) {
+  return (
+    profile.enabled &&
+    upgradeOffered(upgrades.versionOf(profile.id), runOf(profile))
+  )
+}
+/** 重新检测 after the command in Terminal: probe, then the versions again. */
+async function recheckUpgrade(profileId: string) {
+  const profile = config.value?.profiles.find((p) => p.id === profileId)
+  if (profile) await s.recheck(profile)
+  await upgrades.load()
+}
+let ticking: ReturnType<typeof setInterval> | undefined
+let stopProbes: (() => void) | undefined
+onMounted(() => {
+  void upgrades.load('auto')
+  ticking = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  // The probe Core took after an upgrade: the row and the models follow.
+  stopProbes = upgrades.onProbe((profileId, probe) => {
+    const profile = config.value?.profiles.find((p) => p.id === profileId)
+    if (!profile) return
+    s.keySaved(profile, probe)
+    void s.loadModels(profile, true)
+  })
+})
+onBeforeUnmount(() => {
+  clearInterval(ticking)
+  stopProbes?.()
+})
+// Installed versions come from the probes: read again once they are in.
+watch(loading, (isLoading, wasLoading) => {
+  if (wasLoading && !isLoading) void upgrades.load()
+})
 
 // ── 子任务 ────────────────────────────────────────────────────────────
 
@@ -260,6 +345,13 @@ useSettingsHeader({
       @cancel="s.cancelSignIn()"
       @recheck="s.recheck(claudeSignIn.profile)"
     />
+    <Notice
+      v-if="upgrades.error.value"
+      tone="error"
+      :title="upgrades.error.value"
+      data-upgrade-error
+    />
+    <ExecutorUpgradeNotice @recheck="recheckUpgrade" />
 
     <SettingsGroup title="可用的子智能体" data-executor-list>
       <SettingsRow
@@ -293,7 +385,10 @@ useSettingsHeader({
             :size="28"
         /></template>
         <template #badge
+          ><Badge v-if="upgrading(row.profile)" class="readiness" tone="accent"
+            >升级中</Badge
           ><Badge
+            v-else
             class="readiness"
             :tone="
               row.profile
@@ -310,13 +405,53 @@ useSettingsHeader({
           ></template
         >
         <template #description
-          ><span data-executor-summary>{{
-            row.profile
-              ? rowSummary(row.profile, s.factsOf(row.profile))
-              : '没有这个子智能体的配置'
-          }}</span></template
+          ><span v-if="row.profile" data-executor-summary
+            >{{ summaryOf(row.profile).text
+            }}<template v-if="summaryOf(row.profile).highlight"
+              >{{ ' · '
+              }}<span class="offer" data-upgrade-offer>{{
+                summaryOf(row.profile).highlight
+              }}</span></template
+            ></span
+          ><span v-else data-executor-summary
+            >没有这个子智能体的配置</span
+          ></template
         >
+        <template v-if="row.profile && upgrading(row.profile)" #below
+          ><ExecutorUpgradeProgress
+            :log="runOf(row.profile)?.log ?? []"
+            bar
+            :show-log="!!logOpen[row.profile.id]"
+        /></template>
         <div class="row-controls">
+          <Button
+            v-if="row.profile && offers(row.profile)"
+            size="sm"
+            variant="secondary"
+            data-executor-upgrade
+            @click="upgrades.ask([row.profile.id])"
+            >{{
+              failedRun(upgrades.versionOf(row.profile.id), runOf(row.profile))
+                ? '重试'
+                : '升级'
+            }}</Button
+          >
+          <template v-if="row.profile && upgrading(row.profile)">
+            <Button
+              size="sm"
+              variant="ghost"
+              data-upgrade-show-log
+              :aria-expanded="!!logOpen[row.profile.id]"
+              @click="logOpen[row.profile.id] = !logOpen[row.profile.id]"
+              >{{ logOpen[row.profile.id] ? '收起过程' : '查看过程' }}</Button
+            ><Button
+              size="sm"
+              variant="ghost"
+              data-upgrade-cancel
+              @click="upgrades.cancel(row.profile.id)"
+              >取消</Button
+            >
+          </template>
           <Button
             v-if="row.profile && signInNeeded(row.profile)"
             size="sm"
@@ -404,7 +539,16 @@ useSettingsHeader({
     </SettingsGroup>
   </SettingsSection>
   <ExecutorAdvancedPage v-else-if="page === 'advanced'" />
-  <ExecutorDetailPage v-else-if="detailBackend" :backend="detailBackend" />
+  <ExecutorDetailPage
+    v-else-if="detailBackend"
+    :backend="detailBackend"
+    @recheck-upgrade="recheckUpgrade"
+  />
+  <ExecutorUpgradeDialog
+    v-if="upgrades.asking.value"
+    :profile-ids="upgrades.asking.value"
+    @close="upgrades.asking.value = null"
+  />
   <ClaudeApiKeyDialog
     v-if="apiKeyDialog"
     :profile-id="apiKeyDialog.id"
@@ -431,5 +575,9 @@ useSettingsHeader({
 }
 .readiness {
   font-size: var(--fs-xxxs);
+}
+.offer {
+  color: rgb(var(--accent));
+  white-space: nowrap;
 }
 </style>
