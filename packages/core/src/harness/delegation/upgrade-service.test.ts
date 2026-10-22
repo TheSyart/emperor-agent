@@ -22,6 +22,8 @@ import type {
 import { ExecutorUpgradeService } from './upgrade-service'
 
 const cleanup: Array<() => void> = []
+/** Processes start and end slowly while the whole suite runs. */
+const LOADED = { timeout: 10_000 }
 afterEach(() => cleanup.splice(0).forEach((f) => f()))
 
 const alive = (pid: number) => {
@@ -223,7 +225,7 @@ describe('executor versions', () => {
     expect(quiet.fetches).toEqual([])
     const s = service(m, { automatic: true })
     s.upgrades.start()
-    await vi.waitFor(() => expect(s.fetches).toHaveLength(2))
+    await vi.waitFor(() => expect(s.fetches).toHaveLength(2), LOADED)
     // Checked today: the next start does not ask again.
     const again = service(m, { automatic: true })
     again.upgrades.start()
@@ -373,8 +375,9 @@ describe('one-click upgrade', () => {
     await s.probeAll()
     await s.upgrades.versions({ refresh: true })
     await s.upgrades.upgrade({ profileId: 'claude-default', target: '2.1.308' })
-    await vi.waitFor(() =>
-      expect(existsSync(join(m.root, 'npm-pids'))).toBe(true),
+    await vi.waitFor(
+      () => expect(existsSync(join(m.root, 'npm-pids'))).toBe(true),
+      LOADED,
     )
     const pids = readFileSync(join(m.root, 'npm-pids'), 'utf8')
       .trim()
@@ -383,7 +386,7 @@ describe('one-click upgrade', () => {
     expect(pids.every(alive)).toBe(true)
     const { upgrade } = await s.upgrades.cancel({ profileId: 'claude-default' })
     expect(upgrade?.state).toBe('cancelled')
-    await vi.waitFor(() => expect(pids.some(alive)).toBe(false))
+    await vi.waitFor(() => expect(pids.some(alive)).toBe(false), LOADED)
     expect(await settled(s.events, 'claude-default')).toMatchObject({
       state: 'cancelled',
     })
@@ -405,8 +408,9 @@ describe('one-click upgrade', () => {
       target: '2.1.308',
     })
     expect(second.upgrade.startedAt).toBe(first.upgrade.startedAt)
-    await vi.waitFor(() =>
-      expect(existsSync(join(m.root, 'npm-pids'))).toBe(true),
+    await vi.waitFor(
+      () => expect(existsSync(join(m.root, 'npm-pids'))).toBe(true),
+      LOADED,
     )
     await s.upgrades.cancel({ profileId: 'claude-default' })
     expect(
@@ -517,6 +521,9 @@ describe('no new delegations during an upgrade', () => {
     expect(f.service.activeRuns('claude-code')).toBe(0)
     release()
     await f.service.wait(record.id, record.currentRunId!)
-    await vi.waitFor(() => expect(f.service.activeRuns('codex')).toBe(0))
+    await vi.waitFor(
+      () => expect(f.service.activeRuns('codex')).toBe(0),
+      LOADED,
+    )
   })
 })

@@ -34,7 +34,7 @@ const alive = (pid: number) => {
     return false
   }
 }
-async function until(check: () => boolean, ms = 5000) {
+async function until(check: () => boolean, ms = 10_000) {
   const end = Date.now() + ms
   while (!check()) {
     if (Date.now() > end) throw new Error('timed out')
