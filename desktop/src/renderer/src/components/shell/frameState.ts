@@ -52,7 +52,7 @@ export interface FrameState {
   workspacePane: WorkspacePane
   /**
    * Chat-tab environment card: `auto` shows it beside a wide conversation
-   * (≥ 1120px) and hides it on a narrow one, `open` shows it either way
+   * (≥ 1152px) and hides it on a narrow one, `open` shows it either way
    * (opened on demand), `closed` hides it (closed by hand, remembered).
    */
   envCard: EnvCardPreference

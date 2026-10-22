@@ -24,6 +24,15 @@
 //   - CSS animations and transitions are stopped and the caret hidden when
 //     the screenshot is taken (toHaveScreenshot's own options).
 // Untagged tests keep the real clock and the browser defaults.
+//
+// Every test that imports `test` from here (tagged or not) lays out like
+// overlay scrollbars, whatever the Mac's 「显示滚动条」 setting (UI-S16).
+// Headless Chromium never draws a scrollbar (Playwright's --hide-scrollbars),
+// but with Automatic and a mouse attached, or Always, a box with
+// `scrollbar-gutter: stable` (the sidebar list, a page) still keeps the
+// classic 15px gutter, and no launch flag changes that on macOS. So each page
+// gets `scrollbar-width: none` (a constructed stylesheet, no DOM node): no
+// gutter and no scrollbar, as on a trackpad-only Mac.
 import {
   expect,
   test as base,
@@ -78,8 +87,17 @@ function stabilize({ now, seed }: { now: number; seed: number }): void {
   }
 }
 
+/** Runs in the page before any other script: no scrollbar takes room. */
+function overlayScrollbars(): void {
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(
+    '*, ::before, ::after { scrollbar-width: none !important; }',
+  )
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+}
+
 export const test = base.extend<
-  { baselineStability: void },
+  { baselineStability: void; overlayScrollbars: void },
   { warmRenderer: void }
 >({
   // The dev server transforms the renderer on its first request, which can
@@ -116,6 +134,13 @@ export const test = base.extend<
           seed: BASELINE_RANDOM_SEED,
         })
       }
+      await use()
+    },
+    { auto: true },
+  ],
+  overlayScrollbars: [
+    async ({ context }, use) => {
+      await context.addInitScript(overlayScrollbars)
       await use()
     },
     { auto: true },

@@ -613,12 +613,16 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
   min-height: 0;
 }
 
+/* Spans the conversation region: its scrollbar is at the far right, under
+   a floating card. `--chat-shift` (ConversationView, UI-S16) moves the
+   centred column left of a card without narrowing it. */
 .scroller {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: var(--space-4) var(--space-8) calc(var(--space-8) + var(--space-6));
+  padding-inline-end: calc(var(--space-8) + 2 * var(--chat-shift, 0px));
   overflow-anchor: none;
 }
 
@@ -682,7 +686,8 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
   overflow-wrap: anywhere;
 }
 
-/* Zero-height sticky slot: the button never extends scrollHeight. */
+/* Zero-height sticky slot: the button never extends scrollHeight; its right
+   edge is the column's, wherever the column sits. */
 .to-bottom-slot {
   position: sticky;
   bottom: calc(var(--space-8) + var(--space-5));

@@ -1125,6 +1125,21 @@ function resourceCard(page: Page, href: string) {
     .last()
 }
 
+/**
+ * UI-S16: in a narrow conversation (a workspace pane open) an opened
+ * environment card floats over the chat (`data-env-overlay`) and may cover
+ * what a step clicks. Close it with its header toggle, as a user would.
+ */
+async function dismissEnvironmentOverlay(page: Page): Promise<void> {
+  if (!(await page.locator('.conversation-root[data-env-overlay]').count()))
+    return
+  await page
+    .getByRole('button', { name: '环境信息', exact: true })
+    .first()
+    .click()
+  await page.locator('.environment-card').waitFor({ state: 'detached' })
+}
+
 async function closeResourceDetails(page: Page): Promise<void> {
   if (await page.locator('[data-resource-dialog]').count()) {
     await page.keyboard.press('Escape')
@@ -1377,11 +1392,7 @@ async function conversationResources(
       page,
       'a resource card opens its real file line with the custom SVG',
       async () => {
-        const closeOverlay = page.getByRole('button', {
-          name: '关闭环境信息',
-          exact: true,
-        })
-        if (await closeOverlay.isVisible()) await closeOverlay.click()
+        await dismissEnvironmentOverlay(page)
         const card = resourceCard(page, lineHref)
         await card.waitFor({ timeout: 10_000 })
         if (
@@ -1410,6 +1421,9 @@ async function conversationResources(
           10_000,
           'missing resource state',
         )
+        // The file opened in the Files pane: the narrower chat may now have
+        // the card over it, right where this forced click lands.
+        await dismissEnvironmentOverlay(page)
         await missing.locator('a.resource-title').click({ force: true })
         if (await page.locator('[data-resource-dialog]').count())
           throw new Error('the missing-file click opened an unrelated resource')
@@ -1445,6 +1459,7 @@ async function conversationResources(
       page,
       'remote metadata starts only after details and keeps the real message owner',
       async () => {
+        await dismissEnvironmentOverlay(page)
         const card = resourceCard(page, web)
         const button = card.locator('[data-resource-detail]')
         await button.click()
@@ -1639,13 +1654,6 @@ async function conversationResources(
           .getByRole('button', { name: '新对话', exact: true })
           .first()
           .click()
-        // The existing Files pane narrows this Chat, so its environment
-        // card becomes an intentional overlay. Dismiss it through the UI.
-        const closeEnvironment = page.getByRole('button', {
-          name: '关闭环境信息',
-          exact: true,
-        })
-        if (await closeEnvironment.isVisible()) await closeEnvironment.click()
         const input = page.locator('.composer-root input[type="file"]').first()
         await input.setInputFiles([
           {
@@ -1742,7 +1750,9 @@ async function conversationResources(
         )
         if (sessions.find((session) => session.id === chatId)?.mode !== 'chat')
           throw new Error('attachment acceptance is not in an ordinary Chat')
-        if (await closeEnvironment.isVisible()) await closeEnvironment.click()
+        // The existing Files pane narrows this Chat, so its environment
+        // card becomes an intentional overlay. Dismiss it through the UI.
+        await dismissEnvironmentOverlay(page)
         const sentImages = page.locator('.user-row').last().locator('.images')
         if (
           (await sentImages.innerText()).trim() ||

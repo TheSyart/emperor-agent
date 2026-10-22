@@ -570,6 +570,50 @@ describe('ComputerUsePreviewStack', () => {
     rectangles.mockRestore()
   })
 
+  it('UI-S16: sits beside the chat from a 1152px region, a chip below it', async () => {
+    columnWidth = 1151
+    setTargets([target()])
+    let root = await mount()
+    expect(root.querySelector('.cu-preview-chip')).not.toBeNull()
+    app?.unmount()
+    host?.remove()
+    columnWidth = 1152
+    root = await mount()
+    expect(root.querySelector('.cu-preview-chip')).toBeNull()
+    expect(root.querySelector('.cu-preview-stack')).not.toBeNull()
+  })
+
+  it('UI-S16: reserves its span measured from the bottom of its own seat', async () => {
+    const rectangles = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('view-area'))
+          return { top: 0, bottom: 700 } as DOMRect
+        if (this.classList.contains('conversation-root'))
+          return { top: 0, bottom: 900 } as DOMRect
+        if (this.classList.contains('cu-preview'))
+          return { top: 400, bottom: 656 } as DOMRect
+        return { top: 0, bottom: 0 } as DOMRect
+      })
+    setTargets([target()])
+    host = document.createElement('div')
+    host.className = 'conversation-root'
+    Object.defineProperty(host, 'clientWidth', { get: () => columnWidth })
+    const seat = document.createElement('div')
+    seat.className = 'view-area'
+    host.append(seat)
+    document.body.append(host)
+    app = createApp({
+      setup: () => () =>
+        h(ComputerUsePreviewStack, { sessionId: 's1', awaiting: false }),
+    })
+    app.mount(seat)
+    await flush()
+    // 700 − 400 + the 12px gap: the card above stops 12 short of it.
+    expect(previewLayout.reservedHeight).toBe(312)
+    rectangles.mockRestore()
+  })
+
   it('brings a target forward and enlarges it on a tool row request', async () => {
     setTargets([
       target({

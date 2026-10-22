@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-22（对照 `1bb92495`）<br>
+> 最后核验：2026-10-22（对照 `94d6a737`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -88,9 +88,9 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 
 ### 环境信息
 
-「环境信息」卡浮在对话右上角，电脑操作的预览在右下角，两者互不遮挡。它只做汇总：每一项是一行（「来源」最多列 3 行），点一下去到真正处理的地方，卡片本身不做任何写操作。
+「环境信息」卡浮在对话右上角，电脑操作的预览在右下角，两者互不遮挡。卡片和对话在同一个区域里：对话的滚动条在最右边，卡片不随对话滚动，也永远不盖住输入框；卡片里的内容多时在卡片内部滚动。它只做汇总：每一项是一行（「来源」最多列 3 行），点一下去到真正处理的地方，卡片本身不做任何写操作。
 
-- **展开方式**：对话区域足够宽时卡片默认展开，对话内容和输入框向左让出位置；你用会话头部的「环境信息」按钮或快捷键 ⌥⌘E 关掉后，会一直保持关闭，直到再次打开。较窄时卡片默认不显示，用同一个按钮打开，打开后同样让出位置，再按一次收起。
+- **展开方式**：对话区域足够宽时卡片默认展开，对话内容和输入框保持居中；居中会碰到卡片时，二者一起向左挪到刚好让开。你用会话头部的「环境信息」按钮或快捷键 ⌥⌘E 关掉后，会一直保持关闭，直到再次打开。较窄时（包括打开右侧工作台后对话区变窄）卡片默认不显示，用同一个按钮打开，这时对话保持居中，卡片盖在对话上面，再按一次收起。
 - **标题**：Build 会话的卡片标题是项目名，其他会话是「环境信息」。
 - **「…」菜单**：「复制项目路径」「在访达中显示」（打开项目文件夹；没有绑定项目时不可用）和「隐藏此卡片」（与会话头部的按钮一样关闭并记住）。切换分支、worktree、提交、推送和比较分支都在「审查」面板里。
 

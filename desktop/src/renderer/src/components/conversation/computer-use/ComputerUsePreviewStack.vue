@@ -17,10 +17,12 @@
  *   landed, drawn on that target's live picture with the on-screen arrow,
  *   also while the window itself is covered. It glides from point to point
  *   (not when the system reduces motion) and fades out after about 2 s.
- * - Beside the chat (1120px column) the stack sits in the right column and
- *   publishes its height so the environment card above stops short.
- *   Narrower, it folds into a counted chip that expands over the chat;
- *   arrow keys switch cards and Escape folds it again.
+ * - From a 1152px conversation region the stack floats beside the chat
+ *   (ConversationView moves the column clear of it, as of the environment
+ *   card, UI-S16) and publishes the span it takes above the bottom of its
+ *   seat, so the card above stops short. Narrower, it folds into a counted
+ *   chip that expands over the chat; arrow keys switch cards and Escape
+ *   folds it again.
  * - Subscriptions stop and every object URL is released when the stack is
  *   folded, the page is hidden, the view is deactivated or unmounted (a
  *   session switch remounts it by key), so no other session's frame shows.
@@ -89,8 +91,11 @@ const props = withDefaults(
   { awaiting: false },
 )
 
-/** Conversation column width from which the stack sits beside the chat. */
-const BESIDE_MIN = 1120
+/**
+ * Conversation region width from which the stack sits beside the chat
+ * (ConversationView's FLOAT_BESIDE_MIN).
+ */
+const BESIDE_MIN = 1152
 /** Gap (px) kept between the stack and the environment card above it. */
 const RESERVE_GAP = 12
 
@@ -411,13 +416,17 @@ let host: HTMLElement | null = null
 let hostObserver: ResizeObserver | null = null
 let stackObserver: ResizeObserver | null = null
 
-/** The visible chip or expanded stack reserves its span below the info card. */
+/**
+ * The visible chip or expanded stack reserves its span below the info card:
+ * from its top to the bottom of the seat both float in (the view area).
+ */
 function publishReserve(): void {
   const element = root.value
+  const seat = element?.parentElement
   previewLayout.reservedHeight =
-    activated.value && host && element && front.value
+    activated.value && host && element && seat && front.value
       ? Math.round(
-          host.getBoundingClientRect().bottom -
+          seat.getBoundingClientRect().bottom -
             element.getBoundingClientRect().top,
         ) + RESERVE_GAP
       : 0
