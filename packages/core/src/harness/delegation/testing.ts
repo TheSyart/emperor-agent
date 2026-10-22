@@ -176,6 +176,32 @@ export function fakeClaude(
   return path
 }
 
+/**
+ * A `codex` that only answers `--version` (and fails anything else, such as
+ * the schema generation), so a probe sees a supported but unverified Codex
+ * on every machine: tests never depend on whether the developer's or the
+ * CI runner's PATH has a real Codex.
+ */
+export function fakeCodexCli(
+  dir: string,
+  options: { version?: string } = {},
+): string {
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'codex')
+  writeFileSync(
+    path,
+    [
+      '#!/bin/sh',
+      `if [ "$1" = "--version" ]; then echo "codex-cli ${options.version ?? '0.163.0'}"; exit 0; fi`,
+      'echo "fake codex: $*" >&2',
+      'exit 2',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  return path
+}
+
 /** The fake `claude auth login`'s pid, process group and child (FIX-11). */
 export function fakeLoginProcess(configDirectory: string): {
   pid?: number

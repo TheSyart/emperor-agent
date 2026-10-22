@@ -6,7 +6,7 @@ import { assertRequestInvariant } from '../harness/agent/invariant'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fakeClaude } from '../harness/delegation/testing'
+import { fakeClaude, fakeCodexCli } from '../harness/delegation/testing'
 import { LlmClient } from '../llm/client'
 import type { RouteSpec } from '../llm/route'
 import type { GenerateOptions, StreamChunk } from '../llm/types'
@@ -108,13 +108,15 @@ export async function makeApi(
     // External executors look for sign-ins in a temporary home, never the
     // user's ~/.claude or ~/.codex, and never run the login shell. A fake
     // claude comes first on PATH: tests never run the real one (AGT-12),
-    // so 登录 Claude Code runs the fake's `auth login` (FIX-11).
+    // so 登录 Claude Code runs the fake's `auth login` (FIX-11). A fake
+    // codex that only reports its version comes first too, so a probe sees
+    // the same Codex on a developer's Mac and on CI.
     executorHome:
       options.extra?.executorHome === undefined
         ? {
             home: join(root, 'executor-home'),
             environment: {
-              PATH: `${dirname(fakeClaude(join(root, 'fake-claude-bin')))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+              PATH: `${dirname(fakeClaude(join(root, 'fake-claude-bin')))}:${dirname(fakeCodexCli(join(root, 'fake-codex-bin')))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
             },
             loginShell: { read: async () => ({}) },
           }
