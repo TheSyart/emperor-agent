@@ -7,6 +7,7 @@
  */
 
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import { InvalidSessionError } from '../harness/host/scope'
 import { fallbackSessionTitle, sanitizeSessionTitle } from '../sessions/title'
 import type { SessionEntry } from '../sessions/store'
 import type {
@@ -73,16 +74,7 @@ export interface MaterializedSession {
   clientDraftId: string | null
 }
 
-export class InvalidSessionError extends Error {
-  readonly code = 'invalid_session'
-  readonly sessionId: string | null
-
-  constructor(message: string, sessionId: string | null) {
-    super(message)
-    this.name = 'InvalidSessionError'
-    this.sessionId = sessionId
-  }
-}
+export { InvalidSessionError }
 
 export interface QueuedPromptRecord {
   id: string
@@ -238,7 +230,10 @@ export class ChatService {
   listQueuedPrompts(input: { sessionId: string }): QueuedPromptRecord[] {
     const sessionId = String(input.sessionId ?? '').trim()
     if (!sessionId || !this.host.kept.sessionStore.get(sessionId))
-      throw new Error(`unknown session: ${sessionId || '<empty>'}`)
+      throw new InvalidSessionError(
+        `unknown session: ${sessionId || '<empty>'}`,
+        sessionId || null,
+      )
     const queued = this.host.queuedPrompts(sessionId)
     if (queued.length === 0) return []
     const metas = new Map<string, Record<string, unknown>>()

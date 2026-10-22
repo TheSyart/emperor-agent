@@ -3682,7 +3682,8 @@ export class CoreApi {
    */
   private activateSession(sessionId: string) {
     const entry = this.host.kept.sessionStore.get(sessionId)
-    if (entry === null) throw new Error(`unknown session ${sessionId}`)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${sessionId}`, sessionId)
     const previous =
       this.focusedSessionId === null
         ? null
@@ -4352,13 +4353,7 @@ export class CoreApi {
   ): void {
     const entry = this.viewedSession(this.viewOf(view, `${area}.${action}`))
     const control = this.host.controlPayload(entry?.id ?? null)
-    assertCoreMutationAllowed(
-      {
-        pending: control.pending,
-        mode: control.plan === true ? 'plan' : control.preset,
-      },
-      { area, action },
-    )
+    assertCoreMutationAllowed(control, { area, action })
   }
 
   private async withWorkspaceGitMutation<T>(

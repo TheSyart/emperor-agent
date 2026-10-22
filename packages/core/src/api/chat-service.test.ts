@@ -3,6 +3,7 @@
 // sessions), submit results, and the queued-prompt surface while a turn is
 // blocked on a pending question.
 import { afterEach, describe, expect, it } from 'vitest'
+import { EmperorError } from '../errors'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
 import { InvalidSessionError } from './chat-service'
@@ -290,5 +291,25 @@ describe('ChatService', () => {
           event.client_message_id === 'client-q',
       ),
     ).toBeDefined()
+  })
+
+  it('FIX-13 · 6 · an unknown session is invalid_session, which the interface explains', async () => {
+    const { api } = await setup()
+    for (const call of [
+      () => api.chat.submit({ content: 'hi', sessionId: 'missing-session' }),
+      async () => api.host.agentFor('missing-session'),
+      async () => api.host.scopeFor('missing-session'),
+      async () => api.chat.listQueuedPrompts({ sessionId: 'missing-session' }),
+      async () => api.sessions.activate('missing-session'),
+    ]) {
+      const error = await call().then(
+        () => null,
+        (cause: unknown) => cause,
+      )
+      expect(error).toBeInstanceOf(EmperorError)
+      expect((error as EmperorError).toSafe()).toMatchObject({
+        code: 'invalid_session',
+      })
+    }
   })
 })

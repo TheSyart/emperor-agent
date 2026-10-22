@@ -29,13 +29,31 @@ export interface ViewScope {
   readonly sessionId: string | null
 }
 
-/** A call that needs a session got none (KRN-01). */
+/**
+ * A call that needs a session got none (KRN-01). The message is shown to
+ * the user as it is, so it names no operation; `operation` keeps it for
+ * logs and tests (FIX-13).
+ */
 export class SessionRequiredError extends EmperorError {
+  readonly operation: string
+
   constructor(operation: string) {
-    super(
-      `请先打开一个会话再试（${operation} 需要指明 sessionId）。`,
-      'SESSION_REQUIRED',
-    )
+    super('请先打开一个会话再试。', 'SESSION_REQUIRED')
+    this.operation = operation
+  }
+}
+
+/**
+ * A call named a session that does not exist, was deleted or cannot take
+ * it (`invalid_session`): the interface says 「会话不存在或已被删除。」
+ * instead of an internal error (FIX-13).
+ */
+export class InvalidSessionError extends EmperorError {
+  readonly sessionId: string | null
+
+  constructor(message: string, sessionId: string | null) {
+    super(message, 'invalid_session')
+    this.sessionId = sessionId
   }
 }
 
