@@ -10,7 +10,7 @@
  * here runs the real codex or touches ~/.codex.
  */
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { makeApi, waitFor } from '../test-helpers'
@@ -61,6 +61,18 @@ async function scenario(defaultModel?: string) {
     api.delegationRuntime as unknown as { options: DelegationServiceOptions }
   ).options
   options.checkAuth = undefined
+  // Signed in with a ChatGPT login, like the user: a fixture's auth.json
+  // the isolated one links to (never ~/.codex).
+  const login = join(runtimes, 'user-codex', 'auth.json')
+  mkdirSync(join(runtimes, 'user-codex'))
+  writeFileSync(
+    login,
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+    }),
+    { mode: 0o600 },
+  )
   options.runtime = async (_profile, id) => {
     const runtimeRoot = join(runtimes, id),
       tempRoot = join(runtimeRoot, 'tmp')
@@ -69,6 +81,8 @@ async function scenario(defaultModel?: string) {
       runtimeRoot,
       tempRoot,
       environment: { PATH: process.env.PATH ?? '' },
+      codexAuth: { source: login, isolated: join(runtimeRoot, 'auth.json') },
+      billing: 'subscription' as const,
     }
   }
   options.adapters.set(

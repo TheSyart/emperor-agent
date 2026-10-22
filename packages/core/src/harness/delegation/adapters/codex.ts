@@ -995,9 +995,12 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         // the delegation's run limit bounds it, not the idle timer.
         releaseTurn = rpc!.hold?.()
         // Nobody in Emperor chose a model and Codex's own default is not in
-        // the list this login offers (FIX-16): the turn asks for the list's
-        // default instead. The user's ~/.codex is never written.
-        if (!input.profile.defaultModel && threadModel) {
+        // the list its ChatGPT login offers (FIX-16): the turn asks for the
+        // list's default instead. Only that login's list is the account's
+        // own; with an API key or another provider a model the list leaves
+        // out may still run, so only a refusal changes it (the retry
+        // below). The user's ~/.codex is never written.
+        if (input.codexAuth && !input.profile.defaultModel && threadModel) {
           const pick = replacementModel(
             (await offeredModels()) ?? [],
             threadModel,

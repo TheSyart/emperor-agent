@@ -4,10 +4,12 @@
  * (`gpt-6.1-sol`, set by the Codex desktop app), which the account's model
  * list does not offer, so each turn ended at once with a 400.
  *
- * When nobody in Emperor chose a model and Codex's own default is not in
- * the list its process offers, the run uses the list's default instead,
- * and says so. A model chosen in Emperor is used as is. Without a list,
- * nothing is switched: a refusal refreshes the list and retries once.
+ * When nobody in Emperor chose a model, Codex runs on its ChatGPT login and
+ * its own default is not in the list its process offers, the run uses the
+ * list's default instead, and says so. A model chosen in Emperor is used as
+ * is. Without a list — or with an API key, whose models Codex's list does
+ * not decide — nothing is switched: a refusal refreshes the list and
+ * retries once.
  * (Why a failed turn failed: service-failure.test.ts.)
  *
  * The Codex runs go through the real adapter against the fake app-server
@@ -15,7 +17,7 @@
  */
 import { afterEach, expect, it } from 'vitest'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fixture, spec } from './service-test-fixture'
 import { CodexExecutorAdapter } from './adapters/codex'
 import {
@@ -40,13 +42,41 @@ const ACCOUNT_MODELS = [
   { id: 'gpt-5.6-luna' },
 ]
 
-/** The service with the real Codex adapter on the fake app-server. */
-function withFakeCodex(options: FakeCodexOptions) {
+/**
+ * The service with the real Codex adapter on the fake app-server, signed in
+ * with a ChatGPT login (the isolated auth.json links to a fixture's file),
+ * or with an API key.
+ */
+function withFakeCodex(
+  options: FakeCodexOptions,
+  login: 'chatgpt' | 'api-key' = 'chatgpt',
+) {
   const f = fixture()
   f.options.adapters.set(
     'codex',
     new CodexExecutorAdapter({ processes: fakeCodexProcesses(options) }),
   )
+  if (login === 'chatgpt') {
+    const home = join(f.root, 'user-home', '.codex'),
+      source = join(home, 'auth.json')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(
+      source,
+      JSON.stringify({
+        auth_mode: 'chatgpt',
+        tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+      }),
+      { mode: 0o600 },
+    )
+    const prepare = f.options.runtime
+    f.options.runtime = async (profile, id) => {
+      const runtime = await prepare(profile, id)
+      return {
+        ...runtime,
+        codexAuth: { source, isolated: join(runtime.runtimeRoot, 'auth.json') },
+      }
+    }
+  }
   cleanups.push(async () => {
     await f.service.shutdown()
     f.cleanup()
@@ -171,6 +201,37 @@ it('FIX-16 · 4 · a chosen model the list does not offer, but the account accep
   })
   expect(run.modelChoice).toBeUndefined()
   expect(requests.some((r) => r.method === 'model/list')).toBe(false)
+})
+
+it('FIX-16 · 4 · with an API key the configured default is used as is: Codex’s list does not decide which models it can run', async () => {
+  const f = withFakeCodex(
+    { defaultModel: 'gpt-4.1', models: ACCOUNT_MODELS },
+    'api-key',
+  )
+  const { run, requests } = await settle(f)
+  expect(run).toMatchObject({ phase: 'completed', summary: 'done (gpt-4.1)' })
+  expect(run.modelChoice).toBeUndefined()
+  expect(requests.some((r) => r.method === 'model/list')).toBe(false)
+})
+
+it('FIX-16 · 5 · with an API key a refused default is still retried once on a model the list offers', async () => {
+  const f = withFakeCodex(
+    {
+      defaultModel: 'gpt-6.1-sol',
+      models: ACCOUNT_MODELS,
+      rejectModel: 'gpt-6.1-sol',
+    },
+    'api-key',
+  )
+  const { run, requests } = await settle(f)
+  expect(turnStarts(requests).map((r) => r.model)).toEqual([
+    null,
+    'gpt-5.6-sol',
+  ])
+  expect(run).toMatchObject({
+    phase: 'completed',
+    modelChoice: { used: 'gpt-5.6-sol', reason: 'retried' },
+  })
 })
 
 it('FIX-16 · 5 · without a list nothing is switched; the refusal refreshes the list and retries once', async () => {

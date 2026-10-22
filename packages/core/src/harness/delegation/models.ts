@@ -241,10 +241,13 @@ export class ExecutorModelCatalogService {
       for (const row of discovered)
         if (!row.hidden) add(row.id, source, row.name)
       // Codex's own default (its config.toml, as the run inherits it) is
-      // not in the list this login offers: say so, and what a run that
-      // follows the CLI uses instead (FIX-16).
+      // not in the list its ChatGPT login offers: say so, and what a run
+      // that follows the CLI uses instead (FIX-16). An API key's or another
+      // provider's models are not decided by that list.
       const own =
-        profile.backend === 'codex' ? env.EMPEROR_EXECUTOR_MODEL : undefined
+        profile.backend === 'codex' && runtime.codexAuth
+          ? env.EMPEROR_EXECUTOR_MODEL
+          : undefined
       const replacement = own ? replacementModel(discovered, own) : undefined
       if (own && replacement) defaultUnavailable = { model: own, replacement }
       const claudeSettings =

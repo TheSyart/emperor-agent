@@ -313,8 +313,20 @@ it('never waits behind a running Codex task to list models, and never starts a s
   await running.release()
 })
 
+/** A ChatGPT login: the one whose model list is the account's own. */
+function chatGptLogin(home: string) {
+  writeFileSync(
+    join(home, '.codex', 'auth.json'),
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+    }),
+  )
+}
+
 it('FIX-16 · 6 · the catalog says when Codex’s own default is not in the list this login offers, and what a run uses instead', async () => {
   const f = fixture()
+  chatGptLogin(f.home)
   writeFileSync(join(f.home, '.codex', 'config.toml'), 'model="gpt-6.1-sol"\n')
   const offered = [
     { id: 'gpt-6-astra' },
@@ -350,8 +362,9 @@ it('FIX-16 · 6 · the catalog says when Codex’s own default is not in the lis
   )
 })
 
-it('FIX-16 · 6 · no hint for a default the list offers (hidden included) or without a list', async () => {
+it('FIX-16 · 6 · no hint for a default the list offers (hidden included), without a list, or with an API key', async () => {
   const f = fixture()
+  chatGptLogin(f.home)
   writeFileSync(
     join(f.home, '.codex', 'config.toml'),
     'model="gpt-5.5-legacy"\n',
@@ -365,6 +378,7 @@ it('FIX-16 · 6 · no hint for a default the list offers (hidden included) or wi
   })
   expect((await offered.list(f.profile, true)).defaultUnavailable).toBeNull()
   const g = fixture()
+  chatGptLogin(g.home)
   writeFileSync(join(g.home, '.codex', 'config.toml'), 'model="gpt-6.1-sol"\n')
   const unknown = new ExecutorModelCatalogService({
     ...g,
@@ -375,6 +389,14 @@ it('FIX-16 · 6 · no hint for a default the list offers (hidden included) or wi
   const value = await unknown.list(g.profile, true)
   expect(value.models.some((m) => m.source === 'builtin')).toBe(true)
   expect(value.defaultUnavailable).toBeNull()
+  // An API key's models are not decided by Codex's list.
+  const k = fixture()
+  writeFileSync(join(k.home, '.codex', 'config.toml'), 'model="gpt-4.1"\n')
+  const apiKey = new ExecutorModelCatalogService({
+    ...k,
+    readNative: async () => [{ id: 'gpt-5.6-sol', isDefault: true }],
+  })
+  expect((await apiKey.list(k.profile, true)).defaultUnavailable).toBeNull()
 })
 
 it('FIX-16 · the model list asks Codex for hidden models too and keeps its default and hidden flags', async () => {
