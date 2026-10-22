@@ -42,6 +42,8 @@ import {
 } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { installBaselineFonts } from './baselineFonts'
+import { installVisualCoreBridge } from './visualBridge'
 
 export { expect }
 
@@ -99,7 +101,7 @@ function overlayScrollbars(): void {
 }
 
 export const test = base.extend<
-  { baselineStability: void; overlayScrollbars: void },
+  { baselineStability: void; baselineFonts: void; overlayScrollbars: void },
   { warmRenderer: void }
 >({
   // The dev server transforms the renderer on its first request, which can
@@ -109,9 +111,19 @@ export const test = base.extend<
       const baseURL = workerInfo.project.use.baseURL
       if (baseURL) {
         const page = await browser.newPage()
-        await page
-          .goto(baseURL, { waitUntil: 'load', timeout: 90_000 })
-          .finally(() => page.close())
+        try {
+          await installVisualCoreBridge(page)
+          await page.goto(
+            new URL('/chat/build-ui?settings=browser', baseURL).href,
+            { waitUntil: 'load', timeout: 90_000 },
+          )
+          // Warm the lazy settings shell and section before timed assertions.
+          await page
+            .getByTestId('open-import')
+            .waitFor({ state: 'visible', timeout: 90_000 })
+        } finally {
+          await page.close()
+        }
       }
       await use()
     },
@@ -136,6 +148,13 @@ export const test = base.extend<
           seed: BASELINE_RANDOM_SEED,
         })
       }
+      await use()
+    },
+    { auto: true },
+  ],
+  baselineFonts: [
+    async ({ context }, use, info) => {
+      if (isBaseline(info)) await installBaselineFonts(context)
       await use()
     },
     { auto: true },
@@ -241,6 +260,17 @@ export async function expectBaseline(
       `${expected} is outside tests/visual/__baselines__: run with a config built by visualConfig() (playwright.config.ts)`,
     )
   await settle('page' in target ? target.page() : target)
+  const page = 'page' in target ? target.page() : target
+  await page.waitForFunction(
+    () => document.documentElement.dataset.baselineFonts === 'ready',
+  )
+  await page.evaluate(async () => {
+    await document.fonts.load(
+      '14px "Noto Sans SC Variable"',
+      document.body.textContent ?? 'Emperor 子智能体',
+    )
+    await document.fonts.ready
+  })
   await expect(target).toHaveScreenshot([area, `${screen}.png`])
 }
 

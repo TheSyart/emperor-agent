@@ -222,8 +222,26 @@ function launchServicesLeftovers(needles) {
   const dump = spawnSync(LSREGISTER, ['-dump'], {
     encoding: 'utf8',
     maxBuffer: 512 * 1024 * 1024,
+    timeout: 10_000,
   })
+  if (dump.error || dump.status !== 0)
+    throw new Error(
+      `LaunchServices inspection failed: ${dump.error?.message || dump.stderr || dump.status}`,
+    )
   return findLaunchServicesLeftovers(dump.stdout || '', needles)
+}
+
+/** `lsregister -u` may return before lsd publishes its updated database. */
+async function waitForNoLaunchServicesLeftovers(
+  needles,
+  { timeoutMs = 5_000, read = () => launchServicesLeftovers(needles) } = {},
+) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const left = read()
+    if (!left.length || Date.now() >= deadline) return left
+    await new Promise((wait) => setTimeout(wait, 100))
+  }
 }
 
 function walk(dir) {
@@ -322,6 +340,7 @@ module.exports = {
   defaultNmSocketPath,
   encodeNativeMessage,
   findLaunchServicesLeftovers,
+  waitForNoLaunchServicesLeftovers,
   findLeftoverProcesses,
   launchServicesLeftovers,
   nmHostHandshake,

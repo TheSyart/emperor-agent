@@ -6,7 +6,7 @@ import * as fs from 'node:fs'
 import { createRequire } from 'node:module'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const extras = require(
@@ -23,6 +23,10 @@ const extras = require(
   checkCleanQuit(stateRoot: string): { quitLine: string }
   findLeftoverProcesses(psOutput: string, needles: string[]): string[]
   findLaunchServicesLeftovers(dump: string, needles: string[]): string[]
+  waitForNoLaunchServicesLeftovers(
+    needles: string[],
+    options?: { timeoutMs?: number; read?: () => string[] },
+  ): Promise<string[]>
   prepareUpgradeHome(fixtureRoot: string, stateRoot: string): UpgradeManifest
   checkUpgradeReceipt(receipt: unknown, manifest: UpgradeManifest): void
 }
@@ -208,6 +212,43 @@ describe('clean quit', () => {
 })
 
 describe('LaunchServices leftovers', () => {
+  it('waits for an asynchronous unregister to settle without hiding persistent registrations', async () => {
+    vi.useFakeTimers()
+    try {
+      const helper = '/tmp/smoke/helper.app'
+      const read = vi.fn().mockReturnValueOnce([helper]).mockReturnValue([])
+      const settling = extras.waitForNoLaunchServicesLeftovers(
+        ['/tmp/smoke/'],
+        {
+          timeoutMs: 500,
+          read,
+        },
+      )
+      await vi.advanceTimersByTimeAsync(500)
+      expect(await settling).toEqual([])
+      expect(read.mock.calls.length).toBeGreaterThan(1)
+
+      const persistent = extras.waitForNoLaunchServicesLeftovers(
+        ['/tmp/smoke/'],
+        {
+          timeoutMs: 500,
+          read: () => [helper],
+        },
+      )
+      await vi.advanceTimersByTimeAsync(500)
+      expect(await persistent).toEqual([helper])
+      await expect(
+        extras.waitForNoLaunchServicesLeftovers(['/tmp/smoke/'], {
+          read: () => {
+            throw new Error('lsregister failed')
+          },
+        }),
+      ).rejects.toThrow('lsregister failed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('finds the helper copies a smoke run left registered', () => {
     const dump = [
       'path:                       /private/var/folders/t/emperor-packaged-smoke-1/state/native-helpers/abc/Emperor Computer Helper.app (0xdbac)',

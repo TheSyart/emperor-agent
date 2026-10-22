@@ -10,46 +10,6 @@ func describe(_ font: CTFont) -> [String: Any] {
     ]
 }
 
-final class FontMatchState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var finished = false
-    private var failed = false
-    func complete(_ failure: Bool) { lock.lock(); failed = failed || failure; finished = true; lock.unlock() }
-    func status() -> (Bool, Bool) { lock.lock(); defer { lock.unlock() }; return (finished, failed) }
-}
-
-func ensureDocumentFonts() throws {
-    let state = FontMatchState()
-    let names = ["PingFangSC-Regular", "PingFangSC-Medium", "PingFangSC-Semibold"]
-    let descriptors = names.map { name in
-        CTFontDescriptorCreateWithAttributes([kCTFontNameAttribute: name, kCTFontDownloadableAttribute: true] as CFDictionary)
-    }
-    let mandatory = Set([kCTFontNameAttribute as String, kCTFontDownloadableAttribute as String]) as CFSet
-    let started = CTFontDescriptorMatchFontDescriptorsWithProgressHandler(descriptors as CFArray, mandatory) { phase, details in
-        if phase == .didFailWithError {
-            FileHandle.standardError.write(Data("font match failed: \(String(describing: details).prefix(1500))\n".utf8))
-            state.complete(true)
-        } else if phase == .didFinish { state.complete(false) }
-        return true
-    }
-    let deadline = Date().addingTimeInterval(180)
-    while started && !state.status().0 && Date() < deadline {
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-    }
-    guard started && state.status().0 && !state.status().1 else {
-        throw NSError(domain: "FontPreflight", code: 1, userInfo: [NSLocalizedDescriptionKey: "Apple document font match failed or timed out"])
-    }
-}
-
-
-if CommandLine.arguments.contains("--ensure-document-fonts") {
-    guard ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" else {
-        FileHandle.standardError.write(Data("Font preparation is restricted to the disposable CI runner.\n".utf8))
-        exit(64)
-    }
-    try ensureDocumentFonts()
-}
-
 let families = CTFontManagerCopyAvailableFontFamilyNames() as! [String]
 let text = "设置子智能体"
 var records: [[String: Any]] = []

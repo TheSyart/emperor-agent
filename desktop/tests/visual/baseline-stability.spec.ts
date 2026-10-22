@@ -122,4 +122,37 @@ test('an untagged test keeps the real clock', async ({ page }) => {
   const now = await page.evaluate(() => Date.now())
   expect(now).not.toBe(BASELINE_NOW)
   expect(Math.abs(now - Date.now())).toBeLessThan(60_000)
+  expect(
+    await page.evaluate(() => getComputedStyle(document.body).fontFamily),
+  ).not.toContain('Noto Sans SC Variable')
+  expect(
+    await page.evaluate(() => document.documentElement.dataset.baselineFonts),
+  ).toBeUndefined()
 })
+
+test(
+  'a baseline loads the pinned font for Chinese and Latin at every UI weight',
+  { tag: BASELINE_TAG },
+  async ({ page }) => {
+    await openRunningTurn(page)
+    await page.waitForFunction(
+      () => document.documentElement.dataset.baselineFonts === 'ready',
+    )
+    const result = await page.evaluate(async () => ({
+      family: getComputedStyle(document.body).fontFamily,
+      weights: await Promise.all(
+        [400, 500, 600].map(
+          async (weight) =>
+            (
+              await document.fonts.load(
+                `${weight} 14px "Noto Sans SC Variable"`,
+                'Emperor 子智能体',
+              )
+            ).length,
+        ),
+      ),
+    }))
+    expect(result.family).toContain('Noto Sans SC Variable')
+    expect(result.weights.every((count) => count > 0)).toBe(true)
+  },
+)

@@ -41,3 +41,6 @@
 
 # Written by Emperor 0.1.0-preview.4 itself (fixture.json, generate.ts); kept byte-for-byte.
 /packages/core/fixtures/emperor-home-0.1.0-preview.4/home/
+
+# Unmodified OFL font distribution pinned by provenance.json.
+/desktop/tests/visual/fonts/

@@ -26,10 +26,10 @@ const {
   UPGRADE_FIXTURE,
   checkCleanQuit,
   checkUpgradeReceipt,
-  launchServicesLeftovers,
   nmHostHandshake,
   prepareUpgradeHome,
   waitForNoLeftovers,
+  waitForNoLaunchServicesLeftovers,
 } = require('./packaged-smoke-extras.cjs')
 
 const desktopRoot = resolve(__dirname, '..')
@@ -153,7 +153,7 @@ async function main() {
   quit.upgrade = checkCleanQuit(upgradeStateRoot).quitLine
   await assertNothingLeftRunning()
   // SEC-04/REL-04: the helper copies this smoke launched left LaunchServices.
-  const registered = launchServicesLeftovers([
+  const registered = await waitForNoLaunchServicesLeftovers([
     `${tempRoot}/`,
     `${realpathSync(tempRoot)}/`,
   ])
