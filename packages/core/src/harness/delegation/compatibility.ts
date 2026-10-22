@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import codex01534 from './protocol/codex-0.153.4/digest.json'
+import codex01630 from './protocol/codex-0.163.0/digest.json'
 
 /**
  * Compatibility is a capability handshake (AGT-01), not an exact version
@@ -9,8 +10,9 @@ import codex01534 from './protocol/codex-0.153.4/digest.json'
  *   `claude auth login --console` (2.1.79), so at least 2.1.79; the SDK
  *   `init` message is checked again at run time.
  * - Codex: the installed CLI must share a major.minor with a protocol Emperor
- *   has verified. Within that minor, a digest of the CLI's generated JSON
- *   schema tells "verified" from "may be incompatible".
+ *   has verified (0.153 since AGT-01, 0.163 since AGT-13). Within that minor,
+ *   a digest of the CLI's generated JSON schema tells "verified" from "may be
+ *   incompatible".
  */
 
 /** The Agent SDK Emperor drives the installed claude with. */
@@ -103,9 +105,14 @@ function protocol(value: {
   }
 }
 
-/** One entry per `protocol/codex-<version>/digest.json`; register new ones here. */
+/**
+ * One entry per `protocol/codex-<version>/digest.json`, oldest first;
+ * register new ones here. 0.163 differs from 0.153 only by additions to what
+ * the adapter uses (AGT-13; docs/architecture/external-agent-delegation.md).
+ */
 export const KNOWN_CODEX_PROTOCOLS: readonly CodexProtocol[] = [
   protocol(codex01534),
+  protocol(codex01630),
 ]
 
 function canonicalJson(value: unknown): string {

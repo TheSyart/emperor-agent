@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "codexVersion": "0.163.0",
+  "generatedBy": "codex app-server generate-json-schema --out <dir>",
+  "algorithm": "sha256(\"emperor-codex-protocol/1\\n\" + per sorted file: path, newline, key-sorted JSON, newline)",
+  "files": [
+    "ClientRequest.json",
+    "CommandExecutionRequestApprovalResponse.json",
+    "FileChangeRequestApprovalResponse.json",
+    "PermissionsRequestApprovalResponse.json",
+    "ServerRequest.json",
+    "ToolRequestUserInputParams.json",
+    "ToolRequestUserInputResponse.json",
+    "v1/InitializeResponse.json",
+    "v2/AgentMessageDeltaNotification.json",
+    "v2/ModelListResponse.json",
+    "v2/ThreadReadParams.json",
+    "v2/ThreadResumeParams.json",
+    "v2/ThreadStartParams.json",
+    "v2/ThreadStartResponse.json",
+    "v2/ThreadTokenUsageUpdatedNotification.json",
+    "v2/TurnCompletedNotification.json",
+    "v2/TurnInterruptParams.json",
+    "v2/TurnStartParams.json",
+    "v2/TurnStartResponse.json",
+    "v2/TurnSteerParams.json",
+    "v2/TurnSteerResponse.json"
+  ],
+  "digests": [
+    "91673b5fa568de43c4708cf62b0adc2277559a2971332559c738b766e75dd9c9"
+  ]
+}
