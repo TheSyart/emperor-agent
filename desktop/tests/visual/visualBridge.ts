@@ -5319,9 +5319,21 @@ export async function installVisualCoreBridge(
             case 'bootstrap':
               return boot
             case 'commands.list':
-              return visualCommands
-            case 'commands.complete':
-              return []
+            case 'commands.complete': {
+              // Core's schema (FIX-14): a session id, or a draft id that
+              // may carry its draftSession; never an empty owner.
+              const input = (args[0] ?? {}) as {
+                sessionId?: string
+                draftSession?: unknown
+              }
+              const owner = String(input.sessionId ?? '').trim()
+              if (
+                !owner ||
+                (input.draftSession != null && !owner.startsWith('draft:'))
+              )
+                throw new Error(`Invalid arguments for ${operationKey}`)
+              return operationKey === 'commands.list' ? visualCommands : []
+            }
             case 'commands.invoke':
               return {
                 status: 'rejected',
