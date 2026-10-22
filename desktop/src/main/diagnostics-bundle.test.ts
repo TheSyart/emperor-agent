@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCoreHost } from './core-host'
+import { QUIET_TOOLCHAIN } from './test-fixtures/test-core'
 import {
   DiagnosticsBundles,
   sanitizeCoreDiagnostics,
@@ -212,6 +213,7 @@ describe('diagnostics bundle (REL-01)', () => {
         stateRootSource: 'explicit',
         emperorHomePrepared: false,
         initializeMcp: false,
+        environmentProbeRunner: QUIET_TOOLCHAIN,
         logDirectory: logDir,
       },
     })

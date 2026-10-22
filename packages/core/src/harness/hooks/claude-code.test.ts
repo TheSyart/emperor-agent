@@ -24,6 +24,10 @@ import { ClaudeCodeHooks, type ClaudeCodeHooksOptions } from './claude-code'
 import { defaultHookConfigPaths, parseClaudeCodeConfig } from './config'
 import { runHook } from './runner'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 type Hooks = Record<
   string,
   Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }>
@@ -516,7 +520,7 @@ describe.skipIf(process.platform === 'win32')(
         expect(agent.inbox.nextStep.map((m) => messageText(m))).toEqual([
           'session context',
         ])
-      })
+      }, LOADED)
       expect(payloads(dir)[0]).toMatchObject({
         hook_event_name: 'SessionStart',
         source: 'startup',
@@ -536,11 +540,11 @@ describe.skipIf(process.platform === 'win32')(
         expect(child.inbox.nextStep.map((m) => messageText(m))).toEqual([
           'child context',
         ])
-      })
+      }, LOADED)
       bridge.subagentStopped(child)
       await vi.waitFor(() => {
         expect(payloads(dir, 'sub.jsonl')).toHaveLength(2)
-      })
+      }, LOADED)
       expect(
         payloads(dir, 'sub.jsonl').map((p) => [
           p.hook_event_name,

@@ -14,7 +14,7 @@ import { SandboxPolicyService } from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
 import { installSubagents } from '../subagent/tools'
 import { createTestHarness, replyChunks, type TestHarness } from '../testing'
-import { WorkflowEngine } from './engine'
+import { WorkflowEngine, type WorkflowEngineConfig } from './engine'
 import { createSpawnChildProvider } from './provider'
 import { WorkflowRunFold, WorkflowRunRegistry } from './records'
 import { installWorkflow, RALPH_SCRIPT } from './tools'
@@ -28,7 +28,7 @@ interface Stack {
   engine: WorkflowEngine
 }
 
-function setup(): Stack {
+function setup(config: WorkflowEngineConfig = {}): Stack {
   const h = createTestHarness()
   const agents = new Map<string, Agent>()
   const manager = new SubagentManager({
@@ -57,7 +57,7 @@ function setup(): Stack {
   installSubagents(manager, h.tools, h.prompt)
   const engine = new WorkflowEngine(
     [createSpawnChildProvider({ manager, llm: h.llm })],
-    { maxConcurrentAgents: 4, disposeGraceMs: 500 },
+    { maxConcurrentAgents: 4, disposeGraceMs: 500, ...config },
   )
   const runs = new WorkflowRunRegistry()
   installWorkflow(h.tools, h.prompt, { engine, runs })
@@ -339,7 +339,9 @@ describe('workflow tool over the real in-process stack', () => {
   })
 
   it('cancels the run and its children when the parent turn is cancelled', async () => {
-    const stack = setup()
+    // A cooperative cancel, not the forced one: the run gets the product's
+    // grace, so a slow script process cannot turn it into a termination.
+    const stack = setup({ disposeGraceMs: 5_000 })
     const { h, root } = stack
     let childStarted = false
     for (let index = 0; index < 5; index++)
@@ -374,6 +376,8 @@ describe('workflow tool over the real in-process stack', () => {
       if (Date.now() - start > 5000) throw new Error('child never started')
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
+    // The child is at the model; the script process may not have published
+    // it yet. Either way the record lists it (FIX-17).
     root.cancel({ kind: 'user' })
     await settle(stack, () =>
       root.session.events.some(
@@ -382,7 +386,16 @@ describe('workflow tool over the real in-process stack', () => {
     )
     const [record] = WorkflowRunFold.fold(root.session.events)
     expect(record?.status).toBe('cancelled')
+    expect(record?.agents).toHaveLength(1)
     expect(record?.agents[0]?.outcome).toBe('cancelled')
+    const settled = root.session.events.find(
+      (event): event is SessionEvent<'subagent/settled'> =>
+        event.type === 'subagent/settled',
+    )
+    expect(settled?.data).toMatchObject({
+      subagentId: record?.agents[0]?.childId,
+      stopReason: 'aborted',
+    })
   })
 })
 

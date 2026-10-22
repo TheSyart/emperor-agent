@@ -5,6 +5,10 @@ import { fixture, spec } from './service-test-fixture'
 import { DelegationService } from './service'
 import { defaultExecutorConfig } from './config'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 /** Upper bound on tokens: ASCII at 4 chars per token, anything else 1.5 per char. */
 function tokenCeiling(text: string): number {
   let ascii = 0,
@@ -99,7 +103,7 @@ it('follow-up messages reach the executor as written, without a Task: header', a
     text: 'also check the tests',
     delivery: 'queue',
   })
-  await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(2))
+  await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(2), LOADED)
   expect(f.adapter.submitted[1]!.text).toBe('also check the tests')
   await f.service.shutdown()
   f.cleanup()

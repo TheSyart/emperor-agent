@@ -20,6 +20,11 @@ import type {
   ExecutorTurnInput,
   NormalizedExecutorEvent,
 } from './types'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 const spec: DelegationStart = {
   backend: 'codex',
   description: 'fixture task',
@@ -161,7 +166,7 @@ it('root stop cancels active and queued descendant work without closing an idle 
   })
   const f = fixture(undefined, gate),
     record = await f.service.start(f.owner, spec)
-  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled(), LOADED)
   await f.service.send(record.id, {
     messageId: 'dgm-after',
     text: 'after',
@@ -188,12 +193,14 @@ it('a queued send cannot reopen a conversation while its current run is cancelli
   })
   const f = fixture(undefined, gate),
     record = await f.service.start(f.owner, spec)
-  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled(), LOADED)
   const stopping = f.service.interrupt(record.id, record.currentRunId!)
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
-      'cancelling',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      ).toBe('cancelling'),
+    LOADED,
   )
   await expect(
     f.service.send(record.id, {
@@ -250,10 +257,12 @@ it('queued followup creates a new run and resumes the same provider session; dup
     text: 'continue',
     delivery: 'queue',
   })
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).record!.currentRunId).not.toBe(
-      record.currentRunId,
-    ),
+  await vi.waitFor(
+    () =>
+      expect(f.service.inspect(record.id).record!.currentRunId).not.toBe(
+        record.currentRunId,
+      ),
+    LOADED,
   )
   const next = f.service.inspect(record.id).record!.currentRunId!
   await f.service.wait(record.id, next)
@@ -282,7 +291,7 @@ it('cancel during preparation cannot submit or dispatch followup', async () => {
   })
   const f = fixture(undefined, gate)
   const record = await f.service.start(f.owner, spec)
-  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled(), LOADED)
   const stop = f.service.interrupt(record.id, record.currentRunId!)
   prepared()
   await stop
@@ -383,7 +392,7 @@ it('unknown process termination never becomes cancelled and retains the writer d
     ...spec,
     workspace: 'shared-exclusive',
   })
-  await vi.waitFor(() => expect(f.adapter.submitted.length).toBe(1))
+  await vi.waitFor(() => expect(f.adapter.submitted.length).toBe(1), LOADED)
   const stop = f.service.interrupt(record.id, record.currentRunId!)
   finish()
   await stop
@@ -446,7 +455,7 @@ it('finishes durable receipt collection before submitting a queued followup', as
   const f = fixture(undefined, undefined, { onSettled: collected })
   try {
     const record = await f.service.start(f.owner, spec)
-    await vi.waitFor(() => expect(collected).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(collected).toHaveBeenCalledOnce(), LOADED)
     await f.service.send(record.id, {
       messageId: 'dgm-followup',
       text: 'next',
@@ -455,7 +464,7 @@ it('finishes durable receipt collection before submitting a queued followup', as
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(f.adapter.submitted).toHaveLength(1)
     release()
-    await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(2))
+    await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(2), LOADED)
     expect(f.service.inspect(record.id).runs[record.currentRunId!]?.phase).toBe(
       'completed',
     )
@@ -480,7 +489,7 @@ it('awaits the same shutdown barrier for concurrent and repeated close requests'
     await f.service.wait(record.id, record.currentRunId!)
     const first = f.service.shutdown(),
       second = f.service.shutdown()
-    await vi.waitFor(() => expect(stop).toHaveBeenCalled())
+    await vi.waitFor(() => expect(stop).toHaveBeenCalled(), LOADED)
     expect(stop).toHaveBeenCalledTimes(1)
     let settled = false
     void second.then(() => {

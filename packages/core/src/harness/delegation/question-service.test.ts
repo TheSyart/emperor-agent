@@ -13,6 +13,11 @@ import type {
   ExecutorInteractionAnswer,
   ExecutorEventPayload,
 } from './types'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 function fixture(
   onQuestion?: ConstructorParameters<typeof DelegationService>[0]['onQuestion'],
 ) {
@@ -135,10 +140,12 @@ function fixture(
 it('persists question ownership before publishing, fences generations and answers exactly once', async () => {
   const f = fixture(() => new Promise(() => {})),
     record = await f.service.start(f.owner, f.spec)
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
-      'running',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      ).toBe('running'),
+    LOADED,
   )
   f.emit(
     {
@@ -148,10 +155,12 @@ it('persists question ownership before publishing, fences generations and answer
     },
     record.id,
   )
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
-      'waiting_input',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      ).toBe('waiting_input'),
+    LOADED,
   )
   expect(f.persisted).toEqual(['pending'])
   const input = {
@@ -194,10 +203,12 @@ it('persists question ownership before publishing, fences generations and answer
 it('unavailable answers deny the request and interrupt with needs_user rather than hang', async () => {
   const f = fixture(),
     record = await f.service.start(f.owner, f.spec)
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
-      'running',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      ).toBe('running'),
+    LOADED,
   )
   f.emit(
     {
@@ -222,10 +233,12 @@ it('permission denials never become business questions or widen parent policy', 
   const ask = vi.fn(),
     f = fixture(ask),
     record = await f.service.start(f.owner, f.spec)
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
-      'running',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      ).toBe('running'),
+    LOADED,
   )
   f.emit(
     {

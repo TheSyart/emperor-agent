@@ -17,6 +17,10 @@ import type { DelegationState } from '../../harness/delegation/fold'
 import type { DelegationRunRecord } from '../../harness/delegation/types'
 import { SessionProjector } from '../../harness/projection/projector'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 /** The renderer shows no session (KRN-01 view scope). */
 const VIEW = { sessionId: null }
 async function fixture(
@@ -435,25 +439,27 @@ it('collects real artifacts through Core composition and requires independent cr
         ],
       },
     })
-    await vi.waitFor(() =>
-      expect(
-        readdirSync(join(api.paths.delegationsRoot, 'processes')).some(
-          (name) => {
-            const ownership = JSON.parse(
-              readFileSync(
-                join(api.paths.delegationsRoot, 'processes', name),
-                'utf8',
-              ),
-            )
-            return (
-              ownership.purpose === 'verification' &&
-              ownership.parentRunId === run.id &&
-              ownership.pid &&
-              !ownership.exit
-            )
-          },
-        ),
-      ).toBe(true),
+    await vi.waitFor(
+      () =>
+        expect(
+          readdirSync(join(api.paths.delegationsRoot, 'processes')).some(
+            (name) => {
+              const ownership = JSON.parse(
+                readFileSync(
+                  join(api.paths.delegationsRoot, 'processes', name),
+                  'utf8',
+                ),
+              )
+              return (
+                ownership.purpose === 'verification' &&
+                ownership.parentRunId === run.id &&
+                ownership.pid &&
+                !ownership.exit
+              )
+            },
+          ),
+        ).toBe(true),
+      LOADED,
     )
     api.control.setPermissionMode('read-only', root)
     expect((await cancelled).state).not.toBe('passed')

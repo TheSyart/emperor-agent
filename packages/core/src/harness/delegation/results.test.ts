@@ -136,9 +136,8 @@ it('8 · a write task in a folder outside Git runs in a copy, never blocks the m
   })
   const f = fixture({ kind: 'folder', script: writes(CHILD_EDIT, gate) })
   const record = await f.start()
-  await expect
-    .poll(() => f.service.inspect(record.id).record!.workspaceLeaseId)
-    .not.toBe('')
+  await f.reachesExecutor(record.id)
+  expect(f.service.inspect(record.id).record!.workspaceLeaseId).not.toBe('')
   const cwd = f.service.inspect(record.id).record!.cwd
   expect(cwd).not.toBe(f.repo)
   // While the child works, a main-session write in the folder goes ahead.
@@ -167,19 +166,26 @@ it('8 · a write task in a folder outside Git runs in a copy, never blocks the m
 it('9 · a main-session write waiting on an exclusive child is told who holds the workspace after the notice delay, and stopping the child lets it go on', async () => {
   const f = fixture({ script: waitsForStop })
   const record = await f.start({ workspace: 'shared-exclusive' })
-  await expect.poll(() => f.mutations.hasActiveWriter(f.repo)).toBe(true)
+  await f.reachesExecutor(record.id)
+  expect(f.mutations.hasActiveWriter(f.repo)).toBe(true)
   const notices: string[][] = []
   let ended = 0
+  let noticed!: () => void
+  const notice = new Promise<void>((resolve) => {
+    noticed = resolve
+  })
   const waiting = f.mutations.acquireWriterWithNotice(f.repo, 'call-write', {
     noticeMs: 50,
     onWait: (blockers) => {
       notices.push(blockers)
+      noticed()
       return () => {
         ended++
       }
     },
   })
-  await expect.poll(() => notices.length).toBe(1)
+  await notice
+  expect(notices).toHaveLength(1)
   expect(notices[0]).toContain(record.id)
   // 「停止它」
   await f.service.interrupt(record.id, record.currentRunId!)
@@ -191,7 +197,8 @@ it('9 · a main-session write waiting on an exclusive child is told who holds th
 it('9 · the main session can stop waiting for the workspace', async () => {
   const f = fixture({ script: waitsForStop })
   const record = await f.start({ workspace: 'shared-exclusive' })
-  await expect.poll(() => f.mutations.hasActiveWriter(f.repo)).toBe(true)
+  await f.reachesExecutor(record.id)
+  expect(f.mutations.hasActiveWriter(f.repo)).toBe(true)
   const stop = new AbortController()
   const waiting = f.mutations.acquireWriterWithNotice(f.repo, 'call-write', {
     signal: stop.signal,
@@ -250,8 +257,12 @@ it('11 · stopping never hangs on a run that waits for the workspace', async () 
   // A main-session write holds the project while the child prepares.
   const held = await f.mutations.acquireWriter(f.repo, 'call-long-bash')
   const record = await f.start()
+  // No event marks the wait; poll the phase with room for a loaded machine.
   await expect
-    .poll(() => f.service.inspect(record.id).runs[record.currentRunId!]!.phase)
+    .poll(
+      () => f.service.inspect(record.id).runs[record.currentRunId!]!.phase,
+      { timeout: 10_000 },
+    )
     .toBe('preparing')
   const stopped = await Promise.race([
     f.service.shutdown().then(() => 'stopped'),

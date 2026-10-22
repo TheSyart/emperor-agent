@@ -6,7 +6,7 @@ import { MessageChannel, type MessagePort } from 'node:worker_threads'
 import { describe, expect, it, vi } from 'vitest'
 import { createJsonSchemaKit } from '../tools/json-schema'
 import { createRealmKit } from './realm'
-import { createExecutionKit } from './runtime'
+import { createExecutionKit, type WorkflowExecutionLike } from './runtime'
 import { createSessionKit } from './session'
 import type {
   ChildResult,
@@ -14,6 +14,8 @@ import type {
   HostToWorkerMessage,
   WorkerInit,
   WorkerToHostMessage,
+  WorkflowAgentEndInfo,
+  WorkflowAgentInfo,
   WorkflowResult,
 } from './types'
 
@@ -370,5 +372,52 @@ describe('runWorkerSession over an in-process MessageChannel', () => {
       init(`return await agent('x')`),
     )
     expect(result.value).toBe('ab')
+  })
+})
+
+describe('a cancel that lands while a child starts (FIX-17)', () => {
+  it('still lists the child the host started, paired as cancelled, and disposes it', async () => {
+    const starts: WorkflowAgentInfo[] = []
+    const ends: WorkflowAgentEndInfo[] = []
+    let disposed = 0
+    const workerInit = init(`return await agent('x')`)
+    const run: WorkflowExecutionLike = execution.createExecution(
+      workerInit.meta,
+      workerInit.body,
+      undefined,
+      workerInit.limits,
+      {
+        phase: () => {},
+        log: () => {},
+        agentStart: (info) => starts.push(info),
+        agentEnd: (info) => ends.push(info),
+      },
+      {
+        // The host has started the child; the parent's stop reaches the
+        // script before the child-started reply does.
+        startAgent: async () => {
+          run.cancel('the parent turn was stopped')
+          return {
+            id: 'child-0',
+            result: new Promise<ChildResult>(() => {}),
+            dispose: async () => {
+              disposed += 1
+            },
+          }
+        },
+      },
+    )
+    const result = await run.drive()
+    expect(result).toMatchObject({
+      stopReason: 'cancelled',
+      error: 'workflow run cancelled: the parent turn was stopped',
+    })
+    expect(starts).toEqual([
+      expect.objectContaining({ seq: 1, childId: 'child-0' }),
+    ])
+    expect(ends).toEqual([
+      expect.objectContaining({ seq: 1, outcome: 'cancelled' }),
+    ])
+    expect(disposed).toBe(1)
   })
 })
