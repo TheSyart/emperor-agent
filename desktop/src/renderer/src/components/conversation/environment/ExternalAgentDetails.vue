@@ -312,7 +312,32 @@ const FAILURE: Record<string, [reason: string, next: string]> = {
     '子智能体这一轮执行失败。',
     '查看下面的子智能体报告和输出，修正后让主会话重试。',
   ],
+  // FIX-15: failures outside the subagent's own report; the run's summary
+  // carries Core's reason.
+  WORKSPACE_GIT_UNAVAILABLE: [
+    '准备工作区时没有可用的 Git。',
+    '在「设置 › 高级 › 诊断」的环境工具里查看 Git，装好或修好后让主会话重试。',
+  ],
+  WORKSPACE_GIT_FAILED: [
+    '准备工作区时 Git 命令失败。',
+    '按下面的原因处理后让主会话重试。',
+  ],
+  WORKSPACE_PREPARE_FAILED: [
+    '准备工作区失败。',
+    '按下面的原因处理后让主会话重试；仍然失败时，在「设置 › 高级 › 诊断」导出诊断包反馈。',
+  ],
+  EXECUTOR_ERROR: [
+    '子智能体意外出错。',
+    '按下面的原因处理后让主会话重试；仍然失败时，在「设置 › 高级 › 诊断」导出诊断包反馈。',
+  ],
 }
+/** Failures Core explains (FIX-15): their summary is its reason, not a report. */
+const CORE_REASON = new Set([
+  'WORKSPACE_GIT_UNAVAILABLE',
+  'WORKSPACE_GIT_FAILED',
+  'WORKSPACE_PREPARE_FAILED',
+  'EXECUTOR_ERROR',
+])
 function failureLabel(code: string): string {
   return LIMIT_LABEL[code] ?? FAILURE[code]?.[0] ?? code
 }
@@ -395,7 +420,14 @@ function costText(usage: {
           >打开子智能体设置</Button
         >
       </p>
-      <p v-if="run?.summary" class="external-note">
+      <p
+        v-if="run?.summary && CORE_REASON.has(run.failureCode ?? '')"
+        class="external-note"
+        data-run-reason
+      >
+        原因：{{ run.summary }}
+      </p>
+      <p v-else-if="run?.summary" class="external-note">
         子智能体报告：{{ run.summary }}
       </p>
       <p class="external-path">成果目录 · {{ record?.cwd }}</p>

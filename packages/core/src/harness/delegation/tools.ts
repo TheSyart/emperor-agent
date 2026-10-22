@@ -176,6 +176,9 @@ function closingText(
       backend: record.backend,
       cwd: record.cwd,
       phase: run.phase,
+      ...(run.failureCode && run.phase !== 'completed'
+        ? { failureCode: run.failureCode }
+        : {}),
       acceptance: run.acceptance,
       receiptId: run.receiptId,
       providerSessionId: record.providerSessionId,
@@ -183,7 +186,7 @@ function closingText(
     }) +
     resultLine(run) +
     '\n' +
-    (run.summary ?? '(executor returned no closing text)')
+    (run.summary || '(executor returned no closing text)')
   )
 }
 const executorName = (backend: string) =>
@@ -370,7 +373,8 @@ export function createDelegationTools(
               'external run ' +
                 run.phase +
                 ': ' +
-                (run.failureCode ?? run.summary ?? ''),
+                // The code, then why (FIX-15).
+                [run.failureCode, run.summary].filter(Boolean).join(' — '),
               'DELEGATION_FAILED',
             )
           return {

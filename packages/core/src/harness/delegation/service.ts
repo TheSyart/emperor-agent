@@ -65,6 +65,14 @@ import { delegationNeedsExit } from '../../runtime/agent-view'
 import { durableReplaceSync } from '../../store/persistence'
 import type { CodexAuthLink } from './codex-auth'
 import { executorGrants } from './environment'
+import {
+  describeRunFailure,
+  sanitizeFailureMessage,
+  type RunStage,
+} from './failure'
+import { logger } from '../../util/log'
+
+const log = logger.child({ component: 'executors' })
 export interface DelegationServiceOptions {
   facts?: ExecutorFactsStore
   root: string
@@ -1514,7 +1522,10 @@ export class DelegationService {
       failureCode: string | undefined,
       usage: DelegationRunRecord['usage'],
       /** Set when the CLI's protocol only matched by minor (AGT-01). */
-      protocolNote: string | undefined
+      protocolNote: string | undefined,
+      /** How far the run got: a failure says where (FIX-15). */
+      stage: RunStage = 'budget',
+      secrets: readonly string[] = []
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1553,6 +1564,7 @@ export class DelegationService {
           'PERMISSION_REVOKED',
           'parent permissions narrowed',
         )
+      stage = 'workspace'
       if (!record.workspaceLeaseId) {
         const lease = await this.options.workspaces.prepare(record.owner, {
           cwd: record.cwd,
@@ -1573,6 +1585,7 @@ export class DelegationService {
       }
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled during prepare')
+      stage = 'lock'
       if (spec.workspace === 'shared-exclusive')
         workspace = await this.options.mutations.resources.acquire(
           {
@@ -1588,7 +1601,9 @@ export class DelegationService {
           id,
           controller.signal,
         )
+      stage = 'runtime'
       const runtime = await this.options.runtime(profile, id)
+      secrets = runtime.secretValues ?? []
       const effectiveProfile = {
         ...profile,
         defaultModel: spec.model ?? profile.defaultModel,
@@ -1599,6 +1614,7 @@ export class DelegationService {
       this.facts.bind(effectiveProfile, runtime.environment, activeRunId)
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before process open')
+      stage = 'preflight'
       const preflight = await this.options.registry.requireAvailable(
         profile,
         controller.signal,
@@ -1657,6 +1673,7 @@ export class DelegationService {
           )
           .digest('hex')
       let ownership: ProcessOwnership | undefined
+      stage = 'open'
       session = await this.options.adapters.get(record.backend)!.open({
         onProcessStarted: async (identity) => {
           ownership = {
@@ -1729,6 +1746,7 @@ export class DelegationService {
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before submit')
       sent = true
+      stage = 'submit'
       const provider = await session.submit({
         runId: activeRunId,
         messageId,
@@ -1764,6 +1782,7 @@ export class DelegationService {
         void this.interrupt(id, activeRunId).catch(() => undefined)
       }, config.limits.runTimeoutMs)
       timer.unref()
+      stage = 'events'
       let bytes = 0
       for await (const raw of session.events) {
         if (
@@ -1907,12 +1926,51 @@ export class DelegationService {
       }
       if (!status && !e.stop) failureCode = 'OUTCOME_UNKNOWN'
     } catch (error) {
-      failureCode =
-        error instanceof DelegationError
-          ? error.code
-          : controller.signal.aborted
-            ? 'ABORTED'
-            : 'EXECUTOR_ERROR'
+      const where = {
+        backend: record.backend,
+        profileId: record.profileId,
+        delegationId: id,
+        runId: activeRunId,
+        phase: ((): RunPhase | undefined => {
+          try {
+            return e.journal.load().runs[activeRunId]?.phase
+          } catch {
+            return undefined
+          }
+        })(),
+        stage,
+      }
+      if (error instanceof DelegationError) {
+        failureCode = error.code
+        if (error.code !== 'ABORTED')
+          log.info('external run stopped', {
+            ...where,
+            code: error.code,
+            message: sanitizeFailureMessage(error.message, secrets),
+          })
+      } else if (controller.signal.aborted) failureCode = 'ABORTED'
+      else {
+        // Not a failure the executor reported: say what failed and why, in
+        // the run (its row, 任务详情, the parent's notice) and in core.log.
+        const failure = describeRunFailure(
+          error,
+          stage,
+          record.backend,
+          secrets,
+        )
+        failureCode = failure.failureCode
+        summary = boundText(
+          summary ? failure.reason + '\n\n' + summary : failure.reason,
+          8192,
+        )
+        log.warn('external run failed', {
+          ...where,
+          ...(failure.code ? { code: failure.code } : {}),
+          failureCode: failure.failureCode,
+          error: error instanceof Error ? error.name : typeof error,
+          message: failure.message,
+        })
+      }
       if (failureCode === 'OUTCOME_UNKNOWN') quiescent = false
     } finally {
       if (timer) clearTimeout(timer)

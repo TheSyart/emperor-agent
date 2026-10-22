@@ -19,7 +19,10 @@ export function settlementNotice(
       ? ' (marked as ended by the user)'
       : " (marked as ended with the user's approval)"
     : ''
-  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}\n${run.summary ?? 'No closing summary.'}`
+  // A failure names its code; the summary says why (FIX-15).
+  const failure =
+    run.failureCode && run.phase !== 'completed' ? ` (${run.failureCode})` : ''
+  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${failure}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}\n${run.summary || 'No closing summary.'}`
   const bytes = Buffer.from(text),
     bounded =
       bytes.length <= 8192

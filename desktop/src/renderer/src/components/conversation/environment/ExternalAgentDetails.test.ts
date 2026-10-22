@@ -395,3 +395,35 @@ it.each([
   expect(note.textContent).toContain(text)
   expect(note.querySelector('[data-failure-next]')!.textContent).not.toBe('')
 })
+
+// FIX-15: a run that failed outside its executor's report names what failed
+// in Chinese, what to do next, and shows Core's reason as 原因, not as the
+// subagent's report.
+it.each([
+  ['WORKSPACE_GIT_UNAVAILABLE', '没有可用的 Git'],
+  ['WORKSPACE_GIT_FAILED', 'Git 命令失败'],
+  ['WORKSPACE_PREPARE_FAILED', '准备工作区失败'],
+  ['EXECUTOR_ERROR', '意外出错'],
+])(
+  '4 · %s reads in Chinese with a next step and the reason',
+  async (code, text) => {
+    app?.unmount()
+    root?.remove()
+    withRun({
+      phase: 'failed',
+      failureCode: code,
+      summary: '准备工作区失败：当前签名执行环境中没有可用 Git。',
+    })
+    const body = await mount()
+    const note = body.querySelector<HTMLElement>('[data-failure-code]')!
+    expect(note.dataset.failureCode).toBe(code)
+    expect(note.textContent).toContain(text)
+    expect(note.textContent).not.toContain(code)
+    expect(note.querySelector('[data-failure-next]')!.textContent).not.toBe('')
+    const reason = body.querySelector<HTMLElement>('[data-run-reason]')!
+    expect(reason.textContent?.trim()).toBe(
+      '原因：准备工作区失败：当前签名执行环境中没有可用 Git。',
+    )
+    expect(body.textContent).not.toContain('子智能体报告：准备工作区失败')
+  },
+)

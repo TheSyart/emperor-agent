@@ -83,6 +83,19 @@ const REQUIREMENT_ALIASES: Record<string, EnvironmentToolId> = {
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 /** Distinct probe answers kept (projects × PATHs × Skill sets). */
 const PROBE_CACHE_LIMIT = 16
+/**
+ * How long an answer is kept when one of its checks did not finish (timed
+ * out, could not start, was stopped) — FIX-15. Such a check says nothing
+ * about the machine: macOS holds a new build's first processes in a
+ * Desktop or Documents project until the user answers the folder prompt,
+ * and the check's limit is 5 s. Kept for the session, Git read as failed
+ * until Emperor restarted. Briefly kept, the next question after this asks
+ * again; an answer whose checks all finished is kept as before. A check
+ * that keeps not finishing (a tool that hangs) is asked again less and
+ * less often, up to UNFINISHED_PROBE_MAX_TTL_MS.
+ */
+export const UNFINISHED_PROBE_TTL_MS = 30_000
+export const UNFINISHED_PROBE_MAX_TTL_MS = 5 * 60_000
 const PROBE_ENV_KEYS = [
   'LANG',
   'LC_ALL',
@@ -196,6 +209,8 @@ export interface EnvironmentProbeOptions {
   runner?: EnvironmentProcessRunner
   resolveExecutable?: EnvironmentExecutableResolver
   windowsPathProvider?: () => Promise<WindowsRegistryPaths>
+  /** The clock unfinished answers expire by (tests). */
+  now?: () => number
 }
 
 export class EnvironmentProbe {
@@ -214,7 +229,13 @@ export class EnvironmentProbe {
    * different questions for every Git command; one shared slot made each
    * evict the other and probe the whole catalog again (FIX-08).
    */
-  private readonly cache = new Map<string, EnvironmentProbeStatus>()
+  private readonly cache = new Map<
+    string,
+    { status: EnvironmentProbeStatus; expiresAt: number; ttl?: number }
+  >()
+  /** Answers with a check that did not finish (FIX-15). */
+  private readonly unfinished = new WeakSet<EnvironmentProbeStatus>()
+  private readonly now: () => number
   /** Probes in flight per question, shared by callers without a signal. */
   private readonly pending = new Map<string, Promise<EnvironmentProbeStatus>>()
   /** Bumped by invalidate(): a probe started before must not be cached. */
@@ -235,6 +256,7 @@ export class EnvironmentProbe {
     this.runner = opts.runner ?? new NodeEnvironmentProcessRunner()
     this.resolveExecutable = opts.resolveExecutable ?? resolveCatalogExecutable
     this.windowsPathProvider = opts.windowsPathProvider
+    this.now = opts.now ?? Date.now
   }
 
   invalidate(): void {
@@ -305,11 +327,13 @@ export class EnvironmentProbe {
     })
     if (!request.forceRefresh) {
       const cached = this.cache.get(cacheKey)
-      if (cached) {
+      // An expired unfinished answer stays until the new one replaces it:
+      // its time to live doubles while the check keeps not finishing.
+      if (cached && cached.expiresAt > this.now()) {
         // Most recently used last.
         this.cache.delete(cacheKey)
         this.cache.set(cacheKey, cached)
-        return structuredClone(cached)
+        return structuredClone(cached.status)
       }
     }
     // Callers asking the same question at once share one probe; a caller
@@ -351,8 +375,23 @@ export class EnvironmentProbe {
   }
 
   private remember(key: string, value: EnvironmentProbeStatus): void {
+    const previous = this.cache.get(key)?.ttl
     this.cache.delete(key)
-    this.cache.set(key, structuredClone(value))
+    if (this.unfinished.has(value)) {
+      const ttl =
+        previous === undefined
+          ? UNFINISHED_PROBE_TTL_MS
+          : Math.min(previous * 2, UNFINISHED_PROBE_MAX_TTL_MS)
+      this.cache.set(key, {
+        status: structuredClone(value),
+        expiresAt: this.now() + ttl,
+        ttl,
+      })
+    } else
+      this.cache.set(key, {
+        status: structuredClone(value),
+        expiresAt: Number.POSITIVE_INFINITY,
+      })
     while (this.cache.size > PROBE_CACHE_LIMIT) {
       const oldest = this.cache.keys().next().value
       if (oldest === undefined) break
@@ -390,6 +429,7 @@ export class EnvironmentProbe {
       this.platform,
     )
     const diagnostics = [...project.diagnostics, ...windowsPaths.diagnostics]
+    const unfinished: string[] = []
     const tools = await mapWithConcurrency(
       loaded.catalog.tools,
       4,
@@ -402,6 +442,7 @@ export class EnvironmentProbe {
           pathEntries: effectivePath.entries,
           processEnv,
           signal: request.signal,
+          unfinished: () => unfinished.push(tool.id),
         })
       },
     )
@@ -429,6 +470,7 @@ export class EnvironmentProbe {
       skills: skillStates,
       diagnostics: [...new Set(diagnostics)],
     })
+    if (unfinished.length) this.unfinished.add(value)
     return value
   }
 
@@ -439,6 +481,8 @@ export class EnvironmentProbe {
     pathEntries: string[]
     processEnv: Record<string, string>
     signal?: AbortSignal
+    /** The check did not finish: its answer says nothing (FIX-15). */
+    unfinished?: () => void
   }): Promise<EnvironmentToolState> {
     const { tool, context } = opts
     const targetStrategies = tool.strategies.filter((strategy) =>
@@ -538,6 +582,7 @@ export class EnvironmentProbe {
         signal: opts.signal,
       })
     } catch {
+      opts.unfinished?.()
       return parseToolState({
         ...base,
         status: 'failed',
@@ -547,6 +592,7 @@ export class EnvironmentProbe {
         reason: '探测进程启动失败',
       })
     }
+    if (result.status !== 'completed') opts.unfinished?.()
     if (result.status !== 'completed' || result.exitCode !== 0)
       return parseToolState({
         ...base,

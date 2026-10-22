@@ -218,6 +218,7 @@ import { agentTitle } from '../runtime/agent-view'
 
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
+import { sanitizeFailureMessage } from '../harness/delegation/failure'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
 import { ExecutorConsentStore } from '../harness/delegation/consent'
 import {
@@ -751,11 +752,16 @@ export class CoreApi {
     const runGh = createGhCommandRunner(new NodeEnvironmentProcessRunner())
     const resolveGit = async (projectRoot: string) => {
       const runtime = await this.resolveGitRuntime(projectRoot)
-      if (!runtime)
+      if (!runtime) {
+        // Why, when the check said (FIX-15): 「（探测失败：timeout）」.
+        const why = this.gitUnavailable.get(projectRoot)?.reason
         throw new WorkspaceOperationError(
           'git_unavailable',
-          '当前签名执行环境中没有可用 Git。',
+          why
+            ? `当前签名执行环境中没有可用 Git（${why}）。`
+            : '当前签名执行环境中没有可用 Git。',
         )
+      }
       return runtime
     }
     const runGit = async (request: GitCommandRequest) => {
@@ -2649,6 +2655,11 @@ export class CoreApi {
    * `bootstrap`, never used to pick what runs where.
    */
   private focusedSessionId: string | null = null
+  /** Why Git is unavailable per project, last logged (FIX-15). */
+  private readonly gitUnavailable = new Map<
+    string,
+    { reason: string; signature: string }
+  >()
   private statusRead: Promise<ComputerUseStatusView> | null = null
 
   /** One Computer Use status read, shared by the driver checks of one refresh. */
@@ -4301,15 +4312,21 @@ export class CoreApi {
       projectRoot,
     })
     const executable = environment.toolPaths.git
-    if (!executable) return null
     const status = await kept.environmentProbe.getStatus({
       projectRoot,
       skillRequirements: collectSkillEnvironmentRequirements(kept.skillManager),
     })
-    const git = status.tools.find(
-      (tool) => tool.id === 'git' && tool.status === 'ready',
-    )
-    if (!git?.detectedVersion || git.executablePath !== executable) return null
+    const git = status.tools.find((tool) => tool.id === 'git')
+    if (
+      !executable ||
+      git?.status !== 'ready' ||
+      !git.detectedVersion ||
+      git.executablePath !== executable
+    ) {
+      this.noteGitUnavailable(projectRoot, executable ?? null, git)
+      return null
+    }
+    this.gitUnavailable.delete(projectRoot)
     return {
       executable,
       gitVersion: git.detectedVersion,
@@ -4327,6 +4344,49 @@ export class CoreApi {
         ]),
       },
     }
+  }
+
+  /**
+   * Why Git is unavailable for a project (FIX-15): the error says it, and
+   * core.log gets the check's own state once per change, never per call.
+   */
+  private noteGitUnavailable(
+    projectRoot: string,
+    executable: string | null,
+    git:
+      | {
+          status: string
+          executablePath: string | null
+          detectedVersion: string | null
+          requiredVersion?: string | null
+          reason: string
+        }
+      | undefined,
+  ): void {
+    const reason =
+      git === undefined || git.status === 'missing'
+        ? '没有找到 Git'
+        : git.status === 'version_mismatch'
+          ? `Git ${git.detectedVersion ?? ''} 不满足 ${git.requiredVersion ?? ''}`.trim()
+          : git.status !== 'ready'
+            ? git.reason
+            : '两次检查找到的 Git 不一致'
+    const signature = JSON.stringify([executable, git ?? null])
+    if (this.gitUnavailable.get(projectRoot)?.signature !== signature)
+      logger.warn('git runtime unavailable', {
+        component: 'workspace',
+        projectRoot: sanitizeFailureMessage(projectRoot),
+        reason,
+        executable: executable && sanitizeFailureMessage(executable),
+        git: git && {
+          status: git.status,
+          executablePath:
+            git.executablePath && sanitizeFailureMessage(git.executablePath),
+          detectedVersion: git.detectedVersion,
+          reason: git.reason,
+        },
+      })
+    this.gitUnavailable.set(projectRoot, { reason, signature })
   }
 
   /**

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-22（对照 `30b48900`）<br>
+> 最后核验：2026-10-22（对照 `4a7663b5`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -183,5 +183,5 @@ Claude Code 子任务里执行的命令（Bash）拿不到 Emperor 交给它的 
 - **每次运行最多轮数**：Claude Code 一次运行默认最多调用模型 200 轮，可在「设置 › 子智能体 › 高级 › 每次运行最多轮数」改为 50–1000。用完时这次运行结束，主会话可以发消息让它接着做。
 - **长时间等待**：Codex 子智能体向你提问后，过几分钟再回答也不会超时；长时间没有输出的命令（例如构建）也不会被中途停止。只有超过「设置 › 子智能体 › 高级 › 单次运行时长上限」（默认 30 分钟，可选 10、30、60、120 分钟）时才会停止，结果里写明原因是超时。多轮对话、输出很长的 Codex 子智能体也可以继续安排任务。
 - **开发环境**：子智能体在自己隔离的主目录里运行（Claude Code 用 Emperor 为它准备的专用目录），读不到你的 `~/.gitconfig`、SSH 密钥、nvm 等工具链和 gh 登录。「设置 › 子智能体 › 高级 › 开发环境」逐项决定带上哪些：「Git 身份」（提交时用你 git 配置里的姓名和邮箱）和「网络代理」默认打开；「SSH 代理」（经你的 SSH agent 访问远端仓库，不复制密钥）、「开发工具链」（nvm 的默认 node、volta、rustup / cargo、pyenv）和「允许子智能体使用 GitHub 登录」（把 `gh auth token` 的令牌交给子任务，并在它私有的 gh 配置里写一份，Claude Code 的 Bash 也能用 gh）默认关闭，按需打开。从程序坞启动 Emperor 时，这些变量从你的登录 shell 读取。仓库里的 `CLAUDE.md`、`AGENTS.md` 会作为说明交给 Claude Code，`AGENTS.md` 的摘要会附在 Codex 的任务简报里；仓库的 `.claude/settings.json` 不会被加载（其中的权限放行规则可能绕过 Emperor 的审批）。
-- **失败原因**：Claude Code 子任务失败时，任务详情写明原因和下一步：「Claude Code 的登录已失效或过期」（401，点「登录 Claude Code」重新登录，或换一个新的 API Key）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附子智能体报告。
+- **失败原因**：Claude Code 子任务失败时，任务详情写明原因和下一步：「Claude Code 的登录已失效或过期」（401，点「登录 Claude Code」重新登录，或换一个新的 API Key）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附子智能体报告。Codex 或 Claude Code 还没开始工作就失败时（准备工作区、准备运行环境、启动进程），子智能体那一行、任务详情（「原因：…」）和主会话的 Agent 收到的结果都写明哪一步、为什么，例如「准备工作区失败：当前签名执行环境中没有可用 Git（探测失败：timeout）。」；任务详情另给下一步，`~/Library/Logs/Emperor Agent/core.log` 里同时记一行 `external run failed`（不含密钥和你的任务内容）。
 - **版本**：Claude Code 使用你本机安装的 `claude`，需要 2.1.79 或更高（它支持 `claude auth status` 与 `claude auth login --console`）；用官方命令安装的 Claude Code 会自己在后台更新，Homebrew 安装的用 `brew upgrade claude-code` 升级。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。
