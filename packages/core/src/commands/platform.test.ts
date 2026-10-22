@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { CommandPlatform } from './platform'
+import { CommandPlatform, type CommandDraftSession } from './platform'
 import type { CommandInvocationResult } from './types'
 import type { SkillInfoPayload } from '../api/services/skill-service'
 
@@ -20,6 +20,7 @@ function setup(opts: { busy?: boolean } = {}) {
   const platform = new CommandPlatform({
     stateRoot,
     listSkills: () => [],
+    listDraftSkills: () => [],
     sessionContext: () => ({ exists: true }),
     isBusy: () => Boolean(opts.busy),
     executeBuiltin,
@@ -215,6 +216,7 @@ describe('CommandPlatform', () => {
     const platform = new CommandPlatform({
       stateRoot: mkdtempSync(join(tmpdir(), 'emperor-skill-commands-')),
       listSkills: () => [skill('code-audit')],
+      listDraftSkills: () => [],
       sessionContext: () => ({ exists: true }),
       isBusy: () => false,
       executeBuiltin: vi.fn(),
@@ -258,6 +260,7 @@ describe('CommandPlatform', () => {
     const platform = new CommandPlatform({
       stateRoot: mkdtempSync(join(tmpdir(), 'emperor-live-skill-commands-')),
       listSkills: () => skills,
+      listDraftSkills: () => [],
       sessionContext: () => ({ exists: true }),
       isBusy: () => false,
       executeBuiltin: vi.fn(),
@@ -304,5 +307,102 @@ describe('CommandPlatform aliases', () => {
         descriptor: expect.objectContaining({ id: 'builtin.permissions' }),
       }),
     ])
+  })
+})
+
+// FIX-14: the start page is a draft (`draft:<uuid>`) that Core has no session
+// for yet. Listing and completion use the draft's mode and project; running
+// a command still needs the session the desktop creates first.
+describe('CommandPlatform on a start-page draft (FIX-14)', () => {
+  function draftSetup() {
+    const listSkills = vi.fn((): SkillInfoPayload[] => [skill('elsewhere')])
+    const listDraftSkills = vi.fn((draft: CommandDraftSession) =>
+      draft.project?.project_path === '/work/app' ? [skill('deploy')] : [],
+    )
+    const completeDynamic = vi.fn(async () => [
+      { value: 'read-only', label: '只读', kind: 'permission_preset' },
+    ])
+    const platform = new CommandPlatform({
+      stateRoot: mkdtempSync(join(tmpdir(), 'emperor-draft-commands-')),
+      listSkills,
+      listDraftSkills,
+      // Core has no session for a draft id.
+      sessionContext: () => ({ exists: false }),
+      isBusy: () => false,
+      executeBuiltin: vi.fn(),
+      submitSkill: vi.fn(),
+      queueAfterTurn: vi.fn(async () => 'unused'),
+      completeDynamic,
+    })
+    return { platform, listSkills, listDraftSkills, completeDynamic }
+  }
+  const buildDraft = {
+    mode: 'build',
+    project: { project_path: '/work/app' },
+  } satisfies CommandDraftSession
+
+  it('lists every command of a new idle session, and the skills of the draft', async () => {
+    const { platform, listSkills, listDraftSkills } = draftSetup()
+    const listed = await platform.list({
+      sessionId: 'draft:1',
+      draftSession: buildDraft,
+      invocationSource: 'desktop',
+    })
+    expect(listed.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        'builtin.new',
+        'builtin.plan',
+        'builtin.stop',
+        'skill.project.deploy',
+      ]),
+    )
+    expect(listed.every((item) => item.available)).toBe(true)
+    expect(listDraftSkills).toHaveBeenCalledWith(buildDraft)
+    // Never the skills of some other session.
+    expect(listSkills).not.toHaveBeenCalled()
+    expect(listed.some((item) => item.name === 'elsewhere')).toBe(false)
+  })
+
+  it('treats a draft id without a context as a Chat draft', async () => {
+    const { platform, listDraftSkills } = draftSetup()
+    const listed = await platform.list({
+      sessionId: 'draft:2',
+      invocationSource: 'desktop',
+    })
+    expect(listed.some((item) => item.id === 'builtin.plan')).toBe(true)
+    expect(listDraftSkills).toHaveBeenCalledWith({})
+  })
+
+  it('completes arguments on a draft', async () => {
+    const { platform, completeDynamic } = draftSetup()
+    await expect(
+      platform.complete({
+        sessionId: 'draft:1',
+        draftSession: buildDraft,
+        commandId: 'builtin.permissions',
+        rawArgs: 're',
+        cursor: 2,
+        invocationSource: 'desktop',
+      }),
+    ).resolves.toEqual([
+      { value: 'read-only', label: '只读', kind: 'permission_preset' },
+    ])
+    expect(completeDynamic).toHaveBeenCalledOnce()
+  })
+
+  it('runs nothing on a draft id: the session comes first', async () => {
+    const { platform } = draftSetup()
+    await expect(
+      platform.invoke({
+        sessionId: 'draft:1',
+        commandId: 'builtin.plan',
+        rawInput: '/plan',
+        invocationId: 'draft-plan',
+        invocationSource: 'desktop',
+      }),
+    ).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'command_unavailable',
+    })
   })
 })

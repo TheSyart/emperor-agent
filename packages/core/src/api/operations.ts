@@ -13,6 +13,7 @@ import {
   referencesFit,
 } from '../harness/host/message-references'
 import { SKILL_NAME, SKILL_NAME_MAX_LENGTH } from '../skills/name'
+import { isDraftSessionId } from '../sessions/constants'
 import {
   environmentIdSchema,
   environmentToolIdSchema,
@@ -474,22 +475,6 @@ const manageQueuedPromptSchema = z
   .strict()
 
 const commandInvocationSourceSchema = z.enum(['desktop', 'automation', 'acp'])
-const commandListSchema = z
-  .object({
-    sessionId: idSchema,
-    includeUnavailable: z.boolean().optional(),
-    invocationSource: commandInvocationSourceSchema.optional(),
-  })
-  .strict()
-const commandCompleteSchema = z
-  .object({
-    sessionId: idSchema,
-    commandId: idSchema,
-    rawArgs: z.string().max(8_192),
-    cursor: z.number().int().min(0).max(8_192),
-    invocationSource: commandInvocationSourceSchema,
-  })
-  .strict()
 /** Chips in a message's text (E-track contract §2). */
 const messageReferencesSchema = z
   .array(
@@ -894,6 +879,41 @@ const chatSubmitSchema = z
       referencesFit(value.content, value.references),
     { message: 'references do not match the content', path: ['references'] },
   )
+
+/**
+ * `commands.list` / `commands.complete` name a session, or a start-page draft
+ * by its id (`draft:<uuid>`) with the mode and project its session will get,
+ * as `chat.submit` and `goals.start` carry them (FIX-14). The draft context
+ * goes with a draft id only.
+ */
+const commandOwnerFits = (value: {
+  sessionId: string
+  draftSession?: unknown
+}): boolean => value.draftSession == null || isDraftSessionId(value.sessionId)
+const commandOwnerIssue = {
+  message: 'draftSession goes with a draft session id',
+  path: ['draftSession'],
+}
+const commandListSchema = z
+  .object({
+    sessionId: idSchema,
+    draftSession: draftSessionSchema.nullable().optional(),
+    includeUnavailable: z.boolean().optional(),
+    invocationSource: commandInvocationSourceSchema.optional(),
+  })
+  .strict()
+  .refine(commandOwnerFits, commandOwnerIssue)
+const commandCompleteSchema = z
+  .object({
+    sessionId: idSchema,
+    draftSession: draftSessionSchema.nullable().optional(),
+    commandId: idSchema,
+    rawArgs: z.string().max(8_192),
+    cursor: z.number().int().min(0).max(8_192),
+    invocationSource: commandInvocationSourceSchema,
+  })
+  .strict()
+  .refine(commandOwnerFits, commandOwnerIssue)
 
 const hookAuditOptionsSchema = z
   .object({

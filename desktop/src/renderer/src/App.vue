@@ -8,11 +8,7 @@ import {
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type {
-  CommandCompletion,
-  CommandDescriptor,
-  CommandSurface,
-} from '@emperor/core/api'
+import type { CommandDescriptor, CommandSurface } from '@emperor/core/api'
 import AppFrame from './components/shell/AppFrame.vue'
 import ImageViewerHost from './components/ui/ImageViewerHost.vue'
 import {
@@ -53,7 +49,11 @@ import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDi
 import { runInitialStartup } from './appStartup'
 import { showDataNotices } from './appDataNotices'
 import { buildSlashPaletteItems } from './commands'
-import { createCommandCatalogLoader } from './commandCatalog'
+import {
+  commandCatalogOwner,
+  createCommandCatalogLoader,
+  createCommandCompleter,
+} from './commandCatalog'
 import {
   onBrowserPairingRequest,
   onBrowserReveal,
@@ -367,21 +367,26 @@ async function reconnect() {
   await loadCommands()
 }
 
-watch(sessionId, () => void loadCommands())
-
-function commandCatalogSessionId(): string {
-  return (
-    sessionStore.backendSessionId() ||
-    sessionStore.sessions.value.find((item) => !item.draft)?.id ||
-    ''
-  )
+/**
+ * The session on screen, or the start-page draft with its own mode and
+ * project — never another session's catalog (FIX-14).
+ */
+function commandOwner() {
+  const id = sessionStore.activeId.value
+  return commandCatalogOwner(id, sessionStore.getSession(id))
 }
 
+// Another session, draft or draft project: another catalog.
+watch(
+  () => JSON.stringify(commandOwner()),
+  () => void loadCommands(),
+)
+
 const commandCatalog = createCommandCatalogLoader({
-  currentSessionId: commandCatalogSessionId,
+  currentOwner: commandOwner,
   list: (owner) =>
     core('commands.list', {
-      sessionId: owner,
+      ...owner,
       includeUnavailable: false,
       invocationSource: 'desktop',
     }),
@@ -420,21 +425,11 @@ async function resolveCommandSessionId(): Promise<string> {
   return created.id
 }
 
-async function completeSlashCommand(
-  commandId: string,
-  rawArgs: string,
-  cursor: number,
-): Promise<CommandCompletion[]> {
-  const owner = commandCatalogSessionId()
-  if (!owner) return []
-  return await core('commands.complete', {
-    sessionId: owner,
-    commandId,
-    rawArgs,
-    cursor,
-    invocationSource: 'desktop',
-  })
-}
+const completeSlashCommand = createCommandCompleter({
+  currentOwner: commandOwner,
+  complete: (input) =>
+    core('commands.complete', { ...input, invocationSource: 'desktop' }),
+})
 
 async function activateTransitionedSession(
   session: SessionInfo,

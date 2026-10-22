@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
-> 事实源：`desktop/src/renderer/src/components/composer/`（`ComposerCard.vue`、`PermissionChip.vue`、`PlanChip.vue`、`ModelPicker.vue`、`ContextMeter.vue`、`ChangesPill.vue`、`TodoDock.vue`、`SubagentDock.vue`、`GoalBar.vue`、`QueueDock.vue`）、`components/chat/composerController.ts`、`composerPalette.ts`、`composerModelControl.ts`、`components/conversation/HeroProfilePrompt.vue`、`theme/components.css`（`--composer-*`）、`desktop/src/main/screenshot-ipc.ts`；测试 `ComposerBottomBar.test.ts`、`QueueDock.test.ts`、`composerArchitecture.test.ts`、`desktop/tests/visual/composer.spec.ts`
+> 最后核验：2026-10-22（对照 `5ec88219`）<br>
+> 事实源：`desktop/src/renderer/src/components/composer/`（`ComposerCard.vue`、`PermissionChip.vue`、`PlanChip.vue`、`ModelPicker.vue`、`ContextMeter.vue`、`ChangesPill.vue`、`TodoDock.vue`、`SubagentDock.vue`、`GoalBar.vue`、`QueueDock.vue`）、`components/chat/composerController.ts`、`composerPalette.ts`、`composerModelControl.ts`、`components/conversation/HeroProfilePrompt.vue`、`theme/components.css`（`--composer-*`）、`desktop/src/main/screenshot-ipc.ts`；`components/conversation/ConversationView.vue`（停用的卡片）；测试 `ComposerBottomBar.test.ts`、`QueueDock.test.ts`、`composerArchitecture.test.ts`、`desktop/tests/visual/composer.spec.ts`、`desktop/tests/visual/session-not-found.spec.ts`
 
 输入框在对话面板底部：上面是按需出现的几条 dock，下面一张卡片，卡片里是富文本编辑器和一排控件。布局沿用 Emperor 自己的结构；0.2 只提升卡片的质感（参考 Codex 的视觉品质，不照搬它的布局）。
 
@@ -14,6 +14,7 @@
 - 编辑器在上，控件行在下。一行草稿时，从卡片上沿到控件行上沿的输入区至少 56px（上内边距 16 + 一行 28 + 与控件行的间距 12）；草稿变长时编辑器长高，最多 336px 后滚动。
 - 编辑器上方按需出现一行说明：附件托盘、留到别的对话的听写结果、像密钥的内容的提示、未知 `/词` 的提示。
 - 拖入文件时卡片外圈加 2px 焦点色描边。
+- **没有会话可以操作时**（打开了不存在或已删除的会话，页面写「没有找到这个会话。」）卡片留在原位，整张停用：不能输入、拖入文件或发送，`+`、权限芯片、模型芯片和发送位都不可用，计划 / 目标胶囊和上下文环不显示，它们说的是背后那个会话。占位提示写「没有找到这个会话，请从侧栏打开其他会话」（还在读取这个会话时写「正在读取会话…」）。卡片上方属于背后那个会话的 Goal 条、排队消息和审批卡也不显示。和「还没有可用模型」一样，原因写在输入的位置，不另外弹提示。
 
 ## 控件行
 
