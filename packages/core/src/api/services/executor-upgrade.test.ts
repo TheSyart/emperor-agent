@@ -125,7 +125,7 @@ it('checks npm, upgrades Claude Code with its own npm and shows the new version'
   let done: ExecutorUpgradeView | undefined
   await waitFor(() => {
     done = events
-      .filter((e) => e.event === 'executor_upgrade')
+      .filter((e) => e.event === 'executor_upgrade' && e.upgrade)
       .map((e) => e.upgrade as ExecutorUpgradeView)
       .find((u) => u.state !== 'waiting' && u.state !== 'running')
     return !!done

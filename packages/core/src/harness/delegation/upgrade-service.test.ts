@@ -127,7 +127,7 @@ async function settled(
   await vi.waitFor(
     () => {
       found = events
-        .filter((e) => e.event === 'executor_upgrade')
+        .filter((e) => e.event === 'executor_upgrade' && e.upgrade)
         .map((e) => e.upgrade as ExecutorUpgradeView)
         .find(
           (u) =>
@@ -212,7 +212,7 @@ describe('executor versions', () => {
     expect(s.fetches).toHaveLength(6)
     await s.upgrades.versions()
     expect(s.fetches).toHaveLength(6)
-    expect(s.events.some((e) => e.event === 'executor_versions')).toBe(true)
+    expect(s.events.some((e) => e.versions)).toBe(true)
   })
 
   it('checks once at startup when the last check is a day old, only where checks may run', async () => {
@@ -271,7 +271,9 @@ describe('one-click upgrade', () => {
     )
     expect(done.log.join('\n')).toContain('changed 1 package')
     expect(done.log.join('\n')).toContain('正在重新检测 Claude Code…')
-    const last = s.events.filter((e) => e.event === 'executor_upgrade').at(-1)!
+    const last = s.events
+      .filter((e) => e.event === 'executor_upgrade' && e.upgrade)
+      .at(-1)!
     expect((last.probe as ExecutorProbe).executableVersion).toBe('2.1.308')
     expect(s.probes.get('claude-default')?.executableVersion).toBe('2.1.308')
     const view = await s.upgrades.versions()

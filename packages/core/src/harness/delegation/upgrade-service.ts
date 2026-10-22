@@ -69,7 +69,7 @@ export interface ExecutorUpgradeServiceOptions {
   /** Its subtasks running now. */
   activeRuns: (backend: ExternalBackend) => number
   gate: ExecutorDispatchGate
-  /** Host events: `executor_upgrade`, `executor_versions`. */
+  /** Host events: `executor_upgrade` (an upgrade, or the versions). */
   emit: (event: Record<string, unknown>) => void
   /** The once-a-day check at startup may run here (the packaged app, or a test registry). */
   automatic: boolean
@@ -143,7 +143,7 @@ export class ExecutorUpgradeService {
     this.brewVersions.clear()
     await this.options.published.check()
     this.options.emit({
-      event: 'executor_versions',
+      event: 'executor_upgrade',
       versions: await this.view(),
     })
   }
@@ -171,7 +171,7 @@ export class ExecutorUpgradeService {
       ),
     )
     const view = await this.view(entries)
-    this.options.emit({ event: 'executor_versions', versions: view })
+    this.options.emit({ event: 'executor_upgrade', versions: view })
     return view
   }
 
@@ -448,7 +448,7 @@ export class ExecutorUpgradeService {
       this.options.gate.release(backend)
       void this.view()
         .then((versions) =>
-          this.options.emit({ event: 'executor_versions', versions }),
+          this.options.emit({ event: 'executor_upgrade', versions }),
         )
         .catch(() => undefined)
     }

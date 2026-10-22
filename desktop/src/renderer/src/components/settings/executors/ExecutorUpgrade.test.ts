@@ -469,7 +469,7 @@ describe('running and done', () => {
       ],
       { upgrades: [done] },
     )
-    push({ event: 'executor_versions', versions: structuredClone(versions) })
+    push({ event: 'executor_upgrade', versions: structuredClone(versions) })
     await settle()
     expect(pushToast).toHaveBeenCalledWith('Codex 已升级到 0.163.0', {
       tone: 'ok',

@@ -346,17 +346,14 @@ export type RuntimeEvent = RuntimeEventEnvelope &
       }
     | {
         /**
-         * 升级 (AGT-13) changed: waiting, running (output), or ended; at
-         * the end, the probe that followed.
+         * 子智能体 › 版本 (AGT-13): an upgrade changed (waiting, running
+         * with output, ended — then with the probe that followed), or the
+         * versions did (a check, the end of an upgrade, 稍后).
          */
         event: 'executor_upgrade'
-        upgrade: ExecutorUpgradeView
+        upgrade?: ExecutorUpgradeView
         probe?: ExecutorProbe
-      }
-    | {
-        /** 子智能体 › 版本 after a check, an upgrade or 稍后 (AGT-13). */
-        event: 'executor_versions'
-        versions: ExecutorVersionsView
+        versions?: ExecutorVersionsView
       }
     | {
         /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */

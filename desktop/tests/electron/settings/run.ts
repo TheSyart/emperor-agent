@@ -13,21 +13,30 @@
  * and the one-line command for Terminal, and nothing claude printed reaches
  * the logs; 退出登录 signs out; 使用 API Key seals the key and shows only 末
  * 4 位 (AGT-12). A fake claude stands in for the installed one, and
- * sign-ins are read from an empty folder instead of ~/.claude. Screenshots
- * of every page land in out-e2e/settings/.
+ * sign-ins are read from an empty folder instead of ~/.claude. 子智能体 ›
+ * 版本 (AGT-13): the fake claude is installed with a fake npm in a temp
+ * prefix, a test registry on 127.0.0.1 says 2.1.308 is out; 升级 asks
+ * first, runs that prefix's npm and the row shows the new version; no
+ * write permission says why with the command to copy; 取消 stops npm and
+ * what it started. Screenshots of every page land in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
  */
 
 import { execFileSync } from 'node:child_process'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -110,24 +119,72 @@ const LOGIN_LINK =
   'https://claude.com/cai/oauth/authorize?code=true&state=E2E-STATE-5b4a'
 const LOGIN_CODE = 'E2E-CODE-3f2e1d'
 
+/** Where the fake claude is installed (an npm prefix) and its bin folder. */
+const claudePackage = (prefix: string) =>
+  join(prefix, 'lib', 'node_modules', '@anthropic-ai', 'claude-code')
+
 /**
- * The installed claude's stand-in: `--version`, and `auth status | login |
- * logout` answered like the CLI (JSON; exit 0 signed in, 1 not), keyed to
- * its CLAUDE_CONFIG_DIR. `auth login` prints a sign-in link and a code
- * prompt like the CLI, then follows `<its folder>/login-mode`: empty waits
- * a moment (the browser), signs in and exits 0; `fail` exits 3; `hang`
- * waits on a child `sleep` until it is stopped, with both pids in
- * `<its folder>/login-pids`. Returns its folder.
+ * The installed claude's stand-in, installed the way npm installs it
+ * (AGT-13): `<prefix>/bin/claude` → `../lib/node_modules/@anthropic-ai/
+ * claude-code/bin/claude.exe`, reporting the version in its package.json
+ * (2.1.300). `--version`, and `auth status | login | logout` answered like
+ * the CLI (JSON; exit 0 signed in, 1 not), keyed to its CLAUDE_CONFIG_DIR.
+ * `auth login` prints a sign-in link and a code prompt like the CLI, then
+ * follows `<bin>/login-mode`: empty waits a moment (the browser), signs in
+ * and exits 0; `fail` exits 3; `hang` waits on a child `sleep` until it is
+ * stopped, with both pids in `<bin>/login-pids`.
+ *
+ * Beside it a fake `npm` following `<bin>/npm-mode`: empty writes the
+ * requested version into the package (an upgrade); `eacces` fails as npm
+ * does without write permission; `hang` waits on a child `sleep` (pids in
+ * `<bin>/npm-pids`). Each call appends its arguments and the prefix and
+ * Claude folder it was given to `<bin>/npm-calls`. Returns the bin folder.
  */
-function fakeClaude(dir: string): string {
-  mkdirSync(dir, { recursive: true })
+function fakeClaude(prefix: string): string {
+  const bin = join(prefix, 'bin')
+  const pkg = claudePackage(prefix)
+  mkdirSync(join(pkg, 'bin'), { recursive: true })
+  mkdirSync(bin, { recursive: true })
   writeFileSync(
-    join(dir, 'claude'),
+    join(pkg, 'package.json'),
+    JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.300' }),
+  )
+  symlinkSync(
+    '../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe',
+    join(bin, 'claude'),
+  )
+  writeFileSync(
+    join(bin, 'npm'),
+    [
+      '#!/bin/sh',
+      'bin="$(dirname "$0")"',
+      // Emperor's own environment check asks every npm on PATH.
+      'if [ "$1" = "--version" ]; then echo 10.9.0; exit 0; fi',
+      'echo "$* prefix=$npm_config_prefix claude=$CLAUDE_CONFIG_DIR" >> "$bin/npm-calls"',
+      'mode="$(cat "$bin/npm-mode" 2>/dev/null)"',
+      'spec=""',
+      'for a in "$@"; do case "$a" in *@[0-9]*) spec="$a";; esac; done',
+      'pkg="${spec%@*}"; ver="${spec##*@}"',
+      'if [ "$mode" = eacces ]; then',
+      '  echo "npm error code EACCES" >&2',
+      '  echo "npm error path $npm_config_prefix/lib/node_modules/$pkg" >&2',
+      '  echo "npm error Error: EACCES: permission denied" >&2; exit 243',
+      'fi',
+      'if [ "$mode" = hang ]; then sleep 600 & echo "$$ $!" > "$bin/npm-pids"; wait; exit 0; fi',
+      'sleep 1',
+      'printf \'{"name":"%s","version":"%s"}\\n\' "$pkg" "$ver" > "$npm_config_prefix/lib/node_modules/$pkg/package.json"',
+      'echo "changed 1 package in 1s"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  writeFileSync(
+    join(pkg, 'bin', 'claude.exe'),
     [
       '#!/bin/sh',
       'dir="$CLAUDE_CONFIG_DIR"',
-      'bin="$(dirname "$0")"',
-      'if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi',
+      `bin="${bin}"`,
+      `if [ "$1" = "--version" ]; then v=$(sed -n 's/.*"version": *"\\([^"]*\\)".*/\\1/p' "${pkg}/package.json"); echo "$v (Claude Code)"; exit 0; fi`,
       'if [ "$1" = "auth" ] && [ "$2" = "login" ]; then',
       '  echo "Opening browser to sign in…"',
       `  echo "If the browser didn't open, visit: ${LOGIN_LINK}"`,
@@ -149,7 +206,43 @@ function fakeClaude(dir: string): string {
     ].join('\n'),
     { mode: 0o755 },
   )
-  return dir
+  return bin
+}
+
+/**
+ * npm's registry for 子智能体 › 版本 (AGT-13), on 127.0.0.1: Claude Code's
+ * `latest` (changed by the test), and Codex with nothing newer.
+ */
+async function startFakeRegistry(): Promise<{
+  url: string
+  claude: { latest: string }
+  close(): Promise<void>
+}> {
+  const claude = { latest: '2.1.308' }
+  const server: Server = createServer((req, res) => {
+    if (req.url === '/@anthropic-ai/claude-code/latest') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ version: claude.latest }))
+    }
+    if (req.url === '/@openai/codex') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(
+        JSON.stringify({
+          'dist-tags': { latest: '0.153.4' },
+          versions: { '0.153.4': {} },
+        }),
+      )
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+  const { port } = server.address() as AddressInfo
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    claude,
+    close: () => new Promise<void>((done) => server.close(() => done())),
+  }
 }
 
 async function check<T>(
@@ -216,6 +309,7 @@ function prepareHome(home: string, model: FakeModel): void {
 
 async function launch(
   home: string,
+  registry: string,
 ): Promise<{ app: ElectronApplication; page: Page }> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env))
@@ -227,7 +321,10 @@ async function launch(
   // PATH: the real one never runs (AGT-12).
   env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
   mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
-  env.PATH = `${fakeClaude(join(home, 'executor-bin'))}:${env.PATH ?? ''}`
+  const prefix = join(home, 'executor-prefix')
+  env.PATH = `${existsSync(join(prefix, 'bin', 'claude')) ? join(prefix, 'bin') : fakeClaude(prefix)}:${env.PATH ?? ''}`
+  // 子智能体 › 版本 asks the test registry, never npm's (AGT-13).
+  env.EMPEROR_EXECUTOR_REGISTRY_URL = registry
   const app = await _electron.launch({
     args: ['.'],
     cwd: desktop,
@@ -376,7 +473,7 @@ async function settings(page: Page, home: string): Promise<void> {
         'signed out',
       )
       // 取消: claude and the child it started are both gone.
-      const bin = join(home, 'executor-bin')
+      const bin = join(home, 'executor-prefix', 'bin')
       writeFileSync(join(bin, 'login-mode'), 'hang')
       await signIn.locator('[data-claude-sign-in-start]').click()
       await pending.waitFor()
@@ -902,6 +999,179 @@ function storageBytes(text: string): number {
 }
 
 /**
+ * AGT-13 in the real app: 子智能体 › 版本 against the test registry. The
+ * fake claude (2.1.300, an npm install in a temp prefix) is turned on and
+ * signed in; the page finds 2.1.308 — the notice, 「本机 2.1.300 · 可升级到
+ * 2.1.308」 and 升级 on the row, the dot on 子智能体 — and 升级 asks first,
+ * then runs that prefix's npm; the row shows 2.1.308 and a toast says so.
+ * Then, for 2.1.309: a node_modules folder it cannot write fails before npm
+ * runs, with the folder and the command; and 取消 stops npm and the child
+ * it started.
+ */
+async function executorUpgrade(
+  page: Page,
+  home: string,
+  registry: { claude: { latest: string } },
+): Promise<void> {
+  await check(
+    page,
+    '子智能体 › 版本: finds Claude Code 2.1.308, upgrades it with its own npm, says why it cannot write, and 取消 stops npm',
+    async () => {
+      // Core reads where claude really lives (/private/var/…).
+      const prefix = join(realpathSync(home), 'executor-prefix')
+      const bin = join(prefix, 'bin')
+      const modules = join(prefix, 'lib', 'node_modules')
+      writeFileSync(
+        join(home, 'delegations', 'claude-code', 'config', 'e2e-signed-in'),
+        'signed-in',
+      )
+      const dialog = await openSection(page, 'executors')
+      const claude = dialog.locator('[data-settings-agent="claude-code"]')
+      const enabled = claude.locator('[data-executor-enabled]')
+      if ((await enabled.getAttribute('aria-checked')) !== 'true')
+        await enabled.click()
+      await dialog
+        .getByRole('button', { name: '重新检测', exact: true })
+        .click()
+      const summary = claude.locator('[data-executor-summary]')
+      await until(
+        async () =>
+          (await summary.innerText()).includes(
+            '本机 2.1.300 · 可升级到 2.1.308',
+          ),
+        30_000,
+        '本机 2.1.300 · 可升级到 2.1.308',
+      )
+      const notice = dialog.locator('[data-upgrade-notice]')
+      const said = await notice.innerText()
+      if (!said.includes('Claude Code 有新版本'))
+        throw new Error(`notice: ${said}`)
+      if (!said.includes('Claude Code 2.1.300 → 2.1.308'))
+        throw new Error(`notice: ${said}`)
+      await dialog
+        .locator('.nav-cell[data-section="executors"] [data-nav-mark]')
+        .waitFor()
+      await page.screenshot({ path: join(shots, 'upgrade-found.png') })
+
+      // 升级: the confirmation names the command; then that prefix's npm.
+      await claude.locator('[data-executor-upgrade]').click()
+      const confirm = page.getByRole('dialog', {
+        name: '升级 Claude Code 到 2.1.308？',
+      })
+      await confirm.waitFor()
+      const command = (
+        await confirm.locator('[data-upgrade-command]').innerText()
+      ).trim()
+      if (command !== 'npm install -g @anthropic-ai/claude-code@2.1.308')
+        throw new Error(`command: ${command}`)
+      await page.screenshot({ path: join(shots, 'upgrade-confirm.png') })
+      await confirm.locator('[data-upgrade-confirm]').click()
+      await until(
+        async () =>
+          (await summary.innerText()).includes(
+            '本机 2.1.308 · 已是最新 · 刚刚升级',
+          ),
+        60_000,
+        'the row with 2.1.308',
+      )
+      await page.getByText('Claude Code 已升级到 2.1.308').waitFor()
+      await page.screenshot({ path: join(shots, 'upgrade-done.png') })
+      const calls = readFileSync(join(bin, 'npm-calls'), 'utf8')
+        .trim()
+        .split('\n')
+      const config = join(home, 'delegations', 'claude-code', 'config')
+      if (
+        calls.length !== 1 ||
+        calls[0] !==
+          `install -g @anthropic-ai/claude-code@2.1.308 prefix=${prefix} claude=${config}`
+      )
+        throw new Error(`npm calls: ${JSON.stringify(calls)}`)
+      const installed = JSON.parse(
+        readFileSync(
+          join(modules, '@anthropic-ai', 'claude-code', 'package.json'),
+          'utf8',
+        ),
+      ).version
+
+      // 2.1.309: no write permission, before npm runs.
+      registry.claude.latest = '2.1.309'
+      await claude.locator('[data-executor-details]').click()
+      const versions = dialog.locator(
+        '[data-executor-detail="claude-code"] [data-executor-versions]',
+      )
+      await versions.locator('[data-version-check]').click()
+      const upgrade = versions.locator('[data-version-upgrade]')
+      await until(
+        async () => (await upgrade.innerText()).includes('升级到 2.1.309'),
+        30_000,
+        '升级到 2.1.309',
+      )
+      chmodSync(modules, 0o555)
+      let failure: string
+      try {
+        await upgrade.click()
+        await page
+          .getByRole('dialog', { name: '升级 Claude Code 到 2.1.309？' })
+          .locator('[data-upgrade-confirm]')
+          .click()
+        const failed = dialog.locator('[data-upgrade-failed]')
+        await failed.waitFor({ timeout: 30_000 })
+        failure = await failed.innerText()
+      } finally {
+        chmodSync(modules, 0o755)
+      }
+      if (!failure.includes(`没有写入 ${modules} 的权限`))
+        throw new Error(`failure: ${failure}`)
+      if (!failure.includes('npm install -g @anthropic-ai/claude-code@2.1.309'))
+        throw new Error(`failure: ${failure}`)
+      if (readFileSync(join(bin, 'npm-calls'), 'utf8').includes('2.1.309'))
+        throw new Error('npm ran without write permission')
+      await page.screenshot({ path: join(shots, 'upgrade-failed.png') })
+
+      // 取消: npm and the child it started stop.
+      writeFileSync(join(bin, 'npm-mode'), 'hang')
+      await upgrade.click()
+      await page
+        .getByRole('dialog', { name: '升级 Claude Code 到 2.1.309？' })
+        .locator('[data-upgrade-confirm]')
+        .click()
+      await until(
+        () => existsSync(join(bin, 'npm-pids')),
+        30_000,
+        'npm running',
+      )
+      const pids = readFileSync(join(bin, 'npm-pids'), 'utf8')
+        .trim()
+        .split(/\s+/)
+        .map(Number)
+      await versions.locator('[data-version-running]').waitFor()
+      await page.screenshot({ path: join(shots, 'upgrade-running.png') })
+      await versions.locator('[data-upgrade-cancel]').click()
+      await until(
+        () =>
+          pids.every((pid) => {
+            try {
+              process.kill(pid, 0)
+              return false
+            } catch {
+              return true
+            }
+          }),
+        15_000,
+        'npm and its child stopped',
+      )
+      await versions.locator('[data-version-running]').waitFor({
+        state: 'detached',
+        timeout: 15_000,
+      })
+      writeFileSync(join(bin, 'npm-mode'), '')
+      await dialog.getByTestId('settings-crumb').click()
+      return { command, installed, failure: failure.split('\n')[0], pids }
+    },
+  )
+}
+
+/**
  * KRN-12 test 8 in the real app: 高级 › 存储's total is within 5% of `du -sk`
  * on the same Emperor Home, and 清理 (after its confirm) removes a spill
  * file no session owns that is 40 days old.
@@ -999,13 +1269,15 @@ async function damagedVault(page: Page, home: string): Promise<void> {
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const model = await startFakeModel({ agentTool: 'read' })
+  const registry = await startFakeRegistry()
   const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-settings-'))
   let app: ElectronApplication | null = null
   try {
     prepareHome(home, model)
-    const launched = await launch(home)
+    const launched = await launch(home, registry.url)
     app = launched.app
     await settings(launched.page, home)
+    await executorUpgrade(launched.page, home, registry)
     await storagePage(launched.page, home)
     // Relaunch on the same Emperor Home with a damaged vault.json.
     await app.close()
@@ -1016,7 +1288,7 @@ async function main(): Promise<void> {
       '{"version":3,"entries":[{"handleId":',
       { mode: 0o600 },
     )
-    const relaunched = await launch(home)
+    const relaunched = await launch(home, registry.url)
     app = relaunched.app
     await damagedVault(relaunched.page, home)
   } catch (error) {
@@ -1034,6 +1306,7 @@ async function main(): Promise<void> {
   } finally {
     await app?.close().catch(() => undefined)
     await model.close()
+    await registry.close()
     rmSync(home, { recursive: true, force: true })
     process.stdout.write('E2E-DONE\n')
   }

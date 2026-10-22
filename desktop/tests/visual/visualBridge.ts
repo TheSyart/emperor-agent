@@ -8481,7 +8481,7 @@ export async function installVisualCoreBridge(
                     ? { probe: visualExecutorProbe('codex-default', null) }
                     : {}),
                 })
-                emit({ event: 'executor_versions', versions: visualVersions() })
+                emit({ event: 'executor_upgrade', versions: visualVersions() })
               }
               return visualVersions()
             }

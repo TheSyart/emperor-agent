@@ -2,8 +2,8 @@
  * 设置 › 子智能体's versions and 升级 (AGT-13), one copy for the window:
  * read from Core (`executors.versions`) when the settings open (the nav
  * dot) and when 子智能体 opens (which also asks npm, at most once a
- * minute), kept current by Core's `executor_versions` and
- * `executor_upgrade` events. The confirmation dialog's state lives here
+ * minute), kept current by Core's `executor_upgrade` events (an upgrade
+ * as it goes, or the versions after a check). The confirmation dialog's state lives here
  * too, so the main page and the detail pages share it. Loaded with the
  * settings, never at startup.
  */
@@ -63,12 +63,9 @@ function follow() {
       upgrade?: ExecutorUpgradeView
       probe?: ExecutorProbe
     } | null
-    if (
-      data?.event === 'executor_versions' &&
-      Array.isArray(data.versions?.executors)
-    )
-      versions.value = data.versions!
-    if (data?.event === 'executor_upgrade' && data.upgrade) {
+    if (data?.event !== 'executor_upgrade') return
+    if (Array.isArray(data.versions?.executors)) versions.value = data.versions!
+    if (data.upgrade) {
       adoptRun(data.upgrade)
       if (data.probe)
         for (const listener of probeListeners)
