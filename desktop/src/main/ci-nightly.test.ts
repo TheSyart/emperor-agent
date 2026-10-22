@@ -28,6 +28,8 @@ interface PlannedStep {
   skip?: string
   hook?: string
   retry?: string[]
+  unavailableExitCode?: number
+  unavailableReason?: string
 }
 
 describe('the nightly plan (REL-04 test 3)', () => {
@@ -262,6 +264,48 @@ describe('the nightly runner', () => {
     ])
     expect(result.status).toBe(0)
     expect(summary).toMatchObject({ ok: true })
+  })
+
+  it('records an explicitly unavailable runtime check as skipped, never passed', () => {
+    const { result, summary } = runPlan([
+      {
+        id: 'package:probe',
+        command: [
+          'node',
+          '-e',
+          'console.log("independent OS control is unenforced");process.exit(77)',
+        ],
+        unavailableExitCode: 77,
+        unavailableReason:
+          'OS enforcement unavailable; verify on a SIP-enabled host',
+      },
+    ])
+    expect(result.status).toBe(0)
+    expect(summary.steps).toMatchObject([
+      {
+        id: 'package:probe',
+        status: 'skipped',
+        exitCode: 77,
+        reason: 'OS enforcement unavailable; verify on a SIP-enabled host',
+      },
+    ])
+    expect(summary.steps[0].logTail).toContain('independent OS control')
+  })
+
+  it('keeps unexpected nonzero results and real hardening failures red', () => {
+    const { result, summary } = runPlan([
+      { id: 'not-opted-in', command: ['node', '-e', 'process.exit(77)'] },
+      {
+        id: 'real-gap',
+        command: ['node', '-e', 'process.exit(1)'],
+        unavailableExitCode: 77,
+      },
+      { id: 'success', command: ['node', '-e', '0'], unavailableExitCode: 0 },
+    ])
+    expect(result.status).toBe(1)
+    expect(
+      summary.steps.map((step: { status: string }) => step.status),
+    ).toEqual(['failed', 'failed', 'passed'])
   })
 
   it('runs only the steps asked for', () => {

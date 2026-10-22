@@ -161,6 +161,9 @@ export function nightlyPlan() {
       title: 'Packaged hardening probes (SEC-04, package:probe)',
       command: ['npm', '--prefix', 'desktop', 'run', 'package:probe'],
       timeoutMs: 20 * MINUTE,
+      unavailableExitCode: 77,
+      unavailableReason:
+        'Dynamic injection protection is unverified: this host disables SIP and also allows injection into the independent hardened control. Repeat package:probe on a SIP-enabled host before publishing.',
     },
   ]
 }
@@ -365,10 +368,21 @@ async function main(argv) {
       `${step.id.replace(/[^\w.-]/g, '_')}.log`,
     )
     const result = await runStep(step, logPath)
+    const unavailable =
+      Number.isInteger(step.unavailableExitCode) &&
+      step.unavailableExitCode !== 0 &&
+      step.unavailableExitCode === result.exitCode
     summary.steps.push({
       id: step.id,
       title: step.title,
-      status: result.exitCode === 0 ? 'passed' : 'failed',
+      status: unavailable
+        ? 'skipped'
+        : result.exitCode === 0
+          ? 'passed'
+          : 'failed',
+      ...(unavailable
+        ? { reason: step.unavailableReason ?? 'check unavailable on this host' }
+        : {}),
       exitCode: result.exitCode,
       ms: result.ms,
       ...(result.retried

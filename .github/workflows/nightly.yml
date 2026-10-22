@@ -30,7 +30,9 @@ env:
 jobs:
   macos-nightly:
     name: macOS nightly
-    runs-on: macos-15
+    # Pixel baselines use the macOS 26 system fonts. Compatibility builds
+    # remain on macOS 15 in ci.yml and both release workflows.
+    runs-on: macos-26
     timeout-minutes: 300
     permissions:
       contents: read

@@ -42,6 +42,7 @@ Emperor 可以把子任务交给用户电脑上安装的 Claude Code。按 Anthr
    ```bash
    scripts/build_desktop_release.sh
    scripts/verify-macos-release.sh arm64
+   node desktop/scripts/probe-packaged-hardening.cjs --app "desktop/dist/mac-arm64/Emperor Agent.app"
    node scripts/ci/gate-negative-probe.mjs --app "desktop/dist/mac-arm64/Emperor Agent.app"
    node scripts/release-dry-run.mjs --out "$TMPDIR/emperor-release-dry-run"
    ```
@@ -51,7 +52,7 @@ Emperor 可以把子任务交给用户电脑上安装的 Claude Code。按 Anthr
 3. **nightly 是绿的**：最近 72 小时内有一次完整通过的 nightly，且没有未关闭的 `nightly-failure` issue；否则 `release.yml` 第一步 `scripts/ci/require-green-nightly.mjs` 就会失败（见 [CI 门禁](../development/ci.md)）。
 4. **打 tag**：在已进入默认分支的发布提交上创建 annotated tag `v<version>` 并推送。推送 tag 不会触发任何 workflow。
 5. **演练运行**：在 Actions 里手动运行 `release`，`stable_tag` 填 `v<version>`，`publish` 保持 `false`。`release-policy` 先检查 nightly，再要求 tag 是无后缀的 `v<major>.<minor>.<patch>`、是 annotated tag、与该提交里 `desktop/package.json` 的版本一致、位于默认分支历史中。两个架构的候选、核验、反向探测、聚合、SBOM、`SHA256SUMS.txt` 与两份证明都通过后，下载 `stable-release-bundle` 产物核对。
-6. **正式发布**：公开发布同时要求三件事——手动输入 `publish=true`；仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 设为 `true`；`stable-release` Environment 配置了 required reviewers 并通过审批。`publish-release` 是唯一有写权限的 job：重新核验 bundle 与证明，以 `RELEASE-NOTES.md` 为正文创建草稿，核对草稿的资产清单与 bundle 完全一致，再公开；任何一步失败都会删掉草稿。
+6. **正式发布**：下载双架构演练产物，在 SIP 开启的 Mac 上分别运行 `desktop/scripts/probe-packaged-hardening.cjs --app "<候选应用>.app"` 并保留通过证据；CI 因 SIP 关闭而记为未验证的结果不能代替这一步。公开发布同时要求三件事——手动输入 `publish=true`；仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 设为 `true`；`stable-release` Environment 配置了 required reviewers 并通过审批。`publish-release` 是唯一有写权限的 job：重新核验 bundle 与证明，以 `RELEASE-NOTES.md` 为正文创建草稿，核对草稿的资产清单与 bundle 完全一致，再公开；任何一步失败都会删掉草稿。
 
 ## Workflow 阶段
 

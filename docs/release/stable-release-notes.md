@@ -4,7 +4,7 @@ scripts/assemble-release-bundle.mjs 在聚合时删掉这段注释、替换 {{ta
 最后一行的 emperor-release 注释给应用内的检查更新读取（REL-02：诊断页据此提醒 Electron 过旧），不要删改；
 scripts/publish-release.sh 用它作 Release 正文（gh release create --notes-file）。
 第一段必须写明安装包未签名并给出首次打开的步骤：scripts/release-contract.mjs 检查，缺一项发布就失败。
-最后核验：2026-10-21 · 事实源：.github/workflows/release.yml、desktop/electron-builder.release.cjs、scripts/release-contract.mjs
+最后核验：2026-10-23 · 事实源：.github/workflows/release.yml、desktop/electron-builder.release.cjs、scripts/release-contract.mjs
 -->
 
 **Emperor Agent {{version}} 的安装包是未签名的**：没有 Apple Developer ID 签名，也没有经过 Apple 公证，第一次打开时 macOS 会拦下它。首次打开这样做：先用本页的 `SHA256SUMS.txt` 核对下载的文件；把 Emperor Agent 拖进「应用程序」文件夹，双击打开，系统提示无法打开时点「完成」；再到「系统设置 › 隐私与安全性」，在安全性一栏找到 Emperor Agent，点「仍要打开」并输入登录密码。之后就能像其他应用一样直接打开。
@@ -22,7 +22,7 @@ The Emperor Agent {{version}} packages are unsigned: they have no Apple Develope
 
 ## 未签名不等于未封签
 
-应用和各个 Helper 都以 hardened runtime 做了 ad-hoc 封签，Electron 的 Node 运行与调试入口已经关闭，`app.asar` 改动一个字节就无法启动。其他程序不能借 Emperor 的身份和你已经授予它的权限运行自己的代码。不要为了打开 Emperor 而关闭整机的 Gatekeeper。
+应用和各个 Helper 都以 hardened runtime 做了 ad-hoc 封签，Electron 的 Node 运行与调试入口已经关闭，`app.asar` 改动一个字节就无法启动。在系统完整性保护（SIP）开启的 macOS 中，其他程序不能借 Emperor 的身份和你已经授予它的权限运行自己的代码。不要为了打开 Emperor 而关闭整机的 Gatekeeper。
 
 ## 核验来源
 

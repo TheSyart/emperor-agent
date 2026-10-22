@@ -2,10 +2,10 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-21（对照 `8f954763`）<br>
+> 最后核验：2026-10-23<br>
 > 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
 
-CI 只跑 macOS（项目不支持 Windows 和 Linux）。每个 job 只调用一个脚本，脚本里写着它做的全部事情，所以本机用同一条命令就能重跑；GitHub 只负责按时间或事件把它们排上 runner。
+CI 只跑 macOS（项目不支持 Windows 和 Linux）。各项检查都由仓库内脚本执行，本机可以用相同命令重跑；GitHub 只负责按时间或事件把它们排上 runner。
 
 ## 各 job 做什么
 
@@ -13,7 +13,7 @@ CI 只跑 macOS（项目不支持 Windows 和 Linux）。每个 job 只调用一
 | ------------------------------------------------------------- | ----------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `ci.yml` › macOS PR gate (arm64)                              | pull request；推送到 `main`、`release/**`；手动 | `macos-15`                   | `scripts/ci/pr-gate.sh`：`make check`、`package:verify`、未封签副本探测                                                     | `scripts/ci/pr-gate.sh`（`--dry-run` 只列步骤）                                                        |
 | `ci.yml` › macOS x64 build                                    | 同上                                            | `macos-15-intel`             | `scripts/ci/pr-gate.sh --build-only`：desktop build 代替 `make check`，其余相同                                             | Intel Mac 上 `scripts/ci/pr-gate.sh --build-only`                                                      |
-| `nightly.yml` › macOS nightly                                 | 每天 18:00 UTC；手动（可填 `only`）             | `macos-15`                   | `scripts/ci/nightly.mjs`：视觉套件、像素基线钩子、Electron e2e、kill -9、加固探测；失败时 `open-failure-issue.mjs` 开 issue | `node scripts/ci/nightly.mjs`，或 `--only e2e:settings,kill9`；`--list` 看全部步骤                     |
+| `nightly.yml` › macOS nightly                                 | 每天 18:00 UTC；手动（可填 `only`）             | `macos-26`                   | `scripts/ci/nightly.mjs`：视觉套件、像素基线钩子、Electron e2e、kill -9、加固探测；失败时 `open-failure-issue.mjs` 开 issue | `node scripts/ci/nightly.mjs`，或 `--only e2e:settings,kill9`；`--list` 看全部步骤                     |
 | `weekly-model-metadata.yml` › models.dev snapshot             | 每周一 02:00 UTC；手动                          | `macos-15`                   | `scripts/ci/weekly-model-metadata.mjs`：models.dev 快照过期时刷新并开 PR                                                    | `node scripts/ci/weekly-model-metadata.mjs --dry-run`（只看计划，不改文件），或 `npm run models:check` |
 | `release-preview.yml`、`release.yml` 的第一步                 | Preview tag；Stable 手动                        | 各自的 job                   | `scripts/ci/require-green-nightly.mjs`：最近一次 nightly 不绿、超过 72 小时或有未关闭的失败 issue 时，发布直接失败          | 需要 `gh` 登录：`node scripts/ci/require-green-nightly.mjs`                                            |
 | `release-internal.yml`、`environment-installers-internal.yml` | 手动                                            | `macos-15`、`macos-15-intel` | 内部未签名包与 macOS 环境适配器回执                                                                                         | `npm --prefix desktop run package:verify`                                                              |
@@ -45,6 +45,10 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 ## Nightly
 
 `node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过；它只跑带 `@baseline` 的测试并与 `desktop/tests/visual/__baselines__/` 逐像素比对，用 `playwright.config.ts`，换端口用 `EMPEROR_VISUAL_PORT`，见[开发指南](README.md#质量门禁)）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics、updates（检查更新，对本机的假发布源）；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
+
+像素基线固定使用 macOS 26 的系统字体；macOS 15 上的系统字形与已提交基线不同。PR 与发布的 arm64 / Intel 兼容构建仍在 macOS 15 上运行，像素比较的容差保持不变。失败时 workflow 额外保存 `nightly-visual-debug`（像素差异与 Electron 验收截图）。CI 和 Nightly 提前上传 `runtime-context-*`，记录系统版本、SIP 与普通／hardened runtime 两个独立控制程序的注入结果。
+
+`package:probe` 只有在系统明确关闭 SIP、且独立加固控制程序同样被注入时，才把动态库注入检查报告为 **UNVERIFIED**，退出码为 77；Nightly 对该步骤记录 `skipped` 和原因，不能把它当作验证成功。其余探测发现缺口、控制程序无法执行，或系统报告启用保护却仍能注入时，仍退出 1 并阻断。发布者必须把真实发布候选的两个架构下载到 SIP 开启的 Mac 上重跑 `node desktop/scripts/probe-packaged-hardening.cjs --app "<候选应用>.app"`，保留实际通过回执。Intel 包可在 Intel Mac 或已安装 Rosetta 的 Apple 芯片 Mac 上验证；注入库按目标架构编译，无法启动目标不会被算作通过。
 
 需要真实模型或真实外部子智能体的步骤只列出、不运行：`e2e-cu.mjs --mode=real`、`--mode=references-real`、`desktop/tests/external-agents.e2e.mjs`（它只接受 `--real`，同时驱动真实的 Codex 与 Claude Code）。委派用假 Claude Code / Codex 的测试在 `make check` 里。
 

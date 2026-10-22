@@ -36,7 +36,12 @@ function resolveApp(argv) {
   const explicit = index >= 0 ? argv[index + 1] : ''
   const path = resolve(
     explicit ||
-      join(desktopRoot, 'dist', `mac-${process.arch}`, 'Emperor Agent.app'),
+      join(
+        desktopRoot,
+        'dist',
+        process.arch === 'x64' ? 'mac' : 'mac-arm64',
+        'Emperor Agent.app',
+      ),
   )
   if (process.platform !== 'darwin' || !existsSync(path))
     throw new Error(`no macOS package at ${path}`)
@@ -266,6 +271,47 @@ const probes = {
   },
 
   async 'DYLD_INSERT_LIBRARIES (5)'() {
+    const architecture = spawnSync('/usr/bin/lipo', ['-archs', main], {
+      encoding: 'utf8',
+    })
+    const arches = architecture.stdout.trim().split(/\s+/)
+    if (
+      architecture.status !== 0 ||
+      arches.some((arch) => !['arm64', 'x86_64'].includes(arch))
+    )
+      return {
+        ok: false,
+        detail: 'could not determine the package architecture',
+      }
+    const targetArch = arches.includes(
+      process.arch === 'x64' ? 'x86_64' : 'arm64',
+    )
+      ? process.arch === 'x64'
+        ? 'x86_64'
+        : 'arm64'
+      : arches[0]
+    const { collectRuntimeContext } =
+      await import('../../scripts/ci/macos-runtime-context.mjs')
+    const context = collectRuntimeContext({ architecture: targetArch })
+    if (
+      !context.controls.plain.injected ||
+      context.controls.plain.error ||
+      context.controls.hardened.error
+    )
+      return {
+        ok: false,
+        detail:
+          'the injection control could not execute; no package result is valid',
+      }
+    const unenforced =
+      /status: disabled\./.test(context.sip) &&
+      context.controls.hardened.injected
+    if (context.controls.hardened.injected && !unenforced)
+      return {
+        ok: false,
+        detail:
+          'the independent hardened control was injected despite the reported OS policy',
+      }
     const source = join(work, 'inject.c')
     const dylib = join(work, 'inject.dylib')
     writeFileSync(
@@ -283,6 +329,7 @@ const probes = {
       ].join('\n'),
     )
     const build = spawnSync('/usr/bin/clang', [
+      ...arches.flatMap((arch) => ['-arch', arch]),
       '-dynamiclib',
       '-o',
       dylib,
@@ -315,15 +362,28 @@ const probes = {
       app: [main, ['--emperor-packaged-smoke']],
     }
     const loaded = []
+    const notExecuted = []
     for (const [label, [executable, args]] of Object.entries(targets)) {
       const mark = marker(`dyld-${label.replace(/\W/g, '-')}`)
       const { env } = sandboxEnv({
         DYLD_INSERT_LIBRARIES: dylib,
         PROBE_MARK: mark,
       })
-      await launch(executable, args, env, { timeoutMs: 10_000 })
+      const result = await launch(executable, args, env, { timeoutMs: 10_000 })
+      if (result.code === null && result.signal === null)
+        notExecuted.push(label)
       if (existsSync(mark)) loaded.push(label)
     }
+    if (notExecuted.length)
+      return {
+        ok: false,
+        detail: `could not execute: ${notExecuted.join(', ')}`,
+      }
+    if (unenforced)
+      return {
+        unverified: true,
+        detail: `SIP disabled; the independent hardened control also loaded the library. OS protection cannot be verified here. Observed package targets: ${loaded.join(', ') || 'none'}. Repeat on a SIP-enabled host.`,
+      }
     return {
       ok: loaded.length === 0,
       detail: loaded.length
@@ -394,6 +454,8 @@ async function mainProbe() {
     ? process.argv[process.argv.indexOf('--only') + 1]
     : null
   let failed = 0
+  let unverified = 0
+  let passed = 0
   console.log(`probing ${app}`)
   for (const [name, probe] of Object.entries(probes)) {
     if (only && !name.includes(only)) continue
@@ -403,13 +465,22 @@ async function mainProbe() {
     } catch (error) {
       result = { ok: false, detail: String(error?.message ?? error) }
     }
-    if (!result.ok) failed++
-    console.log(`${result.ok ? 'PASS' : 'FAIL'}  ${name}: ${result.detail}`)
+    if (result.unverified) unverified++
+    else if (!result.ok) failed++
+    else passed++
+    console.log(
+      `${result.unverified ? 'UNVERIFIED' : result.ok ? 'PASS' : 'FAIL'}  ${name}: ${result.detail}`,
+    )
   }
   rmSync(work, { recursive: true, force: true })
   if (failed) {
     console.log(`${failed} hardening probe(s) failed`)
     process.exitCode = 1
+  } else if (unverified) {
+    console.log(
+      `${passed} hardening probes passed; ${unverified} unverified because the OS does not enforce the independent runtime control`,
+    )
+    process.exitCode = 77
   } else console.log('all hardening probes passed')
 }
 
