@@ -252,7 +252,7 @@ import type {
   ReferencePreview,
 } from '../workspace/reference-preview'
 import type { WorkspaceSnapshot } from '../workspace/snapshot'
-import { CommandPlatform } from '../commands/platform'
+import { CommandPlatform, type CommandOwner } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
 import { startSkillFork } from '../harness/subagent/skill-fork'
 import type {
@@ -1453,6 +1453,15 @@ export class CoreApi {
       getSession: (sessionId) => kept.sessionStore.get(sessionId),
       skillsForSession: (sessionId) =>
         this.skillService.list({ sessionId }).skills,
+      // A draft's session will be Build on its project or Chat (FIX-14),
+      // as `materializeSession` creates it.
+      skillsForDraft: (draft) =>
+        this.skillService.listForProject(
+          host.projectRootFor({
+            mode: draft.mode === 'build' ? 'build' : 'chat',
+            project_path: draft.project?.project_path ?? null,
+          }),
+        ).skills,
       // Prompts held after a failed or stopped turn wait for the user; they
       // do not make the session busy.
       sessionBusy: (sessionId) =>
@@ -1499,6 +1508,8 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
       listSkills: (sessionId) =>
         this.commandApplicationService.skillsForSession(sessionId),
+      listDraftSkills: (draft) =>
+        this.commandApplicationService.skillsForDraft(draft),
       sessionContext: async (sessionId) =>
         await this.commandApplicationService.sessionContext(sessionId),
       isBusy: (sessionId) =>
@@ -2008,19 +2019,25 @@ export class CoreApi {
     },
   }
 
+  /**
+   * `list` and `complete` take a session, or a start-page draft's id with
+   * its `draftSession` (FIX-14); `invoke` needs the real session.
+   */
   readonly commands = {
-    list: (input: {
-      sessionId: string
-      includeUnavailable?: boolean
-      invocationSource?: CommandInvocationSource
-    }) => this.commandPlatform.list(input),
-    complete: (input: {
-      sessionId: string
-      commandId: string
-      rawArgs: string
-      cursor: number
-      invocationSource: CommandInvocationSource
-    }): Promise<CommandCompletion[]> => this.commandPlatform.complete(input),
+    list: (
+      input: CommandOwner & {
+        includeUnavailable?: boolean
+        invocationSource?: CommandInvocationSource
+      },
+    ) => this.commandPlatform.list(input),
+    complete: (
+      input: CommandOwner & {
+        commandId: string
+        rawArgs: string
+        cursor: number
+        invocationSource: CommandInvocationSource
+      },
+    ): Promise<CommandCompletion[]> => this.commandPlatform.complete(input),
     invoke: (input: {
       sessionId: string
       commandId: string

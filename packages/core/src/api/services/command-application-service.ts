@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { PERMISSION_PRESET_VALUES } from '../../commands/builtins'
-import type { CommandExecutionContext } from '../../commands/platform'
+import type {
+  CommandDraftSession,
+  CommandExecutionContext,
+} from '../../commands/platform'
 import type { MessageReference } from '../../harness/host/message-references'
 import type { ParsedCommandInput } from '../../commands/parser'
 import type { SessionTransitionService } from '../../commands/session-transition'
@@ -62,6 +65,8 @@ export interface CommandApplicationServiceDeps {
   sessionTransitions: Pick<SessionTransitionService, 'clear'>
   getSession(sessionId: string): { id: string } | null
   skillsForSession(sessionId: string): SkillInfoPayload[]
+  /** The Skills a start-page draft's session will see (no session yet). */
+  skillsForDraft(draft: CommandDraftSession): SkillInfoPayload[]
   sessionBusy(sessionId: string): boolean
   /** `host.compactNow(sessionId)`. */
   compact(
@@ -109,6 +114,10 @@ export class CoreCommandApplicationService {
 
   skillsForSession(sessionId: string): SkillInfoPayload[] {
     return this.deps.skillsForSession(sessionId)
+  }
+
+  skillsForDraft(draft: CommandDraftSession): SkillInfoPayload[] {
+    return this.deps.skillsForDraft(draft)
   }
 
   sessionBusy(sessionId: string): boolean {

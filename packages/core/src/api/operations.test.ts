@@ -827,6 +827,65 @@ describe('Core operation registry', () => {
     expect(setEnabled).not.toHaveBeenCalled()
   })
 
+  it('FIX-14 · commands.list / complete take a session, or a draft id with its draft context', async () => {
+    const list = vi.fn(async () => [])
+    const complete = vi.fn(async () => [])
+    const api = { commands: { list, complete } } as unknown as CoreApi
+    const draftSession = {
+      mode: 'build',
+      project: {
+        project_id: 'p',
+        project_path: '/work/p',
+        project_name: 'p',
+      },
+    }
+    await invokeCoreOperation(api, 'commands.list', [
+      { sessionId: 'draft:1', draftSession, invocationSource: 'desktop' },
+    ])
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'draft:1', draftSession }),
+    )
+    await invokeCoreOperation(api, 'commands.complete', [
+      {
+        sessionId: 'draft:1',
+        draftSession,
+        commandId: 'builtin.model',
+        rawArgs: '',
+        cursor: 0,
+        invocationSource: 'desktop',
+      },
+    ])
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'draft:1', draftSession }),
+    )
+    // Neither a session nor a draft, or a draft context on a real session:
+    // the safe argument error, which the interface shows in Chinese.
+    for (const input of [
+      { invocationSource: 'desktop' },
+      { sessionId: '  ', invocationSource: 'desktop' },
+      { draftSession, invocationSource: 'desktop' },
+      { sessionId: 'session-1', draftSession, invocationSource: 'desktop' },
+    ])
+      await expect(
+        invokeCoreOperation(api, 'commands.list', [input]),
+      ).rejects.toMatchObject({
+        code: 'invalid_core_arguments',
+        message: 'Invalid arguments for commands.list',
+      })
+    await expect(
+      invokeCoreOperation(api, 'commands.complete', [
+        {
+          commandId: 'builtin.model',
+          rawArgs: '',
+          cursor: 0,
+          invocationSource: 'desktop',
+        },
+      ]),
+    ).rejects.toMatchObject({ code: 'invalid_core_arguments' })
+    expect(list).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledOnce()
+  })
+
   it('exposes a runtime operation-key guard without accepting arbitrary strings', () => {
     expect(isCoreOperationKey('hooks.getConfig')).toBe(true)
     expect(isCoreOperationKey('chat.__proto__')).toBe(false)
