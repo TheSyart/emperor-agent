@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 最后核验：2026-10-22（对照 `5ec88219`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -278,6 +278,8 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 - `/stop`：停止当前任务；`/continue`：让 Agent 继续上一项工作。
 - 每个 Skill 使用自己的命令，例如 `/agent-reach 搜索相关讨论`。
 
+还没发过消息的新对话里同样有这些命令和 Skill，即使侧栏里一个会话都没有：Chat 新对话列出个人、插件和内置 Skill，Build 新对话再加上它那个项目的 Skill（不会是侧栏里别的会话那个项目的）。在新对话里执行命令（例如 `/plan`）会先建好会话，再在里面执行。
+
 输入框里以 `/` 开头、但不是任何命令或 Skill 的词（例如 `/tmp 下有什么`）会在输入时提示「不是命令，将作为普通消息发送」，回车后作为普通消息发出；命令列表还没加载完时，最多等 2 秒再判断。模型回复中的斜杠文本不会执行。只有 Skill 命令可以携带附件。完整规则见 [Slash command 平台](../architecture/slash-command-platform.md)。
 
 ### 在消息里引用技能和插件
@@ -339,6 +341,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 - 归档会话从主列表移除，可以在「设置 › 常规 › 已归档对话」恢复。
 - 删除会话会停止它的后台任务并把它移到「设置 › 常规 › 已归档对话 › 最近删除」：删除后提示条上的「撤销」在 10 秒内可以把它原样放回；之后也可以在最近删除里恢复。最近删除里的会话保留 30 天后自动清除，也可以在那里「永久删除」（需要确认），这时对话记录、附件和回合快照才真正删除。
 - 归档、重命名或删除失败时会弹出说明原因的提示，会话保持原样（不取消置顶、不跳转）。
+- 打开一个不存在或已删除的会话（例如旧链接）时，页面写「没有找到这个会话。」，下方的输入框停用，提示「没有找到这个会话，请从侧栏打开其他会话」；计划、权限、目标和模型按钮都不能用，不会作用到背后的另一个会话。从侧栏打开其他会话即可继续。
 - 切换会话不会把进行中的后台 turn 转移到新会话。
 - 新建会话时界面先创建本地草稿，发送第一条消息后才创建真实会话；首条消息之后会自动生成标题。
 
