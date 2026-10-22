@@ -71,15 +71,59 @@ const disabledFeatures = [
   'sleep_tool',
   'shell_snapshot',
   'shell_snapshot_v2',
+  // On by default since Codex 0.163 (AGT-13). Codex 0.153 does not know
+  // eight of them and ignores them without a warning, so both get the list.
+  // A shared app-server daemon could outlive the run and Emperor.
+  'daemon_auto_start',
+  // Emperor owns workspaces and their leases; Codex makes no worktrees.
+  'worktrees',
+  // Voice, realtime and browser annotation: never needed headless.
+  'realtime_conversation',
+  'in_app_voice',
+  'browser_annotation_api',
+  // A speed tier: Emperor never chooses one, so none may apply itself.
+  'ultrafast_mode',
+  // Daybreak, a per-thread mode with its own models.
+  'cli_daybreak',
+  // Commands on a pseudo-terminal get their own session, outside the
+  // process group Emperor stops; 0.153 ran them without one.
+  'unified_exec_tty',
+  // A new approval path; Emperor's runs ask for no approvals.
+  'write_stdin_approval',
+  // Under development; changes how an interrupt ends a turn.
+  'instant_interrupt',
 ]
-const featureConfig = Object.fromEntries([
-  ...disabledFeatures.map((name) => ['features.' + name, false]),
-  ['features.default_mode_request_user_input', true],
-  ['features.skip_host_skill_discovery', true],
-  ['features.code_mode_host', true],
-  ['features.standalone_web_search', true],
-  ['features.image_generation', true],
-])
+/**
+ * The Codex features Emperor sets for every app-server it starts (runs and
+ * the model list): name → on. Every other feature keeps Codex's default;
+ * what that leaves on is pinned per protocol in codex-contract.test.ts.
+ */
+export const CODEX_FEATURES: Readonly<Record<string, boolean>> = {
+  ...Object.fromEntries(disabledFeatures.map((name) => [name, false])),
+  default_mode_request_user_input: true,
+  skip_host_skill_discovery: true,
+  code_mode_host: true,
+  standalone_web_search: true,
+  image_generation: true,
+}
+const featureConfig = Object.fromEntries(
+  Object.entries(CODEX_FEATURES).map(([name, on]) => ['features.' + name, on]),
+)
+/** `codex app-server` over stdio, with Emperor's features, no MCP servers, file credentials. */
+export function codexAppServerArgs(): string[] {
+  return [
+    'app-server',
+    '--listen',
+    'stdio://',
+    ...Object.entries(featureConfig).flatMap(([key, value]) => [
+      '-c',
+      key + '=' + String(value),
+    ]),
+    '-c',
+    'mcp_servers={}',
+    ...CODEX_FILE_CREDENTIALS,
+  ]
+}
 export function codexThreadParams(
   input: ExecutorOpenInput,
 ): Record<string, unknown> {
@@ -734,18 +778,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       else await rpc.respond(id, { decision: 'decline' }, input.generation)
     }
     try {
-      const args = [
-        'app-server',
-        '--listen',
-        'stdio://',
-        ...Object.entries(featureConfig).flatMap(([key, value]) => [
-          '-c',
-          key + '=' + String(value),
-        ]),
-        '-c',
-        'mcp_servers={}',
-        ...CODEX_FILE_CREDENTIALS,
-      ]
+      const args = codexAppServerArgs()
       // One isolated Codex process per login at a time: it may refresh the
       // shared token (codex-auth.ts).
       if (input.codexAuth)

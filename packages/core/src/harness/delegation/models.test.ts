@@ -426,3 +426,22 @@ it('FIX-16 · the model list asks Codex for hidden models too and keeps its defa
       ?.includeHidden,
   ).toBe(true)
 })
+
+it('AGT-13 · the model list starts Codex with the same feature overrides as a run', async () => {
+  const f = fixture()
+  const runtime = await f.runtime.prepare(f.profile, 'dlg-models-features')
+  const { fakeCodexProcesses } = await import('./testing')
+  const { codexAppServerArgs } = await import('./adapters/codex')
+  const processes = fakeCodexProcesses({ models: [{ id: 'gpt-6.1-sol' }] })
+  const spawn = vi.spyOn(processes, 'spawn')
+  await readNativeModels(
+    f.profile,
+    runtime,
+    processes,
+    new AbortController().signal,
+  )
+  expect(spawn.mock.calls[0]![0].args).toEqual(codexAppServerArgs())
+  expect(spawn.mock.calls[0]![0].args.join(' ')).toContain(
+    'features.daemon_auto_start=false',
+  )
+})

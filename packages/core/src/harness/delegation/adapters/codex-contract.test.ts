@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { CodexExecutorAdapter, normalizeCodexNotification } from './codex'
+import {
+  CODEX_FEATURES,
+  CodexExecutorAdapter,
+  codexAppServerArgs,
+  normalizeCodexNotification,
+} from './codex'
 import { recordedProtocol } from './codex-schema-test-fixture'
 import { ManagedAgentProcess } from '../process'
 import { defaultExecutorConfig } from '../config'
@@ -12,6 +17,142 @@ import type { ExecutorOpenInput, NormalizedExecutorEvent } from '../types'
 
 /** Every Codex protocol Emperor has recorded and verified, oldest first. */
 const VERIFIED = ['0.153.4', '0.163.0'] as const
+
+/**
+ * Features Emperor turns off so a delegated Codex stays inside its
+ * boundaries: no native delegation, plugins, apps, browser or computer use,
+ * hooks or memories (AGT-01), and none of what 0.163 turned on by default
+ * that reaches past the run (AGT-13): a daemon that could outlive it,
+ * worktrees outside Emperor's workspace lease, voice and realtime, browser
+ * annotation, a speed tier, Daybreak, commands on a pseudo-terminal (their
+ * own session, outside the process group), a new approval path and the
+ * under-development instant interrupt.
+ */
+const BOUNDARY_OFF = [
+  'multi_agent',
+  'multi_agent_v2',
+  'apps',
+  'plugins',
+  'remote_plugin',
+  'goals',
+  'computer_use',
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'in_app_browser',
+  'in_app_chat',
+  'in_app_local_automation',
+  'hooks',
+  'memories',
+  'skill_search',
+  'skill_mcp_dependency_install',
+  'workspace_dependencies',
+  'recommended_plugins',
+  'tool_suggest',
+  'sleep_tool',
+  'shell_snapshot',
+  'shell_snapshot_v2',
+  'daemon_auto_start',
+  'worktrees',
+  'realtime_conversation',
+  'in_app_voice',
+  'browser_annotation_api',
+  'ultrafast_mode',
+  'cli_daybreak',
+  'unified_exec_tty',
+  'write_stdin_approval',
+  'instant_interrupt',
+]
+
+/**
+ * What stays on under Emperor's overrides, from each protocol's recorded
+ * defaults (`features.json`, `codex features list`). A change here is a
+ * decision: read what the feature does before pinning it.
+ */
+const EFFECTIVE_ON: Record<(typeof VERIFIED)[number], string[]> = {
+  '0.153.4': [
+    'auth_elicitation',
+    'code_mode_host',
+    'collaboration_modes',
+    'compaction_image_budget',
+    'content_item_kinds',
+    'default_mode_request_user_input',
+    'enable_request_compression',
+    'fast_mode',
+    'guardian_approval',
+    'image_generation',
+    'in_app_dictation',
+    'in_app_updates',
+    'item_ids',
+    'mentions_v2',
+    'personality',
+    'plugin_sharing',
+    'remote_compaction_v2',
+    'resize_all_images',
+    'shell_tool',
+    'skip_host_skill_discovery',
+    'sqlite',
+    'standalone_web_search',
+    'steer',
+    'terminal_resize_reflow',
+    'tool_call_mcp_elicitation',
+    'tool_search_always_defer_mcp_tools',
+    'tui_app_server',
+    'unbounded_connection_retries',
+    'unified_exec',
+    'unified_exec_zsh_fork',
+    'view_image',
+  ],
+  '0.163.0': [
+    // New in 0.163 and kept: model metadata for API-key accounts, an
+    // interrupt that reaches a running code-mode cell, the guardian reviewer's
+    // context (no reviewer runs: approvals are never asked), and the macOS
+    // system proxy for Codex's own connection.
+    'api_key_cyber_access_programs',
+    'api_key_model_discovery',
+    'auth_elicitation',
+    'code_mode_host',
+    'code_mode_interrupt',
+    'collaboration_modes',
+    'compaction_image_budget',
+    'content_item_kinds',
+    'default_mode_request_user_input',
+    'enable_request_compression',
+    'fast_mode',
+    'guardian_approval',
+    'guardian_reuse_parent_compaction',
+    'image_generation',
+    'in_app_dictation',
+    'in_app_updates',
+    'item_ids',
+    'mentions_v2',
+    'plugin_sharing',
+    'resize_all_images',
+    'shell_tool',
+    'skip_host_skill_discovery',
+    'sqlite',
+    'standalone_web_search',
+    'steer',
+    'system_proxy_fallback',
+    'terminal_resize_reflow',
+    'tool_call_mcp_elicitation',
+    'tool_search_always_defer_mcp_tools',
+    'tui_app_server',
+    'unbounded_connection_retries',
+    'unified_exec',
+    'view_image',
+  ],
+}
+
+/** A protocol's recorded feature defaults: name → on by default. */
+function featureDefaults(version: string): Record<string, boolean> {
+  const recorded = recordedProtocol(version).file('features.json') as {
+    features: Record<string, { enabled: boolean }>
+  }
+  return Object.fromEntries(
+    Object.entries(recorded.features).map(([name, f]) => [name, f.enabled]),
+  )
+}
 
 it('maps only public agent text and tool state; reasoning never crosses the normalized boundary', () => {
   expect(
@@ -215,6 +356,7 @@ function recordingAdapter(version: string) {
     ...f,
     input,
     adapter,
+    processes,
     requests,
     answers,
     notify: (method: string, params: Record<string, unknown>) =>
@@ -308,6 +450,19 @@ const ANSWERS: Record<string, string> = {
 
 describe.each(VERIFIED)('Codex %s protocol', (version) => {
   const protocol = () => recordedProtocol(version)
+
+  it('the features left on under Emperor’s overrides are exactly the pinned ones', () => {
+    const effective = featureDefaults(version)
+    for (const [name, value] of Object.entries(CODEX_FEATURES))
+      if (name in effective) effective[name] = value
+    expect(
+      Object.keys(effective)
+        .filter((name) => effective[name])
+        .sort(),
+    ).toEqual(EFFECTIVE_ON[version])
+    for (const name of BOUNDARY_OFF)
+      expect(effective[name] ?? false, name).toBe(false)
+  })
 
   it('every request the adapter sends is a valid request of this protocol', async () => {
     const { requests } = await exerciseAdapter(version)
@@ -515,4 +670,46 @@ it('the schema check rejects what a protocol rejects', () => {
   expect(
     recordedProtocol('0.163.0').methods('ClientRequest.json'),
   ).not.toContain('thread/rollback')
+})
+
+it('every boundary flag is overridden off, at spawn and in thread/start', async () => {
+  for (const name of BOUNDARY_OFF)
+    expect(CODEX_FEATURES[name], name).toBe(false)
+  const args = codexAppServerArgs()
+  for (const [name, value] of Object.entries(CODEX_FEATURES))
+    expect(args.join(' '), name).toContain(`features.${name}=${value}`)
+  const f = recordingAdapter('0.163.0')
+  const spawn = vi.mocked(f.processes.spawn)
+  const session = await f.adapter.open(f.input)
+  expect(spawn.mock.calls[0]![0].args).toEqual(codexAppServerArgs())
+  const config = (
+    f.requests.find((r) => r.method === 'thread/start')!.params as {
+      config: Record<string, unknown>
+    }
+  ).config
+  for (const [name, value] of Object.entries(CODEX_FEATURES))
+    expect(config['features.' + name], name).toBe(value)
+  await session.close()
+  f.cleanup()
+})
+
+it('0.163 knows every override; 0.153.4 does not know eight of them and ignores them silently', () => {
+  const unknown = (version: string) =>
+    Object.keys(CODEX_FEATURES)
+      .filter((name) => !(name in featureDefaults(version)))
+      .sort()
+  // 0.163 would log a configWarning for a key it does not know.
+  expect(unknown('0.163.0')).toEqual([])
+  // Checked against the real 0.153.4 (AGT-13): no warning, no error, the
+  // known features unchanged. The keys are sent to both versions.
+  expect(unknown('0.153.4')).toEqual([
+    'browser_annotation_api',
+    'cli_daybreak',
+    'daemon_auto_start',
+    'in_app_voice',
+    'instant_interrupt',
+    'ultrafast_mode',
+    'unified_exec_tty',
+    'worktrees',
+  ])
 })
