@@ -50,6 +50,8 @@ describe('ConversationView composer seat integration', () => {
       'saveComposerDraft(previous, handle.takeSnapshot())',
     )
     expect(source).toContain('handle.applySnapshot(takeComposerDraft(next))')
+    // FIX-13 D3: a draft that became its session is the same chat.
+    expect(source).toContain('isDraftPromotion(previous, next)')
   })
 
   it('passes full control and Provider metadata to the composer', () => {

@@ -73,6 +73,17 @@ export function draftSessionOf(
   }
 }
 
+/** Drafts promoted in this window: draft id → its session id (FIX-13). */
+const promotions = new Map<string, string>()
+
+/** `next` is the session the draft `previous` became: the same chat. */
+export function isDraftPromotion(
+  previous: string | null | undefined,
+  next: string | null | undefined,
+): boolean {
+  return Boolean(previous && next && promotions.get(previous) === next)
+}
+
 export function applySessionCreated(
   sessions: SessionInfo[],
   event: Extract<WsEvent, { event: 'session_created' }>,
@@ -91,6 +102,7 @@ export function promoteDraftSession(
   const index = sessions.findIndex(
     (session) => session.id === draftId || session.id === incoming.id,
   )
+  if (isDraftSessionId(draftId)) promotions.set(draftId, incoming.id)
   if (index < 0) return [incoming, ...sessions]
   const next = sessions.slice()
   // The draft's own settings now live in Core, with the session.

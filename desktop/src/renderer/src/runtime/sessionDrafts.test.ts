@@ -146,8 +146,8 @@ describe('session draft helpers', () => {
     })
   })
 
-  it('1 · a promoted draft drops its own settings: they now live in Core', async () => {
-    const { createDraftSession, promoteDraftSession } =
+  it('1 · D3 · a promoted draft drops its own settings and is known as the same chat', async () => {
+    const { createDraftSession, isDraftPromotion, promoteDraftSession } =
       await import('./sessionDrafts')
     const draft: SessionInfo = {
       ...createDraftSession(),
@@ -162,5 +162,9 @@ describe('session draft helpers', () => {
     expect(row).toMatchObject({ id: 'real-1' })
     expect(row.plan).toBeUndefined()
     expect(row.preset).toBeUndefined()
+    expect(isDraftPromotion(draft.id, 'real-1')).toBe(true)
+    expect(isDraftPromotion(draft.id, 'other')).toBe(false)
+    expect(isDraftPromotion('real-1', draft.id)).toBe(false)
+    expect(isDraftPromotion('draft:never-sent', 'real-1')).toBe(false)
   })
 })

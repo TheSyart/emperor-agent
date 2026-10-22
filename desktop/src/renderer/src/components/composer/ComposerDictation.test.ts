@@ -378,6 +378,27 @@ describe('dictation in the composer', () => {
     expect(composer.button('插入听写内容')).toBeNull()
   })
 
+  it('FIX-13 · D3 · keeps recording when the draft becomes its session, and puts the text there', async () => {
+    const { promoteDraftSession } = await import('../../runtime/sessionDrafts')
+    const composer = mount('draft:d3')
+    await startByButton(composer)
+    hear({ type: 'partial', text: '第二条' })
+    await settle()
+    // The first message was sent: Core names the draft's session.
+    promoteDraftSession([], 'draft:d3', {
+      id: 'session-d3',
+      title: '新会话',
+    } as never)
+    composer.props.dictationChat = 'session-d3'
+    await settle()
+    expect(api.stopDictation).not.toHaveBeenCalled()
+    expect(composer.draft()).toBe('第二条')
+    hear({ type: 'final', text: '第二条消息' })
+    hear({ type: 'ended', reason: 'stopped' })
+    await settle()
+    expect(composer.view().state.doc.textContent).toBe('第二条消息')
+  })
+
   it('starts and stops with the shortcut', async () => {
     const composer = mount()
     const key = () =>

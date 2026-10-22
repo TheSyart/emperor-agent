@@ -109,6 +109,7 @@ import {
   saveComposerDraft,
   takeComposerDraft,
 } from '../../composables/useComposerDrafts'
+import { isDraftPromotion } from '../../runtime/sessionDrafts'
 import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
 import {
   activeTurnTick,
@@ -808,12 +809,14 @@ function sendFromComposer(
   return ctx.submitFromComposer(payload)
 }
 
-// Each chat keeps its own unsent draft (text, chips, uploaded files).
+// Each chat keeps its own unsent draft (text, chips, uploaded files). A
+// draft that became its session is the same chat: what was typed while its
+// first message went out stays (FIX-13).
 watch(
   viewingId,
   (next, previous) => {
     const handle = composer.value
-    if (!handle || next === previous) return
+    if (!handle || next === previous || isDraftPromotion(previous, next)) return
     if (previous) saveComposerDraft(previous, handle.takeSnapshot())
     handle.applySnapshot(takeComposerDraft(next))
   },
