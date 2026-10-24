@@ -59,6 +59,7 @@ import { useUiPreferences } from '../../composables/useUiPreferences'
 import ChatNodeSeat from './ChatNodeSeat.vue'
 import { createExpansionStore, provideChatContext } from './chatContext'
 import TurnStatus from './TurnStatus.vue'
+import ProvisionalUserBubble from './nodes/ProvisionalUserBubble.vue'
 import ConversationLoading from './ConversationLoading.vue'
 import ProcessGroup from './nodes/ProcessGroup.vue'
 import SubagentGroup from './nodes/SubagentGroup.vue'
@@ -70,6 +71,7 @@ import {
   type TimelineRow,
 } from './processModel'
 import type { TimelineAgents } from './subagentRows'
+import type { ProvisionalPrompt } from '../../types'
 import { isAtBottom, turnStatusLabel } from './timelineModel'
 
 const props = withDefaults(
@@ -77,8 +79,10 @@ const props = withDefaults(
     sessionId: string
     rootSessionId?: string
     store?: ConversationStore
+    /** Messages inserted into the running turn, not in the log yet (BUG-07). */
+    provisional?: ProvisionalPrompt[]
   }>(),
-  { store: undefined, rootSessionId: undefined },
+  { store: undefined, rootSessionId: undefined, provisional: () => [] },
 )
 const emit = defineEmits<{
   inspect: [callId: string]
@@ -583,6 +587,13 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
+        <div v-if="provisional.length" class="provisional">
+          <ProvisionalUserBubble
+            v-for="prompt in provisional"
+            :key="prompt.clientMessageId"
+            :prompt="prompt"
+          />
+        </div>
         <TurnStatus
           v-if="running && !liveProcess"
           :label="statusLabel"
@@ -636,6 +647,14 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
 
 .list {
   width: 100%;
+}
+
+/* Inserted messages waiting for the next step (BUG-07), after the flow. */
+.provisional {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
 }
 
 .list :deep(.vue-recycle-scroller__item-view) {

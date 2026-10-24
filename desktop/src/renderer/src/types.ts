@@ -1281,6 +1281,19 @@ export interface QueuedPromptItem {
   payload?: ChatSendPayload
 }
 
+/**
+ * A message inserted into the running turn that the log has not shown yet
+ * (BUG-07): the chat shows it at once as a provisional bubble.
+ */
+export interface ProvisionalPrompt {
+  id: string
+  clientMessageId: string
+  content: string
+  references?: MessageReference[]
+  createdOrder: number
+  sessionId: string
+}
+
 export interface PendingState {
   label: string
   detail: string
