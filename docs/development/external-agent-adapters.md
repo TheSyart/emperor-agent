@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-25（对照 `8057bef3`）<br>
+> 最后核验：2026-10-25（对照 `e962d116`）<br>
 > 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/codex-protocol-handshake.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
@@ -21,6 +21,8 @@
 5. `--write` 把依赖的 schema 文件、`digest.json` 与 `features.json`（`codex features list` 的默认值）写入 `protocol/codex-<version>/`（适配器新依赖的文件用 `--file <path>` 加入，之后的版本沿用最新一份的清单），用 prettier 格式化，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 按版本顺序注册，并把版本加入 contract 测试的 `VERIFIED`。需要登录的真实两轮/问题/干预/取消/恢复证据由维护者在真机上补齐。
 
 同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致，`compatibility.test.ts` 要求维护脚本与运行时对每份协议算出同一个摘要。
+
+版本相关的失败（VER-03）：适配器因版本拒绝一次运行时用 `EXECUTOR_INCOMPATIBLE`（带中文 `reason`）。一个失败算不算版本问题，统一用 `executor-health.ts` 的 `isVersionFailure()` 判断（`VERSION_FAILURE_CODES`，加上未验证协议的 Codex 的启动与轮次失败），不要在别处另列失败码；`DelegationService` 按它记录每个版本的表现，设置页据此提供退回（见[架构文档](../architecture/external-agent-delegation.md#上次正常的版本与退回ver-03)）。Emperor 启动的每个 Claude 进程都带 `DISABLE_AUTOUPDATER=1`（`claudeProcessEnvironment`，运行的 spawn 环境里再固定一次）；新增启动 Claude 的入口时用 `ExecutorRuntimeService.prepare` 给的环境，不要自己拼。
 
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。中断先发协议 interrupt（最多等 5 秒），之后 `session.close()` 调用 `handle.terminate()`；未知协议请求默认拒绝。
 

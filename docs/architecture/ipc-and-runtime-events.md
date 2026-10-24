@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-22（对照 `1bb92495`）<br>
+> 最后核验：2026-10-25（对照 `e962d116`）<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -60,6 +60,8 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 | `environment.*`、`diagnostics.*`、`processes.*`、`onboarding.*`、`desktopPet.*`、`attachments.*`、`projects.*` | 其他宿主能力                                                                                                                                                                                                                                                                                         |
 
 属于某个对话的写入（`delegations.*` 的发送与成果操作、`processes.reparent`）经过 CoreApi mutation guard：那个对话有待处理交互时返回 409 `mutation_blocked_pending`，处于 Plan 模式时返回 403 `mutation_blocked_plan`。设置类 operation 是全局的，不受调用方显示的会话影响（FIX-10），见[权限与控制](control-and-permissions.md#coreapi-mutation-guard)。
+
+子智能体的版本与升级（AGT-13、VER-03）：`executors.versions`、`executors.upgrade`、`executors.rollback`（退回上次正常的版本）、`executors.cancelUpgrade`、`executors.dismissUpgrades`；改变版本的操作按 view 校验，`target` 必须是当前提供的版本，进度经 host 事件 `executor_upgrade`，见[外部子智能体](external-agent-delegation.md#版本检测与一键升级agt-13)。
 
 `bootstrap` 的结果带 `sessionId`：它描述的会话，即界面显示的会话（`bootstrap({ sessionId })` 会先激活它）。`sessions.activate` 只改变这一项，不影响任何会话里正在运行的东西。
 
