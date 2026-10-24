@@ -1738,6 +1738,9 @@ export class DelegationService {
             this.options.config().limits.claudeMaxTurns ??
             DEFAULT_CLAUDE_MAX_TURNS,
         }),
+        ...(preflight.executableVersion
+          ? { executableVersion: preflight.executableVersion }
+          : {}),
         ...(billing === 'api'
           ? { budgetUsd: this.budget.remainingUsd(record.owner.taskScopeId) }
           : {}),
@@ -1874,6 +1877,16 @@ export class DelegationService {
             modelChoice = event.modelChoice
             await this.change(e, activeRunId, { modelChoice })
           }
+          // A newer Claude Code's own plugins, turned off (VER-02).
+          if (event.builtinPluginsDisabled)
+            await this.change(e, activeRunId, {
+              notices: [
+                {
+                  kind: 'builtin_plugins_disabled',
+                  ...event.builtinPluginsDisabled,
+                },
+              ],
+            })
         }
         if (event.type === 'usage') {
           const { type: _type, ...reported } = event as typeof event & {
@@ -1904,7 +1917,7 @@ export class DelegationService {
           if (over) throw over
         }
         if (event.type === 'transport_error')
-          throw new DelegationError(event.code, event.message)
+          throw new DelegationError(event.code, event.message, event.reason)
         if (
           event.type === 'session_bound' &&
           event.sessionId !== session.providerSessionId
@@ -2031,6 +2044,12 @@ export class DelegationService {
       }
       if (error instanceof DelegationError) {
         failureCode = error.code
+        // Emperor refused the run and says why (VER-02).
+        if (error.reason)
+          summary = boundText(
+            summary ? error.reason + '\n\n' + summary : error.reason,
+            8192,
+          )
         if (error.code !== 'ABORTED')
           log.info('external run stopped', {
             ...where,

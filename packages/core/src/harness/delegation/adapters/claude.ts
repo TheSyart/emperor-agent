@@ -33,6 +33,13 @@ import { AsyncQueue } from './async-queue'
 import { readClaudeSessionHistory } from './claude-history'
 import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
 import { claudeInitIssue } from '../compatibility'
+import {
+  BuiltinPluginLedger,
+  isBuiltinPlugin,
+  preflightClaudePlugins,
+  type ReportedPlugin,
+} from '../claude-builtin-plugins'
+import { describeUnapprovedExtensions } from '../failure'
 import { projectInstructions } from '../dev-environment'
 import { findExecutable } from '../executable'
 function record(value: unknown): Record<string, unknown> {
@@ -271,6 +278,44 @@ export function normalizeClaudeMessage(
   }
   return events
 }
+/**
+ * What system/init says the claude loaded beyond what Emperor allows, as
+ * the run's Chinese reason (VER-02), or undefined.
+ */
+function initExtensions(raw: Record<string, unknown>): string | undefined {
+  const servers = (Array.isArray(raw.mcp_servers) ? raw.mcp_servers : []).map(
+    (s) => String(record(s).name ?? s),
+  )
+  if (servers.length)
+    return describeUnapprovedExtensions({ kind: 'mcp', servers })
+  const plugins = (Array.isArray(raw.plugins) ? raw.plugins : []).map(
+    (p): ReportedPlugin => {
+      const r = record(p)
+      return {
+        name: String(r.name),
+        path: String(r.path),
+        ...(typeof r.source === 'string' ? { source: r.source } : {}),
+      }
+    },
+  )
+  if (!plugins.length) return undefined
+  const claudeVersion =
+    typeof raw.claude_code_version === 'string'
+      ? raw.claude_code_version
+      : undefined
+  const foreign = plugins.filter((p) => !isBuiltinPlugin(p))
+  return foreign.length
+    ? describeUnapprovedExtensions({
+        kind: 'foreign',
+        claudeVersion,
+        plugins: foreign,
+      })
+    : describeUnapprovedExtensions({
+        kind: 'stuck',
+        claudeVersion,
+        plugins: plugins.map((p) => p.source!),
+      })
+}
 const tools = CLAUDE_HOST_TOOLS
 const forbidden = [
   'Agent',
@@ -295,6 +340,7 @@ const forbidden = [
 export class ClaudeExecutorAdapter implements ExecutorAdapter {
   readonly backend = 'claude-code' as const
   private readonly processes: ManagedAgentProcess
+  private readonly ledger: BuiltinPluginLedger
   constructor(
     private readonly options: {
       processes?: ManagedAgentProcess
@@ -303,9 +349,17 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       ) => Promise<Pick<WarmQuery, 'query' | 'close'>>
       /** Test hook: the SDK entry the history reader imports. */
       sdkUrl?: () => string
+      /**
+       * Claude Code's own plugins, turned off (VER-02); the composition
+       * root keeps it in `<delegations>/claude-code/`. Default: the seed.
+       */
+      ledger?: BuiltinPluginLedger
+      /** Each control request of the plugin preflight (default 5 s). */
+      preflightTimeoutMs?: number
     } = {},
   ) {
     this.processes = options.processes ?? new ManagedAgentProcess()
+    this.ledger = options.ledger ?? new BuiltinPluginLedger()
   }
   async inspect(
     input: ExecutorOpenInput,
@@ -523,10 +577,8 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
                 ),
               )
             : {}),
-          enabledPlugins: {
-            'agents-md@builtin': false,
-            'telemetry@builtin': false,
-          },
+          // Every builtin Emperor knows, off from launch (VER-02).
+          enabledPlugins: this.ledger.enabledPluginsSetting(),
           syncClaudeAiSkills: false,
           syncClaudeAiPlugins: false,
         },
@@ -673,6 +725,21 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
           'EXECUTOR_INCOMPATIBLE',
           'Claude did not apply required tool hooks',
         )
+      // Before any prompt: builtins a newer claude brought are turned off
+      // in this process; anything else it loaded refuses the run (VER-02).
+      const preflight = await preflightClaudePlugins(
+        query,
+        this.ledger,
+        input.executableVersion,
+        this.options.preflightTimeoutMs,
+      )
+      let pluginNotice =
+        preflight.status === 'adapted'
+          ? {
+              plugins: preflight.disabled,
+              claudeVersion: input.executableVersion ?? 'unknown',
+            }
+          : undefined
       const seenTools = new Set<string>()
       const nativeCalls = new Map<string, { name: string; url?: string }>()
       let sawText = false
@@ -708,17 +775,14 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
                       ),
                     ),
                 )
-              if (
-                (Array.isArray(raw.plugins) && raw.plugins.length) ||
-                (Array.isArray(raw.mcp_servers) && raw.mcp_servers.length)
-              )
+              // The last check (VER-02): the preflight turned the builtins
+              // off, so what is still here is refused.
+              const extensions = initExtensions(raw)
+              if (extensions)
                 throw new DelegationError(
                   'EXECUTOR_INCOMPATIBLE',
-                  'Claude loaded unapproved plugins or MCP servers: ' +
-                    JSON.stringify({
-                      plugins: raw.plugins,
-                      mcp_servers: raw.mcp_servers,
-                    }),
+                  extensions,
+                  extensions,
                 )
               initialized = true
               if (active) acknowledge({ providerTurnId: active.messageId })
@@ -738,6 +802,10 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
                   provider = 'custom-provider'
                 }
                 event = { ...event, provider }
+                if (pluginNotice && event.source === 'initialization') {
+                  event = { ...event, builtinPluginsDisabled: pluginNotice }
+                  pluginNotice = undefined
+                }
               }
               if (event.type === 'text_delta') sawText = true
               if (event.type === 'tool_started') {
@@ -795,12 +863,17 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             error instanceof DelegationError
               ? redactExecutorText(error.message, input.secretValues ?? [])
               : 'Claude protocol stream failed'
-          startFailure = new DelegationError(code, message)
+          const reason =
+            error instanceof DelegationError && error.reason
+              ? redactExecutorText(error.reason, input.secretValues ?? [])
+              : undefined
+          startFailure = new DelegationError(code, message, reason)
           rejectSubmit(startFailure)
           emit({
             type: 'transport_error',
             code,
             message,
+            ...(reason ? { reason } : {}),
           })
           events.end()
         }
@@ -811,6 +884,13 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         throw new DelegationError(
           'OUTCOME_UNKNOWN',
           'Claude startup process termination is unproven',
+        )
+      // Emperor refused what this claude loaded (VER-02): its own reason.
+      if (error instanceof DelegationError && error.reason)
+        throw new DelegationError(
+          error.code,
+          redactExecutorText(error.reason, input.secretValues ?? []),
+          redactExecutorText(error.reason, input.secretValues ?? []),
         )
       throw new DelegationError(
         error instanceof DelegationError ? error.code : 'EXECUTOR_START_FAILED',

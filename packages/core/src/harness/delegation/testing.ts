@@ -541,3 +541,159 @@ export function fakeNpmPrefix(
     mode: (mode) => writeFileSync(join(root, 'npm-mode'), mode),
   }
 }
+
+/** A plugin as Claude Code's SDK reports it (reloadPlugins, system/init). */
+export interface FakeClaudePlugin {
+  name: string
+  path: string
+  source?: string
+}
+
+export interface FakeClaudeSdkOptions {
+  /** `claude_code_version` in system/init. */
+  version?: string
+  /** What the CLI loads unless `enabledPlugins` names it false. */
+  plugins?: FakeClaudePlugin[]
+  /** MCP servers the CLI connects whatever Emperor asks. */
+  mcpServers?: string[]
+  /** false: reloadPlugins is refused (older CLI); 'hang': never answers. */
+  supportsReload?: boolean | 'hang'
+  /** false: applyFlagSettings is accepted and changes nothing. */
+  honoursFlagSettings?: boolean
+  /** reloadPlugins' error_count. */
+  errorCount?: number
+}
+
+export interface FakeClaudeControlRequest {
+  subtype: 'reload_plugins' | 'apply_flag_settings' | 'mcp_server_status'
+  /** Which process (0, 1, …) received it. */
+  launch: number
+  /** User messages the fake had received when the request arrived. */
+  modelCallsBefore: number
+  settings?: Record<string, unknown>
+}
+
+/**
+ * A stand-in for the Agent SDK and the installed claude (VER-02), passed
+ * as ClaudeExecutorAdapter's `startup`. Each launch spawns a quiet node
+ * process through the adapter's managed spawn (as the SDK does) and
+ * answers the control requests Emperor sends before a prompt from its
+ * options: a plugin is loaded unless the launch's `settings.enabledPlugins`
+ * or an honoured applyFlagSettings names it false. Every control request
+ * and user message is recorded; `modelCalls` counts user messages (each
+ * would be a model call). Tests never run the real claude.
+ */
+export function fakeClaudeSdk(options: FakeClaudeSdkOptions = {}): {
+  startup: (
+    options: import('@anthropic-ai/claude-agent-sdk').Options,
+  ) => Promise<
+    Pick<import('@anthropic-ai/claude-agent-sdk').WarmQuery, 'query' | 'close'>
+  >
+  launches: import('@anthropic-ai/claude-agent-sdk').Options[]
+  controlRequests: FakeClaudeControlRequest[]
+  userMessages: unknown[]
+  readonly modelCalls: number
+} {
+  type Options = import('@anthropic-ai/claude-agent-sdk').Options
+  type Query = import('@anthropic-ai/claude-agent-sdk').Query
+  const launches: Options[] = [],
+    controlRequests: FakeClaudeControlRequest[] = [],
+    userMessages: unknown[] = []
+  const sourceOf = (p: FakeClaudePlugin) => p.source ?? p.name
+  const startup = async (opts: Options) => {
+    const launch = launches.push(opts) - 1
+    const proc = opts.spawnClaudeCodeProcess!({
+      command: process.execPath,
+      args: ['-e', 'process.stdin.resume()'],
+      cwd: opts.cwd ?? process.cwd(),
+      env: {},
+      signal: new AbortController().signal,
+    })
+    let flags: Record<string, unknown> = {}
+    const loaded = () => {
+      const enabled = {
+        ...((opts.settings as { enabledPlugins?: Record<string, unknown> })
+          ?.enabledPlugins ?? {}),
+        ...((flags.enabledPlugins as Record<string, unknown>) ?? {}),
+      }
+      return (options.plugins ?? []).filter(
+        (p) => enabled[sourceOf(p)] !== false,
+      )
+    }
+    const control = (
+      subtype: FakeClaudeControlRequest['subtype'],
+      settings?: Record<string, unknown>,
+    ) =>
+      controlRequests.push({
+        subtype,
+        launch,
+        modelCallsBefore: userMessages.length,
+        ...(settings ? { settings } : {}),
+      })
+    const mcp = () =>
+      (options.mcpServers ?? []).map((name) => ({ name, status: 'connected' }))
+    return {
+      close: () => proc.stdin.end(),
+      query: (prompts: string | AsyncIterable<unknown>) => {
+        const messages = (async function* () {
+          if (typeof prompts === 'string') throw new Error('must stream')
+          for await (const prompt of prompts) {
+            userMessages.push(prompt)
+            yield {
+              type: 'system',
+              subtype: 'init',
+              session_id: opts.resume ?? opts.sessionId,
+              tools: ['Read'],
+              plugins: loaded(),
+              mcp_servers: mcp(),
+              claude_code_version: options.version ?? '2.1.310',
+            }
+            yield {
+              type: 'result',
+              subtype: 'success',
+              result: 'done',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }
+          }
+        })()
+        return Object.assign(messages, {
+          initializationResult: async () => ({ hooks_applied: true }),
+          reloadPlugins: async () => {
+            control('reload_plugins')
+            if (options.supportsReload === 'hang')
+              return await new Promise<never>(() => {})
+            if (options.supportsReload === false)
+              throw new Error('Unsupported control request: reload_plugins')
+            return {
+              commands: [],
+              agents: [],
+              plugins: loaded(),
+              mcpServers: mcp(),
+              error_count: options.errorCount ?? 0,
+            }
+          },
+          applyFlagSettings: async (settings: Record<string, unknown>) => {
+            control('apply_flag_settings', settings)
+            if (options.honoursFlagSettings !== false)
+              flags = { ...flags, ...settings }
+          },
+          mcpServerStatus: async () => {
+            control('mcp_server_status')
+            return mcp()
+          },
+          interrupt: async () => undefined,
+          close: () => proc.stdin.end(),
+        }) as unknown as Query
+      },
+    }
+  }
+  return {
+    startup,
+    launches,
+    controlRequests,
+    userMessages,
+    get modelCalls() {
+      return userMessages.length
+    },
+  }
+}

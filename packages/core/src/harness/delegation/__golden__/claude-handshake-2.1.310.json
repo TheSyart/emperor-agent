@@ -1,0 +1,34 @@
+{
+  "claudeVersion": "2.1.310",
+  "sdkVersion": "0.3.281",
+  "promptless": {
+    "hooksApplied": true,
+    "reload": {
+      "supported": true,
+      "plugins": [
+        {
+          "name": "cc-plugin-plugin-authoring",
+          "path": "builtin",
+          "source": "cc-plugin-plugin-authoring@builtin"
+        }
+      ],
+      "mcpServers": [],
+      "errorCount": 0
+    },
+    "afterFlagSettings": {
+      "plugins": []
+    },
+    "mcpStatus": []
+  },
+  "withSeed": {
+    "initPlugins": [],
+    "initMcpServers": []
+  },
+  "ordering": {
+    "initBeforeFirstNetworkAttempt": true,
+    "networkAttempts": 15,
+    "startupAttemptsBeforePrompt": 12
+  },
+  "autoUpdateAttempted": false,
+  "modelCalls": 0
+}

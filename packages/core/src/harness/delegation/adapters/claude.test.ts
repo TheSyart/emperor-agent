@@ -1,5 +1,5 @@
-import { expect, it, vi } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
   Options,
@@ -10,8 +10,13 @@ import type {
 import { ClaudeExecutorAdapter } from './claude'
 import { ManagedAgentProcess, type ManagedProcessHandle } from '../process'
 import { defaultExecutorConfig } from '../config'
-import { delegationTestDirectory } from '../testing'
-import type { ExecutorOpenInput, NormalizedExecutorEvent } from '../types'
+import { delegationTestDirectory, fakeClaudeSdk } from '../testing'
+import { BuiltinPluginLedger } from '../claude-builtin-plugins'
+import type {
+  ExecutorOpenInput,
+  ExecutorSession,
+  NormalizedExecutorEvent,
+} from '../types'
 
 /** Waits on work that runs processes, Git or the file system: room for a
  * loaded CI runner instead of the 1 s default (FIX-17). */
@@ -397,4 +402,210 @@ it('6 · a Claude task reads the repository’s CLAUDE.md, without loading its s
   expect(f.getOptions().settingSources).toEqual([])
   await session.close()
   f.cleanup()
+})
+
+/**
+ * VER-02: a claude that loads its own builtin plugin (2.1.308+) gets it
+ * turned off before the first prompt, in the same process (VER-01: E1, E2
+ * pass on the real binaries); anything else stays refused. The fake SDK
+ * answers reloadPlugins / applyFlagSettings from the launch's options.
+ */
+describe('VER-02 · builtin plugins are turned off before the first prompt', () => {
+  const novel = { name: 'x', path: 'builtin', source: 'x@builtin' }
+  const SEED = {
+    'agents-md@builtin': false,
+    'cc-plugin-plugin-authoring@builtin': false,
+    'telemetry@builtin': false,
+  }
+  function preflight(
+    sdk: ReturnType<typeof fakeClaudeSdk>,
+    ledger = new BuiltinPluginLedger(),
+  ) {
+    const f = fixture()
+    const adapter = new ClaudeExecutorAdapter({
+      startup: sdk.startup,
+      ledger,
+      preflightTimeoutMs: 200,
+    })
+    const input: ExecutorOpenInput = {
+      ...f.input,
+      executableVersion: '2.1.312',
+    }
+    return { ...f, adapter, input, ledger }
+  }
+  async function run(session: ExecutorSession, id = 'dgr-plugins') {
+    const events: NormalizedExecutorEvent[] = []
+    const submit = session.submit({
+      runId: id,
+      messageId: 'dgm-' + id,
+      text: 'fixture',
+    })
+    for await (const event of session.events) {
+      events.push(event)
+      if (event.type === 'turn_finished') break
+    }
+    await submit
+    return events
+  }
+  const disabledNotice = (events: NormalizedExecutorEvent[]) =>
+    events.flatMap((e) =>
+      e.type === 'runtime_metadata' && e.builtinPluginsDisabled
+        ? [e.builtinPluginsDisabled]
+        : [],
+    )
+
+  it('1 · the seed’s three builtins are false in settings.enabledPlugins', async () => {
+    const sdk = fakeClaudeSdk()
+    const f = preflight(sdk)
+    await (await f.adapter.open(f.input)).close()
+    expect(
+      (sdk.launches[0]!.settings as { enabledPlugins: unknown }).enabledPlugins,
+    ).toEqual(SEED)
+    f.cleanup()
+  })
+
+  it('2 · 10 · a new x@builtin is turned off in the running process; no prompt before, no restart', async () => {
+    const sdk = fakeClaudeSdk({ version: '2.1.312', plugins: [novel] })
+    const f = preflight(sdk)
+    const session = await f.adapter.open(f.input)
+    expect(sdk.controlRequests.map((r) => r.subtype)).toEqual([
+      'reload_plugins',
+      'apply_flag_settings',
+      'reload_plugins',
+    ])
+    expect(sdk.controlRequests.every((r) => r.modelCallsBefore === 0)).toBe(
+      true,
+    )
+    expect(sdk.controlRequests[1]!.settings).toEqual({
+      enabledPlugins: { ...SEED, 'x@builtin': false },
+    })
+    const events = await run(session)
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn_finished',
+      status: 'completed',
+    })
+    expect(disabledNotice(events)).toEqual([
+      { plugins: ['x@builtin'], claudeVersion: '2.1.312' },
+    ])
+    expect(sdk.launches).toHaveLength(1)
+    expect(sdk.modelCalls).toBe(1)
+    await session.close()
+    f.cleanup()
+  })
+
+  it('3 · the learned plugin is off from launch in the next run: no applyFlagSettings, no notice', async () => {
+    const d = delegationTestDirectory()
+    const ledger = new BuiltinPluginLedger(d.root)
+    const sdk = fakeClaudeSdk({ version: '2.1.312', plugins: [novel] })
+    const f = preflight(sdk, ledger)
+    await run(await f.adapter.open(f.input), 'dgr-first')
+    const next = preflight(sdk, new BuiltinPluginLedger(d.root))
+    const session = await next.adapter.open(next.input)
+    expect(
+      (sdk.launches[1]!.settings as { enabledPlugins: unknown }).enabledPlugins,
+    ).toEqual({ ...SEED, 'x@builtin': false })
+    expect(
+      sdk.controlRequests.filter((r) => r.launch === 1).map((r) => r.subtype),
+    ).toEqual(['reload_plugins'])
+    expect(disabledNotice(await run(session, 'dgr-second'))).toEqual([])
+    await session.close()
+    f.cleanup()
+    next.cleanup()
+    d.cleanup()
+  })
+
+  it.each([
+    [
+      '4 · a plugin from disk',
+      { plugins: [{ name: 'foo', path: '/Users/ada/plugins/foo' }] },
+      /EXECUTOR_INCOMPATIBLE.*未批准的扩展：插件 foo（来自 /,
+    ],
+    [
+      '9 · path builtin but a marketplace source',
+      { plugins: [{ name: 'foo', path: 'builtin', source: 'foo@market' }] },
+      /EXECUTOR_INCOMPATIBLE.*未批准的扩展：插件 foo@market/,
+    ],
+    [
+      '5 · an MCP server',
+      { mcpServers: ['a'] },
+      /EXECUTOR_INCOMPATIBLE.*MCP server：a。子智能体不允许使用 MCP/,
+    ],
+    [
+      '5 · a builtin that brings an MCP server',
+      { plugins: [novel], mcpServers: ['plugin:x:docs'] },
+      /EXECUTOR_INCOMPATIBLE.*MCP server：plugin:x:docs/,
+    ],
+    [
+      'plugin errors',
+      { plugins: [novel], errorCount: 1 },
+      /EXECUTOR_INCOMPATIBLE.*报告了 1 个错误/,
+    ],
+    [
+      '6 · a builtin still loaded after it was turned off',
+      { plugins: [novel], honoursFlagSettings: false },
+      /EXECUTOR_INCOMPATIBLE.*内置插件 x 关闭后仍在加载.*退回上一个正常版本/,
+    ],
+  ])(
+    '%s: refused before any prompt, nothing learned',
+    async (_name, options, reason) => {
+      const d = delegationTestDirectory()
+      const ledger = new BuiltinPluginLedger(d.root)
+      const sdk = fakeClaudeSdk({ version: '2.1.312', ...options })
+      const f = preflight(sdk, ledger)
+      await expect(f.adapter.open(f.input)).rejects.toThrow(reason)
+      expect(sdk.modelCalls).toBe(0)
+      expect(ledger.disabled()).toEqual(Object.keys(SEED).sort())
+      expect(readdirSync(d.root)).toEqual([])
+      f.cleanup()
+      d.cleanup()
+    },
+  )
+
+  it('7 · a claude without reloadPlugins skips the preflight; the init gate decides', async () => {
+    // Nothing loaded: the run goes on.
+    const clean = fakeClaudeSdk({ supportsReload: false })
+    const a = preflight(clean)
+    const session = await a.adapter.open(a.input)
+    expect((await run(session)).at(-1)).toMatchObject({ status: 'completed' })
+    expect(clean.controlRequests.map((r) => r.subtype)).toEqual([
+      'reload_plugins',
+    ])
+    await session.close()
+    a.cleanup()
+    // A builtin it could not be asked about: refused at init, no restart.
+    const loaded = fakeClaudeSdk({ supportsReload: false, plugins: [novel] })
+    const b = preflight(loaded)
+    const refused = await b.adapter.open(b.input)
+    await expect(
+      refused.submit({ runId: 'dgr-gate', messageId: 'dgm-gate', text: 'x' }),
+    ).rejects.toThrow(/EXECUTOR_INCOMPATIBLE.*内置插件 x/)
+    expect(loaded.launches).toHaveLength(1)
+    await refused.close()
+    b.cleanup()
+  })
+
+  it('7 · a preflight that times out counts as unsupported, not as a failure', async () => {
+    const sdk = fakeClaudeSdk({ supportsReload: 'hang' })
+    const f = preflight(sdk)
+    const started = Date.now()
+    const session = await f.adapter.open(f.input)
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect((await run(session)).at(-1)).toMatchObject({ status: 'completed' })
+    await session.close()
+    f.cleanup()
+  })
+
+  it('a resumed conversation is checked the same way', async () => {
+    const sdk = fakeClaudeSdk({ plugins: [novel] })
+    const f = preflight(sdk)
+    const session = await f.adapter.open({
+      ...f.input,
+      resumeSessionId: '34e4f6da-4e43-46ee-bbfe-2fe1d039fc08',
+    })
+    expect(sdk.controlRequests.map((r) => r.subtype)).toContain(
+      'apply_flag_settings',
+    )
+    await session.close()
+    f.cleanup()
+  })
 })

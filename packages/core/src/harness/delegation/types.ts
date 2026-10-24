@@ -471,6 +471,17 @@ export interface DelegationRunRecord {
   usage?: ExecutorRunUsage
   /** The model the run used instead of Codex's own default (FIX-16). */
   modelChoice?: ExecutorModelChoice
+  /** What Emperor did for the run that 任务详情 says (VER-02). */
+  notices?: DelegationRunNotice[]
+}
+/**
+ * VER-02: a newer Claude Code loaded builtin plugins of its own and Emperor
+ * turned them off before the first prompt (sources, `x@builtin`).
+ */
+export interface DelegationRunNotice {
+  kind: 'builtin_plugins_disabled'
+  plugins: string[]
+  claudeVersion: string
 }
 /**
  * FIX-16: nobody in Emperor chose a model and Codex's own default
@@ -496,6 +507,8 @@ export interface ExecutorOpenInput {
   budgetUsd?: number
   /** Claude Code's turns per run (AGT-02). */
   maxTurns?: number
+  /** The CLI's version as the run's probe read it (`claude --version`). */
+  executableVersion?: string
   policy: SandboxExecutionPolicy
   runtimeRoot: string
   secretValues?: readonly string[]
@@ -554,6 +567,8 @@ export type ExecutorEventPayload =
       searchMode?: 'live' | 'cached' | 'unknown'
       /** The executor used another model than its own default (FIX-16). */
       modelChoice?: ExecutorModelChoice
+      /** Claude Code builtin plugins Emperor turned off in this run (VER-02). */
+      builtinPluginsDisabled?: { plugins: string[]; claudeVersion: string }
     }
   | { type: 'session_bound'; sessionId: string }
   | { type: 'turn_started'; turnId: string }
@@ -586,7 +601,13 @@ export type ExecutorEventPayload =
       /** Why a failed turn failed (AGT-02); absent: EXECUTOR_TURN_FAILED. */
       failureCode?: string
     }
-  | { type: 'transport_error'; code: string; message: string }
+  | {
+      type: 'transport_error'
+      code: string
+      message: string
+      /** The run's Chinese reason (DelegationError.reason). */
+      reason?: string
+    }
 export type NormalizedExecutorEvent = ExecutorEventPayload & {
   delegationId: string
   runId: string
@@ -627,6 +648,11 @@ export class DelegationError extends Error {
   constructor(
     readonly code: string,
     detail: string,
+    /**
+     * One Chinese line for the run's summary, when Emperor itself refused
+     * the run and can say why (VER-02); the parent and 任务详情 show it.
+     */
+    readonly reason?: string,
   ) {
     super(`${code}: ${detail}`)
     this.name = 'DelegationError'

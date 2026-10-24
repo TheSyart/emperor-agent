@@ -61,6 +61,7 @@ export type DelegationEvent =
           | 'usage'
           | 'structured'
           | 'modelChoice'
+          | 'notices'
         >
       >
     }
