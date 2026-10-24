@@ -76,6 +76,7 @@
 
 ### 修复
 
+- Claude Code 2.1.308 及之后的版本可以用作子智能体了：这些版本自带一个内置插件（plugin-authoring），之前 Emperor 把它当成未批准的扩展，每个 Claude Code 子任务都以「不兼容」失败。现在 Emperor 在发出第一条消息之前关掉 Claude Code 自带的内置插件并记住，以后出现新的内置插件也一样处理，不调用模型；外部插件和 MCP server 仍然拒绝，失败时任务详情用中文写明加载了什么。
 - 在 Chrome/Edge 等待网页元素时，等待预算耗尽会正常返回超时，不再偶发抛出内部取消错误；主动停止仍按取消处理。
 - 打开「设置 › 子智能体」或运行 Claude Code 子任务时，不再弹出 macOS 的「找不到钥匙串」提示。Claude Code 的登录一直保存在它专用目录的文件里，和 Codex 一样不使用钥匙串，现在 Emperor 会替它回答「钥匙串不可用」。
 - 不需要 Key 的本机模型（Ollama、LM Studio 等）可以对话了：之前每次请求都在发出前失败，测试显示「No API key for provider」。
