@@ -80,9 +80,7 @@ describe('ExecutorHealthStore', () => {
     now = 2_000
     // The first good run moves lastGood (退回 may change); the next one on
     // the same version does not.
-    expect(store.recordSuccess('claude-default', '2.1.281', 'dgr-b')).toBe(
-      true,
-    )
+    expect(store.recordSuccess('claude-default', '2.1.281', 'dgr-b')).toBe(true)
     now = 3_000
     expect(store.recordSuccess('claude-default', '2.1.281', 'dgr-c')).toBe(
       false,
