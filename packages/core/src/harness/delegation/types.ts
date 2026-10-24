@@ -265,13 +265,29 @@ export interface ExecutorVersionView {
     command: string | null
     manual?: 'desktop' | 'unknown' | 'homebrew'
   } | null
+  /**
+   * 退回 (VER-03): the last version a task ran on, offered when the
+   * installed one failed for its version (or its self-check found it
+   * incompatible); `because` says so in one line. How it runs, as for
+   * `upgrade`: Homebrew gets the npm command to copy (`manual: 'homebrew'`),
+   * a desktop app's copy none. Absent: nothing to go back to.
+   */
+  rollback?: {
+    target: string
+    because: string
+    oneClick: boolean
+    command: string | null
+    manual?: 'desktop' | 'unknown' | 'homebrew'
+  }
   /** Its subtasks running now; an upgrade waits for them. */
   activeRuns: number
 }
-/** 升级 while it runs and once it ended (AGT-13). */
+/** 升级 (or 退回) while it runs and once it ended (AGT-13). */
 export interface ExecutorUpgradeView {
   profileId: string
   backend: ExternalBackend
+  /** `rollback`: 退回 to the last good version (VER-03); absent: 升级. */
+  kind?: 'rollback'
   from: string | null
   target: string
   /** The command as the confirmation showed it. */
@@ -737,6 +753,10 @@ export class DelegationError extends Error {
       ],
       EXECUTOR_UPGRADE_UNAVAILABLE: [
         '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
+        'configure_executor',
+      ],
+      EXECUTOR_ROLLBACK_UNAVAILABLE: [
+        '这个版本不能在这里一键退回，请在「设置 › 子智能体」重新检测后再试。',
         'configure_executor',
       ],
     }

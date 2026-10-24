@@ -108,6 +108,14 @@ export class CoreExecutorService {
     this.profile(input.profileId)
     return this.upgradesOf().upgrade(input)
   }
+  /**
+   * 退回 after the confirmation (VER-03): `target` must be the version
+   * offered, the last good one; it runs and reports like 升级.
+   */
+  rollback(input: { profileId: string; target: string }, _view: ViewScope) {
+    this.profile(input.profileId)
+    return this.upgradesOf().rollback(input)
+  }
   cancelUpgrade(input: { profileId: string }, _view: ViewScope) {
     return this.upgradesOf().cancel(input)
   }

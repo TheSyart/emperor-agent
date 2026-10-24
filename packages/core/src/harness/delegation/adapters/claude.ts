@@ -698,6 +698,9 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
               // credentials (AGT-02); it also pins the permission mode to
               // `default`, which is the mode requested above.
               CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+              // Never updates itself (VER-03): versions change only through
+              // 设置 › 子智能体, where 退回 can undo one.
+              DISABLE_AUTOUPDATER: '1',
             },
             signal: input.signal,
             policy: input.policy,

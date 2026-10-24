@@ -346,4 +346,54 @@ describe('upgrade targets', () => {
       verified: ['0.153'],
     })
   })
+
+  it('7 · a version the user rolled back from is skipped until a newer one comes (VER-03)', () => {
+    const skip = new Set(['2.1.310'])
+    expect(claudeUpgradeTarget('2.1.281', '2.1.310', skip)).toBeNull()
+    expect(claudeUpgradeTarget('2.1.281', '2.1.312', skip)).toBe('2.1.312')
+    expect(claudeUpgradeTarget('2.1.281', '2.1.310', new Set())).toBe('2.1.310')
+    // Codex: the next highest verified release, or nothing.
+    const both = protocols('0.153.4', '0.163.0')
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.1', versions: ['0.153.4', '0.163.0', '0.163.1'] },
+        both,
+        new Set(['0.163.1']),
+      ),
+    ).toEqual({
+      target: '0.163.0',
+      unverified: null,
+      verified: ['0.153', '0.163'],
+    })
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.0', versions: ['0.153.4', '0.163.0'] },
+        both,
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({ target: null, unverified: null, verified: ['0.153', '0.163'] })
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.2', versions: ['0.153.4', '0.163.0', '0.163.2'] },
+        both,
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({
+      target: '0.163.2',
+      unverified: null,
+      verified: ['0.153', '0.163'],
+    })
+    // An unverified release it left is not reported as 尚未验证 either.
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        published,
+        protocols('0.153.4'),
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({ target: null, unverified: null, verified: ['0.153'] })
+  })
 })

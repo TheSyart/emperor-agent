@@ -244,6 +244,7 @@ import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { BuiltinPluginLedger } from '../harness/delegation/claude-builtin-plugins'
+import { ExecutorHealthStore } from '../harness/delegation/executor-health'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
@@ -1005,12 +1006,15 @@ export class CoreApi {
     })
     // An executor being upgraded takes no new delegations (AGT-13).
     const executorGate = new ExecutorDispatchGate()
+    // What each CLI version did, for 退回 (VER-03).
+    const executorHealth = new ExecutorHealthStore(this.paths.delegationsRoot)
     this.delegationRuntime = new DelegationService({
       facts: this.executorFacts,
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
       dispatchGate: executorGate,
+      health: executorHealth,
       checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [
@@ -1243,6 +1247,7 @@ export class CoreApi {
       }),
       activeRuns: (backend) => this.delegationRuntime.activeRuns(backend),
       gate: executorGate,
+      health: executorHealth,
       emit: (event) => host.emitHost(event),
       automatic: versionHost?.automatic ?? false,
     })

@@ -1,12 +1,16 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { makeApi, tmp, waitFor } from '../test-helpers'
 import { invokeCoreOperation } from '../operations'
 import type { CoreApi } from '../core-api'
 import { fakeNpmPrefix } from '../../harness/delegation/testing'
+import {
+  EXECUTOR_HEALTH_FILE,
+  type ExecutorHealthFile,
+} from '../../harness/delegation/executor-health'
 import type {
   ExecutorUpgradeView,
   ExecutorVersionsView,
@@ -50,9 +54,25 @@ async function registry() {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
 }
 
-async function api(registryUrl: string | null) {
+async function api(
+  registryUrl: string | null,
+  options: {
+    versions?: Parameters<typeof fakeNpmPrefix>[1]
+    /** `<delegations>/executor-health.json` as an earlier run left it. */
+    health?: ExecutorHealthFile
+  } = {},
+) {
   const root = realpathSync(tmp('emperor-agt13-'))
-  const machine = fakeNpmPrefix(root)
+  const machine = fakeNpmPrefix(root, options.versions)
+  // makeApi's Emperor Home is `<root>/home`.
+  const delegations = join(root, 'home', 'delegations')
+  if (options.health) {
+    mkdirSync(delegations, { recursive: true })
+    writeFileSync(
+      join(delegations, EXECUTOR_HEALTH_FILE),
+      JSON.stringify(options.health),
+    )
+  }
   const home = join(root, 'executor-home')
   mkdirSync(home, { recursive: true })
   const { api, events } = await makeApi({
@@ -67,7 +87,7 @@ async function api(registryUrl: string | null) {
     },
   })
   cleanup.push(() => api.close())
-  return { api, events, root, machine }
+  return { api, events, root, delegations, machine }
 }
 
 const enable = async (core: CoreApi) => {
@@ -212,4 +232,115 @@ it('offline: the versions stay unknown and nothing breaks', async () => {
   expect(
     versions.executors.find((e) => e.profileId === 'claude-default'),
   ).toMatchObject({ installed: '2.1.281', latest: null, target: null })
+})
+
+it('VER-03 · executors.rollback: the row offers the last good version, only that one is accepted, and it goes back with npm', async () => {
+  const {
+    api: core,
+    events,
+    root,
+    delegations,
+  } = await api(await registry(), {
+    versions: { 'claude-code': '2.1.308', codex: '0.153.4' },
+    health: {
+      schemaVersion: 1,
+      profiles: {
+        'claude-default': {
+          lastGood: { version: '2.1.281', at: 1, runId: 'dgr-good' },
+          versions: {
+            '2.1.281': { firstSeenAt: 1, successes: 3, versionFailures: 0 },
+            '2.1.308': {
+              firstSeenAt: 2,
+              successes: 0,
+              versionFailures: 1,
+              lastFailure: {
+                code: 'EXECUTOR_INCOMPATIBLE',
+                reason: 'Claude Code 2.1.308 加载了未批准的扩展',
+                at: 2,
+                runId: 'dgr-bad',
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  await enable(core)
+  await invokeCoreOperation(core, 'executors.probe', [
+    { profileId: 'claude-default' },
+  ])
+  const versions = (await invokeCoreOperation(core, 'executors.versions', [
+    { refresh: true },
+  ])) as ExecutorVersionsView
+  expect(
+    versions.executors.find((e) => e.profileId === 'claude-default'),
+  ).toMatchObject({
+    installed: '2.1.308',
+    target: null,
+    rollback: {
+      target: '2.1.281',
+      because: '2.1.308 上 1 次任务因版本不兼容失败',
+      oneClick: true,
+      command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    },
+  })
+  const rollback = (input: unknown, context = VIEW) =>
+    invokeCoreOperation(core, 'executors.rollback', [input], context)
+  // A change: the caller's view is required.
+  await expect(
+    invokeCoreOperation(core, 'executors.rollback', [
+      { profileId: 'claude-default', target: '2.1.281' },
+    ]),
+  ).rejects.toMatchObject({ code: 'SESSION_REQUIRED' })
+  // The schema: a release version, nothing else.
+  for (const bad of [
+    { profileId: 'claude-default', target: 'latest' },
+    { profileId: 'claude-default', target: '2.1.281', force: true },
+    { profileId: '', target: '2.1.281' },
+  ])
+    await expect(rollback(bad)).rejects.toMatchObject({
+      code: 'invalid_core_arguments',
+    })
+  // Only the version offered.
+  await expect(
+    rollback({ profileId: 'claude-default', target: '2.1.300' }),
+  ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+  await expect(
+    rollback({ profileId: 'codex-default', target: '0.153.0' }),
+  ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+  await rollback({ profileId: 'claude-default', target: '2.1.281' })
+  let done: ExecutorUpgradeView | undefined
+  await waitFor(() => {
+    done = events
+      .filter((e) => e.event === 'executor_upgrade' && e.upgrade)
+      .map((e) => e.upgrade as ExecutorUpgradeView)
+      .find((u) => u.state !== 'waiting' && u.state !== 'running')
+    return !!done
+  }, 15_000)
+  expect(done).toMatchObject({
+    kind: 'rollback',
+    state: 'succeeded',
+    from: '2.1.308',
+    installed: '2.1.281',
+  })
+  expect(readFileSync(join(root, 'npm-calls'), 'utf8').trim()).toBe(
+    'install -g @anthropic-ai/claude-code@2.1.281',
+  )
+  const health = JSON.parse(
+    readFileSync(join(delegations, EXECUTOR_HEALTH_FILE), 'utf8'),
+  ) as ExecutorHealthFile
+  expect(
+    health.profiles['claude-default']!.versions['2.1.308']!.rolledBackFrom,
+  ).toEqual(expect.any(Number))
+  const after = (await invokeCoreOperation(core, 'executors.versions', [
+    {},
+  ])) as ExecutorVersionsView
+  const claude = after.executors.find((e) => e.profileId === 'claude-default')!
+  // Back on 2.1.281; npm's 2.1.308 is the version it left, so not offered.
+  expect(claude).toMatchObject({
+    installed: '2.1.281',
+    latest: '2.1.308',
+    target: null,
+  })
+  expect(claude).not.toHaveProperty('rollback')
 })

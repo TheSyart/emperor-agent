@@ -89,6 +89,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     '它正在升级，升级完成前不接新的子任务；可以改用本地子智能体。',
   EXECUTOR_UPGRADE_UNAVAILABLE:
     '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
+  EXECUTOR_ROLLBACK_UNAVAILABLE:
+    '这个版本不能在这里一键退回，请在「设置 › 子智能体」重新检测后再试。',
   CONTAINMENT_UNAVAILABLE:
     '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
   PROTOCOL_FRAMING: '子智能体返回了无法识别的数据。',

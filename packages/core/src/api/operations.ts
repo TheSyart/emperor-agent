@@ -1212,6 +1212,21 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.upgrade(input, viewOf(ctx, 'executors.upgrade')),
   ),
+  // VER-03: 退回 to the last version a task ran on, after the confirmation;
+  // the target must be the one offered (rollbackOffer), and it runs like
+  // 升级 (cancelUpgrade stops it).
+  'executors.rollback': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          target: z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.rollback(input, viewOf(ctx, 'executors.rollback')),
+  ),
   'executors.cancelUpgrade': operation(
     z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
     (api, [input], ctx) =>

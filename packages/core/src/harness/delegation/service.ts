@@ -68,6 +68,7 @@ import { durableReplaceSync } from '../../store/persistence'
 import type { CodexAuthLink } from './codex-auth'
 import type { ExecutorDispatchGate } from './dispatch-gate'
 import { executorGrants } from './environment'
+import { isVersionFailure, type ExecutorHealthStore } from './executor-health'
 import {
   describeRunFailure,
   describeTurnError,
@@ -192,6 +193,12 @@ export interface DelegationServiceOptions {
    * refused; a run that starts while the upgrade command runs waits.
    */
   dispatchGate?: Pick<ExecutorDispatchGate, 'refused' | 'settled'>
+  /**
+   * What each CLI version did (VER-03): a run that finished with a final
+   * text makes its version the last good one; a version failure counts
+   * against it. 设置 › 子智能体 offers 退回 from it.
+   */
+  health?: Pick<ExecutorHealthStore, 'recordSuccess' | 'recordFailure'>
 }
 interface Entry {
   journal: DelegationJournal
@@ -1547,7 +1554,9 @@ export class DelegationService {
       /** The model the run used instead of Codex's default (FIX-16). */
       modelChoice: ExecutorModelChoice | undefined,
       /** A refused model was already retried once (FIX-16). */
-      retried = false
+      retried = false,
+      /** The probe this run was checked with: its version (VER-03). */
+      bound: ExecutorProbe | undefined
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1646,6 +1655,7 @@ export class DelegationService {
         profile,
         controller.signal,
       )
+      bound = preflight
       if (preflight.compatibility === 'unverified')
         protocolNote =
           preflight.diagnostic ??
@@ -2218,6 +2228,12 @@ export class DelegationService {
           )
             await this.append(e, { ...interaction, state: 'cancelled' })
       })
+      this.noteHealth(record.profileId, activeRunId, bound, {
+        phase: settledPhase,
+        status,
+        failureCode,
+        summary,
+      })
       if (quiescent && settledPhase !== 'outcome_unknown') {
         await this.collectResult(e, activeRunId)
         try {
@@ -2240,6 +2256,52 @@ export class DelegationService {
       )
       void this.dispatchNotices(id).catch(() => undefined)
       e.controller = undefined
+    }
+  }
+  /**
+   * What a settled run says about its CLI version (VER-03), only the
+   * version its own probe read: a turn that finished with a final text
+   * makes the version the last good one; a failure for the version
+   * (isVersionFailure) counts against it, with the first line of why.
+   * Anything else says nothing about the version. Never fails the run.
+   */
+  private noteHealth(
+    profileId: string,
+    runId: string,
+    probe: ExecutorProbe | undefined,
+    outcome: {
+      phase: RunPhase | undefined
+      status: 'completed' | 'failed' | 'interrupted' | undefined
+      failureCode: string | undefined
+      summary: string
+    },
+  ): void {
+    const health = this.options.health,
+      version = probe?.executableVersion
+    if (!health || !version) return
+    try {
+      if (
+        outcome.phase === 'completed' &&
+        outcome.status === 'completed' &&
+        outcome.summary.trim()
+      )
+        health.recordSuccess(profileId, version, runId)
+      else if (
+        outcome.phase === 'failed' &&
+        outcome.failureCode &&
+        isVersionFailure(outcome.failureCode, probe)
+      )
+        health.recordFailure(profileId, version, {
+          code: outcome.failureCode,
+          reason: outcome.summary.trim(),
+          runId,
+        })
+    } catch (error) {
+      log.warn('executor health not recorded', {
+        profileId,
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
   private async handleQuestion(

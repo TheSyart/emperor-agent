@@ -215,3 +215,27 @@ export function upgradeCommand(
       backend === 'claude-code' ? 'claude update' : `npm install -g ${spec}`,
   }
 }
+
+/**
+ * 退回 to `target` (VER-03), through the channel 升级 uses where it can
+ * install any version: npm and Claude's own installer. Homebrew only
+ * upgrades to its current version, so it gets the npm command to copy (a
+ * second install; PATH order decides which one runs); a desktop app's copy
+ * goes back with the app; an unknown install, or one that could not be
+ * read, gets the npm command — never `claude update`, which goes forward.
+ */
+export function rollbackCommand(
+  source: ExecutorInstallSource | undefined,
+  backend: ExternalBackend,
+  target: string,
+): UpgradeCommand {
+  if (source?.npm || source?.kind === 'claude-native')
+    return upgradeCommand(source, backend, target)
+  if (source?.kind === 'desktop')
+    return { oneClick: false, manual: 'desktop', command: null }
+  return {
+    oneClick: false,
+    manual: source?.kind === 'homebrew' ? 'homebrew' : 'unknown',
+    command: `npm install -g ${EXECUTOR_PACKAGES[backend]}@${target}`,
+  }
+}

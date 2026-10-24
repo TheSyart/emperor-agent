@@ -93,6 +93,7 @@ const EXPECTED_OPERATIONS = [
   'executors.list',
   'executors.models',
   'executors.probe',
+  'executors.rollback',
   'executors.setCredential',
   'executors.signIn',
   'executors.signOut',

@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   EXECUTOR_PACKAGES,
   detectInstallSource,
+  rollbackCommand,
   upgradeCommand,
 } from './install-source'
 
@@ -439,6 +440,114 @@ describe('upgrade command', () => {
       ).command,
     ).toBe(
       `npm install -g --prefix '${prefix}' @anthropic-ai/claude-code@2.1.308`,
+    )
+  })
+})
+
+describe('rollback command (VER-03)', () => {
+  it('6 · npm and Claude’s installer go back the same way they upgrade: any version, one click', () => {
+    const r = root()
+    const prefix = join(r, 'node')
+    const claude = npmGlobal(
+      prefix,
+      '@anthropic-ai/claude-code',
+      'cli.js',
+      'claude',
+    )
+    const npm = detectInstallSource(claude, 'claude-code', { home: r })
+    expect(rollbackCommand(npm, 'claude-code', '2.1.281')).toEqual(
+      upgradeCommand(npm, 'claude-code', '2.1.281'),
+    )
+    expect(rollbackCommand(npm, 'claude-code', '2.1.281')).toMatchObject({
+      oneClick: true,
+      command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    })
+    const home = root()
+    script(join(home, '.local/share/claude/versions/2.1.310'))
+    link(
+      join(home, '.local/share/claude/versions/2.1.310'),
+      join(home, '.local/bin/claude'),
+    )
+    expect(
+      rollbackCommand(
+        detectInstallSource(join(home, '.local/bin/claude'), 'claude-code', {
+          home,
+        }),
+        'claude-code',
+        '2.1.281',
+      ),
+    ).toMatchObject({
+      oneClick: true,
+      argv: [join(home, '.local/bin/claude'), 'install', '2.1.281'],
+      command: 'claude install 2.1.281',
+    })
+  })
+
+  it('8 · Homebrew cannot install an older version: no one click, the npm command to copy', () => {
+    const r = root()
+    const brew = join(r, 'opt-homebrew')
+    script(join(brew, 'Caskroom/claude-code/2.1.310/claude'))
+    link('../Caskroom/claude-code/2.1.310/claude', join(brew, 'bin/claude'))
+    script(join(brew, 'bin/brew'))
+    expect(
+      rollbackCommand(
+        detectInstallSource(join(brew, 'bin/claude'), 'claude-code', {
+          home: r,
+        }),
+        'claude-code',
+        '2.1.281',
+      ),
+    ).toEqual({
+      oneClick: false,
+      manual: 'homebrew',
+      command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    })
+    script(join(brew, 'Cellar/codex/0.163.0/bin/codex'))
+    link('../Cellar/codex/0.163.0/bin/codex', join(brew, 'bin/codex'))
+    expect(
+      rollbackCommand(
+        detectInstallSource(join(brew, 'bin/codex'), 'codex', { home: r }),
+        'codex',
+        '0.153.4',
+      ),
+    ).toEqual({
+      oneClick: false,
+      manual: 'homebrew',
+      command: 'npm install -g @openai/codex@0.153.4',
+    })
+  })
+
+  it('a desktop app’s copy goes with the app; an unknown install gets the npm command, never `claude update`', () => {
+    const r = root()
+    const app = join(r, 'Codex.app')
+    script(join(app, 'Contents/Resources/codex'))
+    expect(
+      rollbackCommand(
+        detectInstallSource(join(app, 'Contents/Resources/codex'), 'codex', {
+          home: r,
+        }),
+        'codex',
+        '0.153.4',
+      ),
+    ).toEqual({ oneClick: false, manual: 'desktop', command: null })
+    script(join(r, 'tools/claude'))
+    const unknown = {
+      oneClick: false,
+      manual: 'unknown',
+      command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    }
+    expect(
+      rollbackCommand(
+        detectInstallSource(join(r, 'tools/claude'), 'claude-code', {
+          home: r,
+        }),
+        'claude-code',
+        '2.1.281',
+      ),
+    ).toEqual(unknown)
+    // Where it is could not be read at all.
+    expect(rollbackCommand(undefined, 'claude-code', '2.1.281')).toEqual(
+      unknown,
     )
   })
 })
