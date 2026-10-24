@@ -343,7 +343,20 @@ const CORE_REASON = new Set([
   'WORKSPACE_PREPARE_FAILED',
   'EXECUTOR_ERROR',
   'EXECUTOR_MODEL_UNSUPPORTED',
+  // An extension Emperor refused, with what it was (VER-02).
+  'EXECUTOR_INCOMPATIBLE',
 ])
+/**
+ * Claude Code builtin plugins Emperor turned off in this run (VER-02):
+ * a newer Claude Code brought them, this run saw them first.
+ */
+function builtinPluginsText(notice: {
+  plugins: string[]
+  claudeVersion: string
+}): string {
+  const names = notice.plugins.map((p) => p.replace(/@builtin$/, ''))
+  return `已自动关闭 Claude Code 内置插件 ${names.join('、')}（${notice.claudeVersion} 首次出现）`
+}
 /**
  * The model a run used instead of Codex's own default (FIX-16): before the
  * turn, or after the provider refused the default.
@@ -452,6 +465,14 @@ function costText(usage: {
       </p>
       <p v-if="run?.modelChoice" class="external-note" data-model-choice>
         {{ modelChoiceText(run.modelChoice) }}
+      </p>
+      <p
+        v-for="(notice, index) in run?.notices ?? []"
+        :key="index"
+        class="external-note"
+        data-builtin-plugins
+      >
+        {{ builtinPluginsText(notice) }}
       </p>
       <p class="external-path">成果目录 · {{ record?.cwd }}</p>
       <p v-if="run?.usage" class="external-note" data-run-usage>

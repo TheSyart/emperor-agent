@@ -1,0 +1,26 @@
+{
+  "claudeVersion": "2.1.281",
+  "sdkVersion": "0.3.281",
+  "promptless": {
+    "hooksApplied": true,
+    "reload": {
+      "supported": true,
+      "plugins": [],
+      "mcpServers": [],
+      "errorCount": 0
+    },
+    "afterFlagSettings": null,
+    "mcpStatus": []
+  },
+  "withSeed": {
+    "initPlugins": [],
+    "initMcpServers": []
+  },
+  "ordering": {
+    "initBeforeFirstNetworkAttempt": true,
+    "networkAttempts": 16,
+    "startupAttemptsBeforePrompt": 12
+  },
+  "autoUpdateAttempted": false,
+  "modelCalls": 0
+}

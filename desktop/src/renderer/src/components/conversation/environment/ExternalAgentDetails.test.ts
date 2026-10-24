@@ -487,3 +487,48 @@ it('FIX-16 · 3 · a run on the configured model says nothing about models', asy
   const body = await mount()
   expect(body.querySelector('[data-model-choice]')).toBeNull()
 })
+
+// VER-02: a newer Claude Code brought its own builtin plugin and Emperor
+// turned it off; 任务详情 says so on that run. An extension Emperor refuses
+// reads as Core's reason, not as the subagent's report.
+it('VER-02 · a run says which Claude Code builtin plugins Emperor turned off', async () => {
+  const s = state('claude-code', 'completed')
+  Object.assign(s.runs['dgr-one'], {
+    notices: [
+      {
+        kind: 'builtin_plugins_disabled',
+        plugins: ['cc-plugin-plugin-authoring@builtin', 'x@builtin'],
+        claudeVersion: '2.1.310',
+      },
+    ],
+  })
+  api.getDelegation.mockResolvedValue(s)
+  const body = await mount()
+  expect(
+    body
+      .querySelector<HTMLElement>('[data-builtin-plugins]')!
+      .textContent?.trim(),
+  ).toBe(
+    '已自动关闭 Claude Code 内置插件 cc-plugin-plugin-authoring、x（2.1.310 首次出现）',
+  )
+})
+it('VER-02 · a run without the notice says nothing about plugins', async () => {
+  api.getDelegation.mockResolvedValue(state('claude-code', 'completed'))
+  const body = await mount()
+  expect(body.querySelector('[data-builtin-plugins]')).toBeNull()
+})
+it('VER-02 · a refused extension shows as 原因', async () => {
+  const REASON =
+    'Claude Code 2.1.310 加载了未批准的扩展：插件 foo（来自 ~/plugins/foo）。Emperor 只允许它自带的内置插件，并会自动关闭它们。'
+  const s = state('claude-code', 'failed')
+  Object.assign(s.runs['dgr-one'], {
+    failureCode: 'EXECUTOR_INCOMPATIBLE',
+    summary: REASON,
+  })
+  api.getDelegation.mockResolvedValue(s)
+  const body = await mount()
+  expect(
+    body.querySelector<HTMLElement>('[data-run-reason]')!.textContent?.trim(),
+  ).toBe(`原因：${REASON}`)
+  expect(body.textContent).not.toContain('子智能体报告：Claude Code')
+})

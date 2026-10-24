@@ -336,3 +336,56 @@ export function describeTurnError(
   const words = TURN_ERROR_WORDS[raw]
   return { reason: opening + (words ? `${words}（${raw}）。` : raw) }
 }
+
+/**
+ * What a claude loaded that Emperor does not allow (VER-02), as the run's
+ * one Chinese line: a plugin from disk or a marketplace (`foreign`), a
+ * builtin that stayed on after Emperor turned it off (`stuck`), an MCP
+ * server, or plugins it could not load (`errors`).
+ */
+export type UnapprovedExtensions =
+  | {
+      kind: 'foreign'
+      claudeVersion?: string
+      plugins: readonly { name: string; path?: string; source?: string }[]
+    }
+  | { kind: 'stuck'; claudeVersion?: string; plugins: readonly string[] }
+  | { kind: 'mcp'; servers: readonly string[] }
+  | { kind: 'errors'; claudeVersion?: string; errorCount: number }
+
+/** At most five names, then 「等 N 个」. */
+function listed(names: readonly string[]): string {
+  const shown = names.slice(0, 5).map((n) => sanitizeFailureMessage(n, [], 80))
+  return names.length > shown.length
+    ? `${shown.join('、')} 等 ${names.length} 个`
+    : shown.join('、')
+}
+
+export function describeUnapprovedExtensions(
+  input: UnapprovedExtensions,
+): string {
+  const claude =
+    'claudeVersion' in input && input.claudeVersion
+      ? `Claude Code ${sanitizeFailureMessage(input.claudeVersion, [], 32)}`
+      : 'Claude Code'
+  switch (input.kind) {
+    case 'foreign':
+      return `${claude} 加载了未批准的扩展：插件 ${listed(
+        input.plugins.map((p) => {
+          const where =
+            p.path && p.path !== 'builtin'
+              ? `（来自 ${sanitizeFailureMessage(p.path, [], 120)}）`
+              : ''
+          return (p.source ?? p.name) + where
+        }),
+      )}。Emperor 只允许它自带的内置插件，并会自动关闭它们。`
+    case 'stuck':
+      return `${claude} 的内置插件 ${listed(
+        input.plugins.map((s) => s.replace(/@builtin$/u, '')),
+      )} 关闭后仍在加载，可能是新版本改了开关。可以在 设置 › 子智能体 退回上一个正常版本。`
+    case 'mcp':
+      return `Claude Code 加载了 MCP server：${listed(input.servers)}。子智能体不允许使用 MCP。`
+    case 'errors':
+      return `${claude} 加载插件时报告了 ${input.errorCount} 个错误，Emperor 无法确认它加载了哪些扩展，没有启动这次任务。`
+  }
+}

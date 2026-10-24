@@ -243,6 +243,7 @@ import {
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
+import { BuiltinPluginLedger } from '../harness/delegation/claude-builtin-plugins'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
@@ -1014,7 +1015,15 @@ export class CoreApi {
       adapters: new Map<string, ExecutorAdapter>([
         [
           'claude-code',
-          new ClaudeExecutorAdapter({ processes: executorProcesses }),
+          new ClaudeExecutorAdapter({
+            processes: executorProcesses,
+            // Claude Code's own plugins Emperor turns off (VER-02), in
+            // `<delegations>/claude-code` (claudeDirectories().root), next
+            // to the folders a Claude process may write, not inside them.
+            ledger: new BuiltinPluginLedger(
+              join(this.paths.delegationsRoot, 'claude-code'),
+            ),
+          }),
         ],
         ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
       ]),
