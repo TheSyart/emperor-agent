@@ -201,14 +201,19 @@ it('renders canonical title, public readonly output and actual ancestry; return 
   expect(dom.textContent).toContain('公开结果')
   // Its page writes to the task itself (AGT-10); the links only navigate.
   expect(dom.querySelector('[data-child-input]')).not.toBeNull()
-  const buttons = [...dom.querySelectorAll<HTMLButtonElement>('button')]
-  buttons.find((b) => b.textContent === '返回父智能体')!.click()
+  // One way back (BUG-03): the header's ‹ goes up one level, the path's
+  // 主会话 to the root; the composer has no links of its own.
+  expect(dom.textContent).not.toContain('返回父智能体')
+  expect(dom.textContent).not.toContain('返回主会话')
+  dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  buttons.find((b) => b.textContent === '返回主会话')!.click()
+  ;[...dom.querySelectorAll<HTMLButtonElement>('nav button')]
+    .find((b) => b.textContent === '主会话')!
+    .click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
@@ -679,9 +684,8 @@ it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
     expect(path.textContent).toContain(child.parentAgentId)
     expect(dom.textContent).not.toContain('返回父智能体')
     expect(path.querySelector('button')).toBeNull()
-    ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent === '返回主会话')!
-      .click()
+    // Without a reachable parent the header's ‹ leads to the main conversation.
+    dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
     await settle()
     expect(bridge.push).toHaveBeenLastCalledWith({
       name: 'chat',
@@ -714,9 +718,7 @@ it('routes a valid external parent under the same owning root', async () => {
   const dom = await mount()
   expect(dom.querySelector('nav')?.textContent).toContain('主会话')
   expect(dom.querySelector('nav')?.textContent).toContain('外部父任务')
-  ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-    .find((b) => b.textContent === '返回父智能体')!
-    .click()
+  dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'external-agent',

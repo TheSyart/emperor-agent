@@ -8,8 +8,6 @@ let root: HTMLDivElement
 const handlers = {
   send: vi.fn(),
   stop: vi.fn(),
-  back: vi.fn(),
-  root: vi.fn(),
 }
 
 async function mount(props: Record<string, unknown> = {}) {
@@ -21,8 +19,6 @@ async function mount(props: Record<string, unknown> = {}) {
         ...props,
         onSend: handlers.send,
         onStop: handlers.stop,
-        onBack: handlers.back,
-        onRoot: handlers.root,
       }),
   })
   app.mount(root)
@@ -97,7 +93,7 @@ it('says when a running child reads the message, and offers 停止', async () =>
   expect(root.textContent).toContain('下一轮读到')
 })
 
-it('leads back to the parent and to the main conversation, and shows a failed send', async () => {
+it('names the parent and shows a failed send; the way back is the page header (BUG-03)', async () => {
   await mount({
     parentTitle: '调研子任务',
     error: '这个子智能体已经结束，不能再发消息。',
@@ -106,8 +102,8 @@ it('leads back to the parent and to the main conversation, and shows a failed se
   expect(root.querySelector('[data-child-send-error]')!.textContent).toContain(
     '已经结束',
   )
-  root.querySelector<HTMLButtonElement>('[data-child-back]')!.click()
-  root.querySelector<HTMLButtonElement>('[data-child-root]')!.click()
-  expect(handlers.back).toHaveBeenCalledTimes(1)
-  expect(handlers.root).toHaveBeenCalledTimes(1)
+  expect(root.querySelector('[data-child-back]')).toBeNull()
+  expect(root.querySelector('[data-child-root]')).toBeNull()
+  expect(root.textContent).not.toContain('返回父智能体')
+  expect(root.textContent).not.toContain('返回主会话')
 })
