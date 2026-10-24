@@ -6,6 +6,7 @@ import type { ToolChatData } from '../../../conversation/types'
 import ResourceCard from '../resources/ResourceCard.vue'
 import { displayResource } from '../resources/resourceModel'
 import GenericToolCard from './GenericToolCard.vue'
+import { formatPublishedDate } from '../chatFormat'
 import { webCard } from './toolModel'
 const props = defineProps<{ data: ToolChatData }>()
 const card = computed(() => webCard(props.data))
@@ -42,7 +43,8 @@ const sources = computed(() =>
         <div
           v-if="source.publishedAt"
           class="published-at"
-          v-text="source.publishedAt"
+          :title="source.publishedAt"
+          v-text="formatPublishedDate(source.publishedAt)"
         />
       </li>
     </ol>
