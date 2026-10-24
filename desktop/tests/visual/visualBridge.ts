@@ -242,7 +242,12 @@ export async function installVisualCoreBridge(
       // `unverified`: Emperor has verified only 0.153; `failed`: a Codex
       // upgrade failed without write permission. A spec moves an upgrade on
       // with window.__visualExecutorUpgrade('running' | 'done' | 'failed').
+      // VER-03 `rollback`: Claude Code 2.1.315 (npm's latest) failed twice
+      // for its version and 2.1.310 ran a task: 退回 2.1.310 is offered.
       const visualUpgradeMode = visualParams.get('visualExecutorUpgrade')
+      const visualRollback = visualUpgradeMode === 'rollback'
+      const VISUAL_ROLLBACK_COMMAND =
+        'npm install -g @anthropic-ai/claude-code@2.1.310'
       const visualUpgrade = {
         claude: '2.1.281',
         codex: '0.153.4',
@@ -288,10 +293,13 @@ export async function installVisualCoreBridge(
         visualUpgrade.claude = '2.1.308'
         visualUpgrade.upgrades = [visualFailedRun()]
       }
+      if (visualRollback) visualUpgrade.claude = '2.1.315'
       const visualVersions = () => {
         const unverified = visualUpgradeMode === 'unverified'
         const claudeTarget =
-          visualUpgrade.claude === '2.1.308' ? null : '2.1.308'
+          visualRollback || visualUpgrade.claude === '2.1.308'
+            ? null
+            : '2.1.308'
         const codexTarget =
           unverified || visualUpgrade.codex === '0.163.0' ? null : '0.163.0'
         return {
@@ -310,9 +318,19 @@ export async function installVisualCoreBridge(
                 kind: 'npm',
                 location: `${VISUAL_NPM}/@anthropic-ai/claude-code`,
               },
-              latest: '2.1.308',
+              latest: visualRollback ? '2.1.315' : '2.1.308',
               verified: [],
               target: claudeTarget,
+              ...(visualRollback && visualUpgrade.claude === '2.1.315'
+                ? {
+                    rollback: {
+                      target: '2.1.310',
+                      because: '2.1.315 上有 2 次任务因版本不兼容失败',
+                      oneClick: true,
+                      command: VISUAL_ROLLBACK_COMMAND,
+                    },
+                  }
+                : {}),
               unverified: null,
               upgrade: claudeTarget
                 ? {
@@ -8502,6 +8520,22 @@ export async function installVisualCoreBridge(
                   profileId: String(input.profileId),
                   state: 'waiting',
                 }),
+              }
+            }
+            case 'executors.rollback': {
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                upgrade: {
+                  profileId: String(input.profileId),
+                  backend: 'claude-code',
+                  kind: 'rollback',
+                  from: '2.1.315',
+                  target: '2.1.310',
+                  command: VISUAL_ROLLBACK_COMMAND,
+                  state: 'waiting',
+                  startedAt: visualRunStarted,
+                  log: [`$ ${VISUAL_ROLLBACK_COMMAND}`],
+                },
               }
             }
             case 'executors.cancelUpgrade':

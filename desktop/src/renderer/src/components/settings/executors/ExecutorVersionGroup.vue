@@ -7,6 +7,11 @@
  * checked — npm's public version numbers only. While it upgrades, the bar,
  * 查看过程 and 取消; a failure, its notice.
  *
+ * 退回 (VER-03, BUG-00 preview § 8): when the installed version failed for
+ * its version and an earlier one ran a task, under 本机版本 the reason and
+ * 「退回 x（上次正常）」 (its confirmation first; without one click it shows
+ * the command to copy); a desktop app's copy only says why not.
+ *
  * Props: profileId. Emits: recheck(profileId).
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
@@ -18,8 +23,12 @@ import { useExecutorUpgrades } from './executorUpgrades'
 import {
   activeRun,
   checkedText,
+  heldBack,
   installText,
+  rollbackAction,
+  rollbackOffered,
   runningLine,
+  runVerb,
   upgradeOffered,
 } from './upgradeText'
 
@@ -83,15 +92,25 @@ const facts = computed(() => {
 const action = computed(() => {
   const v = version.value
   if (!v) return { label: '', disabled: true }
-  if (running.value) return { label: '正在升级…', disabled: true }
+  if (running.value)
+    return { label: `正在${runVerb(run.value)}…`, disabled: true }
   if (v.target && v.upgrade?.manual === 'desktop')
     return { label: '随桌面版更新', disabled: true }
   if (upgradeOffered(v, run.value))
     return { label: `升级到 ${v.target}`, disabled: false }
+  // A newer release not offered: the one the user went back from (VER-03).
+  if (heldBack(v)) return { label: '暂不升级', disabled: true }
   return {
     label: v.unverified ? '已是验证过的最新版' : '已是最新',
     disabled: true,
   }
+})
+
+/** 退回 under 本机版本 (VER-03): the reason, then the button or why not. */
+const rollback = computed(() => {
+  const v = version.value
+  if (!v?.rollback || !rollbackOffered(v, run.value)) return null
+  return { because: v.rollback.because, ...rollbackAction(v) }
 })
 
 const unverifiedLine = computed(() => {
@@ -120,16 +139,45 @@ async function check() {
   <SettingsGroup v-if="version" title="版本" data-executor-versions>
     <SettingsRow layout="stacked">
       <dl class="facts">
-        <div v-for="item in facts" :key="item.key" class="fact">
-          <dt>{{ item.term }}</dt>
-          <dd :data-version-fact="item.key">
-            {{ item.value
-            }}<template v-if="item.location"
-              >{{ ' · '
-              }}<code class="location">{{ item.location }}</code></template
-            >
-          </dd>
-        </div>
+        <template v-for="item in facts" :key="item.key">
+          <div class="fact">
+            <dt>{{ item.term }}</dt>
+            <dd :data-version-fact="item.key">
+              {{ item.value
+              }}<template v-if="item.location"
+                >{{ ' · '
+                }}<code class="location">{{ item.location }}</code></template
+              >
+            </dd>
+          </div>
+          <div
+            v-if="item.key === 'installed' && rollback"
+            class="fact"
+            data-version-rollback
+          >
+            <dt />
+            <dd class="rollback">
+              <span class="because" data-version-rollback-because>{{
+                rollback.because
+              }}</span>
+              <span
+                v-if="rollback.note"
+                class="because"
+                data-version-rollback-note
+                >{{ rollback.note }}</span
+              >
+              <span v-if="rollback.label" class="rollback-actions"
+                ><Button
+                  size="sm"
+                  variant="secondary"
+                  data-version-rollback-button
+                  @click="upgrades.askRollback(profileId)"
+                  >{{ rollback.label }}</Button
+                ></span
+              >
+            </dd>
+          </div>
+        </template>
       </dl>
       <p v-if="running && run" class="state" data-version-running>
         {{ runningLine(run, now) }}
@@ -137,6 +185,7 @@ async function check() {
       <ExecutorUpgradeProgress
         v-if="running && run"
         :log="run.log"
+        :label="`${runVerb(run)}进度`"
         bar
         :show-log="showLog"
       />
@@ -205,6 +254,20 @@ async function check() {
   margin: 0;
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
+}
+
+.rollback {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1-5);
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.because {
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--text-3));
 }
 
 .location {

@@ -56,6 +56,7 @@ vi.setConfig({ testTimeout: 20_000 })
 const NPM = '/opt/homebrew/lib/node_modules'
 const CLAUDE_CMD = 'npm install -g @anthropic-ai/claude-code@2.1.308'
 const CODEX_CMD = 'npm install -g @openai/codex@0.163.0'
+const ROLLBACK_CMD = 'npm install -g @anthropic-ai/claude-code@2.1.310'
 
 function profiles() {
   return [
@@ -237,6 +238,19 @@ beforeEach(() => {
           backend:
             input.profileId === 'codex-default' ? 'codex' : 'claude-code',
           target: input.target,
+          state: 'waiting',
+        }),
+      }
+    if (operation === 'executors.rollback')
+      return {
+        upgrade: runOf({
+          profileId: input.profileId,
+          backend:
+            input.profileId === 'codex-default' ? 'codex' : 'claude-code',
+          kind: 'rollback',
+          from: '2.1.315',
+          target: input.target,
+          command: ROLLBACK_CMD,
           state: 'waiting',
         }),
       }
@@ -633,5 +647,273 @@ describe('detail', () => {
         'Claude 官方安装器 · /Users/ada/.local/share/claude/versions/2.1.281',
       latest: '2.1.308',
     })
+  })
+})
+
+describe('退回 (VER-03)', () => {
+  /** Claude Code 2.1.315 failed twice for its version; 2.1.310 ran a task. */
+  function broken(over: Over = {}) {
+    return claudeVersion({
+      installed: '2.1.315',
+      latest: '2.1.315',
+      target: null,
+      upgrade: null,
+      rollback: {
+        target: '2.1.310',
+        because: '2.1.315 上有 2 次任务因版本不兼容失败',
+        oneClick: true,
+        command: ROLLBACK_CMD,
+      },
+      ...over,
+    })
+  }
+  async function detail(backend: string) {
+    await mount()
+    row(backend)
+      .querySelector<HTMLButtonElement>('[data-executor-details]')!
+      .click()
+    await settle()
+    return root.querySelector<HTMLElement>(
+      `[data-executor-detail="${backend}"]`,
+    )!
+  }
+  const rollbackDialog = () =>
+    document
+      .querySelector<HTMLElement>('[data-upgrade-kind="rollback"]')
+      ?.closest<HTMLElement>('[role="dialog"]') ?? null
+
+  it('11 · Claude Code: why and 「退回 2.1.310（上次正常）」 under 本机版本; the confirmation names the command and the auto-update note', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.315' }))
+    const page = await detail('claude-code')
+    const back = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      back.querySelector('[data-version-rollback-because]')!.textContent,
+    ).toBe('2.1.315 上有 2 次任务因版本不兼容失败')
+    const button = back.querySelector<HTMLButtonElement>(
+      '[data-version-rollback-button]',
+    )!
+    expect(button.textContent?.trim()).toBe('退回 2.1.310（上次正常）')
+    // Right under 本机版本.
+    const installed = page.querySelector('[data-version-fact="installed"]')!
+    expect(installed.textContent?.trim()).toBe('2.1.315')
+    expect(
+      installed
+        .closest('.fact')!
+        .nextElementSibling?.hasAttribute('data-version-rollback'),
+    ).toBe(true)
+    button.click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Claude Code 2.1.310？')
+    expect(box.textContent).toContain(
+      '2.1.315 上有 2 次任务因版本不兼容失败。退回会用你安装 Claude Code 的同一方式运行：',
+    )
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    const note = box.querySelector<HTMLElement>('[data-upgrade-note]')!
+    expect(note.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '你在终端里直接用 claude 时，它可能自动更新回新版本；需要时可在 shell 配置里加 export DISABLE_AUTOUPDATER=1。',
+    )
+    expect(note.querySelector('code')!.textContent).toBe(
+      'export DISABLE_AUTOUPDATER=1',
+    )
+    expect(
+      box.querySelector('[data-upgrade-dismiss]')!.textContent?.trim(),
+    ).toBe('取消')
+    // Nothing runs before the confirmation.
+    expect(calls('executors.rollback')).toEqual([])
+    const confirm = box.querySelector<HTMLButtonElement>(
+      '[data-upgrade-confirm]',
+    )!
+    expect(confirm.textContent?.trim()).toBe('退回')
+    confirm.click()
+    await settle()
+    expect(calls('executors.rollback')).toEqual([
+      { profileId: 'claude-default', target: '2.1.310' },
+    ])
+    expect(rollbackDialog()).toBeNull()
+  })
+
+  it('11 · Codex: the same confirmation without the line about claude updating itself', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.0',
+        target: null,
+        upgrade: null,
+        rollback: {
+          target: '0.153.4',
+          because: '0.163.0 上有 1 次任务因版本不兼容失败',
+          oneClick: true,
+          command: 'npm install -g @openai/codex@0.153.4',
+        },
+      }),
+    ])
+    const page = await detail('codex')
+    page
+      .querySelector<HTMLButtonElement>('[data-version-rollback-button]')!
+      .click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Codex 0.153.4？')
+    expect(box.textContent).toContain(
+      '0.163.0 上有 1 次任务因版本不兼容失败。退回会用你安装 Codex 的同一方式运行：',
+    )
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      'npm install -g @openai/codex@0.153.4',
+    )
+    expect(box.querySelector('[data-upgrade-note]')).toBeNull()
+    expect(box.textContent).not.toContain('DISABLE_AUTOUPDATER')
+  })
+
+  it('Homebrew: the button shows the npm command to copy, no one click', async () => {
+    setVersions([
+      broken({
+        install: {
+          kind: 'homebrew',
+          location: '/opt/homebrew/Caskroom/claude-code',
+        },
+        rollback: {
+          target: '2.1.310',
+          because: '2.1.315 上有 2 次任务因版本不兼容失败',
+          oneClick: false,
+          command: ROLLBACK_CMD,
+          manual: 'homebrew',
+        },
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    page
+      .querySelector<HTMLButtonElement>('[data-version-rollback-button]')!
+      .click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Claude Code 到 2.1.310')
+    expect(box.textContent).toContain('Homebrew 装不了旧版本')
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    expect(box.querySelector('[data-upgrade-confirm]')).toBeNull()
+    expect(box.querySelector('[data-upgrade-copy]')!.textContent?.trim()).toBe(
+      '复制命令',
+    )
+  })
+
+  it('a desktop app’s copy: why, and no button', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.0',
+        target: null,
+        upgrade: null,
+        install: { kind: 'desktop', location: '/Applications/Codex.app' },
+        rollback: {
+          target: '0.153.4',
+          because: '0.163.0 上有 1 次任务因版本不兼容失败',
+          oneClick: false,
+          command: null,
+          manual: 'desktop',
+        },
+      }),
+    ])
+    const page = await detail('codex')
+    const back = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      back.querySelector('[data-version-rollback-note]')!.textContent,
+    ).toBe('Codex 随桌面版更新，不能在这里退回。')
+    expect(back.querySelector('[data-version-rollback-button]')).toBeNull()
+  })
+
+  it('running and done say 退回: the badge, the line, the toast; the version it left is not offered', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })])
+    await mount()
+    const running = runOf({
+      profileId: 'claude-default',
+      backend: 'claude-code',
+      kind: 'rollback',
+      from: '2.1.315',
+      target: '2.1.310',
+      command: ROLLBACK_CMD,
+      state: 'running',
+    })
+    push({ event: 'executor_upgrade', upgrade: running })
+    await settle()
+    const claude = row('claude-code')
+    expect(claude.querySelector('.readiness')!.textContent?.trim()).toBe(
+      '退回中',
+    )
+    expect(
+      claude.querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('正在退回到 2.1.310… 已用')
+    expect(
+      claude
+        .querySelector('[data-upgrade-progress]')!
+        .getAttribute('aria-label'),
+    ).toBe('退回进度')
+    const done = {
+      ...running,
+      state: 'succeeded',
+      installed: '2.1.310',
+      finishedAt: Date.now(),
+    }
+    setVersions(
+      [
+        claudeVersion({
+          installed: '2.1.310',
+          latest: '2.1.315',
+          target: null,
+          upgrade: null,
+        }),
+        codexVersion({ target: null, upgrade: null }),
+      ],
+      { upgrades: [done] },
+    )
+    push({ event: 'executor_upgrade', upgrade: done })
+    push({ event: 'executor_upgrade', versions: structuredClone(versions) })
+    await settle()
+    expect(pushToast).toHaveBeenCalledWith('Claude Code 已退回到 2.1.310', {
+      tone: 'ok',
+    })
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.310 · 已从 2.1.315 退回，暂不升级 · 刚刚退回')
+    // Core skips 2.1.315 now: no 「有新版本」 notice, no 升级 on the row.
+    expect(root.querySelector('[data-upgrade-notice]')).toBeNull()
+    expect(
+      row('claude-code').querySelector('[data-executor-upgrade]'),
+    ).toBeNull()
+  })
+
+  it('a failed rollback: 退回失败 with why and the command', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })], {
+      upgrades: [
+        runOf({
+          profileId: 'claude-default',
+          backend: 'claude-code',
+          kind: 'rollback',
+          from: '2.1.315',
+          target: '2.1.310',
+          command: ROLLBACK_CMD,
+          state: 'failed',
+          reason: 'network',
+          manualCommand: ROLLBACK_CMD,
+          finishedAt: Date.now(),
+        }),
+      ],
+    })
+    await mount()
+    const notice = root.querySelector<HTMLElement>('[data-upgrade-failed]')!
+    expect(notice.textContent).toContain(
+      'Claude Code 退回失败：连不上网络，没有下载到 2.1.310',
+    )
+    expect(notice.querySelector('[data-upgrade-manual]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.315 · 退回没有完成')
   })
 })
