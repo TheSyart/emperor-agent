@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-23（对照 `cd4d8656`）<br>
+> 最后核验：2026-10-25（对照 `9b681f26`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -125,6 +125,14 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 - **完成与失败**：完成后 Emperor 重新检测，那一行写出新版本，并提示「Codex 已升级到 0.163.0」。失败时页面顶部写明原因，例如「Codex 升级失败：没有写入 /opt/homebrew/lib/node_modules 的权限」，并给出同一条命令：「复制命令」后在终端里自己运行，完成后点「重新检测」；那一行的「重试」再试一次，「查看过程」看命令输出。
 - **详情页的「版本」**：本机版本、安装方式和位置、最新版本、Emperor 已验证的版本（Codex），以及「升级到 …」「检查更新」和上次检查的时间。
 - 升级不改动 `~/.codex`、`~/.claude` 里的登录和设置，Emperor 为 Claude Code 准备的专用登录也保留。
+
+### 退回上次正常的版本
+
+Emperor 记得每个子智能体最后一次顺利跑完任务的版本。新装的版本因为版本不兼容让任务失败时，详情页「版本」里本机版本下面会写明原因（例如「2.1.315 上有 2 次任务因版本不兼容失败」），并多一个「退回 2.1.310（上次正常）」。点了先确认：弹窗写明原因和要运行的命令，Claude Code 还会提醒你在终端里直接用 claude 时它可能自动更新回新版本，需要时在 shell 配置里加 `export DISABLE_AUTOUPDATER=1`。确认后的运行、进度、取消和失败提示都和升级一样，只是写作「退回中」「已退回到 2.1.310」。
+
+- **安装方式**：npm 全局安装和 Claude 官方安装命令装的可以一键退回。Homebrew 装不了旧版本，弹窗只给出一条 `npm install -g …` 命令让你在终端运行（会多装一份，PATH 里靠前的那份生效）；认不出安装方式时也一样。Codex 桌面版自带的 Codex 随桌面版更新，不能在这里退回。
+- **退回之后**：退回过的版本不再推荐升级，那一行写「已从 2.1.315 退回，暂不升级」；有更新的版本发布后照常提示。从没顺利跑完过任务（比如第一次装的版本就不兼容）时没有可以退回的版本。
+- Emperor 启动的 Claude Code 不会自己更新，版本只在这里改变。
 
 ### 登录
 

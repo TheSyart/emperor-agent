@@ -66,16 +66,17 @@ flowchart TD
 
 ### 上次正常的版本与退回（VER-03）
 
-Claude Code 一个月发几十个版本，外部 CLI 的一次正常变化就可能让一类子任务全部失败。Emperor 为每个外部子智能体 profile 记住每个版本的表现，当前版本因版本问题失败时可以一键退回到上次正常的版本（Core：`executor-health.ts`、`upgrade-service.ts`、`install-source.ts` 的 `rollbackCommand`；界面部分还没有做）。
+Claude Code 一个月发几十个版本，外部 CLI 的一次正常变化就可能让一类子任务全部失败。Emperor 为每个外部子智能体 profile 记住每个版本的表现，当前版本因版本问题失败时可以一键退回到上次正常的版本（Core：`executor-health.ts`、`upgrade-service.ts`、`install-source.ts` 的 `rollbackCommand`；界面：`ExecutorVersionGroup.vue`、`ExecutorUpgradeDialog.vue`、`upgradeText.ts`）。
 
-- **健康记录**（`ExecutorHealthStore`，`<delegations>/executor-health.json`，`schemaVersion: 1`）：按 profile 记 `lastGood { version, at, runId }`、`lastSeenVersion`，以及每个版本的 `firstSeenAt`、`successes`、`lastSuccessAt`、`versionFailures`、`lastFailure { code, reason, at, runId }`、`rolledBackFrom`（退回成功的时间）和 `selfCheck`（VER-04 写）。`DelegationService` 在运行结束时写入，版本只取这次运行自己的探测结果（`requireAvailable` 的 `executableVersion`），没有版本就不记：轮次完成且有收尾文本 → `recordSuccess`（只有它写 `lastGood`）；运行失败且 `isVersionFailure(failureCode, probe)` → `recordFailure`，`reason` 是运行摘要的第一行（最长 300 字）。其他失败（工作区、登录、预算、取消等）与版本无关，不记。写不进去只记一行日志，不影响运行。
+- **健康记录**（`ExecutorHealthStore`，`<delegations>/executor-health.json`，`schemaVersion: 1`）：按 profile 记 `lastGood { version, at, runId }`、`lastSeenVersion`，以及每个版本的 `firstSeenAt`、`successes`、`lastSuccessAt`、`versionFailures`、`lastFailure { code, reason, at, runId }`、`rolledBackFrom`（退回成功的时间）和 `selfCheck`（VER-04 写）。`DelegationService` 在运行结束时写入，版本只取这次运行自己的探测结果（`requireAvailable` 的 `executableVersion`），没有版本就不记：轮次完成且有收尾文本 → `recordSuccess`（只有它写 `lastGood`）；运行失败且 `isVersionFailure(failureCode, probe)` → `recordFailure`，`reason` 是运行摘要的第一行（最长 300 字）。其他失败（工作区、登录、预算、取消等）与版本无关，不记。写不进去只记一行日志，不影响运行。记下一次版本失败，或 `lastGood` 换了版本时，CoreApi 让 `ExecutorUpgradeService.changed()` 推一次 `executor_upgrade { versions }`，打开着的设置页立即看到退回。
 - **版本相关的失败**（`isVersionFailure`，VER-06 的统一提示也只认它）：`VERSION_FAILURE_CODES` 里的 `EXECUTOR_INCOMPATIBLE`、`EXECUTOR_SELF_CHECK_FAILED`（VER-04）；Codex 的协议摘要不在已验证列表时（探测 `compatibility: 'unverified'`），`EXECUTOR_START_FAILED`、`EXECUTOR_TURN_FAILED` 也算。
-- **何时提供退回**（`rollbackOffer(profileId, installed)`）：有 `lastGood`、本机版本不等于它、且本机版本有过版本失败或自检判为不兼容时，目标就是 `lastGood.version`，`because` 是一句原因（「2.1.310 上 2 次任务因版本不兼容失败」，或「2.1.315 自检不兼容：…」）。从没成功过的不提供。`executors.versions` 的每行据此带 `rollback?: { target, because, oneClick, command, manual? }`。
+- **何时提供退回**（`rollbackOffer(profileId, installed)`）：有 `lastGood`、本机版本不等于它、且本机版本有过版本失败或自检判为不兼容时，目标就是 `lastGood.version`，`because` 是一句原因（「2.1.310 上有 2 次任务因版本不兼容失败」，或「2.1.315 自检不兼容：…」）。从没成功过的不提供。`executors.versions` 的每行据此带 `rollback?: { target, because, oneClick, command, manual? }`。
 - **命令**（`rollbackCommand`）：npm 与 Claude 官方安装器和升级同一条命令（能装任意版本，一键）；Homebrew 装不了旧版，不一键，给 `npm install -g <包>@<版本>`（会多一份安装，PATH 顺序决定用哪份），`manual: 'homebrew'`；桌面版自带随 App 更新，没有命令（`manual: 'desktop'`）；未知安装或读不到位置时给同一条 npm 命令（`manual: 'unknown'`），不用只会往前走的 `claude update`。
 - **运行**：`executors.rollback { profileId, target }`（按 view 校验），`target` 必须等于当前提供的 `rollback.target`，且必须能一键，否则 `EXECUTOR_ROLLBACK_UNAVAILABLE`。之后与升级完全相同：退回期间这个执行器不接新任务（`ExecutorDispatchGate`），`executors.cancelUpgrade` 取消，结束后重新探测，探测到目标版本才算 `succeeded`，失败带同一条命令。同一执行器正在升级或退回时，再点任一按钮都加入正在进行的那个。成功后 `markRolledBack(from)`：离开的版本记 `rolledBackFrom`，升级不再推荐它；本机回到 `lastGood`，退回不再提供。
 - **坏文件**：读不懂（坏 JSON、结构不对）当作空，下一次写入前把原文件改名为 `executor-health.json.damaged-<时间戳>` 保留；更新版本的 Emperor 写的文件（`schemaVersion` 大于 1）只读，不改名也不覆盖，本次运行的变化只留在内存里。同一个 Core 持有状态目录的写锁，所有写入同步进行，不会交错。
 - **自动更新**：Emperor 启动的每个 Claude 进程（运行、`claude auth status`、登录与退出登录、模型列表）都带 `DISABLE_AUTOUPDATER=1`（`claudeProcessEnvironment`，运行的 spawn 环境里再固定一次），Claude Code 不会在 Emperor 里自己更新，版本只经设置页改变。用户在终端里直接用 claude 时它仍可能自动更新；Emperor 不改用户的 shell 配置。
-- **没有接上的**：`noteVersion`（探测发现版本变化）已在存储里，触发自检由 VER-04 接；设置页的「退回」按钮与确认框、失败卡片上的入口（VER-06）还没有做。
+- **界面**（BUG-00 预览 § 8）：详情页「版本」里本机版本下面一行灰字写 `because`，再一个次按钮「退回 x（上次正常）」，确认框沿用升级的（标题「退回 Claude Code x？」、原因与命令，Claude Code 另有终端里自动更新与 `export DISABLE_AUTOUPDATER=1` 的提示，按钮「取消」「退回」）。Homebrew 与未知安装点了只给命令（「复制命令」「知道了」）；桌面版自带的没有按钮，只写随桌面版更新。进度、结果与失败沿用升级的组件，`kind: 'rollback'` 时一律写「退回」（「退回中」「正在退回到 x…」「已退回到 x」「退回失败：…」）；本机比 npm 的最新版旧又没有可升级的目标时，那一行写「已从 x 退回，暂不升级」。
+- **没有接上的**：`noteVersion`（探测发现版本变化）已在存储里，触发自检由 VER-04 接；对话里失败卡片上的「退回」入口属于 VER-06。
 
 ## 专长与原生能力事实
 
