@@ -5,7 +5,15 @@
  * once decided the row opens; a row the reader opened stays open.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, defineComponent, h, nextTick, ref, type Ref } from 'vue'
+import {
+  createApp,
+  defineComponent,
+  h,
+  nextTick,
+  shallowRef,
+  type Component,
+  type Ref,
+} from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
 import { createExpansionStore, provideChatContext } from '../chatContext'
 import ToolCallRow from './ToolCallRow.vue'
@@ -58,7 +66,8 @@ function mount(data: Ref<ToolChatData>): HTMLDivElement {
         expansion: createExpansionStore(),
         sessionId: () => 's1',
       })
-      return () => h(ToolCallRow, { data: data.value })
+      // A plain Component keeps tsc from expanding the SFC's prop types.
+      return () => h(ToolCallRow as Component, { data: data.value })
     },
   })
   createApp(Host).mount(container)
@@ -70,7 +79,7 @@ const expanded = (root: HTMLElement) =>
 
 describe('ToolCallRow · exit_plan_mode (BUG-02)', () => {
   it('stays one line while the plan waits for the review card below', () => {
-    const root = mount(ref(plan()))
+    const root = mount(shallowRef(plan()))
     expect(expanded(root)).toBe('false')
     expect(root.querySelector('.body')).toBeNull()
     expect(root.textContent).toContain('给 README 加一节安装说明')
@@ -78,7 +87,7 @@ describe('ToolCallRow · exit_plan_mode (BUG-02)', () => {
   })
 
   it('opens by itself once the plan is approved', async () => {
-    const data = ref(plan())
+    const data = shallowRef(plan())
     const root = mount(data)
     expect(expanded(root)).toBe('false')
     data.value = plan({ text: 'ok', meta: { approved: true } })
@@ -88,12 +97,14 @@ describe('ToolCallRow · exit_plan_mode (BUG-02)', () => {
   })
 
   it('opens a decided plan from history', () => {
-    const root = mount(ref(plan({ text: 'ok', meta: { approved: true } })))
+    const root = mount(
+      shallowRef(plan({ text: 'ok', meta: { approved: true } })),
+    )
     expect(expanded(root)).toBe('true')
   })
 
   it('keeps a row the reader opened while waiting', async () => {
-    const root = mount(ref(plan()))
+    const root = mount(shallowRef(plan()))
     root.querySelector<HTMLElement>('[aria-expanded]')!.click()
     await nextTick()
     expect(expanded(root)).toBe('true')

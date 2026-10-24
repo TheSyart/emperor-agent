@@ -15,7 +15,6 @@
  */
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
-import LinkButton from '../ui/LinkButton.vue'
 import TextArea from '../ui/TextArea.vue'
 
 const props = withDefaults(
