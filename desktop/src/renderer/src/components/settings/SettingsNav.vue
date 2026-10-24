@@ -100,12 +100,15 @@ const LABELS = Object.fromEntries(
   gap: 1px;
 }
 
+/* Muted gold group titles (BUG-04): readable without competing with the
+   items or the gold of actions and links. */
 .nav-group-label {
-  padding: var(--space-3) var(--space-2-5) var(--space-1);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  font-weight: var(--weight-medium);
-  color: rgb(var(--text-3));
+  padding: var(--space-4) var(--space-2-5) var(--space-1);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  color: rgb(var(--text-accent-muted));
 }
 
 .nav-cell {
