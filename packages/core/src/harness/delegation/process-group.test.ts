@@ -21,11 +21,14 @@ import {
   cleanBoundaryMarkers,
   readJsonLines,
   terminateRecordedProcess,
+  type ManagedProcessHandle,
+  type ProcessRow,
 } from './process'
 import { delegationTestDirectory } from './testing'
 import type { ProcessOwnership } from './ownership'
 import type { SandboxExecutionPolicy } from '../sandbox/policy'
 import { systemBootMarker } from '../../util/stable-process-identity'
+import { setCoreLogSink, type LogLine } from '../../util/log'
 
 const cleanup: Array<() => void> = []
 afterEach(() => cleanup.splice(0).forEach((f) => f()))
@@ -204,6 +207,194 @@ describe.skipIf(process.platform === 'win32')('process group stop', () => {
   })
 })
 
+const EPERM = () =>
+  Object.assign(new Error('kill EPERM'), {
+    code: 'EPERM',
+    errno: -1,
+    syscall: 'kill',
+  })
+/**
+ * Once the run's root has exited, answer group signals the way macOS does
+ * in a given state of what is left of the group:
+ * - 'eperm': only zombies remain (or members Emperor may not signal); every
+ *   signal to the group, 0 included, fails with EPERM;
+ * - 'answers': a member still answers; the signal is accepted (and dropped);
+ * - 'real': the real answer.
+ * `sinceExitMs` counts from the first group signal after the root's exit.
+ */
+function groupAnswers(
+  h: ManagedProcessHandle,
+  answer: (sinceExitMs: number) => 'eperm' | 'answers' | 'real',
+) {
+  const real = process.kill.bind(process)
+  let exitedAt: number | undefined
+  const spy = vi
+    .spyOn(process, 'kill')
+    .mockImplementation((pid: number, signal?: string | number) => {
+      const exited = h.child.exitCode !== null || h.child.signalCode !== null
+      if (pid === -h.identity.pid! && exited) {
+        exitedAt ??= Date.now()
+        const mode = answer(Date.now() - exitedAt)
+        if (mode === 'eperm') throw EPERM()
+        if (mode === 'answers') return true
+      }
+      return real(pid, signal)
+    })
+  // Before the group cleanup, which must reach the real process.kill.
+  cleanup.unshift(() => spy.mockRestore())
+}
+function member(pgid: number, state: string): Map<number, ProcessRow> {
+  const pid = pgid + 1
+  return new Map([
+    [
+      pid,
+      { pid, parent: 1, group: pgid, state, birth: 'Mon Jan 1 00:00:00 2001' },
+    ],
+  ])
+}
+async function stubbornRun(
+  f: ReturnType<typeof workspace>,
+  options: ConstructorParameters<typeof ManagedAgentProcess>[0] = {},
+) {
+  const h = await new ManagedAgentProcess({
+    stopGraceMs: 300,
+    ...options,
+  }).open({
+    executable: process.execPath,
+    args: ['-e', STUBBORN_TREE],
+    cwd: f.workspace,
+    env: process.env,
+    policy: f.policy,
+  })
+  const pgid = h.identity.pid!
+  cleanup.push(() => killGroup(pgid))
+  let child = 0
+  for await (const row of readJsonLines(h.stdout)) {
+    child = Number(row.child)
+    break
+  }
+  return { h, pgid, child }
+}
+
+describe.skipIf(process.platform === 'win32')(
+  'the stop verdict after SIGKILL (BUG-09)',
+  () => {
+    const lines: LogLine[] = []
+    afterEach(() => {
+      setCoreLogSink(null)
+      lines.length = 0
+    })
+
+    it('a group that only has a zombie left (macOS answers EPERM) has stopped', async () => {
+      const f = workspace()
+      const { h, child } = await stubbornRun(f)
+      // The child is a zombie until launchd reaps it, 200 ms after the root.
+      groupAnswers(h, (since) => (since < 200 ? 'eperm' : 'real'))
+      void h.terminate()
+      const exit = await h.closed
+      expect(exit).toMatchObject({ quiescent: true })
+      expect(exit.failureCode).toBeUndefined()
+      expect(alive(child)).toBe(false)
+    })
+
+    it('a root that exits on its own with only a zombie left behind has stopped', async () => {
+      const f = workspace()
+      const code =
+        'require("child_process").spawn(process.execPath,["-e","setTimeout(()=>{},20)"],{stdio:"ignore"});setTimeout(()=>process.exit(0),150)'
+      const h = await new ManagedAgentProcess({ stopGraceMs: 300 }).open({
+        executable: process.execPath,
+        args: ['-e', code],
+        cwd: f.workspace,
+        env: process.env,
+        policy: f.policy,
+      })
+      cleanup.push(() => killGroup(h.identity.pid))
+      groupAnswers(h, (since) => (since < 200 ? 'eperm' : 'real'))
+      const exit = await h.closed
+      expect(exit).toMatchObject({ exitCode: 0, quiescent: true })
+      expect(exit.failureCode).toBeUndefined()
+    })
+
+    it('a member Emperor may not signal and that is still running has not stopped', async () => {
+      const f = workspace()
+      let pgid = 0
+      const run = await stubbornRun(f, {
+        observeProcesses: async () => member(pgid, 'S'),
+      })
+      pgid = run.pgid
+      groupAnswers(run.h, () => 'eperm')
+      void run.h.terminate()
+      expect(await run.h.closed).toMatchObject({
+        quiescent: false,
+        failureCode: 'OUTCOME_UNKNOWN',
+      })
+    })
+
+    it('reads the table again when it cannot be read, and trusts a later read', async () => {
+      const f = workspace()
+      let pgid = 0
+      const reads: Array<Map<number, ProcessRow> | null> = []
+      const table = vi.fn(async () => {
+        const next = reads.length === 0 ? null : member(pgid, 'Z')
+        reads.push(next)
+        return next
+      })
+      const run = await stubbornRun(f, { observeProcesses: table })
+      pgid = run.pgid
+      groupAnswers(run.h, () => 'answers')
+      void run.h.terminate()
+      expect(await run.h.closed).toMatchObject({ quiescent: true })
+      expect(table).toHaveBeenCalledTimes(2)
+    })
+
+    it('stays unconfirmed when the table cannot be read three times, and says so in the log', async () => {
+      setCoreLogSink((line) => lines.push(line))
+      const f = workspace()
+      const table = vi.fn(async () => null)
+      const { h } = await stubbornRun(f, { observeProcesses: table })
+      groupAnswers(h, () => 'answers')
+      void h.terminate()
+      expect(await h.closed).toMatchObject({
+        quiescent: false,
+        failureCode: 'OUTCOME_UNKNOWN',
+      })
+      expect(table).toHaveBeenCalledTimes(3)
+      expect(
+        lines.some(
+          (line) => line.level === 'warn' && line.msg.includes('ps 不可用'),
+        ),
+      ).toBe(true)
+    })
+
+    it('counts a member that is exiting (ps state E) as stopped', async () => {
+      const f = workspace()
+      let pgid = 0
+      const run = await stubbornRun(f, {
+        observeProcesses: async () => member(pgid, 'RE'),
+      })
+      pgid = run.pgid
+      groupAnswers(run.h, () => 'answers')
+      void run.h.terminate()
+      expect(await run.h.closed).toMatchObject({ quiescent: true })
+    })
+
+    it('a member in any other state has not stopped', async () => {
+      const f = workspace()
+      let pgid = 0
+      const table = vi.fn(async () => member(pgid, 'S'))
+      const run = await stubbornRun(f, { observeProcesses: table })
+      pgid = run.pgid
+      groupAnswers(run.h, () => 'answers')
+      void run.h.terminate()
+      expect(await run.h.closed).toMatchObject({
+        quiescent: false,
+        failureCode: 'OUTCOME_UNKNOWN',
+      })
+      expect(table).toHaveBeenCalledTimes(1)
+    })
+  },
+)
+
 describe.skipIf(process.platform === 'win32')(
   'recorded process identity',
   () => {
@@ -299,6 +490,47 @@ describe.skipIf(process.platform === 'win32')(
       })
       expect(alive(user.pid!)).toBe(true)
       expect(alive(userChild)).toBe(true)
+    })
+
+    it('stops a recorded group whose SIGKILL is answered with EPERM because only zombies were left (BUG-09)', async () => {
+      const root = spawn(process.execPath, ['-e', IGNORE], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      const pgid = root.pid!
+      cleanup.push(() => killGroup(pgid))
+      await new Promise((r) => setTimeout(r, 200))
+      const real = process.kill.bind(process)
+      const spy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((pid: number, signal?: string | number) => {
+          if (pid !== -pgid || signal !== 'SIGKILL') return real(pid, signal)
+          // The group goes, and macOS answers for the zombie left behind.
+          real(pid, signal)
+          throw EPERM()
+        })
+      cleanup.unshift(() => spy.mockRestore())
+      const exit = await terminateRecordedProcess(
+        {
+          schemaVersion: 1,
+          pid: pgid,
+          startedAt: 0,
+          fingerprint: birth(pgid),
+          bootTime: systemBootMarker() ?? undefined,
+          delegationId: 'dlg-eperm',
+          runId: 'dgr-eperm',
+          generation: 1,
+          boundaryReceiptId: 'dgb-eperm',
+          policyDigest: 'fixture',
+          cwd: process.cwd(),
+          platform: process.platform,
+          descendants: [],
+        },
+        { graceMs: 300 },
+      )
+      expect(exit).toMatchObject({ quiescent: true })
+      expect(exit.failureCode).toBeUndefined()
+      expect(await untilGone(pgid, 2000)).toBeLessThan(2000)
     })
 
     it('does not touch a recorded PID from before a system restart', async () => {
