@@ -148,10 +148,10 @@ function validProfile(value: unknown): boolean {
   )
 }
 
-/** Why 退回 is offered, for the confirmation (「2.1.310 上 2 次任务…」). */
+/** Why 退回 is offered, for the confirmation (「2.1.310 上有 2 次任务…」). */
 function because(version: string, health: ExecutorVersionHealth): string {
   if (health.versionFailures > 0)
-    return `${version} 上 ${health.versionFailures} 次任务因版本不兼容失败`
+    return `${version} 上有 ${health.versionFailures} 次任务因版本不兼容失败`
   const issue = health.selfCheck?.issues.find((i) => i.blocking)
   return issue
     ? `${version} 自检不兼容：${issue.detail}`
@@ -245,15 +245,21 @@ export class ExecutorHealthStore {
     }
   }
 
-  /** A run on `version` finished with a final text: the last good version. */
-  recordSuccess(profileId: string, version: string, runId: string): void {
-    if (!RELEASE.test(version)) return
+  /**
+   * A run on `version` finished with a final text: the last good version.
+   * True when that is another version than before (退回 may change).
+   */
+  recordSuccess(profileId: string, version: string, runId: string): boolean {
+    if (!RELEASE.test(version)) return false
     const entry = this.version(profileId, version)
+    const profile = this.profile(profileId)
+    const moved = profile.lastGood?.version !== version
     const at = this.now()
     entry.successes += 1
     entry.lastSuccessAt = at
-    this.profile(profileId).lastGood = { version, at, runId }
+    profile.lastGood = { version, at, runId }
     this.save()
+    return moved
   }
 
   /** A run on `version` failed for its version (isVersionFailure). */

@@ -1014,7 +1014,19 @@ export class CoreApi {
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
       dispatchGate: executorGate,
-      health: executorHealth,
+      // A new last good version or a version failure moves 退回: the
+      // settings page hears of it at once.
+      health: {
+        recordSuccess: (...args) => {
+          const moved = executorHealth.recordSuccess(...args)
+          if (moved) this.executorUpgrades.changed()
+          return moved
+        },
+        recordFailure: (...args) => {
+          executorHealth.recordFailure(...args)
+          this.executorUpgrades.changed()
+        },
+      },
       checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [

@@ -177,6 +177,18 @@ export class ExecutorUpgradeService {
     return this.view()
   }
 
+  /**
+   * What a version did changed (VER-03: a run's outcome moved the 退回
+   * offer): the settings page gets the versions again.
+   */
+  changed(): void {
+    void this.view()
+      .then((versions) =>
+        this.options.emit({ event: 'executor_upgrade', versions }),
+      )
+      .catch(() => undefined)
+  }
+
   /** 稍后: no notice or dot for the versions offered now. */
   async dismiss(): Promise<ExecutorVersionsView> {
     const entries = await this.entries()

@@ -78,9 +78,15 @@ describe('ExecutorHealthStore', () => {
     })
     expect(read(root).profiles['claude-default']!.lastGood).toBeUndefined()
     now = 2_000
-    store.recordSuccess('claude-default', '2.1.281', 'dgr-b')
+    // The first good run moves lastGood (退回 may change); the next one on
+    // the same version does not.
+    expect(store.recordSuccess('claude-default', '2.1.281', 'dgr-b')).toBe(
+      true,
+    )
     now = 3_000
-    store.recordSuccess('claude-default', '2.1.281', 'dgr-c')
+    expect(store.recordSuccess('claude-default', '2.1.281', 'dgr-c')).toBe(
+      false,
+    )
     const file = read(root)
     expect(file.schemaVersion).toBe(1)
     expect(file.profiles['claude-default']).toMatchObject({
@@ -128,7 +134,7 @@ describe('ExecutorHealthStore', () => {
     })
     expect(store.rollbackOffer('claude-default', '2.1.310')).toEqual({
       target: '2.1.281',
-      because: '2.1.310 上 2 次任务因版本不兼容失败',
+      because: '2.1.310 上有 2 次任务因版本不兼容失败',
     })
     // A version that never failed is not offered a rollback.
     expect(store.rollbackOffer('claude-default', '2.1.312')).toBeNull()

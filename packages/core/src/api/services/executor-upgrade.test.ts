@@ -279,7 +279,7 @@ it('VER-03 · executors.rollback: the row offers the last good version, only tha
     target: null,
     rollback: {
       target: '2.1.281',
-      because: '2.1.308 上 1 次任务因版本不兼容失败',
+      because: '2.1.308 上有 1 次任务因版本不兼容失败',
       oneClick: true,
       command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
     },

@@ -577,7 +577,7 @@ describe('退回 (VER-03)', () => {
       target: null,
       rollback: {
         target: '2.1.281',
-        because: '2.1.308 上 2 次任务因版本不兼容失败',
+        because: '2.1.308 上有 2 次任务因版本不兼容失败',
         oneClick: true,
         command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
       },
@@ -748,6 +748,28 @@ describe('退回 (VER-03)', () => {
     expect(
       healthFile(m).profiles['claude-default'].versions['2.1.308'],
     ).not.toHaveProperty('rolledBackFrom')
+  })
+
+  it('changed() pushes the versions, so a new version failure shows 退回 at once', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const health = new ExecutorHealthStore(join(m.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    const s = service(m, { health })
+    await s.probeAll()
+    health.recordFailure('claude-default', '2.1.308', {
+      code: 'EXECUTOR_INCOMPATIBLE',
+      reason: 'x',
+      runId: 'dgr-bad',
+    })
+    s.upgrades.changed()
+    await vi.waitFor(() => {
+      const pushed = s.events.filter((e) => e.versions).at(-1)?.versions as
+        | { executors: Array<{ backend: string; rollback?: unknown }> }
+        | undefined
+      expect(
+        pushed?.executors.find((e) => e.backend === 'claude-code')?.rollback,
+      ).toMatchObject({ target: '2.1.281' })
+    }, LOADED)
   })
 
   it('a rollback that fails leaves the version unmarked and gives the command', async () => {
