@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Renderer、工具与 Core 开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-25（对照 `e962d116`）<br>
 > 事实源：`components/conversation/resources/`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
 
 ## 身份与渲染
@@ -40,9 +40,9 @@ meta: {
 
 ### 网站图标
 
-网站图标默认关闭（「设置 › 常规 › 会话 › 显示网站图标」，偏好存于本机 `emperor.ui.prefs.v1`）：关闭时不发出任何图标请求，链接只显示通用图标；打开后，可见网页引用显示真实 favicon；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
+网站图标默认打开（「设置 › 常规 › 会话 › 显示网站图标」，偏好 `siteIconService` 存于本机 `emperor.ui.prefs.v1`；它取代了 0.2.0 默认关闭的 `siteIcons`，旧值不再读取）：关闭时不发出任何图标请求，链接只显示域名首字母；打开时，可见网页引用显示网站图标；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
 
-`references.siteIcon({ sessionId, referenceId })` 使用 opaque 引用，每次请求及返回前校验可读会话与引用归属。后端只读取 HTTPS origin 的 favicon／apple-touch-icon，必要时解析最多 256 KiB 的首页中的 icon link，不读取文章 URL 或 OpenGraph 预览图。第一方未提供可用栅格图标时，以公共 hostname 请求 `icons.duckduckgo.com/ip3/<hostname>.ico`；不发送链接路径、查询参数、Cookie 或浏览器登录状态。私网／非法地址在 DNS 与重定向校验处停止，不进入第三方 fallback。
+`references.siteIcon({ sessionId, referenceId })` 使用 opaque 引用，每次请求及返回前校验可读会话与引用归属。后端只向图标服务请求 `icons.duckduckgo.com/ip3/<hostname>.ico`，**不访问链接所在的网站本身**，所以网站不会因为链接出现在对话里而收到请求；不发送链接路径、查询参数、Cookie 或浏览器登录状态。只有公开的主机名才会发给图标服务：带端口的地址、IP 字面量、单段主机名，以及 `.local`、`.internal`、`.corp`、`.lan`、`.home`、`.test`、`.example` 等私有或保留后缀（`publicHostname()`）都直接显示首字母、不发请求。图标服务没有图标（非 200）时同样显示首字母。
 
 图标最多 256 KiB，支持经过帧结构与尺寸验证的 PNG、JPEG、GIF、WebP 和 ICO（PNG／未压缩 DIB）；SVG 不直接交给 renderer。renderer 只接受受限的 raster data URL，不请求第三方图片。前后端各最多 4 项并发、200 项待处理；后端成功图标按公开 origin 缓存最多 200 项、24 小时，失败缓存 1 分钟；renderer 会话资源缓存最多 600 项、10 分钟，公开品牌图标另供输入框复用。旧会话和卸载组件的响应不会更新当前 DOM。
 

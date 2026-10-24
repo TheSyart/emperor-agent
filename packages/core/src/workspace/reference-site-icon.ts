@@ -1,5 +1,3 @@
-import type { DefaultTreeAdapterMap } from 'parse5'
-import { htmlParser } from '../network/html-parser'
 import {
   PublicHttpError,
   isPublicHttpRedirectResponse,
@@ -26,6 +24,24 @@ const unavailable = (reason = 'icon_unavailable'): ReferenceSiteIcon => ({
   reason,
   updatedAt: Date.now(),
 })
+
+/** Suffixes that name private, local or reserved hosts (RFC 6761, common LAN use). */
+const PRIVATE_SUFFIX =
+  /\.(?:local|localhost|localdomain|internal|intranet|lan|home|corp|private|test|example|invalid|arpa|onion)$/iu
+
+/**
+ * The hostname the icon service may hear about (BUG-01): a public, dotted
+ * name on the default port; never an IP literal, a single-label or a
+ * private/reserved suffix.
+ */
+export function publicHostname(url: URL): string | undefined {
+  if (url.port) return undefined
+  const host = url.hostname.toLowerCase()
+  if (!host.includes('.') || host.startsWith('[')) return undefined
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(host)) return undefined
+  if (PRIVATE_SUFFIX.test(host)) return undefined
+  return host
+}
 
 /** Public, origin-only branding. No article URL, cookies, auth or OG previews. */
 export class ReferenceSiteIconService {
@@ -104,65 +120,24 @@ export class ReferenceSiteIconService {
       else this.active--
     }
   }
+  /**
+   * Only the icon service is asked, by hostname (BUG-01): the site itself
+   * never learns that a link to it was shown, and a private or local host
+   * name is never sent anywhere.
+   */
   private async fetch(origin: string): Promise<ReferenceSiteIcon> {
+    const host = publicHostname(new URL(origin))
+    if (!host) return unavailable('private_host')
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8_000)
     try {
-      for (const path of ['/favicon.ico', '/apple-touch-icon.png']) {
-        const image = await this.image(
-          new URL(path, origin).toString(),
-          controller.signal,
-        )
-        if (image)
-          return { state: 'ready', dataUrl: image, updatedAt: Date.now() }
-      }
-      let home
-      try {
-        home = await this.options.webFetchClient!.get({
-          url: origin + '/',
-          protocols: ['https:'],
-          maxBytes: ICON_LIMIT,
-          signal: controller.signal,
-          headers: { accept: 'text/html' },
-        })
-      } catch (error) {
-        if (
-          !(error instanceof PublicHttpError) ||
-          error.code !== 'response_too_large'
-        )
-          throw error
-      }
-      if (
-        home &&
-        !isPublicHttpRedirectResponse(home) &&
-        home.status === 200 &&
-        /^(text\/html|application\/xhtml\+xml)(;|$)/i.test(
-          String(home.headers['content-type'] ?? ''),
-        ) &&
-        home.body.byteLength <= ICON_LIMIT
-      ) {
-        for (const href of await iconLinks(
-          Buffer.from(home.body).toString('utf8'),
-        )) {
-          const url = new URL(href, home.url)
-          if (url.protocol !== 'https:' || url.username || url.password)
-            continue
-          const image = await this.image(url.toString(), controller.signal)
-          if (image)
-            return { state: 'ready', dataUrl: image, updatedAt: Date.now() }
-        }
-      }
-      // The fallback receives only the public hostname, never a path/query.
-      const url = new URL(origin)
-      if (!url.port) {
-        const image = await this.image(
-          `https://icons.duckduckgo.com/ip3/${encodeURIComponent(url.hostname)}.ico`,
-          controller.signal,
-        )
-        if (image)
-          return { state: 'ready', dataUrl: image, updatedAt: Date.now() }
-      }
-      return unavailable()
+      const image = await this.image(
+        `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`,
+        controller.signal,
+      )
+      return image
+        ? { state: 'ready', dataUrl: image, updatedAt: Date.now() }
+        : unavailable()
     } catch (error) {
       return unavailable(
         controller.signal.aborted
@@ -209,31 +184,4 @@ export class ReferenceSiteIconService {
         return `data:${mime};base64,${bytes.toString('base64')}`
     return
   }
-}
-async function iconLinks(html: string): Promise<string[]> {
-  const { parse } = await htmlParser()
-  const stack: DefaultTreeAdapterMap['node'][] = [
-    parse(html, { scriptingEnabled: false }),
-  ]
-  const icons: string[] = []
-  while (stack.length) {
-    const node = stack.pop()!
-    if (
-      'tagName' in node &&
-      ['script', 'style', 'template', 'noscript'].includes(node.tagName)
-    )
-      continue
-    if ('tagName' in node && node.tagName === 'link') {
-      const attrs = Object.fromEntries(node.attrs.map((a) => [a.name, a.value]))
-      if (
-        /(^|\s)(icon|apple-touch-icon)(\s|$)/i.test(attrs.rel ?? '') &&
-        attrs.href &&
-        attrs.href.length <= 4096 &&
-        !/\.svg(?:[?#]|$)/i.test(attrs.href)
-      )
-        icons.push(attrs.href)
-    }
-    if ('childNodes' in node) stack.push(...node.childNodes.slice().reverse())
-  }
-  return [...new Set(icons)].slice(0, 3)
 }

@@ -33,8 +33,8 @@ function mount() {
 }
 describe('ResourceDetails lazy Core bridge', () => {
   // These cases exercise real site icons, which are opt-in (W-3).
-  beforeEach(() => setUiPreference('siteIcons', true))
-  afterEach(() => setUiPreference('siteIcons', false))
+  beforeEach(() => setUiPreference('siteIconService', true))
+  afterEach(() => setUiPreference('siteIconService', true))
   it('shows a readable network failure and keeps the original open action', async () => {
     vi.mocked(core).mockImplementation((async (name: string) =>
       name === 'references.resolve'

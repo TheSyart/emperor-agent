@@ -1295,11 +1295,12 @@ async function conversationResources(
           exact: true,
         })
         if (await workbench.isVisible()) await workbench.click()
-        // Real site icons are opt-in (设置 › 常规 › 显示网站图标).
+        // Site icons are on by default (BUG-01); set it anyway so an
+        // earlier run's stored preference cannot turn them off.
         await page.evaluate(() =>
           localStorage.setItem(
             'emperor.ui.prefs.v1',
-            JSON.stringify({ siteIcons: true }),
+            JSON.stringify({ siteIconService: true }),
           ),
         )
         await page.reload()

@@ -465,14 +465,14 @@ onMounted(() => void loadPermission())
         </SettingsRow>
         <SettingsRow
           title="显示网站图标"
-          description="在回复里的网页链接前显示网站自己的图标；打开后会联网访问这些网站"
+          description="在网页链接前显示网站图标：按网站域名从图标服务（DuckDuckGo）获取，不会访问网站本身"
           label-for="general-site-icons"
         >
           <Switch
             id="general-site-icons"
-            :model-value="uiPrefs.siteIcons"
+            :model-value="uiPrefs.siteIconService"
             @update:model-value="
-              (on: boolean) => setUiPreference('siteIcons', on)
+              (on: boolean) => setUiPreference('siteIconService', on)
             "
           />
         </SettingsRow>

@@ -58,13 +58,14 @@ function log(): VisualSessionLog {
     events: log.events as unknown as VisualSessionLog['events'],
   }
 }
-// These cases exercise real site icons, which are opt-in (PLAN-V020 W-3).
+// Site icons are on by default and asked of the icon service by hostname
+// (BUG-01); the case that turns them off sets the preference itself.
 test.beforeEach(async ({ page }, info) => {
-  if (info.title.includes('site icons stay off')) return
+  if (!info.title.includes('turned off')) return
   await page.addInitScript(() => {
     localStorage.setItem(
       'emperor.ui.prefs.v1',
-      JSON.stringify({ siteIcons: true }),
+      JSON.stringify({ siteIconService: false }),
     )
   })
 })
@@ -135,7 +136,7 @@ for (const theme of ['dark', 'light'] as const) {
     })
   }
 }
-test('site icons stay off by default and request nothing', async ({ page }) => {
+test('site icons turned off request nothing', async ({ page }) => {
   const records = new ShowcaseLog(now)
   records.user('看看这些网站。')
   records.turnStart(1)

@@ -20,10 +20,20 @@ beforeEach(() => {
 })
 
 describe('ui preferences', () => {
-  it('defaults keep developer surfaces and site icons off', () => {
+  it('defaults keep developer surfaces off and site icons on (BUG-01)', () => {
     expect(uiPreferences()).toEqual(DEFAULT_UI_PREFERENCES)
     expect(uiPreferences().showTrajectory).toBe(false)
-    expect(uiPreferences().siteIcons).toBe(false)
+    expect(uiPreferences().siteIconService).toBe(true)
+  })
+
+  it('BUG-01: the old opt-in key no longer turns site icons off', () => {
+    store.set(
+      UI_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ showTrajectory: true, siteIcons: false }),
+    )
+    reloadUiPreferences()
+    expect(uiPreferences().siteIconService).toBe(true)
+    expect(uiPreferences().showTrajectory).toBe(true)
   })
 
   it('resets only the junk field', () => {
@@ -31,7 +41,7 @@ describe('ui preferences', () => {
       parseUiPreferences({
         showTrajectory: true,
         processDisplay: 'nope',
-        siteIcons: 'yes',
+        siteIconService: 'yes',
       }),
     ).toEqual({ ...DEFAULT_UI_PREFERENCES, showTrajectory: true })
   })
@@ -59,11 +69,11 @@ describe('ui preferences', () => {
   })
 
   it('persists a change and reads it back', () => {
-    setUiPreference('siteIcons', true)
+    setUiPreference('siteIconService', false)
     expect(JSON.parse(store.get(UI_PREFERENCES_STORAGE_KEY)!)).toMatchObject({
-      siteIcons: true,
+      siteIconService: false,
     })
     reloadUiPreferences()
-    expect(uiPreferences().siteIcons).toBe(true)
+    expect(uiPreferences().siteIconService).toBe(false)
   })
 })
