@@ -4,10 +4,7 @@ import { afterEach, expect, it } from 'vitest'
 import { makeApi, tmp, waitFor } from '../test-helpers'
 import { invokeCoreOperation } from '../operations'
 import type { CoreApi } from '../core-api'
-import {
-  fakeClaudeSdk,
-  fakeNpmPrefix,
-} from '../../harness/delegation/testing'
+import { fakeClaudeSdk, fakeNpmPrefix } from '../../harness/delegation/testing'
 import { EXECUTOR_HEALTH_FILE } from '../../harness/delegation/executor-health'
 import type { ExecutorVersionsView } from '../../harness/delegation/types'
 
@@ -26,7 +23,10 @@ afterEach(async () => {
 
 async function api(sdk: ReturnType<typeof fakeClaudeSdk>) {
   const root = realpathSync(tmp('emperor-ver04-'))
-  const machine = fakeNpmPrefix(root, { 'claude-code': '2.1.310', codex: '0.163.0' })
+  const machine = fakeNpmPrefix(root, {
+    'claude-code': '2.1.310',
+    codex: '0.163.0',
+  })
   const home = join(root, 'executor-home')
   mkdirSync(home, { recursive: true })
   const { api, events } = await makeApi({
