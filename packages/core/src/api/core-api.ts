@@ -245,6 +245,10 @@ import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { BuiltinPluginLedger } from '../harness/delegation/claude-builtin-plugins'
 import { ExecutorHealthStore } from '../harness/delegation/executor-health'
+import {
+  ExecutorSelfCheck,
+  type ExecutorSelfCheckOptions,
+} from '../harness/delegation/self-check'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
@@ -310,6 +314,14 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
     registry?: string | null
     automatic: boolean
   } | null
+  /**
+   * The offline self-check (VER-04). `automatic: false` (tests): nothing
+   * starts by itself, only 重新检查; the rest are test hooks.
+   */
+  executorSelfCheck?: Pick<
+    ExecutorSelfCheckOptions,
+    'automatic' | 'claudeStartup' | 'codexFeatures' | 'codexAdapter'
+  > | null
   /**
    * Test hook: the home, environment and login shell external executors
    * read sign-ins from (defaults: the user's own).
@@ -435,6 +447,7 @@ export class CoreApi {
   readonly executors: CoreExecutorService
   /** 子智能体 › 版本 and 升级 (AGT-13). */
   readonly executorUpgrades: ExecutorUpgradeService
+  readonly executorSelfCheck: ExecutorSelfCheck
   readonly delegationReceipts: DelegationReceipts
   readonly delegationAcceptance: DelegationAcceptance
   readonly delegationIntegration: DelegationIntegration
@@ -1008,12 +1021,34 @@ export class CoreApi {
     const executorGate = new ExecutorDispatchGate()
     // What each CLI version did, for 退回 (VER-03).
     const executorHealth = new ExecutorHealthStore(this.paths.delegationsRoot)
+    // Claude Code's own plugins Emperor turns off (VER-02), in
+    // `<delegations>/claude-code` (claudeDirectories().root), next to the
+    // folders a Claude process may write, not inside them; runs, the model
+    // list and the self-check share it.
+    const builtinPlugins = new BuiltinPluginLedger(
+      join(this.paths.delegationsRoot, 'claude-code'),
+    )
+    // The offline self-check of each installed version (VER-04).
+    const selfCheckHost = opts.executorSelfCheck ?? {}
+    const executorSelfCheck = new ExecutorSelfCheck({
+      root: this.paths.delegationsRoot,
+      registry: this.executorRegistry,
+      environment: () =>
+        executorEnvironment(executorHome.environment, executorHome.home),
+      health: executorHealth,
+      ledger: builtinPlugins,
+      processes: executorProcesses,
+      changed: () => this.executorUpgrades.changed(),
+      ...selfCheckHost,
+    })
+    this.executorSelfCheck = executorSelfCheck
     this.delegationRuntime = new DelegationService({
       facts: this.executorFacts,
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
       dispatchGate: executorGate,
+      selfCheck: executorSelfCheck,
       // A new last good version or a version failure moves 退回: the
       // settings page hears of it at once.
       health: {
@@ -1033,12 +1068,7 @@ export class CoreApi {
           'claude-code',
           new ClaudeExecutorAdapter({
             processes: executorProcesses,
-            // Claude Code's own plugins Emperor turns off (VER-02), in
-            // `<delegations>/claude-code` (claudeDirectories().root), next
-            // to the folders a Claude process may write, not inside them.
-            ledger: new BuiltinPluginLedger(
-              join(this.paths.delegationsRoot, 'claude-code'),
-            ),
+            ledger: builtinPlugins,
           }),
         ],
         ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
@@ -1260,16 +1290,24 @@ export class CoreApi {
       activeRuns: (backend) => this.delegationRuntime.activeRuns(backend),
       gate: executorGate,
       health: executorHealth,
+      selfCheck: {
+        after: (profile, reason) =>
+          executorSelfCheck.background(profile, reason),
+        running: (profileId) => executorSelfCheck.running(profileId),
+      },
       emit: (event) => host.emitHost(event),
       automatic: versionHost?.automatic ?? false,
     })
     this.executorUpgrades = executorUpgrades
     this.executors = new CoreExecutorService({
       upgrades: executorUpgrades,
+      health: executorHealth,
+      selfCheck: executorSelfCheck,
       modelCatalog: new ExecutorModelCatalogService({
         root: this.paths.delegationsRoot,
         runtime: executorRuntime,
         processes: executorProcesses,
+        ledger: builtinPlugins,
         // A claude the last check found signed out is not started (AGT-12).
         signedIn: (profile) =>
           profile.backend !== 'claude-code' ||

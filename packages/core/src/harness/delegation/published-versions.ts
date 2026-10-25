@@ -5,10 +5,12 @@ import type { UpdateTransport } from '../../updates/types'
 import {
   claudeVersionSupported,
   formatVersion,
+  KNOWN_CLAUDE_VERSIONS,
   KNOWN_CODEX_PROTOCOLS,
   parseVersion,
   type CodexProtocol,
   type SemanticVersion,
+  type VerifiedClaudeVersion,
 } from './compatibility'
 import { EXECUTOR_PACKAGES } from './install-source'
 
@@ -295,19 +297,49 @@ export class PublishedVersionStore {
 }
 
 /**
- * Claude Code: npm's latest, when it is newer and Emperor supports it;
- * never a version in `skip` (one the user went back from, VER-03).
+ * Claude Code (VER-04, as Codex): the highest release Emperor verified that
+ * is newer than what is installed and not above npm's latest;
+ * `unverified`: npm's latest when it is not verified and newer than what
+ * is installed or offered. Neither is ever a version in `skip` (one the
+ * user went back from, VER-03). `verified`: the exact releases.
  */
 export function claudeUpgradeTarget(
   installed: string | null,
-  latest: string | null,
+  published: PublishedPackage | null | undefined,
+  known: readonly VerifiedClaudeVersion[] = KNOWN_CLAUDE_VERSIONS,
   skip: ReadonlySet<string> = new Set(),
-): string | null {
-  const next = parseVersion(latest)
-  if (!next || !claudeVersionSupported(next)) return null
-  if (skip.has(formatVersion(next))) return null
+): { target: string | null; unverified: string | null; verified: string[] } {
+  const verified = known
+    .map((k) => parseVersion(k.version))
+    .filter((v): v is SemanticVersion => !!v && claudeVersionSupported(v))
+    .sort(compare)
   const current = parseVersion(installed)
-  return !current || compare(next, current) > 0 ? formatVersion(next) : null
+  const latest =
+    published?.latest && RELEASE.test(published.latest)
+      ? parseVersion(published.latest)!
+      : undefined
+  const best = verified
+    .filter(
+      (v) =>
+        !skip.has(formatVersion(v)) &&
+        (!current || compare(v, current) > 0) &&
+        (!latest || compare(v, latest) <= 0),
+    )
+    .at(-1)
+  const floor = [current, best].filter(Boolean) as SemanticVersion[]
+  const unverified =
+    latest &&
+    claudeVersionSupported(latest) &&
+    !skip.has(formatVersion(latest)) &&
+    !verified.some((v) => compare(v, latest) === 0) &&
+    floor.every((v) => compare(latest, v) > 0)
+      ? formatVersion(latest)
+      : null
+  return {
+    target: best ? formatVersion(best) : null,
+    unverified,
+    verified: verified.map(formatVersion),
+  }
 }
 
 /**

@@ -449,3 +449,46 @@ describe('DelegationService records what each version did', () => {
     expect(existsSync(join(f.root, EXECUTOR_HEALTH_FILE))).toBe(false)
   })
 })
+
+describe('self-check results (VER-04)', () => {
+  it('kept per version; a newer one replaces it; the 退回 offer reads it', () => {
+    const root = directory()
+    const store = new ExecutorHealthStore(root, { now: () => 9 })
+    const result = {
+      backend: 'claude-code' as const,
+      version: '2.1.315',
+      checkedAt: 5,
+      status: 'incompatible' as const,
+      issues: [
+        {
+          code: 'mcp_server' as const,
+          detail: '加载了 MCP server x',
+          blocking: true,
+        },
+      ],
+      modelCalls: 0 as const,
+    }
+    expect(store.selfCheckOf('claude-default', '2.1.315')).toBeUndefined()
+    store.recordSelfCheck('claude-default', '2.1.315', result)
+    expect(store.selfCheckOf('claude-default', '2.1.315')).toEqual(result)
+    expect(
+      new ExecutorHealthStore(root).selfCheckOf('claude-default', '2.1.315'),
+    ).toEqual(result)
+    store.recordSuccess('claude-default', '2.1.310', 'dgr-1')
+    expect(store.rollbackOffer('claude-default', '2.1.315')).toEqual({
+      target: '2.1.310',
+      because: '2.1.315 自检不兼容：加载了 MCP server x',
+    })
+    store.recordSelfCheck('claude-default', '2.1.315', {
+      ...result,
+      checkedAt: 6,
+      status: 'ok',
+      issues: [],
+    })
+    expect(store.selfCheckOf('claude-default', '2.1.315')?.status).toBe('ok')
+    expect(store.rollbackOffer('claude-default', '2.1.315')).toBeNull()
+    // Not a release version: nothing kept.
+    store.recordSelfCheck('claude-default', 'latest', result)
+    expect(store.selfCheckOf('claude-default', 'latest')).toBeUndefined()
+  })
+})

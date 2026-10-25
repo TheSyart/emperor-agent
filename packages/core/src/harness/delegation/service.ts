@@ -69,6 +69,7 @@ import type { CodexAuthLink } from './codex-auth'
 import type { ExecutorDispatchGate } from './dispatch-gate'
 import { executorGrants } from './environment'
 import { isVersionFailure, type ExecutorHealthStore } from './executor-health'
+import type { ExecutorSelfCheck, SelfCheckResult } from './self-check'
 import {
   describeRunFailure,
   describeTurnError,
@@ -199,6 +200,19 @@ export interface DelegationServiceOptions {
    * against it. 设置 › 子智能体 offers 退回 from it.
    */
   health?: Pick<ExecutorHealthStore, 'recordSuccess' | 'recordFailure'>
+  /**
+   * The offline self-check (VER-04): a version it found incompatible is
+   * refused before the workspace is prepared; one never checked is checked
+   * first (a check that runs late or errs never blocks).
+   */
+  selfCheck?: Pick<ExecutorSelfCheck, 'gate'>
+}
+/** One Chinese line for a version the self-check refused (VER-04). */
+function selfCheckRefusal(result: SelfCheckResult): string {
+  const name = result.backend === 'codex' ? 'Codex' : 'Claude Code'
+  const issue = result.issues.find((i) => i.blocking)
+  const why = issue ? `：${issue.detail.replace(/。$/u, '')}` : ''
+  return `${name} ${result.version} 自检不兼容${why}。可以在 设置 › 子智能体 退回上一个正常版本，或点「重新检查」。`
 }
 interface Entry {
   journal: DelegationJournal
@@ -1586,6 +1600,29 @@ export class DelegationService {
       })
       const spec = record.startSpec!,
         profile = this.profile({ ...spec, profileId: record.profileId })
+      // A version the self-check found incompatible goes no further: no
+      // workspace, no process (VER-04).
+      stage = 'self-check'
+      let checked: SelfCheckResult | null = null
+      try {
+        checked =
+          (await this.options.selfCheck?.gate(
+            profile,
+            record.executorVersion,
+            controller.signal,
+          )) ?? null
+      } catch (error) {
+        if (controller.signal.aborted) throw error
+        checked = null
+      }
+      if (checked?.status === 'incompatible') {
+        bound = this.facts.probe(profile) ?? undefined
+        throw new DelegationError(
+          'EXECUTOR_SELF_CHECK_FAILED',
+          'the self-check found this executor version incompatible',
+          selfCheckRefusal(checked),
+        )
+      }
       const effective = this.policy.resolve(
         this.options.parent(record.owner),
         spec,

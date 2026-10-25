@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { accessSync, constants, existsSync } from 'node:fs'
 import { delimiter } from 'node:path'
 import { logger } from '../../util/log'
-import type { CodexProtocol } from './compatibility'
+import type { CodexProtocol, VerifiedClaudeVersion } from './compatibility'
 import type { ExecutorDispatchGate } from './dispatch-gate'
 import type { ExecutorHealthStore } from './executor-health'
 import {
@@ -83,8 +83,18 @@ export interface ExecutorUpgradeServiceOptions {
    */
   health?: Pick<
     ExecutorHealthStore,
-    'rollbackOffer' | 'markRolledBack' | 'skipped'
+    'rollbackOffer' | 'markRolledBack' | 'skipped' | 'selfCheckOf'
   >
+  /**
+   * The offline self-check (VER-04): `after` an upgrade or a rollback
+   * succeeded it checks the version now installed; `running` for the row.
+   */
+  selfCheck?: {
+    after(profile: ExecutorProfile, reason: 'upgrade' | 'rollback'): void
+    running(profileId: string): boolean
+  }
+  /** Test hook: the verified Claude Code releases (VER-04). */
+  claudeVersions?: readonly VerifiedClaudeVersion[]
   pollMs?: number
   graceMs?: number
   timeoutMs?: number
@@ -256,7 +266,12 @@ export class ExecutorUpgradeService {
     let unverified: string | null = null
     let verified: string[] = []
     if (backend === 'claude-code')
-      target = claudeUpgradeTarget(installed, published?.latest ?? null, skip)
+      ({ target, unverified, verified } = claudeUpgradeTarget(
+        installed,
+        published,
+        this.options.claudeVersions,
+        skip,
+      ))
     else
       ({ target, unverified, verified } = codexUpgradeTarget(
         installed,
@@ -311,6 +326,11 @@ export class ExecutorUpgradeService {
               },
             }
           : {}),
+        selfCheck:
+          (installed &&
+            this.options.health?.selfCheckOf(profile.id, installed)) ||
+          null,
+        selfChecking: this.options.selfCheck?.running(profile.id) ?? false,
         activeRuns: this.options.activeRuns(backend),
       },
     }
@@ -529,6 +549,9 @@ export class ExecutorUpgradeService {
       )
         this.options.health?.markRolledBack(profile.id, run.view.from)
       this.end(run, result, probe)
+      // The version now installed is checked offline (VER-04).
+      if (result.state === 'succeeded')
+        this.options.selfCheck?.after(profile, run.view.kind ?? 'upgrade')
     } finally {
       if (installing) this.options.gate.installing(backend, false)
       if (this.holder === run) this.holder = null

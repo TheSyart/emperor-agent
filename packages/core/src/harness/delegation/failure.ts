@@ -16,6 +16,7 @@ import type { ExternalBackend } from './types'
 /** Where in a run the failure happened, in the order a run goes through. */
 export type RunStage =
   | 'budget'
+  | 'self-check'
   | 'workspace'
   | 'lock'
   | 'runtime'
@@ -85,6 +86,8 @@ function stageLabel(stage: RunStage, backend: string): string {
   switch (stage) {
     case 'budget':
       return '预留任务额度失败'
+    case 'self-check':
+      return `自检 ${name} 失败`
     case 'workspace':
       return '准备工作区失败'
     case 'lock':

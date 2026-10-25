@@ -1227,6 +1227,12 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.rollback(input, viewOf(ctx, 'executors.rollback')),
   ),
+  // VER-04: 重新检查, the offline self-check of the installed version.
+  'executors.selfCheck': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.selfCheck(input, viewOf(ctx, 'executors.selfCheck')),
+  ),
   'executors.cancelUpgrade': operation(
     z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
     (api, [input], ctx) =>

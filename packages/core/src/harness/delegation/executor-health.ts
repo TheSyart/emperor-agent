@@ -47,7 +47,11 @@ export interface SelfCheckResult {
   version: string
   checkedAt: number
   status: 'ok' | 'adapted' | 'incompatible' | 'error'
-  adapted?: { builtinPluginsDisabled: string[] }
+  adapted?: {
+    builtinPluginsDisabled: string[]
+    /** Each one: the first Claude Code release known to ship it. */
+    since?: Record<string, string>
+  }
   issues: SelfCheckIssue[]
   modelCalls: 0
 }
@@ -323,6 +327,22 @@ export class ExecutorHealthStore {
     if (!RELEASE.test(fromVersion)) return
     this.version(profileId, fromVersion).rolledBackFrom = this.now()
     this.save()
+  }
+
+  /** A self-check of `version` (VER-04); a newer one replaces it. */
+  recordSelfCheck(
+    profileId: string,
+    version: string,
+    result: SelfCheckResult,
+  ): void {
+    if (!RELEASE.test(version)) return
+    this.version(profileId, version).selfCheck = result
+    this.save()
+  }
+
+  /** The last self-check of `version`, if any. */
+  selfCheckOf(profileId: string, version: string): SelfCheckResult | undefined {
+    return this.data.profiles[profileId]?.versions[version]?.selfCheck
   }
 
   /** The versions 升级 does not offer: the ones the user went back from. */

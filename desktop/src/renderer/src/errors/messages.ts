@@ -91,6 +91,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
   EXECUTOR_ROLLBACK_UNAVAILABLE:
     '这个版本不能在这里一键退回，请在「设置 › 子智能体」重新检测后再试。',
+  EXECUTOR_SELF_CHECK_FAILED:
+    '这个版本自检不兼容，请在「设置 › 子智能体」退回上一个正常版本，或点「重新检查」。',
   CONTAINMENT_UNAVAILABLE:
     '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
   PROTOCOL_FRAMING: '子智能体返回了无法识别的数据。',

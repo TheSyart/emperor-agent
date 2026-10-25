@@ -12,7 +12,7 @@
  * (2.1.281, 2.1.308, 2.1.310), offline: scripts/claude-init-handshake.mjs
  * and VER-01's fixtures in __golden__/claude-handshake-*.json.
  */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +21,7 @@ import {
   BuiltinPluginLedger,
   SEED_BUILTIN_PLUGINS,
   isBuiltinPlugin,
+  preflightClaudePlugins,
 } from './claude-builtin-plugins'
 import { describeUnapprovedExtensions } from './failure'
 import { ClaudeExecutorAdapter } from './adapters/claude'
@@ -310,4 +311,67 @@ it('4 · a plugin from disk fails the run with the Chinese reason in its summary
   expect(
     existsSync(join(root, 'claude-code', BUILTIN_PLUGIN_LEDGER_FILE)),
   ).toBe(false)
+})
+
+describe('VER-04', () => {
+  it('a raw ledger (the self-check, `--raw`) turns nothing off at launch and keeps no file', () => {
+    const raw = new BuiltinPluginLedger(undefined, { seed: false })
+    expect(raw.disabled()).toEqual([])
+    expect(raw.enabledPluginsSetting()).toEqual({})
+    raw.learn([{ name: 'x', path: 'builtin', source: 'x@builtin' }], '2.1.310')
+    expect(raw.disabled()).toEqual(['x@builtin'])
+    expect(raw.file).toBeUndefined()
+  })
+
+  it('firstSeen: when a builtin was first learned', () => {
+    const d = delegationTestDirectory()
+    try {
+      const ledger = new BuiltinPluginLedger(d.root)
+      expect(ledger.firstSeen('x@builtin')).toBeUndefined()
+      ledger.learn(
+        [{ name: 'x', path: 'builtin', source: 'x@builtin' }],
+        '2.1.312',
+      )
+      expect(ledger.firstSeen('x@builtin')).toBe('2.1.312')
+    } finally {
+      d.cleanup()
+    }
+  })
+
+  it('a refusal says what kind it is, for the self-check', async () => {
+    const control = (answer: object) => ({
+      reloadPlugins: async () => answer,
+      applyFlagSettings: async () => undefined,
+    })
+    const ledger = new BuiltinPluginLedger()
+    await expect(
+      preflightClaudePlugins(
+        control({ mcpServers: [{ name: 'x' }] }),
+        ledger,
+        '2.1.310',
+      ),
+    ).rejects.toMatchObject({
+      code: 'EXECUTOR_INCOMPATIBLE',
+      issue: 'mcp_server',
+    })
+    await expect(
+      preflightClaudePlugins(
+        control({ plugins: [{ name: 'foo', path: '/x', source: 'foo@m' }] }),
+        ledger,
+        '2.1.310',
+      ),
+    ).rejects.toMatchObject({ issue: 'unapproved_plugin' })
+    await expect(
+      preflightClaudePlugins(
+        control({
+          plugins: [{ name: 'x', path: 'builtin', source: 'x@builtin' }],
+        }),
+        ledger,
+        '2.1.310',
+      ),
+    ).rejects.toMatchObject({ issue: 'builtin_not_disabled' })
+    await expect(
+      preflightClaudePlugins(control({ error_count: 2 }), ledger, '2.1.310'),
+    ).rejects.toMatchObject({ issue: 'unapproved_plugin' })
+  })
 })

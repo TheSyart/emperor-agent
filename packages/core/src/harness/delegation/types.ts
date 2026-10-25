@@ -158,6 +158,11 @@ export interface ExecutorProbe {
   compatibility?: 'verified' | 'unverified'
   /** Codex: the verified release whose protocol the CLI was compared with. */
   protocolVersion?: string
+  /**
+   * Codex (VER-04): its generated schema `matched` a verified digest,
+   * `differs` from it, or was `unreadable` (it could not be generated).
+   */
+  protocolCheck?: 'matched' | 'differs' | 'unreadable'
   capabilities: ExecutorCapabilities
   checkedAt: number
   authVerified: boolean
@@ -279,8 +284,29 @@ export interface ExecutorVersionView {
     command: string | null
     manual?: 'desktop' | 'unknown' | 'homebrew'
   }
+  /**
+   * The offline self-check of the installed version (VER-04): ok, adapted
+   * (builtins turned off), incompatible (why), error; null: not checked.
+   */
+  selfCheck?: ExecutorSelfCheckView | null
+  /** A self-check of this executor runs now. */
+  selfChecking?: boolean
   /** Its subtasks running now; an upgrade waits for them. */
   activeRuns: number
+}
+/** The self-check result 设置 › 子智能体 shows (VER-04, self-check.ts). */
+export interface ExecutorSelfCheckView {
+  backend: ExternalBackend
+  version: string
+  checkedAt: number
+  status: 'ok' | 'adapted' | 'incompatible' | 'error'
+  adapted?: {
+    builtinPluginsDisabled: string[]
+    /** Each one: the first Claude Code release known to ship it. */
+    since?: Record<string, string>
+  }
+  issues: Array<{ code: string; detail: string; blocking: boolean }>
+  modelCalls: 0
 }
 /** 升级 (or 退回) while it runs and once it ended (AGT-13). */
 export interface ExecutorUpgradeView {
@@ -759,12 +785,34 @@ export class DelegationError extends Error {
         '这个版本不能在这里一键退回，请在「设置 › 子智能体」重新检测后再试。',
         'configure_executor',
       ],
+      EXECUTOR_SELF_CHECK_FAILED: [
+        '这个版本自检不兼容，请在「设置 › 子智能体」退回上一个正常版本，或点「重新检查」。',
+        'configure_executor',
+      ],
     }
     const [message, action] = guidance[code] ?? [
       '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
       'inspect_retained_results',
     ]
     return { code, message, action }
+  }
+}
+
+/**
+ * Emperor refused what a CLI reported at startup (VER-02/VER-04):
+ * `EXECUTOR_INCOMPATIBLE` with one Chinese line, and which check it was,
+ * so the self-check can name it.
+ */
+export class ExecutorRefusal extends DelegationError {
+  constructor(
+    readonly issue:
+      | 'mcp_server'
+      | 'unapproved_plugin'
+      | 'builtin_not_disabled'
+      | 'hooks_not_applied',
+    reason: string,
+  ) {
+    super('EXECUTOR_INCOMPATIBLE', reason, reason)
   }
 }
 

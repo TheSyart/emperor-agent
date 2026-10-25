@@ -27,7 +27,13 @@ import type {
   ExecutorUpgradeView,
   ExternalBackend,
 } from './types'
-import { ExecutorUpgradeService } from './upgrade-service'
+import {
+  ExecutorUpgradeService,
+  type ExecutorUpgradeServiceOptions,
+} from './upgrade-service'
+import { BuiltinPluginLedger } from './claude-builtin-plugins'
+import { ExecutorSelfCheck } from './self-check'
+import { fakeClaudeSdk } from './testing'
 
 const cleanup: Array<() => void> = []
 /** Processes start and end slowly while the whole suite runs. */
@@ -72,6 +78,8 @@ function service(
     claudeLatest?: string
     /** Folders before /usr/bin:/bin (default: the npm prefix's bin). */
     path?: string
+    /** VER-04: what runs after an install, and whether it runs now. */
+    selfCheck?: ExecutorUpgradeServiceOptions['selfCheck']
   } = {},
 ) {
   const config = defaultExecutorConfig()
@@ -128,12 +136,23 @@ function service(
     startupDelayMs: 0,
     ...(options.now ? { now: options.now } : {}),
     ...(options.health ? { health: options.health } : {}),
+    ...(options.selfCheck ? { selfCheck: options.selfCheck } : {}),
   })
   cleanup.push(() => void upgrades.close())
   const probeAll = async () => {
     for (const p of config.profiles) await upgrades.options.probe(p.id)
   }
-  return { upgrades, events, gate, fetches, probes, config, probeAll }
+  return {
+    upgrades,
+    events,
+    gate,
+    fetches,
+    probes,
+    config,
+    probeAll,
+    registry,
+    environment,
+  }
 }
 
 const both = [
@@ -676,11 +695,13 @@ describe('退回 (VER-03)', () => {
         (e) => e.backend === 'claude-code',
       ),
     ).toMatchObject({
+      // VER-04: the highest verified one; 2.1.312 is not verified yet.
       installed: '2.1.281',
-      target: '2.1.312',
+      target: '2.1.310',
+      unverified: '2.1.312',
       upgrade: {
         oneClick: true,
-        command: 'npm install -g @anthropic-ai/claude-code@2.1.312',
+        command: 'npm install -g @anthropic-ai/claude-code@2.1.310',
       },
     })
   })
@@ -796,5 +817,117 @@ describe('退回 (VER-03)', () => {
         (e) => e.backend === 'claude-code',
       )?.rollback?.target,
     ).toBe('2.1.281')
+  })
+})
+
+describe('self-check (VER-04)', () => {
+  it('8 · after an upgrade it checks the new version offline and keeps the result; the row shows it', async () => {
+    const m = machine()
+    const root = join(m.root, 'delegations')
+    const health = new ExecutorHealthStore(root)
+    const sdk = fakeClaudeSdk({
+      version: '2.1.308',
+      plugins: [
+        {
+          name: 'cc-plugin-plugin-authoring',
+          path: 'builtin',
+          source: 'cc-plugin-plugin-authoring@builtin',
+        },
+      ],
+    })
+    const reasons: string[] = []
+    const box: { check?: ExecutorSelfCheck } = {}
+    const s = service(m, {
+      health,
+      selfCheck: {
+        after: (profile, reason) => {
+          reasons.push(reason)
+          box.check!.background(profile, reason)
+        },
+        running: (profileId) => box.check!.running(profileId),
+      },
+    })
+    const check = new ExecutorSelfCheck({
+      root,
+      registry: s.registry,
+      environment: () => s.environment,
+      health,
+      ledger: new BuiltinPluginLedger(join(root, 'claude-code')),
+      claudeStartup: sdk.startup,
+      changed: () => s.upgrades.changed(),
+    })
+    box.check = check
+    cleanup.push(() => void check.close())
+    await s.probeAll()
+    await s.upgrades.versions({ refresh: true })
+    await s.upgrades.upgrade({ profileId: 'claude-default', target: '2.1.308' })
+    expect(await settled(s.events, 'claude-default')).toMatchObject({
+      state: 'succeeded',
+    })
+    expect(reasons).toEqual(['upgrade'])
+    await check.idle()
+    expect(health.selfCheckOf('claude-default', '2.1.308')).toMatchObject({
+      status: 'adapted',
+      adapted: {
+        builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+      },
+      modelCalls: 0,
+    })
+    expect(sdk.modelCalls).toBe(0)
+    const row = (await s.upgrades.versions()).executors.find(
+      (e) => e.backend === 'claude-code',
+    )!
+    expect(row).toMatchObject({
+      installed: '2.1.308',
+      verified: ['2.1.281', '2.1.308', '2.1.310'],
+      selfChecking: false,
+      selfCheck: { status: 'adapted', version: '2.1.308' },
+    })
+  })
+
+  it('a failed upgrade checks nothing; a rollback checks the version it went back to', async () => {
+    const m = machine()
+    m.mode('eacces')
+    const reasons: string[] = []
+    const s = service(m, {
+      selfCheck: {
+        after: (_profile, reason) => reasons.push(reason),
+        running: () => false,
+      },
+    })
+    await s.probeAll()
+    await s.upgrades.versions({ refresh: true })
+    await s.upgrades.upgrade({ profileId: 'claude-default', target: '2.1.308' })
+    await settled(s.events, 'claude-default')
+    expect(reasons).toEqual([])
+    const back = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const health = new ExecutorHealthStore(join(back.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    health.recordFailure('claude-default', '2.1.308', {
+      code: 'EXECUTOR_INCOMPATIBLE',
+      reason: 'x',
+      runId: 'dgr-bad',
+    })
+    const r = service(back, {
+      health,
+      selfCheck: {
+        after: (_profile, reason) => reasons.push(reason),
+        running: () => true,
+      },
+    })
+    await r.probeAll()
+    const row = (await r.upgrades.versions()).executors.find(
+      (e) => e.backend === 'claude-code',
+    )!
+    expect(row.selfChecking).toBe(true)
+    expect(row.selfCheck).toBeNull()
+    await r.upgrades.rollback({
+      profileId: 'claude-default',
+      target: '2.1.281',
+    })
+    expect(await settled(r.events, 'claude-default')).toMatchObject({
+      state: 'succeeded',
+    })
+    expect(reasons).toEqual(['rollback'])
   })
 })
