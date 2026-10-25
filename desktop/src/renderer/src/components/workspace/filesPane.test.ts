@@ -2,8 +2,21 @@
 import { createApp, h, nextTick, ref, isProxy, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { core } = vi.hoisted(() => ({ core: vi.fn() }))
+const { core, coreListeners } = vi.hoisted(() => ({
+  core: vi.fn(),
+  coreListeners: new Set<(event: unknown) => void>(),
+}))
 vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/backend', async (original) => ({
+  ...(await original<typeof import('../../api/backend')>()),
+  onCoreEvent: (listener: (event: unknown) => void) => {
+    coreListeners.add(listener)
+    return () => coreListeners.delete(listener)
+  },
+}))
+function emitCore(event: Record<string, unknown>): void {
+  for (const listener of [...coreListeners]) listener(event)
+}
 
 import FilesPane from './FilesPane.vue'
 
@@ -581,5 +594,198 @@ describe('FilesPane', () => {
     expect(
       root.querySelector<HTMLElement>('.file-tree-column')!.style.width,
     ).toBe('310px')
+  })
+})
+
+// BUG-11: the pane follows the project: the tree and open files refresh
+// when files change, a deleted open file says so, and a failed watch falls
+// back to refreshing when a turn ends.
+describe('FilesPane follows the project (BUG-11)', () => {
+  function disk() {
+    const state = {
+      entries: [...ENTRIES] as Array<Record<string, unknown>>,
+      content: 'const a = 1\n',
+      gone: false,
+    }
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.list')
+        return Promise.resolve({
+          projectRoot: '/tmp/demo',
+          relativePath: String(payload?.relativePath ?? ''),
+          entries: payload?.relativePath ? [] : state.entries,
+        })
+      if (op === 'files.preview') {
+        if (state.gone)
+          return Promise.reject(
+            Object.assign(new Error('文件或目录不存在。'), {
+              code: 'workspace_path_missing',
+            }),
+          )
+        const path = String(payload?.path ?? 'a.ts')
+        return Promise.resolve({
+          id: `file:/tmp/demo/${path}`,
+          path: `/tmp/demo/${path}`,
+          relativePath: path,
+          mimeType: 'text/plain',
+          kind: 'text',
+          name: path.split('/').pop(),
+          content: state.content,
+          truncated: false,
+          bytes: state.content.length,
+          modifiedAt: 1,
+        })
+      }
+      if (op === 'files.watch') return Promise.resolve({ watching: true })
+      if (op === 'files.unwatch') return Promise.resolve({ watching: false })
+      return fakeCore(op, payload)
+    })
+    return state
+  }
+  const calls = (op: string) => core.mock.calls.filter(([name]) => name === op)
+  const change = (patch: Record<string, unknown>) =>
+    emitCore({
+      event: 'workspace_files_changed',
+      session_id: 's1',
+      paths: [],
+      overflow: false,
+      ...patch,
+    })
+
+  it('1 · watches the project while mounted and stops when unmounted', async () => {
+    disk()
+    mount()
+    await flush()
+    expect(calls('files.watch')).toEqual([['files.watch', { sessionId: 's1' }]])
+    app!.unmount()
+    app = null
+    await flush()
+    expect(calls('files.unwatch')).toEqual([
+      ['files.unwatch', { sessionId: 's1' }],
+    ])
+  })
+
+  it('2 · a new file shows in the tree without a manual refresh', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    state.entries = [...ENTRIES, { name: 'b.ts', path: 'b.ts', kind: 'file' }]
+    change({ paths: ['b.ts'] })
+    await flush()
+    expect(treeRow(root, 'b.ts')).toBeTruthy()
+  })
+
+  it('3 · the open file re-reads when it changes on disk', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    state.content = 'const a = 2\n'
+    change({ paths: ['a.ts'] })
+    await flush()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 2',
+    )
+  })
+
+  it('4 · a background tab is marked, and re-read when it is shown', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await exposed.openPath('README.md')
+    await flush()
+    const reads = calls('files.preview').length
+    state.content = 'const a = 3\n'
+    change({ paths: ['a.ts'] })
+    await flush()
+    expect(calls('files.preview')).toHaveLength(reads)
+    const tab = [
+      ...root.querySelectorAll<HTMLElement>('.workspace-tab-bar .tab-item'),
+    ].find((item) => item.textContent?.includes('a.ts'))!
+    expect(tab.querySelector('[data-tab-mark]')).not.toBeNull()
+    tab.querySelector<HTMLElement>('[role="tab"]')!.click()
+    await flush()
+    expect(calls('files.preview')).toHaveLength(reads + 1)
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 3',
+    )
+  })
+
+  it('5 · a deleted open file says so, keeps what was shown, and can be closed', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    state.gone = true
+    change({ paths: ['a.ts'] })
+    await flush()
+    const banner = root.querySelector('[data-file-deleted]')
+    expect(banner?.textContent).toContain('这个文件已被删除')
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+    banner!.querySelector<HTMLButtonElement>('button')!.click()
+    await flush()
+    expect(tabLabels(root)).toEqual([])
+  })
+
+  it('6 · an overflow re-reads the loaded tree and the open file', async () => {
+    const state = disk()
+    mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    const lists = calls('files.list').length
+    const reads = calls('files.preview').length
+    state.content = 'changed'
+    change({ overflow: true })
+    await flush()
+    expect(calls('files.list').length).toBeGreaterThan(lists)
+    expect(calls('files.preview')).toHaveLength(reads + 1)
+  })
+
+  it('7 · changes of another session are ignored', async () => {
+    disk()
+    mount()
+    await flush()
+    const lists = calls('files.list').length
+    emitCore({
+      event: 'workspace_files_changed',
+      session_id: 'other',
+      paths: ['b.ts'],
+      overflow: false,
+    })
+    await flush()
+    expect(calls('files.list')).toHaveLength(lists)
+  })
+
+  it('8 · when the watch fails, a finished turn refreshes the tree instead', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    change({ overflow: true, unavailable: true })
+    await flush()
+    state.entries = [...ENTRIES, { name: 'c.ts', path: 'c.ts', kind: 'file' }]
+    emitCore({ event: 'assistant_done', session_id: 's1' })
+    await flush()
+    expect(treeRow(root, 'c.ts')).toBeTruthy()
+  })
+
+  it('9 · moves the watch with the session', async () => {
+    disk()
+    mount()
+    await flush()
+    owner.value = 's2'
+    app!.unmount()
+    app = null
+    container?.remove()
+    mount()
+    await flush()
+    expect(calls('files.watch').map(([, input]) => input)).toEqual([
+      { sessionId: 's1' },
+      { sessionId: 's2' },
+    ])
   })
 })
