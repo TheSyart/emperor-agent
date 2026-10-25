@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-26（对照 `be39413f`）<br>
+> 最后核验：2026-10-26（对照 `41838be4`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -119,12 +119,12 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 打开「设置 › 子智能体」时，Emperor 向 npm 的公开仓库查 Claude Code 和 Codex 的最新版本号，每天第一次启动时也查一次。只读取公开的版本号，不发送账号、令牌或这台 Mac 的任何信息；连不上时最新版本显示为未知，不影响使用。
 
 - **发现新版本**：打开着的 Claude Code 或 Codex 有新版本时，页面顶部提示「Claude Code 和 Codex 有新版本」，写明从哪个版本升到哪个版本，可以「全部升级」或「稍后」（这些版本不再提示，出了更新的版本再提示）。对应那一行写「本机 x · 可升级到 y」并多一个「升级」，左侧导航的「子智能体」带一个小点。
-- **升级到哪个版本**：只升到 Emperor 验证过的版本。Claude Code 目前验证过 2.1.281、2.1.308、2.1.310；Codex 只升到验证过的次版本里最新的发布版（目前验证过 0.153 和 0.163，所以 0.153.4 升到 0.163.0）。更新、但 Emperor 还没验证的版本显示「尚未验证」，不提供升级；你自己装上的这类版本仍然可以用，以自检结果为准。
+- **升级到哪个版本**：只升到 Emperor 验证过的版本。Claude Code 目前验证过 2.1.281、2.1.308、2.1.310；Codex 只升到验证过的次版本里最新的发布版（目前验证过 0.153、0.163 和 0.164，所以 0.153.4 和 0.163.0 都升到 0.164.0）。更新、但 Emperor 还没验证的版本显示「尚未验证」，不提供升级；你自己装上的这类版本仍然可以用，以自检结果为准。
 - **自检**：升级或退回之后、发现版本变了、点「重新检查」时，Emperor 会在一个临时目录里离线启动一次 Claude Code 或 Codex，只看它启动时加载了什么（插件、MCP server、工具钩子，Codex 的协议和默认打开的功能），不发任何提示词，不花额度，也不碰你的登录和设置，结束就删掉临时目录。详情页「版本」里本机版本旁边写结果：「自检通过」（下面写已自动关闭哪些内置插件）、「不兼容」（下面写原因，有上次正常的版本时可以退回）、「尚未验证」，以及「重新检查」。自检判定不兼容的版本不会再接新任务：任务马上失败并说明原因，不准备工作区。
 - **版本问题导致的失败**：对话里那一行写明是哪个版本、为什么，以及上次正常的版本，下面有「退回 x」（或「装 x（已验证）」）、「打开设置」，自检没完成时还有「重新检查」；子智能体页顶部也有同样的提示。点「退回」「装」会打开设置里的确认框，确认后才运行。主智能体也会收到这些信息，并被告知不要换别的方式重试同一个子智能体。
 - **怎么升级**：按你当初安装它的方式。npm 全局安装的，用装它的那个 npm 运行 `npm install -g <包>@<版本>`；Homebrew 安装的运行 `brew upgrade <名字>`（Homebrew 提供的正是这个版本时）；用 Claude 官方安装命令装的运行 `claude install <版本>`。点「升级」后先确认：弹窗写明要运行的命令和不会改动的东西，确认后才运行。Emperor 从不自动升级，也不用管理员权限。Codex 桌面版自带的 Codex 随桌面版更新；认不出安装方式时，只给出一条命令让你复制到终端运行。
 - **升级中**：那一行显示「升级中」、进度条和已用的时间，「查看过程」显示命令的输出（令牌和你的用户目录已去掉），可以「取消」。升级期间不把新的子任务交给它；正在运行的子任务先跑完，然后才开始升级。
-- **完成与失败**：完成后 Emperor 重新检测，那一行写出新版本，并提示「Codex 已升级到 0.163.0」。失败时页面顶部写明原因，例如「Codex 升级失败：没有写入 /opt/homebrew/lib/node_modules 的权限」，并给出同一条命令：「复制命令」后在终端里自己运行，完成后点「重新检测」；那一行的「重试」再试一次，「查看过程」看命令输出。
+- **完成与失败**：完成后 Emperor 重新检测，那一行写出新版本，并提示「Codex 已升级到 0.164.0」。失败时页面顶部写明原因，例如「Codex 升级失败：没有写入 /opt/homebrew/lib/node_modules 的权限」，并给出同一条命令：「复制命令」后在终端里自己运行，完成后点「重新检测」；那一行的「重试」再试一次，「查看过程」看命令输出。
 - **详情页的「版本」**：本机版本、安装方式和位置、最新版本、Emperor 已验证的版本（Codex），以及「升级到 …」「检查更新」和上次检查的时间。
 - 升级不改动 `~/.codex`、`~/.claude` 里的登录和设置，Emperor 为 Claude Code 准备的专用登录也保留。
 
@@ -207,4 +207,4 @@ Claude Code 子任务里执行的命令（Bash）拿不到 Emperor 交给它的 
 - **长时间等待**：Codex 子智能体向你提问后，过几分钟再回答也不会超时；长时间没有输出的命令（例如构建）也不会被中途停止。只有超过「设置 › 子智能体 › 高级 › 单次运行时长上限」（默认 30 分钟，可选 10、30、60、120 分钟）时才会停止，结果里写明原因是超时。多轮对话、输出很长的 Codex 子智能体也可以继续安排任务。
 - **开发环境**：子智能体在自己隔离的主目录里运行（Claude Code 用 Emperor 为它准备的专用目录），读不到你的 `~/.gitconfig`、SSH 密钥、nvm 等工具链和 gh 登录。「设置 › 子智能体 › 高级 › 开发环境」逐项决定带上哪些：「Git 身份」（提交时用你 git 配置里的姓名和邮箱）和「网络代理」默认打开；「SSH 代理」（经你的 SSH agent 访问远端仓库，不复制密钥）、「开发工具链」（nvm 的默认 node、volta、rustup / cargo、pyenv）和「允许子智能体使用 GitHub 登录」（把 `gh auth token` 的令牌交给子任务，并在它私有的 gh 配置里写一份，Claude Code 的 Bash 也能用 gh）默认关闭，按需打开。从程序坞启动 Emperor 时，这些变量从你的登录 shell 读取。仓库里的 `CLAUDE.md`、`AGENTS.md` 会作为说明交给 Claude Code，`AGENTS.md` 的摘要会附在 Codex 的任务简报里；仓库的 `.claude/settings.json` 不会被加载（其中的权限放行规则可能绕过 Emperor 的审批）。
 - **失败原因**：Claude Code 子任务失败时，任务详情写明原因和下一步：「Claude Code 的登录已失效或过期」（401，点「登录 Claude Code」重新登录，或换一个新的 API Key）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附子智能体报告。子智能体这一轮失败时，子智能体那一行、任务详情和主会话的 Agent 收到的结果都以一句原因开头：服务返回的错误读成一句话，例如「Codex 这一轮失败：被限流了（HTTP 429，rate_limit_error）：…」；模型不可用时写明是哪个模型、去哪里换，例如「Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。」，任务详情有「打开子智能体设置」。Codex 或 Claude Code 还没开始工作就失败时（准备工作区、准备运行环境、启动进程），子智能体那一行、任务详情（「原因：…」）和主会话的 Agent 收到的结果都写明哪一步、为什么，例如「准备工作区失败：当前签名执行环境中没有可用 Git（探测失败：timeout）。」；任务详情另给下一步，`~/Library/Logs/Emperor Agent/core.log` 里同时记一行 `external run failed`（不含密钥和你的任务内容）。
-- **版本**：Claude Code 使用你本机安装的 `claude`，需要 2.1.79 或更高（它支持 `claude auth status` 与 `claude auth login --console`）；用官方命令安装的 Claude Code 会自己在后台更新，Homebrew 安装的用 `brew upgrade claude-code` 升级；两者有新版本时也可以在设置页升级（见上面「版本与升级」）。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x 与 0.163.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。
+- **版本**：Claude Code 使用你本机安装的 `claude`，需要 2.1.79 或更高（它支持 `claude auth status` 与 `claude auth login --console`）；用官方命令安装的 Claude Code 会自己在后台更新，Homebrew 安装的用 `brew upgrade claude-code` 升级；两者有新版本时也可以在设置页升级（见上面「版本与升级」）。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x、0.163.x 与 0.164.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。
