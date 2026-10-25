@@ -13,7 +13,7 @@
  * a closable editor tab.
  *
  * Props:
- * - tabs: { id, label, disabled?, icon?, count?, closable?, title? }[]
+ * - tabs: { id, label, disabled?, icon?, count?, closable?, marked?, title? }[]
  *   (`title` is the hover text, kept on a disabled tab).
  * - modelValue (v-model): active tab id.
  * - block?: stretch to the container, equal widths (segmented).
@@ -109,6 +109,12 @@ function onKeydown(event: KeyboardEvent, tab: TabItem) {
       >
         <component :is="tab.icon" v-if="tab.icon" class="tab-icon" :size="14" />
         <span class="tab-label">{{ tab.label }}</span>
+        <span
+          v-if="tab.marked"
+          class="tab-mark"
+          data-tab-mark
+          aria-label="有更新"
+        ></span>
         <Badge
           v-if="tab.count !== undefined"
           variant="count"
@@ -346,5 +352,13 @@ function onKeydown(event: KeyboardEvent, tab: TabItem) {
 .tab-close:hover {
   background: var(--surface-hover-strong);
   color: rgb(var(--text-1));
+}
+/* An editor tab whose file changed since it was shown (BUG-11). */
+.tab-mark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: rgb(var(--accent));
 }
 </style>

@@ -104,6 +104,8 @@ const EXPECTED_OPERATIONS = [
   'files.read',
   'files.search',
   'files.stat',
+  'files.unwatch',
+  'files.watch',
   'git.branches',
   'git.closePullRequest',
   'git.commit',
