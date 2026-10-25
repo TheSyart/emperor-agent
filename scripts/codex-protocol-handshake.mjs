@@ -68,6 +68,8 @@ await build({
   stdin: {
     contents: [
       'export { CodexExecutorAdapter, CODEX_FEATURES, codexAppServerArgs } from "./packages/core/src/harness/delegation/adapters/codex"',
+      // The same `features list` arguments the self-check runs (VER-04).
+      'export { codexFeatureListArgs } from "./packages/core/src/harness/delegation/self-check"',
       'export { CodexRpc } from "./packages/core/src/harness/delegation/adapters/codex-rpc"',
       'export { ManagedAgentProcess } from "./packages/core/src/harness/delegation/process"',
       'export { ExecutorRegistry } from "./packages/core/src/harness/delegation/registry"',
@@ -206,13 +208,9 @@ await step('probe', async () => {
 })
 
 await step('features', async () => {
-  const flags = Object.entries(core.CODEX_FEATURES).flatMap(([name, on]) => [
-    '-c',
-    `features.${name}=${on}`,
-  ])
   const output = execFileSync(
     '/usr/bin/sandbox-exec',
-    ['-p', OFFLINE, codex, 'features', ...flags, 'list'],
+    ['-p', OFFLINE, codex, ...core.codexFeatureListArgs()],
     { env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   )
   const effective = {}
