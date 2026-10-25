@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { WorkspaceOperationError } from '../../workspace/common'
 import { redactLogText } from '../../util/redaction'
 import { redactExecutorText } from './redaction'
-import type { ExternalBackend } from './types'
+import type { ExternalBackend, VersionFailureContext } from './types'
 
 /** Where in a run the failure happened, in the order a run goes through. */
 export type RunStage =
@@ -31,6 +31,67 @@ export const WORKSPACE_FAILURE_CODES = [
   'WORKSPACE_GIT_FAILED',
   'WORKSPACE_PREPARE_FAILED',
 ] as const
+
+const firstSentence = (text: string) =>
+  (text.split('\n')[0] ?? '').split('。')[0]!.trim()
+
+/**
+ * VER-06: the version context of a run that failed for its version. The
+ * versions come from the health record and the run's probe; `reason` is
+ * Emperor's own line (the refusal's reason, the self-check's blocking
+ * issue, or what an unverified Codex protocol means), never the CLI's.
+ */
+export function describeVersionFailure(input: {
+  backend: ExternalBackend
+  profileId: string
+  current: string
+  failureCode: string
+  /** A DelegationError's own Chinese reason, when it had one. */
+  errorReason?: string
+  /** The self-check that refused the version (EXECUTOR_SELF_CHECK_FAILED). */
+  selfCheckIssue?: string
+  protocolVersion?: string
+  lastGood?: string
+  verifiedMax?: string
+  selfCheckErred?: boolean
+}): VersionFailureContext {
+  const name = executorName(input.backend)
+  const prefix = `${name} ${input.current}`
+  const reason =
+    input.failureCode === 'EXECUTOR_SELF_CHECK_FAILED' && input.selfCheckIssue
+      ? `${prefix} 自检不兼容：${firstSentence(input.selfCheckIssue)}`
+      : input.failureCode === 'EXECUTOR_INCOMPATIBLE' ||
+          input.failureCode === 'EXECUTOR_SELF_CHECK_FAILED'
+        ? input.errorReason
+          ? firstSentence(input.errorReason)
+          : `${prefix} 与 Emperor 不兼容`
+        : `${prefix} 的协议与 Emperor 验证过的 ${input.protocolVersion ?? '版本'} 不同，这次运行失败可能与此有关`
+  const newer = (a: string, b: string) => {
+    const [x, y] = [a, b].map((v) => v.split('.').map(Number))
+    for (let i = 0; i < 3; i++)
+      if ((x![i] ?? 0) !== (y![i] ?? 0)) return (x![i] ?? 0) > (y![i] ?? 0)
+    return false
+  }
+  const lastGood =
+    input.lastGood && input.lastGood !== input.current
+      ? input.lastGood
+      : undefined
+  const actions: VersionFailureContext['actions'] = []
+  if (lastGood) actions.push('rollback')
+  else if (input.verifiedMax && newer(input.verifiedMax, input.current))
+    actions.push('install_verified')
+  actions.push('open_settings')
+  if (input.selfCheckErred) actions.push('recheck')
+  return {
+    backend: input.backend === 'codex' ? 'codex' : 'claude-code',
+    profileId: input.profileId,
+    current: input.current,
+    ...(lastGood ? { lastGood } : {}),
+    ...(input.verifiedMax ? { verifiedMax: input.verifiedMax } : {}),
+    reason,
+    actions,
+  }
+}
 
 export interface RunFailure {
   /** The run's failureCode. */

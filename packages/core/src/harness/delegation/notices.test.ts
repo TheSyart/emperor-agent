@@ -131,3 +131,56 @@ it('out of order settlements each wake once and late stopped notices remain pend
     notices[0]!.id,
   ])
 })
+
+it('VER-06 · 5 · a version failure ends with the fixed sentence: why, the last good version, what to tell the user', () => {
+  const record = fixtureDelegationRecord()
+  const failed = {
+    ...fixtureDelegationRun(),
+    phase: 'failed' as const,
+    failureCode: 'EXECUTOR_INCOMPATIBLE',
+    summary: 'Claude Code 2.1.310 加载了未批准的扩展：插件 foo。',
+    versionFailure: {
+      backend: 'claude-code' as const,
+      profileId: 'claude-default',
+      current: '2.1.310',
+      lastGood: '2.1.281',
+      verifiedMax: '2.1.310',
+      reason: 'Claude Code 2.1.310 加载了未批准的扩展：插件 foo',
+      actions: ['rollback' as const, 'open_settings' as const],
+    },
+  }
+  expect(settlementNotice(record, failed).text).toContain(
+    '失败原因：Claude Code 2.1.310 加载了未批准的扩展：插件 foo。上次正常版本：2.1.281。请告诉用户可以在 设置 › 子智能体 退回；不要换别的方式重试同一个子智能体。',
+  )
+  // No last good version: the verified one to install instead.
+  expect(
+    settlementNotice(record, {
+      ...failed,
+      versionFailure: {
+        ...failed.versionFailure,
+        current: '2.1.200',
+        lastGood: undefined,
+        actions: ['install_verified' as const, 'open_settings' as const],
+      },
+    }).text,
+  ).toContain(
+    '失败原因：Claude Code 2.1.310 加载了未批准的扩展：插件 foo。Emperor 验证过的版本：2.1.310。请告诉用户可以在 设置 › 子智能体 安装这个版本；不要换别的方式重试同一个子智能体。',
+  )
+  // Neither: where to look.
+  expect(
+    settlementNotice(record, {
+      ...failed,
+      versionFailure: {
+        ...failed.versionFailure,
+        lastGood: undefined,
+        actions: ['open_settings' as const],
+      },
+    }).text,
+  ).toContain(
+    '请告诉用户可以在 设置 › 子智能体 查看并重新检查；不要换别的方式重试同一个子智能体。',
+  )
+  // 6 · An older run without the context: as before.
+  expect(
+    settlementNotice(record, { ...failed, versionFailure: undefined }).text,
+  ).not.toContain('失败原因')
+})

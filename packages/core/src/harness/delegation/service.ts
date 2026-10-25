@@ -73,9 +73,11 @@ import type { ExecutorSelfCheck, SelfCheckResult } from './self-check'
 import {
   describeRunFailure,
   describeTurnError,
+  describeVersionFailure,
   sanitizeFailureMessage,
   type RunStage,
 } from './failure'
+import { KNOWN_CLAUDE_VERSIONS, KNOWN_CODEX_PROTOCOLS } from './compatibility'
 import { logger } from '../../util/log'
 
 const log = logger.child({ component: 'executors' })
@@ -199,7 +201,10 @@ export interface DelegationServiceOptions {
    * text makes its version the last good one; a version failure counts
    * against it. 设置 › 子智能体 offers 退回 from it.
    */
-  health?: Pick<ExecutorHealthStore, 'recordSuccess' | 'recordFailure'>
+  health?: Pick<
+    ExecutorHealthStore,
+    'recordSuccess' | 'recordFailure' | 'lastGood' | 'selfCheckOf'
+  >
   /**
    * The offline self-check (VER-04): a version it found incompatible is
    * refused before the workspace is prepared; one never checked is checked
@@ -1570,7 +1575,11 @@ export class DelegationService {
       /** A refused model was already retried once (FIX-16). */
       retried = false,
       /** The probe this run was checked with: its version (VER-03). */
-      bound: ExecutorProbe | undefined
+      bound: ExecutorProbe | undefined,
+      /** Emperor's own reason a DelegationError carried (VER-06). */
+      refusalReason: string | undefined,
+      /** The self-check's blocking issue that refused the run (VER-06). */
+      selfCheckIssue: string | undefined
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1617,6 +1626,7 @@ export class DelegationService {
       }
       if (checked?.status === 'incompatible') {
         bound = this.facts.probe(profile) ?? undefined
+        selfCheckIssue = checked.issues.find((i) => i.blocking)?.detail
         throw new DelegationError(
           'EXECUTOR_SELF_CHECK_FAILED',
           'the self-check found this executor version incompatible',
@@ -2091,6 +2101,7 @@ export class DelegationService {
       }
       if (error instanceof DelegationError) {
         failureCode = error.code
+        refusalReason = error.reason
         // Emperor refused the run and says why (VER-02).
         if (error.reason)
           summary = boundText(
@@ -2237,6 +2248,14 @@ export class DelegationService {
             /* Durable ownership intent still preserves the directory. */
           }
         }
+        // A failure for its version says which and what to do (VER-06).
+        const versionFailure =
+          settledPhase === 'failed'
+            ? this.versionFailure(record, bound, failureCode, {
+                refusalReason,
+                selfCheckIssue,
+              })
+            : undefined
         if (!TERMINAL_RUN_PHASES.has(current.phase))
           await this.append(e, {
             type: 'run-changed',
@@ -2247,6 +2266,7 @@ export class DelegationService {
               finishedAt: Date.now(),
               summary,
               usage,
+              ...(versionFailure ? { versionFailure } : {}),
               ...(structured === undefined ? {} : { structured }),
               ...(e.inputFailure
                 ? {
@@ -2293,6 +2313,48 @@ export class DelegationService {
       )
       void this.dispatchNotices(id).catch(() => undefined)
       e.controller = undefined
+    }
+  }
+  /**
+   * VER-06: the version context of a run that failed for its version, from
+   * the health record and the run's probe; none for other failures.
+   */
+  private versionFailure(
+    record: DelegationRecord,
+    probe: ExecutorProbe | undefined,
+    failureCode: string | undefined,
+    found: { refusalReason?: string; selfCheckIssue?: string },
+  ): import('./types').VersionFailureContext | undefined {
+    const current = probe?.executableVersion
+    if (!current || !failureCode || !isVersionFailure(failureCode, probe))
+      return undefined
+    try {
+      const health = this.options.health
+      const verified =
+        record.backend === 'codex'
+          ? KNOWN_CODEX_PROTOCOLS.map((p) => p.version)
+          : KNOWN_CLAUDE_VERSIONS.map((k) => k.version)
+      return describeVersionFailure({
+        backend: record.backend,
+        profileId: record.profileId,
+        current,
+        failureCode,
+        ...(found.refusalReason ? { errorReason: found.refusalReason } : {}),
+        ...(found.selfCheckIssue
+          ? { selfCheckIssue: found.selfCheckIssue }
+          : {}),
+        ...(probe?.protocolVersion
+          ? { protocolVersion: probe.protocolVersion }
+          : {}),
+        ...(health?.lastGood(record.profileId)
+          ? { lastGood: health.lastGood(record.profileId)! }
+          : {}),
+        ...(verified.length ? { verifiedMax: verified.at(-1)! } : {}),
+        selfCheckErred:
+          health?.selfCheckOf(record.profileId, current)?.status === 'error',
+      })
+    } catch {
+      return undefined
     }
   }
   /**

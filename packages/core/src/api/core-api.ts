@@ -1069,6 +1069,9 @@ export class CoreApi {
           executorHealth.recordFailure(...args)
           this.executorUpgrades.changed()
         },
+        lastGood: (profileId) => executorHealth.lastGood(profileId),
+        selfCheckOf: (profileId, version) =>
+          executorHealth.selfCheckOf(profileId, version),
       },
       checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([

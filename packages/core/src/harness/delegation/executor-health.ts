@@ -340,6 +340,11 @@ export class ExecutorHealthStore {
     this.save()
   }
 
+  /** The last version a task ran on (VER-06). */
+  lastGood(profileId: string): string | undefined {
+    return this.data.profiles[profileId]?.lastGood?.version
+  }
+
   /** The last self-check of `version`, if any. */
   selfCheckOf(profileId: string, version: string): SelfCheckResult | undefined {
     return this.data.profiles[profileId]?.versions[version]?.selfCheck

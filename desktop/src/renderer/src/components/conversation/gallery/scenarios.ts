@@ -2115,3 +2115,94 @@ export function fixturePage(
     lastSeq: all.at(-1)?.seq ?? -1,
   }
 }
+
+/** VER-06: the version context of the failed Claude Code run below. */
+export const VERSION_FAILURE_FIXTURE = {
+  backend: 'claude-code' as const,
+  profileId: 'claude-default',
+  current: '2.1.315',
+  lastGood: '2.1.310',
+  verifiedMax: '2.1.310',
+  reason:
+    'Claude Code 2.1.315 自检不兼容：加载了 MCP server「x」，子智能体不允许使用 MCP',
+  actions: ['rollback' as const, 'open_settings' as const],
+}
+
+/**
+ * VER-06 (preview § 8): one Claude Code task fails because the installed
+ * 2.1.315 loads an MCP server; the row says why, the last good version,
+ * and offers 退回 2.1.310 and 打开设置.
+ */
+export function versionFailureScenario(now = Date.now()): Scenario {
+  const started = now - 30_000
+  const log = new ShowcaseLog(started - 20_000)
+  log.user('让 Claude Code 读一下 README，总结三点。')
+  log.turnStart(1)
+  const writer: Writer = {
+    callId: 'call_readme',
+    id: 'dlg-readme',
+    description: '读一下 README 总结三点',
+    backend: 'claude-code',
+  }
+  log.stepStart(1, 1)
+  log.stream(1, 1, [
+    { text: '交给 Claude Code。' },
+    {
+      tool: {
+        id: writer.callId,
+        name: 'subagent',
+        args: { description: writer.description },
+      },
+    },
+  ])
+  log.call(1, 1, writer.callId, 'subagent', {
+    description: writer.description,
+    prompt: '读 README.md，用三点总结。',
+    run_in_background: true,
+    backend: 'claude-code',
+  })
+  externalRun(log, writer, { status: 'running', started_at: started })
+  log.add(
+    'tool/result',
+    {
+      turn: 1,
+      step: 1,
+      message: {
+        id: `result-${writer.callId}`,
+        role: 'user',
+        source: { kind: 'tool', callId: writer.callId },
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: writer.callId,
+            content: [{ type: 'text', text: `started ${writer.id}` }],
+          },
+        ],
+      },
+      meta: { kind: 'continuable', subagentId: writer.id },
+    },
+    { surfaceOp: 'append' },
+  )
+  log.stepEnd(1, 1)
+  externalRun(log, writer, {
+    status: 'failed',
+    started_at: started,
+    finished_at: started + 2_000,
+    detail:
+      'Claude Code 2.1.315 自检不兼容：加载了 MCP server「x」，子智能体不允许使用 MCP。可以在 设置 › 子智能体 退回上一个正常版本，或点「重新检查」。',
+    version_failure: VERSION_FAILURE_FIXTURE,
+  })
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
+    {
+      text: 'Claude Code 这次没能运行：当前版本 2.1.315 不兼容。可以在设置里退回上次正常的 2.1.310。',
+    },
+  ])
+  log.stepEnd(1, 2)
+  log.turnEnd(1)
+  return {
+    id: 'version-failure',
+    label: '子智能体（版本不兼容）',
+    sessions: [{ id: 'version-failure', events: log.events }],
+  }
+}

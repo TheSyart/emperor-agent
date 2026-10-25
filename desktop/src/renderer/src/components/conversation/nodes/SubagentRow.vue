@@ -10,6 +10,10 @@
  * the report's opening, or why it failed; in a group (and the status bar)
  * that line is the row's tooltip, as in the approved design.
  *
+ * A Claude Code / Codex run that failed for its version (VER-06) shows,
+ * instead of that line, why with the last good version and its buttons
+ * (退回 x / 装 x（已验证） / 打开设置 / 重新检查).
+ *
  * Props: row (SubagentRowView), href (null: nothing to open yet),
  * variant ('single' in the flow, 'grouped' in a group or the status bar),
  * details (offer 任务详情). Emits: open(event), details().
@@ -18,6 +22,7 @@ import { computed } from 'vue'
 import Avatar from '../../ui/Avatar.vue'
 import LinkButton from '../../ui/LinkButton.vue'
 import Spinner from '../../ui/Spinner.vue'
+import VersionFailureActions from '../VersionFailureActions.vue'
 import { useSubagentNow } from '../subagentClock'
 import { subagentStatusText, type SubagentRowView } from '../subagentRows'
 
@@ -114,8 +119,13 @@ const logoSize = computed(() => (props.variant === 'single' ? 20 : 16))
       >
       <span v-if="href" class="go" aria-hidden="true">↗</span>
     </div>
+    <VersionFailureActions
+      v-if="variant === 'single' && row.versionFailure"
+      class="summary"
+      :context="row.versionFailure"
+    />
     <p
-      v-if="variant === 'single' && row.summary"
+      v-else-if="variant === 'single' && row.summary"
       class="summary"
       data-agent-summary
     >

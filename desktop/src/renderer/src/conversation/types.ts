@@ -1,3 +1,4 @@
+import type { VersionFailureContext } from '@emperor/core/runtime-contract'
 // Chat target contract: the node union the M4 conversation UI renders.
 //
 // Every node is produced by one Definition in `nodes/*` from raw session-log
@@ -212,6 +213,8 @@ export interface ToolExternalAgentView {
   readonly finishedAt?: number
   /** The run's summary: its closing text, or why it failed. */
   readonly detail?: string
+  /** A failure for its CLI's version (VER-06, `task.version_failure`). */
+  readonly versionFailure?: VersionFailureContext
 }
 export interface ToolChatData {
   readonly callId: string

@@ -55,6 +55,8 @@ export function externalTask(state: DelegationState, run: DelegationRunRecord) {
       run.id === record.currentRunId && delegationNeedsExit(record, run),
     ...(run.abandoned ? { abandoned_by: run.abandoned.by } : {}),
     detail: run.summary ?? null,
+    // VER-06: a failure for its version, for the card's buttons.
+    ...(run.versionFailure ? { version_failure: run.versionFailure } : {}),
     revision: run.revision,
   }
 }

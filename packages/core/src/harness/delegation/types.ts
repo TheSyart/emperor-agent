@@ -515,6 +515,26 @@ export interface DelegationRunRecord {
   modelChoice?: ExecutorModelChoice
   /** What Emperor did for the run that 任务详情 says (VER-02). */
   notices?: DelegationRunNotice[]
+  /** The run failed for its CLI's version (VER-06): what to show and offer. */
+  versionFailure?: VersionFailureContext
+}
+/**
+ * VER-06: a run that failed for its version (isVersionFailure). Every
+ * version comes from the health record and the run's own probe, never from
+ * an error string. `actions`: 退回 (`lastGood`, not the current one),
+ * 装 the verified one (`verifiedMax`, newer than the current one), 打开设置
+ * always, 重新检查 when the self-check did not finish.
+ */
+export interface VersionFailureContext {
+  backend: ExternalBackend
+  profileId: string
+  current: string
+  lastGood?: string
+  /** The highest release Emperor verified. */
+  verifiedMax?: string
+  /** One Chinese line, without a full stop. */
+  reason: string
+  actions: Array<'rollback' | 'install_verified' | 'open_settings' | 'recheck'>
 }
 /**
  * VER-02: a newer Claude Code loaded builtin plugins of its own and Emperor
