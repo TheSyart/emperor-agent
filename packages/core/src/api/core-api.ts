@@ -4722,6 +4722,7 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  collapsed_sections: [],
   pinned_session_ids: [],
   right_workspace: {
     version: 3,
@@ -4744,6 +4745,7 @@ function normalizeSidebarState(value: unknown): Dict {
       raw.project_session_order,
     ),
     collapsed_project_ids: stringList(raw.collapsed_project_ids),
+    collapsed_sections: normalizeCollapsedSections(raw.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(raw.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(raw.right_workspace),
   }
@@ -4831,6 +4833,15 @@ function normalizeSidebarSectionOrder(value: unknown): string[] {
     if (!out.includes(item)) out.push(item)
   }
   return out.slice(0, 2)
+}
+
+/**
+ * Folded sidebar sections (BUG-06): known keys only, each once; a state
+ * written before the field existed has none folded.
+ */
+function normalizeCollapsedSections(value: unknown): string[] {
+  const known = new Set(['pinned', 'projects', 'chats'])
+  return [...new Set(stringList(value))].filter((key) => known.has(key))
 }
 
 function normalizeSidebarProjectSessionOrder(
