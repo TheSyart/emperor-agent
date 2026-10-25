@@ -13,7 +13,6 @@ import type {
   MemoryVersionDetail,
   DesktopPetPayload,
   PendingState,
-  ProvisionalPrompt,
   QueuedPromptItem,
   RuntimeStatus,
   GoalProjectionState,
@@ -36,10 +35,6 @@ export interface AppContext {
   configContent: Ref<string>
 
   queuedPrompts: Ref<QueuedPromptItem[]>
-  /** Inserted messages the chat shows before the log does (BUG-07). */
-  provisionalPrompts: ComputedRef<ProvisionalPrompt[]>
-  /** What the queue dock lists: queued and held prompts, not insertions. */
-  queueDockItems: ComputedRef<QueuedPromptItem[]>
   pendingInteractionsBySession: Record<string, ControlInteraction>
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>

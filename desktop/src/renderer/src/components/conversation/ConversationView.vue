@@ -85,6 +85,7 @@ import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
 import ChildComposer from '../composer/ChildComposer.vue'
+import { useProvisionalPrompts } from './provisionalPrompts'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import { useAgentTree } from '../sidebar/agentTree'
@@ -1073,8 +1074,16 @@ async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   )
 }
 
+// Inserted messages shown before the log has them (BUG-07).
+const provisional = useProvisionalPrompts({
+  queuedPrompts: ctx.queuedPrompts,
+  busy: ctx.busy,
+  sessionId: ctx.sessionId,
+})
+
 async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
-  await ctx.manageQueuedPrompt(item.id, 'interject')
+  if (await ctx.manageQueuedPrompt(item.id, 'interject'))
+    provisional.interjected(item)
 }
 
 async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
@@ -1135,9 +1144,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :session-id="viewingId"
           :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
           :provisional="
-            viewingId === ctx.sessionId.value
-              ? ctx.provisionalPrompts.value
-              : []
+            viewingId === ctx.sessionId.value ? provisional.shown.value : []
           "
           @inspect="inspectCall"
           @open-subagent="openSubagent"
@@ -1237,7 +1244,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
           v-if="!takeoverOpen && !unknownSession"
-          :items="ctx.queueDockItems.value"
+          :items="provisional.dock.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
