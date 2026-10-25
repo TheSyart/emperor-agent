@@ -62,7 +62,10 @@ describe('WebSearchView resources', () => {
     ).not.toBeNull()
     expect(element.textContent).toContain('Search answer')
     expect(element.textContent).toContain('Official guide')
-    expect(element.textContent).toContain('2026-10-15')
+    // BUG-08: a local date; the provider's value stays in the tooltip.
+    const published = element.querySelector('.published-at')!
+    expect(published.textContent).toContain('10月15日')
+    expect(published.getAttribute('title')).toBe('2026-10-15')
     expect(element.querySelector('details summary')?.textContent).toContain(
       '原始结果',
     )

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `b4b98b8c`）<br>
+> 最后核验：2026-10-25（对照 `e962d116`）<br>
 > 事实源：`desktop/src/renderer/src/theme/`（`primitives.css`、`semantic.dark.css`、`semantic.light.css`、`components.css`、`base.css`、`retired-tokens.json`、`legacy-keys.json`、`tokens.test.ts`）、`desktop/src/renderer/src/style-audit.test.ts` 与 `style-audit-ratchet.json`、`scripts/codemods/tokens-v2.mjs`、`desktop/src/main/window-background.ts`
 
 界面的颜色、尺寸、字号、圆角、间距和动效都来自三层令牌。组件只用 L2 与 L3，不直接写颜色值，也不直接用 L1 的颜色原子；新增样式先加令牌再使用。这里列出令牌本身；怎样用见[颜色使用规范](color.md)、[排版](typography.md)、[外壳布局](layout.md)与[动效](motion.md)。
@@ -52,16 +52,17 @@
 
 ### 文字（Text）
 
-| 令牌               | 用途               |
-| ------------------ | ------------------ |
-| `--text-1`         | 主文字             |
-| `--text-2`         | 次要文字           |
-| `--text-3`         | 三级文字、元信息   |
-| `--text-4`         | 说明文字、占位符   |
-| `--text-disabled`  | 禁用文字           |
-| `--text-inverted`  | 反色底上的文字     |
-| `--text-link`      | 链接与行内引用     |
-| `--text-on-accent` | 强调色填充上的文字 |
+| 令牌                  | 用途                     |
+| --------------------- | ------------------------ |
+| `--text-1`            | 主文字                   |
+| `--text-2`            | 次要文字                 |
+| `--text-3`            | 三级文字、元信息         |
+| `--text-4`            | 说明文字、占位符         |
+| `--text-disabled`     | 禁用文字                 |
+| `--text-inverted`     | 反色底上的文字           |
+| `--text-link`         | 链接与行内引用           |
+| `--text-accent-muted` | 淡金：设置左栏的分组标题 |
+| `--text-on-accent`    | 强调色填充上的文字       |
 
 ### 描边（Strokes，完整颜色；DS-02 起以 0.5px box-shadow 绘制）
 

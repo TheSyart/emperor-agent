@@ -86,7 +86,7 @@ describe('site icon privacy switch', () => {
       await import('../../../composables/useUiPreferences')
     const call = vi.mocked(core)
     call.mockReset()
-    setUiPreference('siteIcons', false)
+    setUiPreference('siteIconService', false)
     expect(await loadSiteIcon('s1', resource(90))).toBeNull()
     expect(call).not.toHaveBeenCalled()
 
@@ -94,12 +94,12 @@ describe('site icon privacy switch', () => {
       op === 'references.resolve'
         ? { id: 'ref_1' }
         : { state: 'ready', dataUrl: PNG }) as never)
-    setUiPreference('siteIcons', true)
+    setUiPreference('siteIconService', true)
     expect(await loadSiteIcon('s1', resource(91))).toBe(PNG)
     expect(call).toHaveBeenCalledWith('references.siteIcon', {
       sessionId: 's1',
       referenceId: 'ref_1',
     })
-    setUiPreference('siteIcons', false)
+    setUiPreference('siteIconService', false)
   })
 })

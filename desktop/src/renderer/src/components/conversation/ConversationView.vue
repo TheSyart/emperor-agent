@@ -453,11 +453,6 @@ function closeEnvCard(): void {
   frameActions.setEnvCard(frame, false)
 }
 
-function backToParent(): void {
-  const target = parentCrumb.value?.sessionId
-  if (target) navigate(target)
-}
-
 // ── composer inputs ───────────────────────────────────────────────────────
 // The start page shows its draft's own plan mode and preset and no goal,
 // never the previous chat's (FIX-13). Before this view renders, so the
@@ -1209,8 +1204,6 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :error="childSendError || undefined"
           :closed="childClosed || undefined"
           @send="sendToChild"
-          @back="backToParent"
-          @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
           @stop="stopChild"
         />
       </template>

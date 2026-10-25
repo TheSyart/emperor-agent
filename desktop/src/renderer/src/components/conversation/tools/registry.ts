@@ -302,7 +302,13 @@ const exitPlanMode: ToolViewSpec = {
   title: () => '计划',
   summary: (data) => {
     const plan = stringArg(argsOf(data), 'plan') ?? ''
-    return join(planTitle(plan), PLAN_OUTCOME_LABEL[planOutcome(data).outcome])
+    const outcome = planOutcome(data).outcome
+    // While waiting the row is folded and the review card below holds the
+    // plan (BUG-02).
+    return join(
+      planTitle(plan),
+      outcome === 'waiting' ? '等待你在下方确认' : PLAN_OUTCOME_LABEL[outcome],
+    )
   },
 }
 

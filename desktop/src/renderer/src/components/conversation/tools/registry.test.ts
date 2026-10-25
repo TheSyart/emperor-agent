@@ -287,7 +287,9 @@ describe('tool registry titles and summaries', () => {
 
   it('exit_plan_mode reports the review outcome', () => {
     const plan = { plan: '# Ship it\n\n1. do' }
-    expect(row(tool('exit_plan_mode', plan)).summary).toBe('Ship it · 等待审阅')
+    expect(row(tool('exit_plan_mode', plan)).summary).toBe(
+      'Ship it · 等待你在下方确认',
+    )
     expect(
       row(
         tool('exit_plan_mode', plan, { text: 'ok', meta: { approved: true } }),
