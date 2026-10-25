@@ -37,7 +37,8 @@ describe('pixel baselines (DS-06)', () => {
   it('has about 60 key images, one dark and one light of each screen', async () => {
     const files = (await load()).committedBaselines()
     expect(files.length).toBeGreaterThanOrEqual(50)
-    expect(files.length).toBeLessThanOrEqual(80)
+    // 80 until VER-04 added the three version states of 设置 › 子智能体.
+    expect(files.length).toBeLessThanOrEqual(90)
     for (const file of files) {
       expect(file).toMatch(/^[a-z0-9-]+\/[a-z0-9-]+-(dark|light)\.png$/)
       const twin = file.endsWith('-dark.png')
