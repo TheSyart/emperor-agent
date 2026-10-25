@@ -3142,13 +3142,16 @@ export class CoreApi {
       let failed = false
       const stop = this.projectFiles.subscribe(
         root,
-        (batch) =>
+        (batch) => {
+          // The pane re-lists on this event: no cached listing may answer.
+          this.workspaceFilesService.forgetListings(root)
           this.host.emitHost({
             event: 'workspace_files_changed',
             session_id: sessionId,
             paths: batch.paths,
             overflow: batch.overflow,
-          }),
+          })
+        },
         () => {
           failed = true
           this.fileWatches.delete(sessionId)

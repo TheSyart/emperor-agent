@@ -391,6 +391,21 @@ export class WorkspaceFilesService {
     }
   }
 
+  /**
+   * Forget the listings and searches cached for a project (a few seconds
+   * each): a change seen on disk must show in the next listing, which is
+   * what the 文件 pane asks for when the change arrives (BUG-11).
+   */
+  forgetListings(projectRoot: string): void {
+    const root = JSON.stringify(projectRoot)
+    for (const cache of [this.listCache, this.searchCache] as Map<
+      string,
+      unknown
+    >[])
+      for (const key of [...cache.keys()])
+        if (key.includes(`,${root},`)) cache.delete(key)
+  }
+
   /** The session's project folder, canonical (the 文件 pane watches it, BUG-11). */
   projectRoot(sessionId: string): string {
     return realpathSync(this.scope(sessionId).projectRoot)
