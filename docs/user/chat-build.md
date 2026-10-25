@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-22（对照 `94d6a737`）<br>
+> 最后核验：2026-10-25（对照 `6614710d`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -189,7 +189,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
   - **错误**：写操作失败（例如提交被 pre-commit hook 拒绝）时，原因一直显示在分支栏下方，点 × 关闭；之后的刷新不会清掉它，提交信息也留着，改好后可以再提交。读取失败另行提示，下次读取成功后自动消失。
   - **输入**：输入框始终可以输入，Agent 正在运行或 Git 操作未完成时只禁用提交、推送、切换分支等操作，按钮旁和分支菜单底部写明原因，所以可以先写好提交信息或新分支名。切换会话会清空提交信息和新分支名，不会带到另一个项目。切到其他面板再回来，没提交的内容和列表的滚动位置都还在。
 - **终端**：在当前项目目录启动你的系统 Shell，支持多个标签，标签栏和「文件」的是同一种；标签栏的「+」新建一个终端（最多 8 个），已退出的终端在标签上标「已退出」，用 ← / → 在标签之间移动时焦点留在标签栏上。关闭工作台不结束终端；关闭标签、删除所属 session 或退出应用才会终止，重启后不恢复。终端里还有程序在运行（例如开发服务器）时关闭标签会先确认。拖动工作台宽度时，终端在停下约 0.1 秒后才按新宽度排版，并且只在列数或行数真的变了时通知 Shell；收起工作台或窗口窄到不足 20 列、5 行时保持原来的大小，Shell 里的输出不会被挤成两列。只有点开「终端」面板、在终端面板上打开工作台、点击终端标签或新建终端时，键盘焦点才进入终端，切换会话不会把焦点从输入框抢走。
-- **文件**：顶部是已打开文件的标签条，没有打开文件时为空；标签条上的「+」显示文件树并把光标放进「筛选文件…」。中间是路径和预览，路径右侧有刷新、「在访达中显示」、Markdown 的「源码 / 预览」和「复制路径」（菜单里选复制相对路径或绝对路径）。最右侧是项目文件树，树顶部的「筛选文件…」按文件名搜索。支持 Markdown 渲染与源码切换、行号和图片预览；焦点在文件面板内时，⌘W 关闭当前文件标签。`.git` 不展示，目录与搜索都有扫描上限，文件树宽度会被记住。切到其他面板再回来，打开的标签和滚动位置都在。已打开的文件再次从回复里的链接或目录树打开时，会先比较大小和修改时间，磁盘上变过就重新读取，跳到第 N 行看到的是当前内容。
+- **文件**：顶部是已打开文件的标签条，没有打开文件时为空；标签条上的「+」显示文件树并把光标放进「筛选文件…」。中间是路径和预览，路径右侧有刷新、「在访达中显示」、Markdown 的「源码 / 预览」和「复制路径」（菜单里选复制相对路径或绝对路径）。最右侧是项目文件树，树顶部的「筛选文件…」按文件名搜索。支持 Markdown 渲染与源码切换、行号和图片预览；`.mp4`、`.m4v`、`.webm`、`.mov` 视频直接在面板里播放、拖动进度，编码不受支持（例如 ProRes）时显示「这个视频的编码无法在应用里播放」和「用默认应用打开」；焦点在文件面板内时，⌘W 关闭当前文件标签。`.git` 不展示，目录与搜索都有扫描上限，文件树宽度会被记住。切到其他面板再回来，打开的标签和滚动位置都在。已打开的文件再次从回复里的链接或目录树打开时，会先比较大小和修改时间，磁盘上变过就重新读取，跳到第 N 行看到的是当前内容。
 - **浏览器**：在地址栏输入网址并回车后加载，提供后退、前进、刷新 / 停止、浏览历史和「在外部打开」。设置和限制见下文。
 
 ### 浏览器的限制
