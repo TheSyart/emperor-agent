@@ -110,7 +110,7 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   workspace_path_missing: '文件或目录不存在。',
   workspace_path_not_directory: '目标路径不是目录。',
   workspace_path_not_file: '目标路径不是文件。',
-  workspace_media_unsupported: '这个文件不能在应用里播放。',
+  workspace_media_unsupported: '这个位置是目录，没有可以显示的内容。',
   workspace_agent_running: '这个工作区有 Agent 正在运行，等它结束后再试。',
   turn_already_reverted: '这些改动已经撤销过。',
   turn_file_not_recorded: '这份改动记录里没有这个文件。',

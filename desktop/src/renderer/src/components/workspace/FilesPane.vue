@@ -17,8 +17,13 @@
  * current text. Turn snapshots and attachments never change and are reused.
  * WorkspacePanel keeps this pane alive across pane switches (KeepAlive); the
  * scroll positions are put back on reactivation.
- * Videos play in FileVideoPreview (BUG-05), streamed from an address Core
- * grants; nothing of them is read into the preview.
+ * Formats (BUG-05, BUG-10): videos, songs and pictures past the inline
+ * limit (or the PNG of a HEIC) come from an address Core grants
+ * (FileMediaPreview); documents show their first page and text
+ * (FileDocumentPreview); CSV / TSV a table and SVG a picture, each with
+ * its source on request; text names an encoding that is not UTF-8; and
+ * anything else is a card with 「用默认应用打开」 / 「在访达中显示」
+ * (FileUnsupportedCard).
  *
  * Following the project (BUG-11): while mounted the pane watches its
  * project (files.watch). A change re-reads the loaded folders that hold it
@@ -84,7 +89,18 @@ import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
 import WorkspaceTabBar from './WorkspaceTabBar.vue'
-import FileVideoPreview from './FileVideoPreview.vue'
+import FileMediaPreview from './FileMediaPreview.vue'
+import FileDocumentPreview from './FileDocumentPreview.vue'
+import FileTablePreview from './FileTablePreview.vue'
+import FileUnsupportedCard from './FileUnsupportedCard.vue'
+import Segmented from '../ui/Segmented.vue'
+import {
+  delimiterFor,
+  fileTypeLabel,
+  isMarkdownName,
+  isSvgName,
+  parseDelimited,
+} from './filePreviewModel'
 import {
   FILES_TREE_MAX,
   FILES_TREE_MIN,
@@ -203,8 +219,67 @@ const { separatorProps: treeResizerProps } = useResizable({
 const markdownSource = computed(() => activeTab.value?.preview.content || '')
 const { rendered: renderedMarkdown } = useMarkdown(markdownSource)
 const isMarkdown = computed(() =>
-  /(?:^|\.)md(?:own)?$/i.test(activeTab.value?.preview.name || ''),
+  isMarkdownName(activeTab.value?.preview.name || ''),
 )
+/** An SVG shows as a picture (an <img> runs none of its scripts). */
+const isSvg = computed(() => {
+  const preview = activeTab.value?.preview
+  return Boolean(
+    preview &&
+    preview.kind === 'text' &&
+    !preview.truncated &&
+    isSvgName(preview.name),
+  )
+})
+const svgSrc = computed(() =>
+  isSvg.value
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(activeTab.value!.preview.content || '')}`
+    : '',
+)
+/** CSV / TSV as a table; the tab's source mode shows the text. */
+const activeTable = computed(() => {
+  const preview = activeTab.value?.preview
+  const delimiter = preview ? delimiterFor(preview.name) : null
+  if (!preview || preview.kind !== 'text' || !delimiter || !preview.content)
+    return null
+  return parseDelimited(preview.content, delimiter)
+})
+const tableMode = computed<'table' | 'source'>({
+  get: () => (activeTab.value?.sourceMode ? 'source' : 'table'),
+  set: (mode) => {
+    if (activeTab.value) activeTab.value.sourceMode = mode === 'source'
+  },
+})
+const TABLE_MODES = [
+  { value: 'table' as const, label: '表格' },
+  { value: 'source' as const, label: '源码' },
+]
+/** A video, a song, or a picture with no inline data: from its address. */
+const mediaKind = computed(() => {
+  const kind = activeTab.value?.preview.kind
+  return kind === 'image' || kind === 'video' || kind === 'audio' ? kind : null
+})
+/** The meta line's type: a document by name (`Word 文档`), else its MIME type. */
+const metaType = computed(() => {
+  const preview = activeTab.value?.preview
+  if (!preview) return ''
+  return preview.kind === 'document'
+    ? fileTypeLabel(preview.name)
+    : preview.mimeType
+})
+/** The meta line's extras: an encoding, a conversion, a table's size. */
+const metaNotes = computed(() => {
+  const preview = activeTab.value?.preview
+  if (!preview) return []
+  return [
+    preview.encoding ? `${preview.encoding}（已自动识别）` : '',
+    preview.converted ? '已转成 PNG 预览' : '',
+    preview.kind === 'document' && preview.thumbnail ? '第一页预览' : '',
+    activeTable.value && !activeTab.value?.sourceMode
+      ? `${activeTable.value.moreRows ? '前 2000 行 · ' : ''}共 ${activeTable.value.columns} 列`
+      : '',
+  ].filter(Boolean)
+})
 const codeView = computed(() =>
   highlightFile(
     activeTab.value?.preview.name || '',
@@ -674,7 +749,7 @@ async function revealFile(): Promise<void> {
 function imageSrc(preview: FilePreviewResult): string | null {
   return preview.kind === 'image' &&
     preview.dataBase64 &&
-    /^image\/(?:png|jpeg|webp|gif)$/.test(preview.mimeType)
+    /^image\/(?:png|jpeg|webp|gif|avif|bmp|x-icon)$/.test(preview.mimeType)
     ? `data:${preview.mimeType};base64,${preview.dataBase64}`
     : null
 }
@@ -695,6 +770,17 @@ function enlargeImage(): void {
       0,
       items.findIndex((item) => item.id === activePath.value),
     ),
+  })
+}
+
+/** A picture shown from its address (past the inline limit, a HEIC's PNG). */
+function enlargeStreamed(src: string): void {
+  const tab = activeTab.value
+  if (!tab) return
+  openImageViewer({
+    owner: props.sessionId,
+    items: [{ id: tab.key, src, name: tab.preview.name, file: tab.request }],
+    index: 0,
   })
 }
 
@@ -807,12 +893,8 @@ async function copyPath(relative: boolean): Promise<void> {
   await navigator.clipboard.writeText(relative ? tab.path : tab.preview.path)
 }
 
-/** What a preview that shows no content says instead. */
-const noPreviewNote = computed(() =>
-  activeTab.value?.preview.kind === 'directory'
-    ? '目录位置 · 可在访达中查看'
-    : '此格式暂不支持内容预览。',
-)
+/** What a folder (a reference to one) shows instead of content. */
+const noPreviewNote = '目录位置 · 可在访达中查看'
 
 function isCurrent(owner: string, generation: number): boolean {
   return props.sessionId === owner && requestGeneration === generation
@@ -887,7 +969,7 @@ function message(value: unknown): string {
             <FolderOpen :size="14" />
           </IconButton>
           <Button
-            v-if="isMarkdown"
+            v-if="isMarkdown || isSvg"
             class="source-toggle"
             size="sm"
             @click="toggleSourceMode"
@@ -939,24 +1021,30 @@ function message(value: unknown): string {
           <Button size="sm" @click="closeTab(activeTab.key)">关闭标签</Button>
         </div>
         <template v-if="activeTab && !openError">
-          <button
-            v-if="activeImageSrc"
-            class="file-image-preview"
-            type="button"
-            :aria-label="`放大图片：${activeTab.preview.name}`"
-            @click="enlargeImage"
+          <p
+            v-if="activeTab.preview.kind === 'text' && !activeTab.preview.bytes"
+            class="files-muted"
           >
-            <img :src="activeImageSrc!" :alt="activeTab.preview.name" />
-            <span>点击放大</span>
-          </button>
-          <p v-else-if="activeTab.preview.kind === 'image'" class="files-muted">
-            图片超过预览大小限制（8 MiB）。
+            空文件
           </p>
-          <FileVideoPreview
-            v-else-if="activeTab.preview.kind === 'video'"
-            :key="activeTab.key"
+          <FileMediaPreview
+            v-else-if="mediaKind"
+            :key="`${activeTab.key}:${activeTab.preview.modifiedAt ?? ''}`"
             :target="activeTab.request.target"
             :name="activeTab.preview.name"
+            :kind="mediaKind"
+            :openable="activeTab.preview.openable"
+            :src="activeImageSrc ?? undefined"
+            @enlarge="(src) => (activeImageSrc ? enlargeImage() : enlargeStreamed(src))"
+          />
+          <FileDocumentPreview
+            v-else-if="activeTab.preview.kind === 'document'"
+            :key="`${activeTab.key}:${activeTab.preview.modifiedAt ?? ''}`"
+            :target="activeTab.request.target"
+            :name="activeTab.preview.name"
+            :thumbnail="activeTab.preview.thumbnail"
+            :text="activeTab.preview.content"
+            :openable="activeTab.preview.openable"
           />
           <div
             v-else-if="isMarkdown && !activeTab.sourceMode"
@@ -966,20 +1054,41 @@ function message(value: unknown): string {
             @keydown="handleMarkdownKeydown($event, markdownLinkOptions)"
           ></div>
           <div
-            v-else-if="activeTab.preview.kind === 'text'"
-            class="file-code-view"
+            v-else-if="isSvg && !activeTab.sourceMode"
+            class="file-svg-preview"
           >
-            <div
-              v-for="(line, index) in codeView.lines"
-              :key="index"
-              class="file-code-line"
-              :class="{ 'reference-line-active': activeLine === index + 1 }"
-              :data-line="index + 1"
-            >
-              <span>{{ index + 1 }}</span
-              ><code v-html="line || ' '"></code>
-            </div>
+            <img :src="svgSrc" :alt="activeTab.preview.name" />
           </div>
+          <template v-else-if="activeTab.preview.kind === 'text'">
+            <Segmented
+              v-if="activeTable"
+              v-model="tableMode"
+              class="file-table-mode"
+              :options="TABLE_MODES"
+              aria-label="表格视图"
+            />
+            <FileTablePreview
+              v-if="activeTable && !activeTab.sourceMode"
+              :table="activeTable"
+            />
+            <div v-else class="file-code-view">
+              <div
+                v-for="(line, index) in codeView.lines"
+                :key="index"
+                class="file-code-line"
+                :class="{ 'reference-line-active': activeLine === index + 1 }"
+                :data-line="index + 1"
+              >
+                <span>{{ index + 1 }}</span
+                ><code v-html="line || ' '"></code>
+              </div>
+            </div>
+          </template>
+          <FileUnsupportedCard
+            v-else-if="activeTab.preview.kind === 'binary'"
+            :target="activeTab.request.target"
+            :preview="activeTab.preview"
+          />
           <div v-else class="files-muted">{{ noPreviewNote }}</div>
           <div v-if="activeTab.request.uses?.length" class="file-source-uses">
             <button
@@ -991,16 +1100,26 @@ function message(value: unknown): string {
               定位出处 · {{ use.label }} {{ index + 1 }}
             </button>
           </div>
-          <p class="file-preview-meta">
-            {{ activeTab.preview.mimeType }} ·
-            {{ activeTab.preview.bytes.toLocaleString() }} 字节 · 只读
-          </p>
-          <small v-if="activeTab.preview.extractedText" class="file-truncated"
-            >PDF 提取文本 · 不含原始排版</small
-          >
-          <small v-if="activeTab.preview.truncated" class="file-truncated">
-            预览已截断 · {{ activeTab.preview.bytes.toLocaleString() }} 字节
-          </small>
+          <template v-if="activeTab.preview.kind !== 'binary'">
+            <p class="file-preview-meta">
+              {{ metaType }} ·
+              {{ activeTab.preview.bytes.toLocaleString() }} 字节 · 只读<template
+                v-for="note in metaNotes"
+                :key="note"
+              >
+                · {{ note }}</template
+              >
+            </p>
+            <small v-if="activeTab.preview.extractedText" class="file-truncated"
+              >文字为提取所得 · 不含原始排版</small
+            >
+            <small
+              v-if="activeTab.preview.truncated && !mediaKind"
+              class="file-truncated"
+            >
+              预览已截断 · {{ activeTab.preview.bytes.toLocaleString() }} 字节
+            </small>
+          </template>
         </template>
         <EmptyState
           v-else-if="!openError"
@@ -1140,24 +1259,18 @@ function message(value: unknown): string {
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
-.file-image-preview {
+.file-svg-preview {
   display: grid;
   place-items: center;
-  gap: var(--space-3);
-  width: 100%;
   padding: var(--space-4);
-  border: 0;
-  background: transparent;
-  color: rgb(var(--text-3));
-  cursor: zoom-in;
 }
-.file-image-preview img {
+.file-svg-preview img {
   max-width: 100%;
   max-height: 65vh;
   object-fit: contain;
 }
-.file-image-preview span {
-  font: var(--font-xs);
+.file-table-mode {
+  margin-bottom: var(--space-2);
 }
 
 .files-pane {

@@ -694,6 +694,296 @@ describe('FilesPane', () => {
     })
   })
 
+  describe('BUG-10 · formats', () => {
+    const ADDRESS = (path: string) =>
+      `app://workspace-media/${Buffer.from(path).toString('hex').padEnd(32, '0').slice(0, 32)}`
+    const opened: string[] = []
+    const revealed: string[] = []
+
+    /** files.preview answers these (by path); files.mediaUrl an address. */
+    function formatsCore(previews: Record<string, Record<string, unknown>>) {
+      return (operation: string, payload?: Record<string, unknown>) => {
+        const path = String(payload?.path ?? '')
+        if (operation === 'files.preview' && previews[path])
+          return Promise.resolve({
+            id: `file:/tmp/demo/${path}`,
+            path: `/tmp/demo/${path}`,
+            relativePath: path,
+            name: path.split('/').pop(),
+            truncated: false,
+            bytes: 2048,
+            modifiedAt: Date.now() - 60_000,
+            openable: true,
+            ...previews[path],
+          })
+        if (operation === 'files.mediaUrl')
+          return Promise.resolve({ url: ADDRESS(path) })
+        return fakeCore(operation, payload)
+      }
+    }
+
+    async function open(path: string): Promise<HTMLElement> {
+      const root = mount('')
+      await exposed.openPreview({
+        owner: 's1',
+        target: { source: 'project', sessionId: 's1', path },
+      })
+      await flush()
+      return root
+    }
+
+    function button(root: HTMLElement, text: string) {
+      return [
+        ...root.querySelectorAll<HTMLElement>('button, [role="radio"]'),
+      ].find((element) => element.textContent?.trim() === text)
+    }
+
+    beforeEach(() => {
+      opened.length = 0
+      revealed.length = 0
+      ;(window as unknown as { emperor: unknown }).emperor = {
+        openWorkspaceMedia: async (url: string) => {
+          opened.push(url)
+          return { ok: true }
+        },
+        revealWorkspaceMedia: async (url: string) => {
+          revealed.push(url)
+          return { ok: true }
+        },
+      }
+    })
+    afterEach(() => {
+      delete (window as unknown as { emperor?: unknown }).emperor
+    })
+
+    it('3 · plays audio with the native controls', async () => {
+      core.mockImplementation(
+        formatsCore({ '配音.m4a': { kind: 'audio', mimeType: 'audio/mp4' } }),
+      )
+      const root = await open('配音.m4a')
+      const audio = root.querySelector<HTMLAudioElement>('audio')!
+      expect(audio).not.toBeNull()
+      expect(audio.hasAttribute('controls')).toBe(true)
+      expect(audio.getAttribute('preload')).toBe('metadata')
+      expect(audio.getAttribute('src')).toBe(ADDRESS('配音.m4a'))
+    })
+
+    it('1–2 · shows a picture without inline data, a big one or a converted HEIC, from its address', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'IMG_0001.HEIC': {
+            kind: 'image',
+            mimeType: 'image/heic',
+            converted: 'png',
+          },
+        }),
+      )
+      const root = await open('IMG_0001.HEIC')
+      const image = root.querySelector<HTMLImageElement>(
+        '.file-image-preview img',
+      )!
+      expect(image.getAttribute('src')).toBe(ADDRESS('IMG_0001.HEIC'))
+      expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+        '已转成 PNG 预览',
+      )
+    })
+
+    it('4–5 · shows a document as its first page, its text on request, with both ways out', async () => {
+      core.mockImplementation(
+        formatsCore({
+          '需求说明.docx': {
+            kind: 'document',
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            thumbnail: true,
+            content: '需求说明\n第一段\n',
+            extractedText: true,
+          },
+        }),
+      )
+      const root = await open('需求说明.docx')
+      const page = root.querySelector<HTMLImageElement>('.file-document-page')!
+      expect(page.getAttribute('src')).toBe(ADDRESS('需求说明.docx'))
+      expect(root.querySelector('.file-document-text')).toBeNull()
+      button(root, '文字')!.click()
+      await flush()
+      expect(root.querySelector('.file-document-text')?.textContent).toContain(
+        '第一段',
+      )
+      expect(root.querySelector('.file-document-page')).toBeNull()
+      button(root, '用默认应用打开')!.click()
+      await flush()
+      button(root, '在访达中显示')!.click()
+      await flush()
+      expect(opened).toEqual([ADDRESS('需求说明.docx')])
+      expect(revealed).toEqual([ADDRESS('需求说明.docx')])
+      expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+        'Word 文档',
+      )
+    })
+
+    it('a document with only text shows the text', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'notes.rtf': {
+            kind: 'document',
+            mimeType: 'application/rtf',
+            thumbnail: false,
+            content: 'Plain words',
+            extractedText: true,
+          },
+        }),
+      )
+      const root = await open('notes.rtf')
+      expect(root.querySelector('.file-document-page')).toBeNull()
+      expect(root.querySelector('.file-document-text')?.textContent).toContain(
+        'Plain words',
+      )
+      expect(button(root, '预览图')).toBeUndefined()
+    })
+
+    it('7 · names an encoding that is not UTF-8', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'orders.txt': {
+            kind: 'text',
+            mimeType: 'text/plain',
+            content: '订单号,客户\n',
+            encoding: 'GB18030',
+          },
+        }),
+      )
+      const root = await open('orders.txt')
+      expect(root.querySelector('.file-code-view')?.textContent).toContain(
+        '订单号',
+      )
+      expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+        'GB18030（已自动识别）',
+      )
+    })
+
+    it('9 · renders .markdown as Markdown', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'notes.markdown': {
+            kind: 'text',
+            mimeType: 'text/markdown',
+            content: '# 标题\n\n正文',
+          },
+        }),
+      )
+      const root = await open('notes.markdown')
+      expect(root.querySelector('.file-markdown-preview h1')?.textContent).toBe(
+        '标题',
+      )
+    })
+
+    it('10 · shows CSV as a table, its source on request', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'sales.csv': {
+            kind: 'text',
+            mimeType: 'text/csv',
+            content: '日期,渠道,销量\n10-21,京东,"1,204"\n10-22,天猫,986\n',
+          },
+        }),
+      )
+      const root = await open('sales.csv')
+      const table = root.querySelector('.file-table')!
+      expect(
+        [...table.querySelectorAll('th')].map((cell) => cell.textContent),
+      ).toEqual(['日期', '渠道', '销量'])
+      expect(table.querySelectorAll('tbody tr')).toHaveLength(2)
+      expect(table.querySelector('tbody td:last-child')?.textContent).toBe(
+        '1,204',
+      )
+      button(root, '源码')!.click()
+      await flush()
+      expect(root.querySelector('.file-table')).toBeNull()
+      expect(root.querySelector('.file-code-view')?.textContent).toContain(
+        '10-21,京东',
+      )
+    })
+
+    it('shows an SVG as a picture (no script runs in <img>), its source on request', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'logo.svg': {
+            kind: 'text',
+            mimeType: 'image/svg+xml',
+            content: '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>',
+          },
+        }),
+      )
+      const root = await open('logo.svg')
+      const image = root.querySelector<HTMLImageElement>(
+        '.file-svg-preview img',
+      )!
+      expect(image.getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
+      root.querySelector<HTMLButtonElement>('.source-toggle')!.click()
+      await flush()
+      expect(root.querySelector('.file-svg-preview')).toBeNull()
+      expect(root.querySelector('.file-code-view')?.textContent).toContain(
+        '<rect/>',
+      )
+    })
+
+    it('11 · anything else is a card with its type and both ways out; a program only in Finder', async () => {
+      core.mockImplementation(
+        formatsCore({
+          '素材打包.zip': {
+            kind: 'binary',
+            mimeType: 'text/plain',
+            bytes: 48.6 * 1024 * 1024,
+          },
+          'bin/tool': {
+            kind: 'binary',
+            mimeType: 'text/plain',
+            openable: false,
+          },
+        }),
+      )
+      const root = await open('素材打包.zip')
+      const card = root.querySelector('.file-unsupported')!
+      expect(card.textContent).toContain('素材打包.zip')
+      expect(card.textContent).toContain('ZIP 压缩包')
+      expect(card.textContent).toContain('48.6 MB')
+      expect(card.textContent).toContain('修改')
+      expect(root.textContent).not.toContain('此格式暂不支持内容预览')
+      button(root, '用默认应用打开')!.click()
+      await flush()
+      expect(opened).toEqual([ADDRESS('素材打包.zip')])
+
+      await exposed.openPreview({
+        owner: 's1',
+        target: { source: 'project', sessionId: 's1', path: 'bin/tool' },
+      })
+      await flush()
+      expect(button(root, '用默认应用打开')).toBeUndefined()
+      button(root, '在访达中显示')!.click()
+      await flush()
+      expect(revealed).toEqual([ADDRESS('bin/tool')])
+    })
+
+    it('says an empty file is empty', async () => {
+      core.mockImplementation(
+        formatsCore({
+          'empty.txt': {
+            kind: 'text',
+            mimeType: 'text/plain',
+            content: '',
+            bytes: 0,
+          },
+        }),
+      )
+      const root = await open('empty.txt')
+      expect(
+        root.querySelector('.file-preview-content')?.textContent,
+      ).toContain('空文件')
+      expect(root.querySelector('.file-code-view')).toBeNull()
+    })
+  })
+
   it('reports the tree width once a keyboard resize settles', async () => {
     const root = mount()
     await flush()
