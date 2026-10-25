@@ -569,6 +569,118 @@ describe('FilesPane', () => {
     expect(root.textContent).toContain('文件或目录不存在。')
   })
 
+  describe('BUG-05 · videos', () => {
+    const URL_A = `app://workspace-media/${'1'.repeat(32)}`
+    const URL_B = `app://workspace-media/${'2'.repeat(32)}`
+    const request = {
+      owner: 's1',
+      target: {
+        source: 'project' as const,
+        sessionId: 's1',
+        path: 'clips/飞行 测试.mp4',
+      },
+    }
+
+    /** files.mediaUrl answers these in turn (the last one repeats). */
+    function videoCore(...answers: Array<string | Error>) {
+      return (operation: string, payload?: Record<string, unknown>) => {
+        if (operation === 'files.preview')
+          return Promise.resolve({
+            id: 'file:/tmp/demo/clips/飞行 测试.mp4',
+            path: '/tmp/demo/clips/飞行 测试.mp4',
+            relativePath: 'clips/飞行 测试.mp4',
+            mimeType: 'video/mp4',
+            kind: 'video',
+            name: '飞行 测试.mp4',
+            truncated: false,
+            bytes: 17_829,
+          })
+        if (operation === 'files.mediaUrl') {
+          const answer = answers.length > 1 ? answers.shift()! : answers[0]!
+          return answer instanceof Error
+            ? Promise.reject(answer)
+            : Promise.resolve({ url: answer })
+        }
+        return fakeCore(operation, payload)
+      }
+    }
+
+    function mediaUrlCalls() {
+      return core.mock.calls.filter(([op]) => op === 'files.mediaUrl')
+    }
+
+    afterEach(() => {
+      delete (window as unknown as { emperor?: unknown }).emperor
+    })
+
+    it('7 · plays a video from its media address with the native controls', async () => {
+      core.mockImplementation(videoCore(URL_A))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      const video = root.querySelector<HTMLVideoElement>('video')!
+      expect(video).not.toBeNull()
+      expect(video.hasAttribute('controls')).toBe(true)
+      expect(video.getAttribute('preload')).toBe('metadata')
+      expect(video.getAttribute('src')).toBe(URL_A)
+      expect(mediaUrlCalls()).toEqual([['files.mediaUrl', request.target]])
+      expect(isProxy(mediaUrlCalls()[0]![1])).toBe(false)
+      expect(root.textContent).not.toContain('此格式暂不支持内容预览')
+      expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+        'video/mp4',
+      )
+    })
+
+    it('8 · a video that cannot play asks once more, then offers the default app', async () => {
+      const openWorkspaceMedia = vi.fn(async () => ({ ok: true }))
+      ;(window as unknown as { emperor: unknown }).emperor = {
+        openWorkspaceMedia,
+      }
+      core.mockImplementation(videoCore(URL_A))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      // The grant still runs (same address): the codec is the problem.
+      expect(mediaUrlCalls()).toHaveLength(2)
+      expect(root.querySelector('video')).toBeNull()
+      expect(root.textContent).toContain('这个视频的编码无法在应用里播放')
+      const open = [...root.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('用默认应用打开'),
+      )!
+      open.click()
+      await flush()
+      expect(openWorkspaceMedia).toHaveBeenCalledWith(URL_A)
+    })
+
+    it('an address that expired while watching is asked for again', async () => {
+      core.mockImplementation(videoCore(URL_A, URL_B))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      expect(root.querySelector('video')?.getAttribute('src')).toBe(URL_B)
+      expect(root.textContent).not.toContain('无法在应用里播放')
+    })
+
+    it('a video removed since it opened says the file is gone', async () => {
+      const gone = Object.assign(new Error('文件或目录不存在。'), {
+        code: 'workspace_path_missing',
+      })
+      core.mockImplementation(videoCore(URL_A, gone))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      expect(root.querySelector('video')).toBeNull()
+      expect(root.textContent).toContain('文件已不存在')
+      expect(root.textContent).not.toContain('用默认应用打开')
+    })
+  })
+
   it('reports the tree width once a keyboard resize settles', async () => {
     const root = mount()
     await flush()

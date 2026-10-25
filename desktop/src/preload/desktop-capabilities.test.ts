@@ -54,6 +54,7 @@ import {
   VAULT_RESET_CHANNEL,
   VAULT_START_OVER_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
+  WORKSPACE_MEDIA_OPEN_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
 
@@ -155,6 +156,7 @@ describe('desktop capability preload bridge', () => {
       'openHomeBackup',
       'openLink',
       'openSkillsFolder',
+      'openWorkspaceMedia',
       'planHomeBackup',
       'prepareDiagnosticsBundle',
       'removeBrowserDownload',
@@ -182,6 +184,14 @@ describe('desktop capability preload bridge', () => {
       'vaultStatus',
       'vaultUnlock',
     ])
+  })
+
+  it('names a video by its granted media address, never by path (BUG-05)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    const url = `app://workspace-media/${'a'.repeat(32)}`
+    await bridge.openWorkspaceMedia(url)
+    expect(ipc.invoked.at(-1)).toEqual([WORKSPACE_MEDIA_OPEN_CHANNEL, { url }])
   })
 
   it('asks main for 备份与恢复 by id, forwarding only known fields (REL-03)', async () => {

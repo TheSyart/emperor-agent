@@ -91,6 +91,11 @@ import {
   registerScreenshotIpc,
 } from './screenshot-ipc'
 import { pluginAssetResponse } from './plugin-assets'
+import {
+  WORKSPACE_MEDIA_HOST,
+  registerWorkspaceMediaIpc,
+  workspaceMediaResponse,
+} from './workspace-media'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
@@ -478,6 +483,8 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       corsEnabled: true,
+      // Range requests for the Files pane's videos (BUG-05: workspace-media).
+      stream: true,
     },
   },
 ])
@@ -531,6 +538,14 @@ registerOpenPathIpc({
   },
   openPath: (target) => shell.openPath(target),
   showItemInFolder: (target) => shell.showItemInFolder(target),
+})
+
+// BUG-05 「用默认应用打开」: a video Core granted the Files pane, by address.
+registerWorkspaceMediaIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  lookup: (token) => coreApi?.files.mediaGrant(token) ?? null,
+  openPath: (target) => shell.openPath(target),
 })
 
 // REL-01 导出诊断包: staged in a private temp folder, listed for the user,
@@ -1215,6 +1230,11 @@ function registerAppProtocol(): void {
       return pluginAssetResponse(
         url,
         (input) => coreApi?.plugins.logo(input) ?? null,
+      )
+    if (url.host === WORKSPACE_MEDIA_HOST)
+      return workspaceMediaResponse(
+        request,
+        (token) => coreApi?.files.mediaGrant(token) ?? null,
       )
     if (url.host === 'media') {
       const mediaPath = resolveMediaRawPath(request.url, {
