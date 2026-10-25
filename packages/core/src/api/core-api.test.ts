@@ -99,6 +99,7 @@ const EXPECTED_OPERATIONS = [
   'executors.upgrade',
   'executors.versions',
   'files.list',
+  'files.mediaUrl',
   'files.preview',
   'files.read',
   'files.search',
