@@ -243,6 +243,41 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByLabel('搜索对话')).toBeFocused()
   })
 
+  test(`BUG-06 8 · section headers fold with a chevron (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/build-ui', { theme })
+    const root = sidebar(page)
+    const section = (key: string) =>
+      root.locator(`[data-sidebar-section="${key}"]`)
+    const label = (key: string) => section(key).locator('.section-label')
+    const chevron = (key: string) => label(key).locator('.section-chevron')
+    await expect(label('projects')).toHaveAttribute('aria-expanded', 'true')
+    await expect(chevron('projects')).toHaveCSS('opacity', '0')
+    // Hovered: the chevron shows beside 项目, pointing down.
+    await section('projects').locator('.section-header').hover()
+    await expect(chevron('projects')).toHaveCSS('opacity', '1')
+    await expect(chevron('chats')).toHaveCSS('opacity', '0')
+    await shot(page, `sections-open-${theme}`)
+    await section('projects').locator('.section-header').hover()
+    await expectBaseline(root, 'shell', `sidebar-sections-open-${theme}`)
+
+    // Folded: 对话's rows go, its chevron stays, turned to the right.
+    await label('chats').click()
+    await expect(label('chats')).toHaveAttribute('aria-expanded', 'false')
+    await expect(section('chats').locator('.session-row')).toHaveCount(0)
+    await label('chats').evaluate((element) => element.blur())
+    await page.mouse.move(640, 810)
+    await expect(chevron('chats')).toHaveCSS('opacity', '1')
+    await expect(chevron('chats')).toHaveCSS(
+      'transform',
+      'matrix(0, -1, 1, 0, 0, 0)',
+    )
+    await expect(chevron('projects')).toHaveCSS('opacity', '0')
+    await shot(page, `sections-folded-${theme}`)
+    await expectBaseline(root, 'shell', `sidebar-sections-folded-${theme}`)
+  })
+
   test(`pinned section (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)
