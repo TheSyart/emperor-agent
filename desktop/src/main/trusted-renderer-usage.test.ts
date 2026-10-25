@@ -56,6 +56,8 @@ describe('trusted renderer policy wiring', () => {
       'registerScreenshotIpc',
       // REL-05: the renderer's app version comes from app.getVersion().
       'registerAppVersionIpc',
+      // BUG-05: 「用默认应用打开」 for a granted video.
+      'registerWorkspaceMediaIpc',
     ])
       expect(source).toMatch(
         new RegExp(

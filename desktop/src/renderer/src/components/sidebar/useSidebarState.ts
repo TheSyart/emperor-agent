@@ -1,9 +1,9 @@
 /**
  * The persisted sidebar layout (Core `sidebar.get` / `sidebar.patch`):
- * section sorts, manual orders, collapsed projects and pinned sessions, plus
- * the grouped session list derived from it. Patches are optimistic; every
- * patch carries the pinned list so a Core state written by an older shape
- * can never drop the pins.
+ * section sorts, manual orders, collapsed projects and sections (BUG-06),
+ * pinned sessions, plus the grouped session list derived from it.
+ * Patches are optimistic; every patch carries the pinned list so a Core
+ * state written by an older shape can never drop the pins.
  *
  * Nothing is written before the saved layout has been read (`status`
  * 'unloaded' or 'failed'): a patch built on the defaults would overwrite
@@ -25,6 +25,7 @@ import {
 import type {
   ProjectInfo,
   SessionInfo,
+  SidebarSectionKey,
   SidebarSortMode,
   SidebarState,
 } from '../../types'
@@ -128,6 +129,19 @@ export function useSidebarState(input: {
     void patch({ collapsed_project_ids: next })
   }
 
+  function isSectionCollapsed(key: SidebarSectionKey): boolean {
+    return state.value.collapsed_sections.includes(key)
+  }
+
+  function toggleSection(key: SidebarSectionKey): void {
+    const current = state.value.collapsed_sections
+    void patch({
+      collapsed_sections: current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    })
+  }
+
   function moveChat(sessionId: string, delta: -1 | 1): void {
     const ids = grouped.value.chats.map((session) => session.id)
     void patch({
@@ -172,6 +186,8 @@ export function useSidebarState(input: {
     setChatSort,
     isProjectCollapsed,
     toggleProject,
+    isSectionCollapsed,
+    toggleSection,
     moveChat,
     moveProjectSession,
   }

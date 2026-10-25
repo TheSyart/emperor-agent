@@ -5998,6 +5998,21 @@ export async function installVisualCoreBridge(
                   : '# Visual Build Project\n\nA project workspace visual fixture.\n'
               const bytes = new TextEncoder().encode(content).length
               const modifiedAt = Date.parse(now) + version
+              // BUG-05: videos are never read (files.mediaUrl plays them).
+              const video = /\.(?:mp4|m4v|webm|mov)$/i.exec(path)
+              if (video && operationKey !== 'files.stat')
+                return {
+                  id: `file:${projectDir}/${path}`,
+                  path: `${projectDir}/${path}`,
+                  projectRoot: projectDir,
+                  relativePath: path,
+                  name: path.split('/').pop(),
+                  kind: 'video',
+                  mimeType: path.endsWith('.webm') ? 'video/webm' : 'video/mp4',
+                  bytes: 18_065,
+                  modifiedAt: Date.parse(now),
+                  truncated: false,
+                }
               if (operationKey === 'files.stat') return { bytes, modifiedAt }
               return {
                 id: `file:${projectDir}/${path}`,
@@ -6011,6 +6026,14 @@ export async function installVisualCoreBridge(
                 modifiedAt,
                 truncated: false,
                 content,
+              }
+            }
+            case 'files.mediaUrl': {
+              // BUG-05: workspace.spec.ts routes /__visual-media/* to a clip
+              // (a same-origin address: CSP media-src 'self').
+              const input = (args[0] || {}) as { path?: string }
+              return {
+                url: `${location.origin}/__visual-media/${encodeURI(input.path || '')}`,
               }
             }
             case 'terminals.list':
