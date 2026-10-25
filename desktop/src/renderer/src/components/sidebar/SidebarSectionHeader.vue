@@ -3,9 +3,10 @@
  * Sticky section heading of the session list (置顶 / 项目 / 对话): the
  * label toggles the section open; the default slot holds trailing actions.
  * A chevron after the label (BUG-06) shows while the header is hovered or
- * focused and stays while the section is folded, turned a quarter left.
+ * focused, pointing down, and stays while the section is folded, pointing
+ * right (the project rows' chevron, SidebarProjectRow).
  */
-import { DsChevronDown } from '../icons/ds'
+import { DsChevronRight } from '../icons/ds'
 
 defineProps<{ label: string }>()
 const collapsed = defineModel<boolean>('collapsed', { default: false })
@@ -20,7 +21,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
       @click="collapsed = !collapsed"
     >
       {{ label }}
-      <DsChevronDown
+      <DsChevronRight
         :size="14"
         class="section-chevron"
         :data-collapsed="collapsed || undefined"
@@ -70,13 +71,14 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 .section-chevron {
   flex: none;
   opacity: 0;
+  transform: rotate(90deg);
   transition:
     opacity var(--motion-base) var(--ease-standard),
     transform var(--motion-base) var(--ease-standard);
 }
 
 .section-chevron[data-collapsed] {
-  transform: rotate(-90deg);
+  transform: none;
 }
 
 .section-header:hover .section-chevron,

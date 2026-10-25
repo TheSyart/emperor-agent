@@ -257,22 +257,23 @@ for (const theme of ['dark', 'light'] as const) {
     // Hovered: the chevron shows beside 项目, pointing down.
     await section('projects').locator('.section-header').hover()
     await expect(chevron('projects')).toHaveCSS('opacity', '1')
+    await expect(chevron('projects')).toHaveCSS(
+      'transform',
+      'matrix(0, 1, -1, 0, 0, 0)',
+    )
     await expect(chevron('chats')).toHaveCSS('opacity', '0')
     await shot(page, `sections-open-${theme}`)
     await section('projects').locator('.section-header').hover()
     await expectBaseline(root, 'shell', `sidebar-sections-open-${theme}`)
 
-    // Folded: 对话's rows go, its chevron stays, turned to the right.
+    // Folded: 对话's rows go, its chevron stays, pointing right.
     await label('chats').click()
     await expect(label('chats')).toHaveAttribute('aria-expanded', 'false')
     await expect(section('chats').locator('.session-row')).toHaveCount(0)
     await label('chats').evaluate((element) => element.blur())
     await page.mouse.move(640, 810)
     await expect(chevron('chats')).toHaveCSS('opacity', '1')
-    await expect(chevron('chats')).toHaveCSS(
-      'transform',
-      'matrix(0, -1, 1, 0, 0, 0)',
-    )
+    await expect(chevron('chats')).toHaveCSS('transform', 'none')
     await expect(chevron('projects')).toHaveCSS('opacity', '0')
     await shot(page, `sections-folded-${theme}`)
     await expectBaseline(root, 'shell', `sidebar-sections-folded-${theme}`)
