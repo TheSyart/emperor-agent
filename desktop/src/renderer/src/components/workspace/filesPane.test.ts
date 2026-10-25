@@ -19,6 +19,7 @@ function emitCore(event: Record<string, unknown>): void {
 }
 
 import FilesPane from './FilesPane.vue'
+import { reloadUiPreferences } from '../../composables/useUiPreferences'
 
 const ENTRIES = [
   { name: 'src', path: 'src', kind: 'directory' },
@@ -328,6 +329,8 @@ describe('FilesPane', () => {
       sessionId: 's1',
       relativePath: 'src/lib',
       limit: 500,
+      showHidden: false,
+      showIgnored: false,
     })
     expect(
       root
@@ -367,6 +370,8 @@ describe('FilesPane', () => {
       sessionId: 's1',
       relativePath: 'src',
       limit: 500,
+      showHidden: false,
+      showIgnored: false,
     })
     // No file tab opens.
     expect(tabLabels(root)).toEqual([])
@@ -479,6 +484,8 @@ describe('FilesPane', () => {
       sessionId: 's1',
       query: 'deep',
       limit: 500,
+      showHidden: false,
+      showIgnored: false,
     })
     const row = treeRow(root, 'deep.ts')
     expect(row.querySelector('.file-tree-hint')?.textContent).toBe('src/lib')
@@ -981,6 +988,184 @@ describe('FilesPane', () => {
         root.querySelector('.file-preview-content')?.textContent,
       ).toContain('空文件')
       expect(root.querySelector('.file-code-view')).toBeNull()
+    })
+  })
+
+  describe('BUG-12 · tree options and big folders', () => {
+    const frames = Array.from({ length: 600 }, (_, index) => ({
+      name: `frame-${String(index + 1).padStart(4, '0')}.png`,
+      path: `frames/frame-${String(index + 1).padStart(4, '0')}.png`,
+      kind: 'file',
+      hidden: false,
+    }))
+
+    /** files.list / files.search like Core: pages of `limit` from `cursor`. */
+    function treeCore(operation: string, payload?: Record<string, unknown>) {
+      const page = (entries: unknown[]) => {
+        const start = Number(payload?.cursor ?? 0)
+        const limit = Number(payload?.limit ?? 200)
+        const next = start + limit
+        return {
+          projectRoot: '/tmp/demo',
+          relativePath: String(payload?.relativePath ?? ''),
+          entries: entries.slice(start, next),
+          nextCursor: next < entries.length ? String(next) : null,
+          truncated: false,
+        }
+      }
+      if (operation === 'files.list') {
+        if (payload?.relativePath === 'frames')
+          return Promise.resolve(page(frames))
+        const root = [
+          ...(payload?.showHidden
+            ? [
+                { name: '.env', path: '.env', kind: 'file', hidden: true },
+                {
+                  name: '.github',
+                  path: '.github',
+                  kind: 'directory',
+                  hidden: true,
+                },
+              ]
+            : []),
+          ...(payload?.showIgnored
+            ? [
+                {
+                  name: 'dist',
+                  path: 'dist',
+                  kind: 'directory',
+                  hidden: false,
+                  ignored: true,
+                },
+              ]
+            : []),
+          { name: 'frames', path: 'frames', kind: 'directory', hidden: false },
+          {
+            name: 'package.json',
+            path: 'package.json',
+            kind: 'file',
+            hidden: false,
+          },
+        ]
+        return Promise.resolve(page(root))
+      }
+      if (operation === 'files.search') return Promise.resolve(page(frames))
+      return fakeCore(operation, payload)
+    }
+
+    function rows(root: HTMLElement): string[] {
+      return [...root.querySelectorAll<HTMLElement>('.file-tree-row')].map(
+        (row) => row.dataset.path ?? '',
+      )
+    }
+
+    function more(root: HTMLElement) {
+      return root.querySelector<HTMLButtonElement>('.file-tree-more')
+    }
+
+    async function toggle(root: HTMLElement, label: string) {
+      // The items keep the menu open: open it only when it is closed.
+      if (!document.querySelector('[role="menu"]')) {
+        root
+          .querySelector<HTMLButtonElement>('[aria-label="目录树选项"]')!
+          .click()
+        await flush()
+      }
+      ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((item) => item.textContent?.includes(label))!
+        .click()
+      await flush()
+    }
+
+    beforeEach(() => {
+      localStorage.clear()
+      reloadUiPreferences()
+      core.mockImplementation(treeCore)
+    })
+    afterEach(() => {
+      localStorage.clear()
+      reloadUiPreferences()
+    })
+
+    it('1–3 · hides dot files and ignored ones until asked, then shows them paler', async () => {
+      const root = mount()
+      await flush()
+      expect(rows(root)).toEqual(['frames', 'package.json'])
+      expect(core).toHaveBeenCalledWith(
+        'files.list',
+        expect.objectContaining({ showHidden: false, showIgnored: false }),
+      )
+      await toggle(root, '显示隐藏文件')
+      expect(rows(root)).toEqual(['.env', '.github', 'frames', 'package.json'])
+      expect(
+        root.querySelector('.file-tree-row[data-path=".env"]')?.classList,
+      ).toContain('dim')
+      expect(
+        root.querySelector('.file-tree-row[data-path="frames"]')?.classList,
+      ).not.toContain('dim')
+      await toggle(root, '显示被 Git 忽略的文件')
+      expect(rows(root)).toContain('dist')
+      expect(
+        root.querySelector('.file-tree-row[data-path="dist"]')?.classList,
+      ).toContain('dim')
+    })
+
+    it('4 · remembers the choices after a restart', async () => {
+      const first = mount()
+      await flush()
+      await toggle(first, '显示隐藏文件')
+      app?.unmount()
+      container?.remove()
+      reloadUiPreferences()
+      core.mockClear()
+      const again = mount()
+      await flush()
+      expect(rows(again)).toContain('.env')
+      expect(core).toHaveBeenCalledWith(
+        'files.list',
+        expect.objectContaining({ showHidden: true }),
+      )
+    })
+
+    it('5–6 · a folder of 600 shows 500 and 「再加载 500 项」, then the rest', async () => {
+      const root = mount()
+      await flush()
+      treeRow(root, 'frames').click()
+      await flush()
+      expect(
+        rows(root).filter((path) => path.startsWith('frames/')),
+      ).toHaveLength(500)
+      expect(more(root)?.textContent).toContain(
+        '这个目录有更多文件 · 再加载 500 项',
+      )
+      more(root)!.click()
+      await flush()
+      expect(
+        rows(root).filter((path) => path.startsWith('frames/')),
+      ).toHaveLength(600)
+      expect(more(root)).toBeNull()
+      expect(root.textContent).not.toContain('安全扫描上限')
+    })
+
+    it('7 · filter results past 500 load more the same way', async () => {
+      vi.useFakeTimers()
+      const root = mount()
+      await vi.runAllTimersAsync()
+      await flush()
+      const filter = root.querySelector<HTMLInputElement>(
+        '.files-search input',
+      )!
+      filter.value = 'frame'
+      filter.dispatchEvent(new Event('input'))
+      await vi.runAllTimersAsync()
+      await flush()
+      expect(rows(root)).toHaveLength(500)
+      expect(more(root)?.textContent).toContain('再加载 500 项')
+      more(root)!.click()
+      await vi.runAllTimersAsync()
+      await flush()
+      expect(rows(root)).toHaveLength(600)
+      expect(more(root)).toBeNull()
     })
   })
 
