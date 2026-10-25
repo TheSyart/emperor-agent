@@ -6013,6 +6013,57 @@ export async function installVisualCoreBridge(
                   modifiedAt: Date.parse(now),
                   truncated: false,
                 }
+              // BUG-10: a song, a document, a table and a file with no
+              // preview (workspace.spec.ts routes their media addresses).
+              const formats: Record<string, Record<string, unknown>> = {
+                'media/配音-第一版.mp3': {
+                  kind: 'audio',
+                  mimeType: 'audio/mpeg',
+                  bytes: 6_393,
+                },
+                'docs/需求说明.docx': {
+                  kind: 'document',
+                  mimeType:
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  bytes: 86_016,
+                  thumbnail: true,
+                  content:
+                    '需求说明\n\n一、背景\n侧栏的文件预览要能看常见格式。\n',
+                  extractedText: true,
+                },
+                'data/sales.csv': {
+                  kind: 'text',
+                  mimeType: 'text/csv',
+                  bytes: 78,
+                  content:
+                    '日期,渠道,销量\n10-21,京东,"1,204"\n10-22,天猫,986\n10-23,抖音,"2,310"\n',
+                },
+                'assets/素材打包.zip': {
+                  kind: 'binary',
+                  mimeType: 'text/plain',
+                  bytes: 50_960_384,
+                  truncated: false,
+                },
+                'bin/tool': {
+                  kind: 'binary',
+                  mimeType: 'text/plain',
+                  bytes: 34_816,
+                  openable: false,
+                },
+              }
+              const format = formats[path]
+              if (format && operationKey !== 'files.stat')
+                return {
+                  id: `file:${projectDir}/${path}`,
+                  path: `${projectDir}/${path}`,
+                  projectRoot: projectDir,
+                  relativePath: path,
+                  name: path.split('/').pop(),
+                  modifiedAt: Date.parse(now) - 2 * 3_600_000,
+                  truncated: false,
+                  openable: true,
+                  ...format,
+                }
               if (operationKey === 'files.stat') return { bytes, modifiedAt }
               return {
                 id: `file:${projectDir}/${path}`,

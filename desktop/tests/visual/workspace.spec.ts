@@ -13,6 +13,12 @@ import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'workspace')
 /** A 2 s VP9 clip (BUG-05); the Electron suite plays the H.264 one. */
 const clip = resolve(process.cwd(), 'tests/fixtures/media/clip-vp9.webm')
+/** BUG-10: a 2 s tone and a drawn first page (a few KB each). */
+const tone = resolve(process.cwd(), 'tests/fixtures/media/tone.mp3')
+const documentPage = resolve(
+  process.cwd(),
+  'tests/fixtures/media/document-page.png',
+)
 
 type Theme = 'dark' | 'light'
 
@@ -276,6 +282,103 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(pane.locator('video')).toHaveCount(0)
     await shot(page, `video-unplayable-${theme}`)
     await expectBaseline(pane, 'workspace', `video-unplayable-${theme}`)
+  })
+
+  test(`BUG-10 13 · a song, a document, a table and a file with no preview (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await page.route('**/__visual-media/**', (route) => {
+      const url = decodeURI(route.request().url())
+      return url.endsWith('.mp3')
+        ? route.fulfill({ contentType: 'audio/mpeg', body: readFileSync(tone) })
+        : route.fulfill({
+            contentType: 'image/png',
+            body: readFileSync(documentPage),
+          })
+    })
+    await open(page, '/chat/build-ui?visualProgress=final', theme, 'files')
+    const pane = page.locator('.files-pane')
+    const meta = pane.locator('.file-preview-meta')
+
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'media/配音-第一版.mp3' },
+    })
+    const audio = pane.locator('audio.file-audio')
+    await expect(audio).toHaveAttribute('controls', '')
+    await expect
+      .poll(() => audio.evaluate((node: HTMLAudioElement) => node.readyState))
+      .toBeGreaterThanOrEqual(1)
+    await expect(meta).toContainText('audio/mpeg')
+    await page.mouse.move(400, 450)
+    await shot(page, `audio-${theme}`)
+    await expectBaseline(pane, 'workspace', `audio-${theme}`)
+
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'docs/需求说明.docx' },
+    })
+    const documentPageImage = pane.locator('img.file-document-page')
+    await expect(documentPageImage).toBeVisible()
+    await expect
+      .poll(() =>
+        documentPageImage.evaluate(
+          (node: HTMLImageElement) => node.complete && node.naturalWidth,
+        ),
+      )
+      .toBeGreaterThan(0)
+    await expect(
+      pane.getByRole('button', { name: '用默认应用打开' }),
+    ).toBeVisible()
+    await expect(
+      pane.getByRole('button', { name: '在访达中显示' }),
+    ).toBeVisible()
+    await expect(meta).toContainText('Word 文档')
+    await page.mouse.move(400, 450)
+    await shot(page, `document-${theme}`)
+    await expectBaseline(pane, 'workspace', `document-${theme}`)
+    await pane.getByRole('radio', { name: '文字' }).click()
+    await expect(pane.locator('.file-document-text')).toContainText('一、背景')
+
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'data/sales.csv' },
+    })
+    const table = pane.locator('table.file-table')
+    await expect(table.locator('th')).toHaveText(['日期', '渠道', '销量'])
+    await expect(table.locator('tbody tr')).toHaveCount(3)
+    await expect(meta).toContainText('共 3 列')
+    await page.mouse.move(400, 450)
+    await shot(page, `table-${theme}`)
+    await expectBaseline(pane, 'workspace', `table-${theme}`)
+    await pane.getByRole('radio', { name: '源码' }).click()
+    await expect(pane.locator('.file-code-view')).toContainText('10-21,京东')
+
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'assets/素材打包.zip' },
+    })
+    const card = pane.locator('.file-unsupported')
+    await expect(card).toContainText('ZIP 压缩包 · 48.6 MB')
+    await expect(
+      card.getByRole('button', { name: '用默认应用打开' }),
+    ).toBeVisible()
+    await page.mouse.move(400, 450)
+    await shot(page, `unsupported-${theme}`)
+    await expectBaseline(pane, 'workspace', `unsupported-${theme}`)
+
+    // A program: Finder only.
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'bin/tool' },
+    })
+    await expect(card.locator('b')).toHaveText('tool')
+    await expect(
+      card.getByRole('button', { name: '用默认应用打开' }),
+    ).toHaveCount(0)
+    await expect(
+      card.getByRole('button', { name: '在访达中显示' }),
+    ).toBeVisible()
   })
 
   test(`browser: only the user's own browsing (${theme})`, async ({ page }) => {
