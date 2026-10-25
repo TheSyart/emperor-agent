@@ -20,6 +20,8 @@
  * and as a dot on 子智能体 in the nav; 升级 asks first
  * (ExecutorUpgradeDialog), then runs in the row (升级中, a bar, 查看过程,
  * 取消) and ends in a toast or a failure notice with the command to copy.
+ * 退回 to the last good version (VER-03) starts on a detail page, asks in
+ * the same dialog and runs the same way (退回中).
  */
 import {
   computed,
@@ -68,7 +70,9 @@ import {
   activeRun,
   failedRun,
   rowUpgradeLine,
+  runBadge,
   runningLine,
+  runVerb,
   upgradeOffered,
 } from './executors/upgradeText'
 import { provideExecutorSettings } from './executors/useExecutorSettings'
@@ -385,8 +389,11 @@ useSettingsHeader({
             :size="28"
         /></template>
         <template #badge
-          ><Badge v-if="upgrading(row.profile)" class="readiness" tone="accent"
-            >升级中</Badge
+          ><Badge
+            v-if="upgrading(row.profile)"
+            class="readiness"
+            tone="accent"
+            >{{ runBadge(row.profile && runOf(row.profile)) }}</Badge
           ><Badge
             v-else
             class="readiness"
@@ -420,6 +427,7 @@ useSettingsHeader({
         <template v-if="row.profile && upgrading(row.profile)" #below
           ><ExecutorUpgradeProgress
             :log="runOf(row.profile)?.log ?? []"
+            :label="`${runVerb(runOf(row.profile))}进度`"
             bar
             :show-log="!!logOpen[row.profile.id]"
         /></template>
@@ -548,6 +556,12 @@ useSettingsHeader({
     v-if="upgrades.asking.value"
     :profile-ids="upgrades.asking.value"
     @close="upgrades.asking.value = null"
+  />
+  <ExecutorUpgradeDialog
+    v-if="upgrades.askingRollback.value"
+    kind="rollback"
+    :profile-ids="[upgrades.askingRollback.value]"
+    @close="upgrades.askingRollback.value = null"
   />
   <ClaudeApiKeyDialog
     v-if="apiKeyDialog"

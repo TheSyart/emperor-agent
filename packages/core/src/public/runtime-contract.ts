@@ -114,6 +114,7 @@ export type {
   DelegationRecord,
   DelegationRunRecord,
   DelegationResult,
+  VersionFailureContext,
 } from '../harness/delegation/types'
 export {
   executorIntroduction,

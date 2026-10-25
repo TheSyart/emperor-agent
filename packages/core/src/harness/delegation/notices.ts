@@ -22,7 +22,7 @@ export function settlementNotice(
   // A failure names its code; the summary says why (FIX-15).
   const failure =
     run.failureCode && run.phase !== 'completed' ? ` (${run.failureCode})` : ''
-  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${failure}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}${modelChoiceLine(run)}\n${run.summary || 'No closing summary.'}`
+  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${failure}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}${modelChoiceLine(run)}${versionFailureLine(run)}\n${run.summary || 'No closing summary.'}`
   const bytes = Buffer.from(text),
     bounded =
       bytes.length <= 8192
@@ -96,6 +96,22 @@ export class DelegationNoticeOutbox {
  * The model a run used instead of Codex's own default (FIX-16), so the
  * parent can tell the user; empty when the run used the configured one.
  */
+/**
+ * VER-06: the fixed sentence a version failure ends with for the parent:
+ * why, the last good (or verified) version, what to tell the user, and not
+ * to retry the same executor another way.
+ */
+export function versionFailureLine(run: DelegationRunRecord): string {
+  const context = run.versionFailure
+  if (!context || run.phase === 'completed') return ''
+  const tail = '；不要换别的方式重试同一个子智能体。'
+  const next = context.actions.includes('rollback')
+    ? `上次正常版本：${context.lastGood}。请告诉用户可以在 设置 › 子智能体 退回${tail}`
+    : context.actions.includes('install_verified')
+      ? `Emperor 验证过的版本：${context.verifiedMax}。请告诉用户可以在 设置 › 子智能体 安装这个版本${tail}`
+      : `请告诉用户可以在 设置 › 子智能体 查看并重新检查${tail}`
+  return `\n失败原因：${context.reason}。${next}`
+}
 export function modelChoiceLine(run: DelegationRunRecord): string {
   const choice = run.modelChoice
   if (!choice) return ''

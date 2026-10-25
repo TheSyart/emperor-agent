@@ -62,6 +62,7 @@ import {
 import { provideDelegationLinks } from './delegationLinks'
 import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import ExternalAgentDetails from './environment/ExternalAgentDetails.vue'
+import VersionFailureActions from './VersionFailureActions.vue'
 import Button from '../ui/Button.vue'
 import Avatar from '../ui/Avatar.vue'
 const route = useRoute(),
@@ -607,6 +608,16 @@ async function stop() {
         {{ error }} <Button size="sm" @click="feed?.refresh()">重试</Button>
       </p>
       <p v-if="loading" class="child-note">正在读取子智能体对话…</p>
+      <div
+        v-if="
+          controlsAvailable && run?.phase === 'failed' && run.versionFailure
+        "
+        class="version-banner"
+        role="alert"
+        data-version-failure-banner
+      >
+        <VersionFailureActions :context="run.versionFailure" variant="banner" />
+      </div>
       <div class="child-diagnostics">
         <p
           v-for="issue in availability === 'ready'
@@ -772,6 +783,10 @@ async function stop() {
 .child-conversation[data-env-card] .child-timeline {
   padding-inline-end: calc(var(--env-card-width) + var(--space-4));
 }
+/* The banner, like the timeline, stays clear of the floating card. */
+.child-conversation[data-env-card] .version-banner {
+  margin-inline-end: calc(var(--env-card-width) + 2 * var(--space-4));
+}
 .child-header {
   flex: none;
   min-width: 0;
@@ -853,6 +868,15 @@ h1 {
   align-items: center;
   gap: var(--space-2);
   padding-top: var(--space-3);
+}
+/* VER-06: a failure for its version, why and what to do. */
+.version-banner {
+  flex: none;
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2-5) var(--space-3);
+  border-radius: var(--r-sm);
+  background: rgb(var(--state-error-soft));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-2);
 }
 .child-note,
 .child-more {

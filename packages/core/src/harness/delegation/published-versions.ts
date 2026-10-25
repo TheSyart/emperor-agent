@@ -5,10 +5,12 @@ import type { UpdateTransport } from '../../updates/types'
 import {
   claudeVersionSupported,
   formatVersion,
+  KNOWN_CLAUDE_VERSIONS,
   KNOWN_CODEX_PROTOCOLS,
   parseVersion,
   type CodexProtocol,
   type SemanticVersion,
+  type VerifiedClaudeVersion,
 } from './compatibility'
 import { EXECUTOR_PACKAGES } from './install-source'
 
@@ -294,27 +296,68 @@ export class PublishedVersionStore {
   }
 }
 
-/** Claude Code: npm's latest, when it is newer and Emperor supports it. */
+/**
+ * Claude Code (VER-04, as Codex): the highest release Emperor verified that
+ * is newer than what is installed and not above npm's latest (none before
+ * npm answered);
+ * `unverified`: npm's latest when it is not verified and newer than what
+ * is installed or offered. Neither is ever a version in `skip` (one the
+ * user went back from, VER-03). `verified`: the exact releases.
+ */
 export function claudeUpgradeTarget(
   installed: string | null,
-  latest: string | null,
-): string | null {
-  const next = parseVersion(latest)
-  if (!next || !claudeVersionSupported(next)) return null
+  published: PublishedPackage | null | undefined,
+  known: readonly VerifiedClaudeVersion[] = KNOWN_CLAUDE_VERSIONS,
+  skip: ReadonlySet<string> = new Set(),
+): { target: string | null; unverified: string | null; verified: string[] } {
+  const verified = known
+    .map((k) => parseVersion(k.version))
+    .filter((v): v is SemanticVersion => !!v && claudeVersionSupported(v))
+    .sort(compare)
   const current = parseVersion(installed)
-  return !current || compare(next, current) > 0 ? formatVersion(next) : null
+  const latest =
+    published?.latest && RELEASE.test(published.latest)
+      ? parseVersion(published.latest)!
+      : undefined
+  // Nothing is offered before npm answered (as for Codex, AGT-13).
+  const best = latest
+    ? verified
+        .filter(
+          (v) =>
+            !skip.has(formatVersion(v)) &&
+            (!current || compare(v, current) > 0) &&
+            compare(v, latest) <= 0,
+        )
+        .at(-1)
+    : undefined
+  const floor = [current, best].filter(Boolean) as SemanticVersion[]
+  const unverified =
+    latest &&
+    claudeVersionSupported(latest) &&
+    !skip.has(formatVersion(latest)) &&
+    !verified.some((v) => compare(v, latest) === 0) &&
+    floor.every((v) => compare(latest, v) > 0)
+      ? formatVersion(latest)
+      : null
+  return {
+    target: best ? formatVersion(best) : null,
+    unverified,
+    verified: verified.map(formatVersion),
+  }
 }
 
 /**
  * Codex: the highest release whose major.minor Emperor verified (read from
  * the protocol list at run time, so a newly verified one is offered by
  * itself); `unverified`: npm's latest when its line is not verified and it
- * is newer than what is installed or offered.
+ * is newer than what is installed or offered. Neither is ever a version
+ * in `skip` (one the user went back from, VER-03).
  */
 export function codexUpgradeTarget(
   installed: string | null,
   published: PublishedPackage | null | undefined,
   protocols: readonly CodexProtocol[] = KNOWN_CODEX_PROTOCOLS,
+  skip: ReadonlySet<string> = new Set(),
 ): { target: string | null; unverified: string | null; verified: string[] } {
   const lines = [
     ...new Set(
@@ -327,7 +370,7 @@ export function codexUpgradeTarget(
   const current = parseVersion(installed)
   const line = (v: SemanticVersion) => `${v.major}.${v.minor}`
   const releases = (published?.versions ?? [])
-    .filter((v) => RELEASE.test(v))
+    .filter((v) => RELEASE.test(v) && !skip.has(v))
     .map((v) => parseVersion(v)!)
   const best = releases
     .filter((v) => lines.includes(line(v)))
@@ -338,7 +381,9 @@ export function codexUpgradeTarget(
       ? formatVersion(best)
       : null
   const latest =
-    published?.latest && RELEASE.test(published.latest)
+    published?.latest &&
+    RELEASE.test(published.latest) &&
+    !skip.has(published.latest)
       ? parseVersion(published.latest)!
       : undefined
   const floor = [current, best].filter(Boolean) as SemanticVersion[]

@@ -445,3 +445,43 @@ it('AGT-13 · the model list starts Codex with the same feature overrides as a r
     'features.daemon_auto_start=false',
   )
 })
+
+it('VER-04 · the Claude model list launches with the ledger’s builtins off, not a list of its own', async () => {
+  const f = fixture()
+  const claude = defaultExecutorConfig().profiles[0]!
+  const runtime = await f.runtime.prepare(claude, 'dlg-models-claude')
+  const { BuiltinPluginLedger } = await import('./claude-builtin-plugins')
+  const ledger = new BuiltinPluginLedger()
+  ledger.learn([{ name: 'x', path: 'builtin', source: 'x@builtin' }], '2.1.312')
+  let settings: Record<string, unknown> | undefined
+  const rows = await readNativeModels(
+    claude,
+    runtime,
+    new ManagedAgentProcess(),
+    new AbortController().signal,
+    {
+      ledger,
+      startup: async (options) => {
+        settings = options.settings as Record<string, unknown>
+        return {
+          close: () => undefined,
+          query: () =>
+            ({
+              supportedModels: async () => [
+                { value: 'opus', displayName: 'Opus' },
+              ],
+              close: () => undefined,
+            }) as never,
+        }
+      },
+    },
+  )
+  expect(rows).toEqual([{ id: 'opus', name: 'Opus' }])
+  expect(settings?.enabledPlugins).toEqual({
+    'agents-md@builtin': false,
+    'cc-plugin-agents-md@builtin': false,
+    'cc-plugin-plugin-authoring@builtin': false,
+    'telemetry@builtin': false,
+    'x@builtin': false,
+  })
+})

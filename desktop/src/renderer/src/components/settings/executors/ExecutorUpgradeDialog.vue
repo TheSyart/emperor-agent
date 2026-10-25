@@ -8,26 +8,46 @@
  * cannot tell, Homebrew offering another version) it shows the command to
  * run in Terminal instead.
  *
- * Props: profileIds (one, or two for 全部升级). Emits: close.
+ * 退回 (VER-03, `kind: 'rollback'`) asks the same way: why (the version's
+ * failures), the command of the install source, and for Claude Code that
+ * the claude in the user's own Terminal may update itself again.
+ *
+ * Props: profileIds (one, or two for 全部升级), kind. Emits: close.
  */
 import { computed, ref } from 'vue'
 import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
 import { writeClipboard } from '../../ui/useCopyFeedback'
 import { useExecutorUpgrades } from './executorUpgrades'
-import { confirmContent } from './upgradeText'
+import { confirmContent, rollbackContent, type CodeNote } from './upgradeText'
 
-const props = defineProps<{ profileIds: readonly string[] }>()
+const props = withDefaults(
+  defineProps<{
+    profileIds: readonly string[]
+    kind?: 'upgrade' | 'rollback'
+  }>(),
+  { kind: 'upgrade' },
+)
 const emit = defineEmits<{ close: [] }>()
 
 const upgrades = useExecutorUpgrades()
 const items = computed(() =>
   props.profileIds.flatMap((id) => {
     const version = upgrades.versionOf(id)
+    if (props.kind === 'rollback')
+      return version?.rollback && version.rollback.manual !== 'desktop'
+        ? [version]
+        : []
     return version?.target && version.upgrade ? [version] : []
   }),
 )
-const content = computed(() => confirmContent(items.value))
+const content = computed<
+  ReturnType<typeof confirmContent> & { note: CodeNote | null }
+>(() =>
+  props.kind === 'rollback' && items.value[0]
+    ? rollbackContent(items.value[0])
+    : { ...confirmContent(items.value), note: null },
+)
 const copied = ref(false)
 async function copy() {
   copied.value = await writeClipboard(content.value.commands.join('\n'))
@@ -36,7 +56,9 @@ function close(open: boolean) {
   if (!open) emit('close')
 }
 function confirm() {
-  void upgrades.upgrade(items.value.map((v) => v.profileId))
+  if (props.kind === 'rollback')
+    void upgrades.rollback(items.value[0]!.profileId)
+  else void upgrades.upgrade(items.value.map((v) => v.profileId))
   emit('close')
 }
 </script>
@@ -48,7 +70,7 @@ function confirm() {
     :width="460"
     @update:open="close"
   >
-    <div class="upgrade-dialog" data-upgrade-dialog>
+    <div class="upgrade-dialog" data-upgrade-dialog :data-upgrade-kind="kind">
       <p class="lead">{{ content.lead }}</p>
       <code
         v-for="command in content.commands"
@@ -60,6 +82,11 @@ function confirm() {
       <ul v-if="content.points.length" class="points">
         <li v-for="point in content.points" :key="point">{{ point }}</li>
       </ul>
+      <p v-if="content.note" class="lead" data-upgrade-note>
+        {{ content.note.before
+        }}<code class="inline">{{ content.note.code }}</code
+        >{{ content.note.after }}
+      </p>
     </div>
     <template #footer>
       <template v-if="content.action">
@@ -111,6 +138,16 @@ function confirm() {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
+}
+
+.inline {
+  padding: 0 var(--space-1);
+  border-radius: var(--r-xs);
+  background: rgb(var(--surface-sunken));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-2);
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
 }
 
 .points {

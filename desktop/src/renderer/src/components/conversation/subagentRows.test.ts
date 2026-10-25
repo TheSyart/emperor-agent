@@ -479,3 +479,37 @@ describe('status bar (UI-S14 · 5 · 6)', () => {
     })
   })
 })
+
+describe('VER-06 · a version failure', () => {
+  const versionFailure = {
+    backend: 'claude-code' as const,
+    profileId: 'claude-default',
+    current: '2.1.315',
+    lastGood: '2.1.310',
+    verifiedMax: '2.1.310',
+    reason: 'Claude Code 2.1.315 不兼容',
+    actions: ['rollback' as const, 'open_settings' as const],
+  }
+  it('1 · a failed run carries it to the row', () => {
+    const row = subagentRowOf(
+      external('v', 'claude-code', {
+        phase: 'failed',
+        detail: 'x',
+        versionFailure,
+      }),
+    )
+    expect(row.versionFailure).toEqual(versionFailure)
+  })
+  it('6 · a run that has none (or is not failed) shows no buttons', () => {
+    expect(
+      subagentRowOf(
+        external('old', 'claude-code', { phase: 'failed', detail: 'x' }),
+      ).versionFailure,
+    ).toBeUndefined()
+    expect(
+      subagentRowOf(
+        external('run', 'claude-code', { phase: 'running', versionFailure }),
+      ).versionFailure,
+    ).toBeUndefined()
+  })
+})

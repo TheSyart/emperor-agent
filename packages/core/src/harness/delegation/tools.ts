@@ -26,7 +26,7 @@ import type {
   DelegationRunRecord,
   DelegationStart,
 } from './types'
-import { modelChoiceLine, resultLine } from './notices'
+import { modelChoiceLine, resultLine, versionFailureLine } from './notices'
 import type { DelegationState } from './fold'
 import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
@@ -186,6 +186,7 @@ function closingText(
     }) +
     resultLine(run) +
     modelChoiceLine(run) +
+    versionFailureLine(run) +
     '\n' +
     (run.summary || '(executor returned no closing text)')
   )
@@ -374,8 +375,10 @@ export function createDelegationTools(
               'external run ' +
                 run.phase +
                 ': ' +
-                // The code, then why (FIX-15).
-                [run.failureCode, run.summary].filter(Boolean).join(' — '),
+                // The code, then why (FIX-15), and for a version failure
+                // what to tell the user (VER-06).
+                [run.failureCode, run.summary].filter(Boolean).join(' — ') +
+                versionFailureLine(run),
               'DELEGATION_FAILED',
             )
           return {

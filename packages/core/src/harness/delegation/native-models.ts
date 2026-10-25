@@ -17,6 +17,7 @@ import { executorGrants } from './environment'
 import { acquireCodexAuth, type CodexAuthLease } from './codex-auth'
 import { codexAppServerArgs } from './adapters/codex'
 import { codexModelRows, type OfferedModel } from './model-choice'
+import { BuiltinPluginLedger } from './claude-builtin-plugins'
 /**
  * A model the CLI lists for this login. Codex also says which is its
  * default and which its picker hides (FIX-16).
@@ -30,11 +31,17 @@ export async function readNativeModels(
   runtime: PreparedExecutor,
   processes: ManagedAgentProcess,
   signal: AbortSignal,
+  sdk: {
+    /** Claude Code's builtins, off as in a run (default: the seed). */
+    ledger?: BuiltinPluginLedger
+    /** Test hook: the Agent SDK's startup. */
+    startup?: (options: Options) => Promise<Pick<WarmQuery, 'query' | 'close'>>
+  } = {},
 ): Promise<NativeModel[]> {
   let handle: ManagedProcessHandle | undefined,
     lease: CodexAuthLease | undefined,
     rpc: CodexRpc | undefined,
-    warm: WarmQuery | undefined,
+    warm: Pick<WarmQuery, 'query' | 'close'> | undefined,
     query: Query | undefined
   const controller = new AbortController()
   const abort = () => controller.abort()
@@ -150,10 +157,11 @@ export async function readNativeModels(
       persistSession: false,
       settings: {
         ...settings,
-        enabledPlugins: {
-          'agents-md@builtin': false,
-          'telemetry@builtin': false,
-        },
+        // The same builtins a run turns off (VER-02): the seed and every
+        // one Emperor learned.
+        enabledPlugins: (
+          sdk.ledger ?? new BuiltinPluginLedger()
+        ).enabledPluginsSetting(),
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
       },
@@ -170,7 +178,9 @@ export async function readNativeModels(
         return handle.spawnedProcess
       },
     }
-    warm = await startup({ options, initializeTimeoutMs: 8000 })
+    warm = await (sdk.startup
+      ? sdk.startup(options)
+      : startup({ options, initializeTimeoutMs: 8000 }))
     query = warm.query(new AsyncQueue())
     const models = await query.supportedModels()
     return models.map((row) => ({ id: row.value, name: row.displayName }))

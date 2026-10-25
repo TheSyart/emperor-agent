@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "claude": {
+    "version": "2.1.310",
+    "builtinPlugins": [
+      "cc-plugin-agents-md@builtin",
+      "cc-plugin-plugin-authoring@builtin"
+    ],
+    "mcpServers": [],
+    "hooksApplied": true
+  }
+}

@@ -1,0 +1,47 @@
+name: weekly-executor-upstream
+
+# VER-05: once a week, install the newest Claude Code and Codex into a
+# temporary prefix and check them offline (no login, no prompt, no model
+# call): Claude Code's builtin plugins, MCP servers and hooks against
+# config/executor-upstream-baseline.json, Codex's protocol digest and default
+# features against the newest protocol/codex-*/ snapshot, and the product's
+# own self-check for both. A difference opens one issue labelled
+# executor-upstream (P0 when incompatible) or comments on the open one;
+# nothing changes the code by itself (scripts/ci/weekly-executor-upstream.mjs;
+# docs/development/ci.md). No secret beyond the run's own token.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-executor-upstream
+  cancel-in-progress: false
+
+jobs:
+  executor-upstream:
+    name: Claude Code and Codex upstream
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Check the newest releases; open or update the issue on a difference
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/weekly-executor-upstream.mjs

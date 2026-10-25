@@ -68,12 +68,16 @@ import { durableReplaceSync } from '../../store/persistence'
 import type { CodexAuthLink } from './codex-auth'
 import type { ExecutorDispatchGate } from './dispatch-gate'
 import { executorGrants } from './environment'
+import { isVersionFailure, type ExecutorHealthStore } from './executor-health'
+import type { ExecutorSelfCheck, SelfCheckResult } from './self-check'
 import {
   describeRunFailure,
   describeTurnError,
+  describeVersionFailure,
   sanitizeFailureMessage,
   type RunStage,
 } from './failure'
+import { KNOWN_CLAUDE_VERSIONS, KNOWN_CODEX_PROTOCOLS } from './compatibility'
 import { logger } from '../../util/log'
 
 const log = logger.child({ component: 'executors' })
@@ -192,6 +196,28 @@ export interface DelegationServiceOptions {
    * refused; a run that starts while the upgrade command runs waits.
    */
   dispatchGate?: Pick<ExecutorDispatchGate, 'refused' | 'settled'>
+  /**
+   * What each CLI version did (VER-03): a run that finished with a final
+   * text makes its version the last good one; a version failure counts
+   * against it. 设置 › 子智能体 offers 退回 from it.
+   */
+  health?: Pick<
+    ExecutorHealthStore,
+    'recordSuccess' | 'recordFailure' | 'lastGood' | 'selfCheckOf'
+  >
+  /**
+   * The offline self-check (VER-04): a version it found incompatible is
+   * refused before the workspace is prepared; one never checked is checked
+   * first (a check that runs late or errs never blocks).
+   */
+  selfCheck?: Pick<ExecutorSelfCheck, 'gate'>
+}
+/** One Chinese line for a version the self-check refused (VER-04). */
+function selfCheckRefusal(result: SelfCheckResult): string {
+  const name = result.backend === 'codex' ? 'Codex' : 'Claude Code'
+  const issue = result.issues.find((i) => i.blocking)
+  const why = issue ? `：${issue.detail.replace(/。$/u, '')}` : ''
+  return `${name} ${result.version} 自检不兼容${why}。可以在 设置 › 子智能体 退回上一个正常版本，或点「重新检查」。`
 }
 interface Entry {
   journal: DelegationJournal
@@ -1547,7 +1573,13 @@ export class DelegationService {
       /** The model the run used instead of Codex's default (FIX-16). */
       modelChoice: ExecutorModelChoice | undefined,
       /** A refused model was already retried once (FIX-16). */
-      retried = false
+      retried = false,
+      /** The probe this run was checked with: its version (VER-03). */
+      bound: ExecutorProbe | undefined,
+      /** Emperor's own reason a DelegationError carried (VER-06). */
+      refusalReason: string | undefined,
+      /** The self-check's blocking issue that refused the run (VER-06). */
+      selfCheckIssue: string | undefined
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1577,6 +1609,30 @@ export class DelegationService {
       })
       const spec = record.startSpec!,
         profile = this.profile({ ...spec, profileId: record.profileId })
+      // A version the self-check found incompatible goes no further: no
+      // workspace, no process (VER-04).
+      stage = 'self-check'
+      let checked: SelfCheckResult | null = null
+      try {
+        checked =
+          (await this.options.selfCheck?.gate(
+            profile,
+            record.executorVersion,
+            controller.signal,
+          )) ?? null
+      } catch (error) {
+        if (controller.signal.aborted) throw error
+        checked = null
+      }
+      if (checked?.status === 'incompatible') {
+        bound = this.facts.probe(profile) ?? undefined
+        selfCheckIssue = checked.issues.find((i) => i.blocking)?.detail
+        throw new DelegationError(
+          'EXECUTOR_SELF_CHECK_FAILED',
+          'the self-check found this executor version incompatible',
+          selfCheckRefusal(checked),
+        )
+      }
       const effective = this.policy.resolve(
         this.options.parent(record.owner),
         spec,
@@ -1646,6 +1702,7 @@ export class DelegationService {
         profile,
         controller.signal,
       )
+      bound = preflight
       if (preflight.compatibility === 'unverified')
         protocolNote =
           preflight.diagnostic ??
@@ -2044,6 +2101,7 @@ export class DelegationService {
       }
       if (error instanceof DelegationError) {
         failureCode = error.code
+        refusalReason = error.reason
         // Emperor refused the run and says why (VER-02).
         if (error.reason)
           summary = boundText(
@@ -2190,6 +2248,14 @@ export class DelegationService {
             /* Durable ownership intent still preserves the directory. */
           }
         }
+        // A failure for its version says which and what to do (VER-06).
+        const versionFailure =
+          settledPhase === 'failed'
+            ? this.versionFailure(record, bound, failureCode, {
+                refusalReason,
+                selfCheckIssue,
+              })
+            : undefined
         if (!TERMINAL_RUN_PHASES.has(current.phase))
           await this.append(e, {
             type: 'run-changed',
@@ -2200,6 +2266,7 @@ export class DelegationService {
               finishedAt: Date.now(),
               summary,
               usage,
+              ...(versionFailure ? { versionFailure } : {}),
               ...(structured === undefined ? {} : { structured }),
               ...(e.inputFailure
                 ? {
@@ -2217,6 +2284,12 @@ export class DelegationService {
             ['pending', 'answering'].includes(interaction.state)
           )
             await this.append(e, { ...interaction, state: 'cancelled' })
+      })
+      this.noteHealth(record.profileId, activeRunId, bound, {
+        phase: settledPhase,
+        status,
+        failureCode,
+        summary,
       })
       if (quiescent && settledPhase !== 'outcome_unknown') {
         await this.collectResult(e, activeRunId)
@@ -2240,6 +2313,94 @@ export class DelegationService {
       )
       void this.dispatchNotices(id).catch(() => undefined)
       e.controller = undefined
+    }
+  }
+  /**
+   * VER-06: the version context of a run that failed for its version, from
+   * the health record and the run's probe; none for other failures.
+   */
+  private versionFailure(
+    record: DelegationRecord,
+    probe: ExecutorProbe | undefined,
+    failureCode: string | undefined,
+    found: { refusalReason?: string; selfCheckIssue?: string },
+  ): import('./types').VersionFailureContext | undefined {
+    const current = probe?.executableVersion
+    if (!current || !failureCode || !isVersionFailure(failureCode, probe))
+      return undefined
+    try {
+      const health = this.options.health
+      const verified =
+        record.backend === 'codex'
+          ? KNOWN_CODEX_PROTOCOLS.map((p) => p.version)
+          : KNOWN_CLAUDE_VERSIONS.map((k) => k.version)
+      return describeVersionFailure({
+        backend: record.backend,
+        profileId: record.profileId,
+        current,
+        failureCode,
+        ...(found.refusalReason ? { errorReason: found.refusalReason } : {}),
+        ...(found.selfCheckIssue
+          ? { selfCheckIssue: found.selfCheckIssue }
+          : {}),
+        ...(probe?.protocolVersion
+          ? { protocolVersion: probe.protocolVersion }
+          : {}),
+        ...(health?.lastGood(record.profileId)
+          ? { lastGood: health.lastGood(record.profileId)! }
+          : {}),
+        ...(verified.length ? { verifiedMax: verified.at(-1)! } : {}),
+        selfCheckErred:
+          health?.selfCheckOf(record.profileId, current)?.status === 'error',
+      })
+    } catch {
+      return undefined
+    }
+  }
+  /**
+   * What a settled run says about its CLI version (VER-03), only the
+   * version its own probe read: a turn that finished with a final text
+   * makes the version the last good one; a failure for the version
+   * (isVersionFailure) counts against it, with the first line of why.
+   * Anything else says nothing about the version. Never fails the run.
+   */
+  private noteHealth(
+    profileId: string,
+    runId: string,
+    probe: ExecutorProbe | undefined,
+    outcome: {
+      phase: RunPhase | undefined
+      status: 'completed' | 'failed' | 'interrupted' | undefined
+      failureCode: string | undefined
+      summary: string
+    },
+  ): void {
+    const health = this.options.health,
+      version = probe?.executableVersion
+    if (!health || !version) return
+    try {
+      if (
+        outcome.phase === 'completed' &&
+        outcome.status === 'completed' &&
+        outcome.summary.trim()
+      )
+        health.recordSuccess(profileId, version, runId)
+      else if (
+        outcome.phase === 'failed' &&
+        outcome.failureCode &&
+        isVersionFailure(outcome.failureCode, probe)
+      )
+        health.recordFailure(profileId, version, {
+          code: outcome.failureCode,
+          reason: outcome.summary.trim(),
+          runId,
+        })
+    } catch (error) {
+      log.warn('executor health not recorded', {
+        profileId,
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
   private async handleQuestion(

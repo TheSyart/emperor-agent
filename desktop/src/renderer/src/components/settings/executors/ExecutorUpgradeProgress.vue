@@ -4,9 +4,18 @@
  * with 查看过程 the command and its output as Core cleaned them (no
  * credentials, ~ for home). Also the 查看过程 of a failed upgrade.
  *
- * Props: log (lines), bar (show the bar), showLog.
+ * Props: log (lines), bar (show the bar), showLog, label (the bar's name:
+ * 升级进度, or 退回进度 for a rollback).
  */
-defineProps<{ log: readonly string[]; bar?: boolean; showLog?: boolean }>()
+withDefaults(
+  defineProps<{
+    log: readonly string[]
+    bar?: boolean
+    showLog?: boolean
+    label?: string
+  }>(),
+  { label: '升级进度' },
+)
 </script>
 
 <template>
@@ -15,7 +24,7 @@ defineProps<{ log: readonly string[]; bar?: boolean; showLog?: boolean }>()
       v-if="bar"
       class="bar"
       role="progressbar"
-      aria-label="升级进度"
+      :aria-label="label"
       data-upgrade-progress
     >
       <span class="fill" />

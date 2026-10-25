@@ -1,3 +1,4 @@
+import type { BuiltinPluginLedger } from './claude-builtin-plugins'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -49,6 +50,8 @@ export class ExecutorModelCatalogService {
        * login is claude's, AGT-12): its CLI is not started for a list.
        */
       signedIn?: (profile: ExecutorProfile) => boolean
+      /** Claude Code's builtins Emperor turns off (VER-02, VER-04). */
+      ledger?: BuiltinPluginLedger
     },
   ) {
     this.file = join(options.root, 'model-catalog-cache.json')
@@ -190,6 +193,7 @@ export class ExecutorModelCatalogService {
                 runtime,
                 this.options.processes ?? new ManagedAgentProcess(),
                 controller.signal,
+                this.options.ledger ? { ledger: this.options.ledger } : {},
               ))
           // A custom Codex provider can receive the bundled OpenAI picker catalog. Keep only explicit local/catalog ids in that case.
           if (profile.backend === 'codex' && !native) {

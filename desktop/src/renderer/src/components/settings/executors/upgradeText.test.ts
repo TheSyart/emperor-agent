@@ -12,8 +12,16 @@ import {
   failureContent,
   installText,
   noticeContent,
+  primaryShown,
+  rollbackAction,
+  rollbackContent,
+  rollbackOffered,
   rowUpgradeLine,
+  runBadge,
   runningLine,
+  selfCheckBadges,
+  selfCheckNotes,
+  selfCheckWarnings,
 } from './upgradeText'
 
 // AGT-13: what 设置 › 子智能体 says about versions and 升级, word for word
@@ -457,5 +465,422 @@ describe('detail and nav', () => {
       ),
     ).toBe(true)
     expect(attentionNeeded(null)).toBe(false)
+  })
+})
+
+describe('退回 (VER-03)', () => {
+  const offer = {
+    target: '2.1.310',
+    because: '2.1.315 上有 2 次任务因版本不兼容失败',
+    oneClick: true,
+    command: 'npm install -g @anthropic-ai/claude-code@2.1.310',
+  }
+  const broken = (over: Partial<ExecutorVersionView> = {}) =>
+    claude({
+      installed: '2.1.315',
+      latest: '2.1.315',
+      target: null,
+      upgrade: null,
+      rollback: offer,
+      ...over,
+    })
+  const back = (over: Partial<ExecutorUpgradeView> = {}) =>
+    run({
+      profileId: 'claude-default',
+      backend: 'claude-code',
+      kind: 'rollback',
+      from: '2.1.315',
+      target: '2.1.310',
+      command: offer.command,
+      ...over,
+    })
+
+  it('the button under 本机版本, or why there is none', () => {
+    expect(rollbackOffered(broken(), null)).toBe(true)
+    expect(rollbackAction(broken())).toEqual({
+      label: '退回 2.1.310（上次正常）',
+      note: null,
+    })
+    // While it (or an upgrade) runs, and for an executor that is off: no.
+    expect(rollbackOffered(broken(), back())).toBe(false)
+    expect(rollbackOffered(broken({ enabled: false }), null)).toBe(false)
+    expect(rollbackOffered(claude(), null)).toBe(false)
+    // Homebrew still has the button: it opens the command to copy.
+    expect(
+      rollbackAction(
+        broken({ rollback: { ...offer, oneClick: false, manual: 'homebrew' } }),
+      ).label,
+    ).toBe('退回 2.1.310（上次正常）')
+    // A desktop app's copy goes with the app.
+    expect(
+      rollbackAction(
+        codex({
+          rollback: {
+            target: '0.153.4',
+            because: '0.163.0 上有 1 次任务因版本不兼容失败',
+            oneClick: false,
+            command: null,
+            manual: 'desktop',
+          },
+        }),
+      ),
+    ).toEqual({ label: null, note: 'Codex 随桌面版更新，不能在这里退回。' })
+  })
+
+  it('11 · the confirmation: why, the command, and for Claude Code the auto-update note', () => {
+    expect(rollbackContent(broken())).toEqual({
+      title: '退回 Claude Code 2.1.310？',
+      lead: '2.1.315 上有 2 次任务因版本不兼容失败。退回会用你安装 Claude Code 的同一方式运行：',
+      commands: ['npm install -g @anthropic-ai/claude-code@2.1.310'],
+      points: [],
+      note: {
+        before:
+          '你在终端里直接用 claude 时，它可能自动更新回新版本；需要时可在 shell 配置里加 ',
+        code: 'export DISABLE_AUTOUPDATER=1',
+        after: '。',
+      },
+      action: '退回',
+    })
+    const codexBack = rollbackContent(
+      codex({
+        installed: '0.163.0',
+        target: null,
+        upgrade: null,
+        rollback: {
+          target: '0.153.4',
+          because: '0.163.0 上有 1 次任务因版本不兼容失败',
+          oneClick: true,
+          command: 'npm install -g @openai/codex@0.153.4',
+        },
+      }),
+    )
+    expect(codexBack).toMatchObject({
+      title: '退回 Codex 0.153.4？',
+      lead: '0.163.0 上有 1 次任务因版本不兼容失败。退回会用你安装 Codex 的同一方式运行：',
+      action: '退回',
+    })
+    // Codex does not update itself: no such note.
+    expect(codexBack.note).toBeNull()
+  })
+
+  it('Homebrew or an unknown install: the npm command to run, no one click', () => {
+    const brew = rollbackContent(
+      broken({
+        install: {
+          kind: 'homebrew',
+          location: '/opt/homebrew/Caskroom/claude-code',
+        },
+        rollback: { ...offer, oneClick: false, manual: 'homebrew' },
+      }),
+    )
+    expect(brew).toMatchObject({
+      title: '退回 Claude Code 到 2.1.310',
+      lead: '2.1.315 上有 2 次任务因版本不兼容失败。Homebrew 装不了旧版本，Emperor 不替你退回。在终端里运行下面这条命令（会另装一份，PATH 里靠前的那份生效），完成后点「重新检测」：',
+      commands: ['npm install -g @anthropic-ai/claude-code@2.1.310'],
+      action: null,
+    })
+    expect(brew.note).not.toBeNull()
+    expect(
+      rollbackContent(
+        broken({ rollback: { ...offer, oneClick: false, manual: 'unknown' } }),
+      ).lead,
+    ).toBe(
+      '2.1.315 上有 2 次任务因版本不兼容失败。Emperor 认不出 Claude Code 的安装方式，不能替你退回。在终端里运行下面这条命令，完成后点「重新检测」：',
+    )
+  })
+
+  it('progress and results say 退回, not 升级', () => {
+    expect(runBadge(back())).toBe('退回中')
+    expect(runBadge(run())).toBe('升级中')
+    expect(runningLine(back(), NOW)).toBe('正在退回到 2.1.310… 已用 12 秒')
+    expect(runningLine(back({ state: 'waiting', waitingFor: 1 }), NOW)).toBe(
+      '等 1 个子任务结束后退回到 2.1.310…',
+    )
+    expect(runningLine(back({ state: 'waiting' }), NOW)).toBe(
+      '正在准备退回到 2.1.310…',
+    )
+    const failed = back({
+      state: 'failed',
+      reason: 'network',
+      manualCommand: offer.command,
+      finishedAt: NOW,
+    })
+    expect(failureContent(failed).title).toBe(
+      'Claude Code 退回失败：连不上网络，没有下载到 2.1.310',
+    )
+    expect(failureContent({ ...failed, reason: 'start' }).title).toBe(
+      'Claude Code 退回失败：退回命令没能启动',
+    )
+    expect(rowUpgradeLine('', broken(), failed, NOW).text).toBe(
+      '本机 2.1.315 · 退回没有完成',
+    )
+  })
+
+  it('back on the last good version: 刚刚退回, and the version it left is not offered', () => {
+    const after = claude({
+      installed: '2.1.310',
+      latest: '2.1.315',
+      target: null,
+      upgrade: null,
+    })
+    const done = back({
+      state: 'succeeded',
+      installed: '2.1.310',
+      finishedAt: NOW - 60_000,
+    })
+    expect(rowUpgradeLine('', after, done, NOW).text).toBe(
+      '本机 2.1.310 · 已从 2.1.315 退回，暂不升级 · 刚刚退回',
+    )
+    expect(rowUpgradeLine('', after, null, NOW).text).toBe(
+      '本机 2.1.310 · 已从 2.1.315 退回，暂不升级',
+    )
+    // Core skips the version it left: nothing to offer, no notice, no dot.
+    const view = versions(
+      [after, codex({ target: null, upgrade: null, latest: '0.153.4' })],
+      {
+        upgrades: [done],
+      },
+    )
+    expect(noticeContent(view)).toBeNull()
+    expect(attentionNeeded(view)).toBe(false)
+    // A newer release later is offered as usual.
+    expect(
+      noticeContent(
+        versions([
+          claude({
+            installed: '2.1.310',
+            latest: '2.1.318',
+            target: '2.1.318',
+            upgrade: {
+              oneClick: true,
+              command: 'npm install -g @anthropic-ai/claude-code@2.1.318',
+            },
+          }),
+        ]),
+      )?.title,
+    ).toBe('Claude Code 有新版本')
+  })
+})
+
+describe('自检与尚未验证 (VER-04, preview § 8)', () => {
+  const VERIFIED = ['2.1.281', '2.1.308', '2.1.310']
+  const check = (
+    over: Partial<NonNullable<ExecutorVersionView['selfCheck']>> = {},
+  ): NonNullable<ExecutorVersionView['selfCheck']> => ({
+    backend: 'claude-code',
+    version: '2.1.310',
+    checkedAt: NOW,
+    status: 'adapted',
+    adapted: {
+      builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+      since: { 'cc-plugin-plugin-authoring@builtin': '2.1.308' },
+    },
+    issues: [],
+    modelCalls: 0,
+    ...over,
+  })
+  const latest = (over: Partial<ExecutorVersionView> = {}) =>
+    claude({
+      installed: '2.1.310',
+      latest: '2.1.310',
+      target: null,
+      upgrade: null,
+      verified: VERIFIED,
+      selfCheck: check(),
+      ...over,
+    })
+
+  it('自检通过 · 已自动关闭内置插件 x（y 起自带）', () => {
+    expect(selfCheckBadges(latest())).toEqual([
+      { text: '自检通过', tone: 'ok' },
+    ])
+    expect(selfCheckNotes(latest())).toEqual([
+      '已自动关闭内置插件 cc-plugin-plugin-authoring（2.1.308 起自带）',
+    ])
+    // Two at once, from the same release.
+    expect(
+      selfCheckNotes(
+        latest({
+          selfCheck: check({
+            adapted: {
+              builtinPluginsDisabled: [
+                'cc-plugin-agents-md@builtin',
+                'cc-plugin-plugin-authoring@builtin',
+              ],
+              since: {
+                'cc-plugin-agents-md@builtin': '2.1.308',
+                'cc-plugin-plugin-authoring@builtin': '2.1.308',
+              },
+            },
+          }),
+        }),
+      ),
+    ).toEqual([
+      '已自动关闭内置插件 cc-plugin-agents-md、cc-plugin-plugin-authoring（2.1.308 起自带）',
+    ])
+    expect(
+      selfCheckBadges(
+        latest({ selfCheck: check({ status: 'ok', adapted: undefined }) }),
+      ),
+    ).toEqual([{ text: '自检通过', tone: 'ok' }])
+  })
+
+  it('x 尚未验证: the highest verified one is installed; a newer one waits', () => {
+    const held = latest({ latest: '2.1.312', unverified: '2.1.312' })
+    expect(selfCheckBadges(held)).toEqual([
+      { text: '自检通过', tone: 'ok' },
+      { text: '2.1.312 尚未验证', tone: 'warn' },
+    ])
+    expect(selfCheckNotes(held)).toContain(
+      '已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级',
+    )
+    // Installed by hand above the verified ones: allowed, and said so.
+    const ahead = latest({
+      installed: '2.1.312',
+      latest: '2.1.312',
+      selfCheck: check({
+        version: '2.1.312',
+        status: 'ok',
+        adapted: undefined,
+      }),
+    })
+    expect(selfCheckBadges(ahead)).toEqual([
+      { text: '自检通过', tone: 'ok' },
+      { text: '尚未验证', tone: 'warn' },
+    ])
+    expect(selfCheckNotes(ahead)).toEqual([
+      '这个版本 Emperor 还没验证；自检通过，可以使用。',
+    ])
+    // Codex keeps its own 尚未验证 line (AGT-13).
+    expect(
+      selfCheckBadges(codex({ unverified: '0.163.0', selfCheck: null })),
+    ).toEqual([])
+  })
+
+  it('不兼容: why, and 退回 instead of a disabled 已是最新', () => {
+    const broken = latest({
+      installed: '2.1.315',
+      latest: '2.1.315',
+      verified: VERIFIED,
+      selfCheck: check({
+        version: '2.1.315',
+        status: 'incompatible',
+        adapted: undefined,
+        issues: [
+          {
+            code: 'mcp_server',
+            detail:
+              'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+            blocking: true,
+          },
+        ],
+      }),
+      rollback: {
+        target: '2.1.310',
+        because:
+          '2.1.315 自检不兼容：Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+        oneClick: true,
+        command: 'npm install -g @anthropic-ai/claude-code@2.1.310',
+      },
+    })
+    // 不兼容 says it all: no 尚未验证 beside it.
+    expect(selfCheckBadges(broken)).toEqual([{ text: '不兼容', tone: 'error' }])
+    expect(selfCheckNotes(broken)).toEqual([
+      'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+    ])
+    expect(primaryShown(broken, null)).toBe(false)
+    expect(rowUpgradeLine('', broken, null, NOW).text).toBe(
+      '本机 2.1.315 · 自检不兼容',
+    )
+    // Nothing wrong: the 已是最新 button stays as designed (AGT-13).
+    expect(primaryShown(latest(), null)).toBe(true)
+    // An upgrade offered: shown, whatever else.
+    expect(
+      primaryShown(
+        {
+          ...broken,
+          target: '2.1.310',
+          upgrade: { oneClick: true, command: 'x' },
+        },
+        null,
+      ),
+    ).toBe(true)
+  })
+
+  it('checking now, or a check that did not finish', () => {
+    expect(selfCheckBadges(latest({ selfChecking: true }))).toEqual([
+      { text: '正在自检…', tone: 'neutral' },
+    ])
+    const erred = latest({
+      selfCheck: check({
+        status: 'error',
+        adapted: undefined,
+        issues: [
+          {
+            code: 'timeout',
+            detail: 'Claude Code 2.1.310 的自检超过 15 秒没有完成。',
+            blocking: false,
+          },
+        ],
+      }),
+    })
+    expect(selfCheckBadges(erred)).toEqual([
+      { text: '自检没有完成', tone: 'neutral' },
+    ])
+    expect(selfCheckNotes(erred)).toEqual([
+      'Claude Code 2.1.310 的自检超过 15 秒没有完成。',
+    ])
+    // Not checked yet: nothing to show.
+    expect(selfCheckBadges(latest({ selfCheck: null }))).toEqual([])
+    expect(selfCheckNotes(latest({ selfCheck: null }))).toEqual([])
+  })
+
+  it('Codex: a feature on by default it never reviewed, or a protocol that differs, is a warning, not a block', () => {
+    const noted = codex({
+      selfCheck: {
+        backend: 'codex',
+        version: '0.163.0',
+        checkedAt: NOW,
+        status: 'ok',
+        issues: [
+          {
+            code: 'feature_default_on',
+            detail:
+              'Codex 0.163.0 默认打开了 Emperor 没有核对过的功能：shiny。',
+            blocking: false,
+          },
+        ],
+        modelCalls: 0,
+      },
+    })
+    expect(selfCheckBadges(noted)).toEqual([{ text: '自检通过', tone: 'ok' }])
+    expect(selfCheckNotes(noted)).toEqual([])
+    expect(selfCheckWarnings(noted)).toEqual([
+      'Codex 0.163.0 默认打开了 Emperor 没有核对过的功能：shiny。',
+    ])
+    const differs = codex({
+      installed: '0.163.2',
+      selfCheck: {
+        backend: 'codex',
+        version: '0.163.2',
+        checkedAt: NOW,
+        status: 'ok',
+        issues: [
+          {
+            code: 'protocol_unknown',
+            detail:
+              'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+            blocking: false,
+          },
+        ],
+        modelCalls: 0,
+      },
+    })
+    expect(selfCheckWarnings(differs)).toEqual([
+      'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+    ])
+    // Not 不兼容, no 退回 for it, and 已是最新 stays.
+    expect(selfCheckBadges(differs)).toEqual([{ text: '自检通过', tone: 'ok' }])
+    expect(primaryShown(differs, null)).toBe(true)
   })
 })

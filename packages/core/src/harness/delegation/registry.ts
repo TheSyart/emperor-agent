@@ -164,6 +164,7 @@ export class ExecutorRegistry {
         requiredVersion,
         compatibility: 'verified',
         protocolVersion: verified.version,
+        protocolCheck: 'matched',
       }
     const nearest = candidates[0]!
     return {
@@ -173,6 +174,11 @@ export class ExecutorRegistry {
       requiredVersion,
       compatibility: 'unverified',
       protocolVersion: nearest.version,
+      // No schema at all is not a different one (VER-04: the self-check
+      // refuses only a schema that differs).
+      protocolCheck: digests?.some((d) => d !== undefined)
+        ? 'differs'
+        : 'unreadable',
       diagnostic: `Codex ${executableVersion} speaks a protocol that differs from the verified Codex ${nearest.version}; it may be incompatible`,
     }
   }

@@ -414,6 +414,7 @@ describe('VER-02 · builtin plugins are turned off before the first prompt', () 
   const novel = { name: 'x', path: 'builtin', source: 'x@builtin' }
   const SEED = {
     'agents-md@builtin': false,
+    'cc-plugin-agents-md@builtin': false,
     'cc-plugin-plugin-authoring@builtin': false,
     'telemetry@builtin': false,
   }
@@ -608,4 +609,25 @@ describe('VER-02 · builtin plugins are turned off before the first prompt', () 
     await session.close()
     f.cleanup()
   })
+})
+
+it('10 · the claude Emperor starts never updates itself: DISABLE_AUTOUPDATER=1 in its environment (VER-03)', async () => {
+  const processes = new ManagedAgentProcess()
+  const spawn = vi.spyOn(processes, 'spawn')
+  const f = fixture(false, processes)
+  const session = await f.adapter.open({
+    ...f.input,
+    // Whatever the run's environment says.
+    environment: { ...f.input.environment, DISABLE_AUTOUPDATER: '0' },
+  })
+  try {
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn.mock.calls[0]![0].env).toMatchObject({
+      DISABLE_AUTOUPDATER: '1',
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+    })
+  } finally {
+    await session.close()
+    f.cleanup()
+  }
 })

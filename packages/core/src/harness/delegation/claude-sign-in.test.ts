@@ -139,6 +139,8 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
         HOME: s.dirs.home,
         XDG_CONFIG_HOME: join(s.dirs.home, '.config'),
         XDG_CACHE_HOME: join(s.dirs.home, '.cache'),
+        // No Claude process Emperor starts updates itself (VER-03).
+        DISABLE_AUTOUPDATER: '1',
       })
       // Seatbelt lets the run write its own login and home, nothing else.
       expect(r.stateRoots).toEqual(
@@ -164,6 +166,7 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
       CLAUDE_CONFIG_DIR: s.dirs.config,
       HOME: s.dirs.home,
       XDG_CONFIG_HOME: join(s.dirs.home, '.config'),
+      DISABLE_AUTOUPDATER: '1',
     })
 
     // 登录 runs the same claude with the same folders, then the check sees it.
@@ -181,6 +184,7 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
       HOME: s.dirs.home,
       XDG_CONFIG_HOME: join(s.dirs.home, '.config'),
       XDG_CACHE_HOME: join(s.dirs.home, '.cache'),
+      DISABLE_AUTOUPDATER: '1',
     })
     expect(
       await checkClaudeSignIn({

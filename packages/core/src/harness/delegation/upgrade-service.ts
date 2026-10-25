@@ -2,12 +2,14 @@ import { execFile } from 'node:child_process'
 import { accessSync, constants, existsSync } from 'node:fs'
 import { delimiter } from 'node:path'
 import { logger } from '../../util/log'
-import type { CodexProtocol } from './compatibility'
+import type { CodexProtocol, VerifiedClaudeVersion } from './compatibility'
 import type { ExecutorDispatchGate } from './dispatch-gate'
+import type { ExecutorHealthStore } from './executor-health'
 import {
   EXECUTOR_PACKAGES,
   detectInstallSource,
   installLocation,
+  rollbackCommand,
   upgradeCommand,
   type ExecutorInstallSource,
   type UpgradeCommand,
@@ -75,6 +77,24 @@ export interface ExecutorUpgradeServiceOptions {
   automatic: boolean
   /** What `brew upgrade` would install. */
   homebrewVersion?: (source: ExecutorInstallSource) => Promise<string | null>
+  /**
+   * What each version did (VER-03): the 退回 offer, and the versions the
+   * user went back from, which 升级 skips.
+   */
+  health?: Pick<
+    ExecutorHealthStore,
+    'rollbackOffer' | 'markRolledBack' | 'skipped' | 'selfCheckOf'
+  >
+  /**
+   * The offline self-check (VER-04): `after` an upgrade or a rollback
+   * succeeded it checks the version now installed; `running` for the row.
+   */
+  selfCheck?: {
+    after(profile: ExecutorProfile, reason: 'upgrade' | 'rollback'): void
+    running(profileId: string): boolean
+  }
+  /** Test hook: the verified Claude Code releases (VER-04). */
+  claudeVersions?: readonly VerifiedClaudeVersion[]
   pollMs?: number
   graceMs?: number
   timeoutMs?: number
@@ -85,6 +105,8 @@ export interface ExecutorUpgradeServiceOptions {
 interface Entry {
   view: ExecutorVersionView
   plan?: UpgradeCommand
+  /** 退回's command (VER-03). */
+  rollback?: UpgradeCommand
 }
 
 interface Run {
@@ -106,6 +128,11 @@ const finished = (run: Run) =>
  * a time, never two upgrades of one executor. The executor takes no new
  * delegations meanwhile, and the upgrade waits for its running subtasks.
  * Afterwards it probes again; a failure says why and gives the command.
+ *
+ * 退回 (VER-03) is the same run with another target: the last version a
+ * task ran on, once the installed one failed for its version
+ * (ExecutorHealthStore). When it succeeds the version it left is
+ * remembered, and 升级 does not offer it again until a newer one comes.
  */
 export class ExecutorUpgradeService {
   private readonly runs = new Map<string, Run>()
@@ -158,6 +185,18 @@ export class ExecutorUpgradeService {
     )
       await this.check()
     return this.view()
+  }
+
+  /**
+   * What a version did changed (VER-03: a run's outcome moved the 退回
+   * offer): the settings page gets the versions again.
+   */
+  changed(): void {
+    void this.view()
+      .then((versions) =>
+        this.options.emit({ event: 'executor_upgrade', versions }),
+      )
+      .catch(() => undefined)
   }
 
   /** 稍后: no notice or dot for the versions offered now. */
@@ -221,16 +260,24 @@ export class ExecutorUpgradeService {
     }
     const published =
       this.options.published.read().packages[EXECUTOR_PACKAGES[backend]]
+    // A version the user went back from is not offered again (VER-03).
+    const skip = this.options.health?.skipped(profile.id) ?? new Set<string>()
     let target: string | null
     let unverified: string | null = null
     let verified: string[] = []
     if (backend === 'claude-code')
-      target = claudeUpgradeTarget(installed, published?.latest ?? null)
+      ({ target, unverified, verified } = claudeUpgradeTarget(
+        installed,
+        published,
+        this.options.claudeVersions,
+        skip,
+      ))
     else
       ({ target, unverified, verified } = codexUpgradeTarget(
         installed,
         published,
-        ...(this.options.codexProtocols ? [this.options.codexProtocols] : []),
+        this.options.codexProtocols,
+        skip,
       ))
     // An upgrade of what is installed; installing is the user's.
     if (!installed) target = null
@@ -241,8 +288,14 @@ export class ExecutorUpgradeService {
           ? { homebrewVersion: await this.homebrewVersion(source) }
           : {}),
       })
+    // 退回: the last good version, when the installed one failed for it.
+    const offer = this.options.health?.rollbackOffer(profile.id, installed)
+    const rollback = offer
+      ? rollbackCommand(source, backend, offer.target)
+      : undefined
     return {
       plan,
+      ...(rollback ? { rollback } : {}),
       view: {
         profileId: profile.id,
         backend,
@@ -263,6 +316,21 @@ export class ExecutorUpgradeService {
               ...(plan.manual ? { manual: plan.manual } : {}),
             }
           : null,
+        ...(offer && rollback
+          ? {
+              rollback: {
+                ...offer,
+                oneClick: rollback.oneClick,
+                command: rollback.command,
+                ...(rollback.manual ? { manual: rollback.manual } : {}),
+              },
+            }
+          : {}),
+        selfCheck:
+          (installed &&
+            this.options.health?.selfCheckOf(profile.id, installed)) ||
+          null,
+        selfChecking: this.options.selfCheck?.running(profile.id) ?? false,
         activeRuns: this.options.activeRuns(backend),
       },
     }
@@ -284,10 +352,29 @@ export class ExecutorUpgradeService {
   }
 
   /** 升级: starts it (after the user confirmed); a second click joins it. */
-  async upgrade(input: {
+  upgrade(input: {
     profileId: string
     target: string
   }): Promise<{ upgrade: ExecutorUpgradeView }> {
+    return this.begin(input, 'upgrade')
+  }
+
+  /**
+   * 退回 (VER-03): to the version offered (the last good one), after the
+   * user confirmed; otherwise the same as 升级, and a click while either
+   * runs joins it.
+   */
+  rollback(input: {
+    profileId: string
+    target: string
+  }): Promise<{ upgrade: ExecutorUpgradeView }> {
+    return this.begin(input, 'rollback')
+  }
+
+  private async begin(
+    input: { profileId: string; target: string },
+    kind: 'upgrade' | 'rollback',
+  ): Promise<{ upgrade: ExecutorUpgradeView }> {
     const running = this.runs.get(input.profileId)
     if (running && !finished(running))
       return { upgrade: structuredClone(running.view) }
@@ -297,17 +384,27 @@ export class ExecutorUpgradeService {
         'EXECUTOR_NOT_FOUND',
         'unknown executor profile',
       )
-    const { view, plan } = await this.entry(profile)
+    const entry = await this.entry(profile)
+    const { view } = entry
+    const [plan, offered] =
+      kind === 'upgrade'
+        ? [entry.plan, view.target]
+        : [entry.rollback, view.rollback?.target]
     if (
       !plan?.oneClick ||
       !plan.argv ||
       !plan.command ||
-      view.target !== input.target
+      offered !== input.target
     )
-      throw new DelegationError(
-        'EXECUTOR_UPGRADE_UNAVAILABLE',
-        'this version is not offered as a one-click upgrade',
-      )
+      throw kind === 'upgrade'
+        ? new DelegationError(
+            'EXECUTOR_UPGRADE_UNAVAILABLE',
+            'this version is not offered as a one-click upgrade',
+          )
+        : new DelegationError(
+            'EXECUTOR_ROLLBACK_UNAVAILABLE',
+            'this version is not offered as a one-click rollback',
+          )
     const again = this.runs.get(input.profileId)
     if (again && !finished(again))
       return { upgrade: structuredClone(again.view) }
@@ -318,6 +415,7 @@ export class ExecutorUpgradeService {
       view: {
         profileId: profile.id,
         backend: profile.backend,
+        ...(kind === 'rollback' ? { kind } : {}),
         from: view.installed,
         target: input.target,
         command: plan.command,
@@ -331,6 +429,7 @@ export class ExecutorUpgradeService {
     this.options.gate.hold(profile.backend)
     log.info('executor upgrade started', {
       profileId: profile.id,
+      ...(kind === 'rollback' ? { kind } : {}),
       from: view.installed,
       target: input.target,
       source: view.install.kind,
@@ -440,7 +539,19 @@ export class ExecutorUpgradeService {
       } catch {
         probe = undefined
       }
-      this.end(run, this.outcome(run, plan, outcome, probe), probe)
+      const result = this.outcome(run, plan, outcome, probe)
+      // Back on the last good version: the one it left is not offered
+      // again until a newer one comes (VER-03).
+      if (
+        run.view.kind === 'rollback' &&
+        result.state === 'succeeded' &&
+        run.view.from
+      )
+        this.options.health?.markRolledBack(profile.id, run.view.from)
+      this.end(run, result, probe)
+      // The version now installed is checked offline (VER-04).
+      if (result.state === 'succeeded')
+        this.options.selfCheck?.after(profile, run.view.kind ?? 'upgrade')
     } finally {
       if (installing) this.options.gate.installing(backend, false)
       if (this.holder === run) this.holder = null
@@ -532,6 +643,7 @@ export class ExecutorUpgradeService {
     delete run.view.queued
     log.info('executor upgrade ended', {
       profileId: run.view.profileId,
+      ...(run.view.kind ? { kind: run.view.kind } : {}),
       state: run.view.state,
       ...(run.view.reason ? { reason: run.view.reason } : {}),
       ...(run.view.exitCode !== undefined

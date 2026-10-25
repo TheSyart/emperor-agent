@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-25（对照 `8057bef3`）<br>
-> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/codex-protocol-handshake.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
+> 最后核验：2026-10-26（对照 `9cd41da2`）<br>
+> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/codex-protocol-handshake.mjs`、`scripts/smoke-external-agents.mjs`、`scripts/ci/weekly-executor-upstream.mjs`、`config/executor-upstream-baseline.json`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
 
@@ -21,6 +21,23 @@
 5. `--write` 把依赖的 schema 文件、`digest.json` 与 `features.json`（`codex features list` 的默认值）写入 `protocol/codex-<version>/`（适配器新依赖的文件用 `--file <path>` 加入，之后的版本沿用最新一份的清单），用 prettier 格式化，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 按版本顺序注册，并把版本加入 contract 测试的 `VERIFIED`。需要登录的真实两轮/问题/干预/取消/恢复证据由维护者在真机上补齐。
 
 同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致，`compatibility.test.ts` 要求维护脚本与运行时对每份协议算出同一个摘要。
+
+新增 Claude Code 版本（VER-04）：
+
+1. 装进临时前缀：`npm install --prefix "$TMP/claude-<version>" @anthropic-ai/claude-code@<version>`，不全局安装，不用你自己的 claude，也不登录。
+2. `node scripts/claude-init-handshake.mjs --claude "$TMP/claude-<version>/node_modules/.bin/claude" --raw`：断网、临时 HOME、假 Key，经真实适配器启动；`--raw` 不带种子和账本，E1 列出这个版本自带的全部插件（VER-05 拿它和上游基线比）。不带 `--raw` 时看到的是 Emperor 关掉已知插件后还剩什么，应为空。
+3. 跑一次产品的离线自检（`ExecutorSelfCheck`，测试里用假 SDK；真机核对可照回执里的脚本把 `self-check.ts` 打包后对临时 prefix 里的二进制运行），结果必须是 `ok` 或 `adapted`。
+4. 都通过后在 `compatibility.ts` 的 `KNOWN_CLAUDE_VERSIONS` 末尾加一项（`version`、当天的 `verifiedAt`、`--raw` 看到的 `builtinPlugins`），新的内置插件同时考虑加进 `SEED_BUILTIN_PLUGINS`。没通过的版本不列入；一键升级只会升到列入的版本，更新的版本显示「尚未验证」。
+
+### 收到上游变化 issue 之后（VER-05）
+
+每周的上游自检（[CI 门禁](ci.md#每周上游自检claude-code-与-codex)）发现差异时会开一个 `executor-upstream` issue，脚本自己不改任何东西。处理步骤：
+
+1. 评估：按 issue 里的版本，照上面「新增 Claude Code 版本」或「新增 Codex 版本」的步骤在本机临时 prefix 里复现。类型是「环境问题待确认」时先确认是不是 runner 的环境造成的；是的话在 issue 里写明原因后关闭。
+2. 更新记录：Claude Code 的变化写进 `config/executor-upstream-baseline.json`（`version` 与 `--raw` 看到的 `builtinPlugins` 等），验证通过的版本加进 `KNOWN_CLAUDE_VERSIONS`，新的内置插件同时考虑加进 `SEED_BUILTIN_PLUGINS`。Codex 用 `codex-protocol-digest.mjs --write` 记下新快照并注册到 `KNOWN_CODEX_PROTOCOLS`，新的默认开启功能需要关时加进 `adapters/codex.ts` 的关闭清单（`CODEX_FEATURES`）。
+3. 开 PR，正文链接 issue；合并后下一次每周运行与记录一致，就不会再开 issue，手动关闭这一个。
+
+版本相关的失败（VER-03）：适配器因版本拒绝一次运行时用 `EXECUTOR_INCOMPATIBLE`（带中文 `reason`）。一个失败算不算版本问题，统一用 `executor-health.ts` 的 `isVersionFailure()` 判断（`VERSION_FAILURE_CODES`，加上未验证协议的 Codex 的启动与轮次失败），不要在别处另列失败码；`DelegationService` 按它记录每个版本的表现，设置页据此提供退回（见[架构文档](../architecture/external-agent-delegation.md#上次正常的版本与退回ver-03)）。Emperor 启动的每个 Claude 进程都带 `DISABLE_AUTOUPDATER=1`（`claudeProcessEnvironment`，运行的 spawn 环境里再固定一次）；新增启动 Claude 的入口时用 `ExecutorRuntimeService.prepare` 给的环境，不要自己拼。
 
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。中断先发协议 interrupt（最多等 5 秒），之后 `session.close()` 调用 `handle.terminate()`；未知协议请求默认拒绝。
 

@@ -2,6 +2,10 @@
  * What 设置 › 子智能体 says about versions and 升级 (AGT-13), word for word
  * from the approved design: the row line, the top notice, the
  * confirmation, a failure, the detail page's 版本 group and the nav dot.
+ * 退回 to the last good version (VER-03, BUG-00 preview § 8) runs the same
+ * way and says 退回 wherever an upgrade says 升级. The offline self-check
+ * (VER-04, preview § 8): 自检通过 / 不兼容 / 尚未验证 on the 本机版本 line,
+ * why under it, and 重新检查.
  * Pure functions over Core's `executors.versions`.
  */
 import type {
@@ -27,6 +31,16 @@ const INSTALL: Record<ExecutorVersionView['install']['kind'], string> = {
 /** 安装方式 in words. */
 export function installText(version: ExecutorVersionView): string {
   return INSTALL[version.install.kind]
+}
+
+/** 升级, or 退回 for a rollback (VER-03). */
+export function runVerb(run: ExecutorUpgradeView | null | undefined): string {
+  return run?.kind === 'rollback' ? '退回' : '升级'
+}
+
+/** The row's badge while it runs. */
+export function runBadge(run: ExecutorUpgradeView | null | undefined): string {
+  return `${runVerb(run)}中`
 }
 
 /** Waiting or running. */
@@ -67,14 +81,37 @@ function seconds(ms: number): string {
   return m ? `${m} 分 ${String(total % 60).padStart(2, '0')} 秒` : `${total} 秒`
 }
 
-/** The row while an upgrade waits or runs. */
+/** The row while an upgrade (or a rollback) waits or runs. */
 export function runningLine(run: ExecutorUpgradeView, now: number): string {
+  const verb = runVerb(run)
   if (run.state === 'running')
-    return `正在升级到 ${run.target}… 已用 ${seconds(now - run.startedAt)}`
+    return `正在${verb}到 ${run.target}… 已用 ${seconds(now - run.startedAt)}`
   if (run.waitingFor)
-    return `等 ${run.waitingFor} 个子任务结束后升级到 ${run.target}…`
-  if (run.queued) return `等另一个升级完成后升级到 ${run.target}…`
-  return `正在准备升级到 ${run.target}…`
+    return `等 ${run.waitingFor} 个子任务结束后${verb}到 ${run.target}…`
+  if (run.queued) return `等另一个升级完成后${verb}到 ${run.target}…`
+  return `正在准备${verb}到 ${run.target}…`
+}
+
+/** x.y.z: `a` is newer than `b`. */
+function newer(a: string, b: string): boolean {
+  const [x, y] = [a, b].map((v) => v.split('.').map(Number))
+  for (let i = 0; i < 3; i++)
+    if ((x![i] ?? 0) !== (y![i] ?? 0)) return (x![i] ?? 0) > (y![i] ?? 0)
+  return false
+}
+
+/**
+ * npm has a newer release and nothing is offered: the one the user went
+ * back from, which 升级 skips until a newer one comes (VER-03).
+ */
+export function heldBack(version: ExecutorVersionView): boolean {
+  return (
+    !version.target &&
+    !version.unverified &&
+    !!version.installed &&
+    !!version.latest &&
+    newer(version.latest, version.installed)
+  )
 }
 
 /** 刚刚升级 for ten minutes after it succeeded. */
@@ -93,7 +130,10 @@ export function rowUpgradeLine(
   const base = [lead, `本机 ${version.installed ?? '版本未知'}`]
     .filter(Boolean)
     .join(' · ')
-  if (failedRun(version, run)) return { text: `${base} · 升级没有完成` }
+  if (failedRun(version, run))
+    return { text: `${base} · ${runVerb(run)}没有完成` }
+  if (version.selfCheck?.status === 'incompatible')
+    return { text: `${base} · 自检不兼容` }
   if (version.target && version.upgrade?.manual === 'desktop')
     return { text: `${base} · ${version.target} 随桌面版更新` }
   if (version.target && version.upgrade)
@@ -107,7 +147,190 @@ export function rowUpgradeLine(
     run?.state === 'succeeded' &&
     run.finishedAt !== undefined &&
     now - run.finishedAt < RECENT_MS
-  return { text: `${base} · 已是最新${recent ? ' · 刚刚升级' : ''}` }
+  const just = recent ? ` · 刚刚${runVerb(run)}` : ''
+  if (heldBack(version))
+    return { text: `${base} · 已从 ${version.latest} 退回，暂不升级${just}` }
+  return { text: `${base} · 已是最新${just}` }
+}
+
+/**
+ * The detail page's 退回 (VER-03): the last good version, when the
+ * installed one failed for its version; a desktop app's copy only says why
+ * not.
+ */
+export function rollbackOffered(
+  version: ExecutorVersionView | null | undefined,
+  run: ExecutorUpgradeView | null | undefined,
+): boolean {
+  return (
+    !!version?.enabled &&
+    !!version.installed &&
+    !!version.rollback &&
+    !activeRun(run)
+  )
+}
+
+/** The 退回 button, or why there is none (a desktop app's copy). */
+export function rollbackAction(version: ExecutorVersionView): {
+  label: string | null
+  note: string | null
+} {
+  const offer = version.rollback
+  if (!offer) return { label: null, note: null }
+  if (offer.manual === 'desktop')
+    return {
+      label: null,
+      note: `${NAME[version.backend]} 随桌面版更新，不能在这里退回。`,
+    }
+  return { label: `退回 ${offer.target}（上次正常）`, note: null }
+}
+
+type Tone = 'ok' | 'warn' | 'error' | 'neutral'
+
+/** Claude Code installed above every verified release (by hand). */
+function installedUnverified(version: ExecutorVersionView): boolean {
+  return (
+    version.backend === 'claude-code' &&
+    version.verified.length > 0 &&
+    !!version.installed &&
+    !version.verified.includes(version.installed)
+  )
+}
+
+/**
+ * Beside 本机版本 (VER-04): what the self-check found (正在自检… while it
+ * runs) and, for Claude Code, 尚未验证 — the installed version, or the
+ * newer release 升级 does not offer yet. Codex keeps its own 尚未验证 line.
+ */
+export function selfCheckBadges(
+  version: ExecutorVersionView,
+): Array<{ text: string; tone: Tone }> {
+  const badges: Array<{ text: string; tone: Tone }> = []
+  const status = version.selfCheck?.status
+  if (version.selfChecking) badges.push({ text: '正在自检…', tone: 'neutral' })
+  else if (status === 'ok' || status === 'adapted')
+    badges.push({ text: '自检通过', tone: 'ok' })
+  else if (status === 'incompatible')
+    badges.push({ text: '不兼容', tone: 'error' })
+  else if (status === 'error')
+    badges.push({ text: '自检没有完成', tone: 'neutral' })
+  if (version.backend !== 'claude-code' || status === 'incompatible')
+    return badges
+  if (installedUnverified(version))
+    badges.push({ text: '尚未验证', tone: 'warn' })
+  else if (version.unverified)
+    badges.push({ text: `${version.unverified} 尚未验证`, tone: 'warn' })
+  return badges
+}
+
+/** Under 本机版本 (VER-04): why, in the tertiary colour. */
+export function selfCheckNotes(version: ExecutorVersionView): string[] {
+  const check = version.selfCheck
+  const notes: string[] = []
+  if (check?.status === 'incompatible') {
+    const issue = check.issues.find((i) => i.blocking)
+    if (issue) notes.push(issue.detail)
+  } else if (check?.status === 'error') {
+    if (check.issues[0]) notes.push(check.issues[0].detail)
+  } else if (check) {
+    const off = check.adapted?.builtinPluginsDisabled ?? []
+    if (off.length) {
+      const since = [
+        ...new Set(off.map((s) => check.adapted?.since?.[s]).filter(Boolean)),
+      ]
+      notes.push(
+        `已自动关闭内置插件 ${off.map((s) => s.replace(/@builtin$/u, '')).join('、')}${since.length === 1 ? `（${since[0]} 起自带）` : ''}`,
+      )
+    }
+  }
+  if (version.backend === 'claude-code' && check?.status !== 'incompatible') {
+    if (installedUnverified(version))
+      notes.push(
+        check && check.status !== 'error'
+          ? '这个版本 Emperor 还没验证；自检通过，可以使用。'
+          : '这个版本 Emperor 还没验证。',
+      )
+    else if (version.unverified)
+      notes.push('已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级')
+  }
+  return notes
+}
+
+/**
+ * Under 本机版本, in the warning colour (VER-04): what the self-check
+ * noted without blocking — a Codex protocol that differs from the verified
+ * one (可能不兼容, still runnable), a feature on by default Emperor never
+ * reviewed.
+ */
+export function selfCheckWarnings(version: ExecutorVersionView): string[] {
+  const check = version.selfCheck
+  if (!check || check.status === 'incompatible' || check.status === 'error')
+    return []
+  return check.issues.filter((i) => !i.blocking).map((i) => i.detail)
+}
+
+/**
+ * The 版本 group's main button: an upgrade, its progress, or 已是最新 as
+ * designed (AGT-13) — but not a disabled 已是最新 beside 退回 or a version
+ * the self-check refused (VER-04).
+ */
+export function primaryShown(
+  version: ExecutorVersionView,
+  run: ExecutorUpgradeView | null | undefined,
+): boolean {
+  if (activeRun(run) || upgradeOffered(version, run)) return true
+  return !version.rollback && version.selfCheck?.status !== 'incompatible'
+}
+
+/** The line about the auto-updater: prose, the export as code, the end. */
+export interface CodeNote {
+  before: string
+  code: string
+  after: string
+}
+
+/** 退回's confirmation (or, without one click, the command to run). */
+export function rollbackContent(version: ExecutorVersionView): {
+  title: string
+  lead: string
+  commands: string[]
+  points: string[]
+  note: CodeNote | null
+  action: string | null
+} {
+  const offer = version.rollback!
+  const name = NAME[version.backend]
+  const commands = offer.command ? [offer.command] : []
+  // Only claude updates itself; Codex does not.
+  const note: CodeNote | null =
+    version.backend === 'claude-code'
+      ? {
+          before:
+            '你在终端里直接用 claude 时，它可能自动更新回新版本；需要时可在 shell 配置里加 ',
+          code: 'export DISABLE_AUTOUPDATER=1',
+          after: '。',
+        }
+      : null
+  if (!offer.oneClick)
+    return {
+      title: `退回 ${name} 到 ${offer.target}`,
+      lead:
+        offer.manual === 'homebrew'
+          ? `${offer.because}。Homebrew 装不了旧版本，Emperor 不替你退回。在终端里运行下面这条命令（会另装一份，PATH 里靠前的那份生效），完成后点「重新检测」：`
+          : `${offer.because}。Emperor 认不出 ${name} 的安装方式，不能替你退回。在终端里运行下面这条命令，完成后点「重新检测」：`,
+      commands,
+      points: [],
+      note,
+      action: null,
+    }
+  return {
+    title: `退回 ${name} ${offer.target}？`,
+    lead: `${offer.because}。退回会用你安装 ${name} 的同一方式运行：`,
+    commands,
+    points: [],
+    note,
+    action: '退回',
+  }
 }
 
 /** One-click offers of executors that are on, unless an upgrade runs. */
@@ -222,11 +445,15 @@ export function failureContent(run: ExecutorUpgradeView): {
   body: string
   command: string | null
 } {
+  const verb = runVerb(run)
   const why: Record<NonNullable<ExecutorUpgradeView['reason']>, string> = {
     permission: `没有写入 ${run.path ?? '安装目录'} 的权限`,
-    network: '连不上网络，没有下载到新版本',
+    network:
+      run.kind === 'rollback'
+        ? `连不上网络，没有下载到 ${run.target}`
+        : '连不上网络，没有下载到新版本',
     timeout: '10 分钟没有完成，已停止',
-    start: '升级命令没能启动',
+    start: `${verb}命令没能启动`,
     'not-upgraded': `命令已结束，但重新检测到的仍是 ${run.installed ?? run.from ?? '原来的版本'}`,
     exit:
       run.exitCode !== undefined
@@ -235,7 +462,7 @@ export function failureContent(run: ExecutorUpgradeView): {
   }
   const tail = '你可以在终端里自己运行下面这条命令，完成后点「重新检测」：'
   return {
-    title: `${NAME[run.backend]} 升级失败：${why[run.reason ?? 'exit']}`,
+    title: `${NAME[run.backend]} ${verb}失败：${why[run.reason ?? 'exit']}`,
     body:
       run.reason === 'permission'
         ? `Emperor 不会用管理员权限运行。${tail}`
