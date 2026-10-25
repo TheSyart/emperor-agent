@@ -356,6 +356,18 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         versions?: ExecutorVersionsView
       }
     | {
+        /**
+         * Files changed in a watched session's project (BUG-11): paths are
+         * project-relative; `overflow` (too many, or unnamed) means re-read
+         * what is shown; `unavailable` means the watch failed.
+         */
+        event: 'workspace_files_changed'
+        session_id: string
+        paths: string[]
+        overflow: boolean
+        unavailable?: boolean
+      }
+    | {
         /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */
         event: 'web_tools_changed'
         settings: {

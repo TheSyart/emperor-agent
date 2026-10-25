@@ -201,14 +201,19 @@ it('renders canonical title, public readonly output and actual ancestry; return 
   expect(dom.textContent).toContain('公开结果')
   // Its page writes to the task itself (AGT-10); the links only navigate.
   expect(dom.querySelector('[data-child-input]')).not.toBeNull()
-  const buttons = [...dom.querySelectorAll<HTMLButtonElement>('button')]
-  buttons.find((b) => b.textContent === '返回父智能体')!.click()
+  // One way back (BUG-03): the header's ‹ goes up one level, the path's
+  // 主会话 to the root; the composer has no links of its own.
+  expect(dom.textContent).not.toContain('返回父智能体')
+  expect(dom.textContent).not.toContain('返回主会话')
+  dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  buttons.find((b) => b.textContent === '返回主会话')!.click()
+  ;[...dom.querySelectorAll<HTMLButtonElement>('nav button')]
+    .find((b) => b.textContent === '主会话')!
+    .click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
@@ -679,9 +684,8 @@ it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
     expect(path.textContent).toContain(child.parentAgentId)
     expect(dom.textContent).not.toContain('返回父智能体')
     expect(path.querySelector('button')).toBeNull()
-    ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent === '返回主会话')!
-      .click()
+    // Without a reachable parent the header's ‹ leads to the main conversation.
+    dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
     await settle()
     expect(bridge.push).toHaveBeenLastCalledWith({
       name: 'chat',
@@ -714,9 +718,7 @@ it('routes a valid external parent under the same owning root', async () => {
   const dom = await mount()
   expect(dom.querySelector('nav')?.textContent).toContain('主会话')
   expect(dom.querySelector('nav')?.textContent).toContain('外部父任务')
-  ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-    .find((b) => b.textContent === '返回父智能体')!
-    .click()
+  dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!.click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'external-agent',
@@ -937,4 +939,62 @@ it('7 · the question the task is waiting on is answered on its page, not two pa
   })
   expect(other.textContent).not.toContain('用哪种图片格式？')
   expect(other.querySelector('[data-child-composer]')).not.toBeNull()
+})
+it('VER-06 · a version failure shows its reason and buttons in a banner; an older failure does not', async () => {
+  const versionFailure = {
+    backend: 'codex',
+    profileId: 'codex-default',
+    current: '0.165.0',
+    lastGood: '0.163.0',
+    verifiedMax: '0.163.0',
+    reason: 'Codex 0.165.0 与 Emperor 不兼容',
+    actions: ['rollback', 'open_settings'],
+  }
+  overrideRead('delegations.get', () => ({
+    record: {
+      id: 'dlg-one',
+      backend: 'codex',
+      owner: { rootSessionId: 'root', parentAgentId: 'sub-parent' },
+      currentRunId: 'dgr-one',
+      startSpec: { description: '检验图片' },
+    },
+    runs: {
+      'dgr-one': {
+        id: 'dgr-one',
+        phase: 'failed',
+        failureCode: 'EXECUTOR_INCOMPATIBLE',
+        versionFailure,
+      },
+    },
+  }))
+  const dom = await mount()
+  const banner = dom.querySelector<HTMLElement>(
+    '[data-version-failure-banner]',
+  )!
+  expect(banner.textContent).toContain(
+    'Codex 0.165.0 与 Emperor 不兼容。上次正常的版本：0.163.0。',
+  )
+  expect(
+    [...banner.querySelectorAll('button')].map((b) => b.textContent?.trim()),
+  ).toEqual(['退回 0.163.0', '打开设置'])
+  app?.unmount()
+  root.remove()
+  overrideRead('delegations.get', () => ({
+    record: {
+      id: 'dlg-one',
+      backend: 'codex',
+      owner: { rootSessionId: 'root', parentAgentId: 'sub-parent' },
+      currentRunId: 'dgr-one',
+      startSpec: { description: '检验图片' },
+    },
+    runs: {
+      'dgr-one': {
+        id: 'dgr-one',
+        phase: 'failed',
+        failureCode: 'EXECUTOR_INCOMPATIBLE',
+      },
+    },
+  }))
+  const old = await mount()
+  expect(old.querySelector('[data-version-failure-banner]')).toBeNull()
 })

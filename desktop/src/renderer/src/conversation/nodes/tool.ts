@@ -1,3 +1,4 @@
+import type { VersionFailureContext } from '@emperor/core/runtime-contract'
 // Tool call Definition: tool/call (running) → tool/result (settled), with
 // the interactions the call owns attached through links: background jobs
 // (`job/finished`), delegated subagents (`subagent/*`), workflow / ralph
@@ -79,6 +80,39 @@ function backgroundJobId(event: WireSessionEvent): string | undefined {
     : undefined
 }
 
+const ACTIONS = new Set([
+  'rollback',
+  'install_verified',
+  'open_settings',
+  'recheck',
+])
+/** A well-formed `task.version_failure`, else undefined. */
+function versionFailureOf(value: unknown): VersionFailureContext | undefined {
+  const v = value as Partial<VersionFailureContext> | null
+  if (
+    !v ||
+    typeof v !== 'object' ||
+    (v.backend !== 'claude-code' && v.backend !== 'codex') ||
+    typeof v.profileId !== 'string' ||
+    typeof v.current !== 'string' ||
+    typeof v.reason !== 'string' ||
+    !Array.isArray(v.actions) ||
+    !v.actions.every((a) => ACTIONS.has(a))
+  )
+    return undefined
+  return {
+    backend: v.backend,
+    profileId: v.profileId,
+    current: v.current,
+    ...(typeof v.lastGood === 'string' ? { lastGood: v.lastGood } : {}),
+    ...(typeof v.verifiedMax === 'string'
+      ? { verifiedMax: v.verifiedMax }
+      : {}),
+    reason: v.reason,
+    actions: [...v.actions],
+  }
+}
+
 function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
   const event = match.event
   if (isEvent(event, 'delegation/projection')) {
@@ -151,6 +185,8 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
       typeof summary === 'string' && summary.trim() !== ''
         ? summary.slice(0, 2000)
         : previous?.detail
+    // VER-06: the run failed for its version (Core's own context).
+    const versionFailure = versionFailureOf(p.task?.version_failure)
     return {
       ...state,
       externalAgent: {
@@ -167,6 +203,7 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
         ...(startedAt === undefined ? {} : { startedAt }),
         ...(finishedAt === undefined ? {} : { finishedAt }),
         ...(detail === undefined ? {} : { detail }),
+        ...(versionFailure ? { versionFailure } : {}),
       },
     }
   }

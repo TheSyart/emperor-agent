@@ -62,6 +62,7 @@ export type DelegationEvent =
           | 'structured'
           | 'modelChoice'
           | 'notices'
+          | 'versionFailure'
         >
       >
     }

@@ -17,6 +17,15 @@
  * current text. Turn snapshots and attachments never change and are reused.
  * WorkspacePanel keeps this pane alive across pane switches (KeepAlive); the
  * scroll positions are put back on reactivation.
+ * Videos play in FileVideoPreview (BUG-05), streamed from an address Core
+ * grants; nothing of them is read into the preview.
+ *
+ * Following the project (BUG-11): while mounted the pane watches its
+ * project (files.watch). A change re-reads the loaded folders that hold it
+ * (new entries flash briefly), re-reads the open file keeping its scroll,
+ * and marks other tabs, which re-read when shown; an open file that is gone
+ * keeps what it showed under 「这个文件已被删除。」. If the watch fails, each
+ * finished turn refreshes the same way.
  *
  * Props:
  * - sessionId, projectPath.
@@ -60,7 +69,7 @@ import {
 import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import { core } from '../../api/http'
 import type { WorkspaceFileRequest } from './workspaceState'
-import { revealReference } from '../../api/backend'
+import { onCoreEvent, revealReference } from '../../api/backend'
 import { openImageViewer } from '../ui/imageViewer'
 import { useMarkdown } from '../../composables/useMarkdown'
 import {
@@ -75,6 +84,7 @@ import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
 import WorkspaceTabBar from './WorkspaceTabBar.vue'
+import FileVideoPreview from './FileVideoPreview.vue'
 import {
   FILES_TREE_MAX,
   FILES_TREE_MIN,
@@ -88,6 +98,10 @@ interface FileTab {
   request: WorkspaceFileRequest
   preview: FilePreviewResult
   sourceMode: boolean
+  /** Changed on disk while another tab was shown: re-read when shown. */
+  stale?: boolean
+  /** Gone from disk: the last preview stays under a notice. */
+  deleted?: boolean
 }
 
 interface TreeRow {
@@ -167,6 +181,7 @@ const tabItems = computed<TabItem[]>(() =>
     title: tab.path,
     icon: fileGlyph(tab.preview.name),
     closable: true,
+    ...(tab.stale ? { marked: true } : {}),
   })),
 )
 const crumbs = computed(() => filePathCrumbs(activeTab.value?.path ?? ''))
@@ -210,8 +225,12 @@ const treeRows = computed<TreeRow[]>(() => {
 
 onMounted(() => {
   if (hasProject.value) void loadDirectory('')
+  startWatching()
 })
 onBeforeUnmount(() => {
+  stopWatching()
+  stopFileEvents()
+  clearTimeout(freshTimer)
   clearTimeout(searchTimer)
   requestGeneration += 1
   fileGeneration += 1
@@ -286,7 +305,114 @@ async function resetSession(): Promise<void> {
   treeError.value = ''
   openError.value = ''
   currentRequest.value = null
+  startWatching()
   if (hasProject.value) await loadDirectory('')
+}
+
+// ── following the project (BUG-11) ───────────────────────────────────────
+let watchedSession = ''
+/** The watch failed: refresh when a turn finishes instead. */
+let watchFailed = false
+/** Entries that just appeared in the tree (flash for a moment). */
+const freshPaths = ref(new Set<string>())
+let freshTimer: ReturnType<typeof setTimeout> | undefined
+
+function startWatching(): void {
+  stopWatching()
+  if (!hasProject.value) return
+  const sessionId = props.sessionId
+  watchedSession = sessionId
+  watchFailed = false
+  void core('files.watch', { sessionId }).then(
+    (result) => {
+      if (watchedSession === sessionId && !result?.watching) watchFailed = true
+    },
+    () => {
+      if (watchedSession === sessionId) watchFailed = true
+    },
+  )
+}
+
+function stopWatching(): void {
+  if (!watchedSession) return
+  const sessionId = watchedSession
+  watchedSession = ''
+  void core('files.unwatch', { sessionId }).catch(() => undefined)
+}
+
+const stopFileEvents = onCoreEvent((input) => {
+  if (!input || typeof input !== 'object') return
+  const data = input as Record<string, unknown>
+  if (!watchedSession || String(data.session_id ?? '') !== props.sessionId)
+    return
+  if (data.event === 'workspace_files_changed') {
+    if (data.unavailable === true) watchFailed = true
+    void applyFileChanges(
+      data.overflow === true || !Array.isArray(data.paths)
+        ? null
+        : (data.paths as string[]),
+    )
+  } else if (data.event === 'assistant_done' && watchFailed)
+    void applyFileChanges(null)
+})
+
+/** `paths`: project-relative changes; null re-reads everything shown. */
+async function applyFileChanges(paths: string[] | null): Promise<void> {
+  const loaded = Object.keys(treeByDirectory.value)
+  const folders =
+    paths === null
+      ? loaded
+      : [
+          ...new Set(
+            paths.map((path) => path.split('/').slice(0, -1).join('/')),
+          ),
+        ].filter((folder) => loaded.includes(folder))
+  for (const folder of folders) void refreshDirectory(folder)
+  if (searchResults.value && query.value.trim()) void searchFiles()
+  for (const tab of tabs.value) {
+    const target = tab.request.target
+    if (target.source !== 'project') continue
+    if (paths !== null && !paths.includes(target.path)) continue
+    if (tab.key === activePath.value) void refreshOpenTab(tab)
+    else tab.stale = true
+  }
+}
+
+/** Re-read one loaded folder; what is new in it flashes. */
+async function refreshDirectory(folder: string): Promise<void> {
+  const before = new Set(
+    (treeByDirectory.value[folder] ?? []).map((entry) => entry.path),
+  )
+  await loadDirectory(folder)
+  const added = (treeByDirectory.value[folder] ?? [])
+    .map((entry) => entry.path)
+    .filter((path) => !before.has(path))
+  if (!added.length) return
+  freshPaths.value = new Set([...freshPaths.value, ...added])
+  clearTimeout(freshTimer)
+  freshTimer = setTimeout(() => (freshPaths.value = new Set()), 2000)
+}
+
+/** Re-read a tab in place, keeping the scroll; a missing file is marked gone. */
+async function refreshOpenTab(tab: FileTab): Promise<void> {
+  const owner = props.sessionId
+  const body = previewBody.value
+  const top = body?.scrollTop ?? 0
+  tab.stale = false
+  try {
+    const preview = await core('files.preview', { ...tab.request.target })
+    if (owner !== props.sessionId) return
+    tab.preview = markRaw(preview)
+    tab.deleted = false
+  } catch (cause) {
+    if (owner !== props.sessionId) return
+    if ((cause as { code?: unknown } | null)?.code === 'workspace_path_missing')
+      tab.deleted = true
+    else openError.value = message(cause)
+    return
+  }
+  await nextTick()
+  if (body && body.isConnected) body.scrollTop = top
 }
 
 async function reloadTree(): Promise<void> {
@@ -613,10 +739,11 @@ defineExpose({ openPath, openDirectory, openPreview })
 
 function activateTab(path: string): void {
   activePath.value = path
-  currentRequest.value =
-    tabs.value.find((tab) => tab.key === path)?.request ?? null
+  const tab = tabs.value.find((item) => item.key === path)
+  currentRequest.value = tab?.request ?? null
   activeLine.value = null
   openError.value = ''
+  if (tab?.stale) void refreshOpenTab(tab)
 }
 
 function closeTab(path: string): void {
@@ -802,6 +929,15 @@ function message(value: unknown): string {
           {{ openError }}
           <LinkButton v-if="activeTab" @click="refreshFile">重试</LinkButton>
         </div>
+        <div
+          v-if="activeTab?.deleted && !openError"
+          class="files-deleted"
+          role="status"
+          data-file-deleted
+        >
+          <span>这个文件已被删除。</span>
+          <Button size="sm" @click="closeTab(activeTab.key)">关闭标签</Button>
+        </div>
         <template v-if="activeTab && !openError">
           <button
             v-if="activeImageSrc"
@@ -816,6 +952,12 @@ function message(value: unknown): string {
           <p v-else-if="activeTab.preview.kind === 'image'" class="files-muted">
             图片超过预览大小限制（8 MiB）。
           </p>
+          <FileVideoPreview
+            v-else-if="activeTab.preview.kind === 'video'"
+            :key="activeTab.key"
+            :target="activeTab.request.target"
+            :name="activeTab.preview.name"
+          />
           <div
             v-else-if="isMarkdown && !activeTab.sourceMode"
             class="markdown-body file-markdown-preview"
@@ -920,7 +1062,10 @@ function message(value: unknown): string {
           type="button"
           class="file-tree-row"
           :data-path="row.entry.path"
-          :class="{ active: row.entry.path === activePath }"
+          :class="{
+            active: row.entry.path === activePath,
+            fresh: freshPaths.has(row.entry.path),
+          }"
           :style="{
             paddingLeft: `calc(var(--space-2) + ${row.level} * var(--space-3-5))`,
           }"
@@ -956,6 +1101,24 @@ function message(value: unknown): string {
 </template>
 
 <style scoped>
+/* BUG-11: an open file gone from disk; what it showed stays below. */
+.files-deleted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-row);
+  background: rgb(var(--attention-soft));
+  color: rgb(var(--text-1));
+  font-size: var(--fs-xs);
+}
+/* A tree entry that just appeared (BUG-11). */
+.file-tree-row.fresh {
+  background: rgb(var(--accent-soft));
+  transition: background-color var(--duration-slow) var(--ease-out);
+}
 .file-source-uses {
   display: flex;
   flex-wrap: wrap;

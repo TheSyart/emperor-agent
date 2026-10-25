@@ -29,6 +29,7 @@ import { useSessionConversation } from '../../composables/useSessionConversation
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { PictureInPicture2 } from 'lucide-vue-next'
 import IconButton from '../ui/IconButton.vue'
+import { DsChevronLeft } from '../icons/ds'
 const EnvironmentCard = defineAsyncComponent(
   () => import('./environment/EnvironmentCard.vue'),
 )
@@ -61,6 +62,7 @@ import {
 import { provideDelegationLinks } from './delegationLinks'
 import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import ExternalAgentDetails from './environment/ExternalAgentDetails.vue'
+import VersionFailureActions from './VersionFailureActions.vue'
 import Button from '../ui/Button.vue'
 import Avatar from '../ui/Avatar.vue'
 const route = useRoute(),
@@ -201,6 +203,17 @@ async function navigate(id: string) {
     if (current === generation) fail(cause)
   }
 }
+/** The header's ‹ (BUG-03): up one level, else to the main conversation. */
+const canGoBack = computed(
+  () =>
+    (controlsAvailable.value && !!ancestry.value?.parentId) ||
+    canOpenRoot.value,
+)
+const backLabel = computed(() =>
+  controlsAvailable.value && ancestry.value?.parentId
+    ? `返回「${ancestry.value.ancestors.at(-1)?.title ?? '主会话'}」`
+    : '返回「主会话」',
+)
 function parent() {
   if (controlsAvailable.value && ancestry.value?.parentId)
     void navigate(ancestry.value.parentId)
@@ -532,6 +545,14 @@ async function stop() {
         <span v-else>子智能体</span>
       </nav>
       <div class="child-title">
+        <IconButton
+          v-if="canGoBack"
+          :label="backLabel"
+          size="sm"
+          data-child-header-back
+          @click="parent"
+          ><DsChevronLeft :size="16"
+        /></IconButton>
         <h1 :title="title" :aria-label="title">{{ title }}</h1>
         <Avatar
           kind="logo"
@@ -587,6 +608,16 @@ async function stop() {
         {{ error }} <Button size="sm" @click="feed?.refresh()">重试</Button>
       </p>
       <p v-if="loading" class="child-note">正在读取子智能体对话…</p>
+      <div
+        v-if="
+          controlsAvailable && run?.phase === 'failed' && run.versionFailure
+        "
+        class="version-banner"
+        role="alert"
+        data-version-failure-banner
+      >
+        <VersionFailureActions :context="run.versionFailure" variant="banner" />
+      </div>
       <div class="child-diagnostics">
         <p
           v-for="issue in availability === 'ready'
@@ -702,16 +733,12 @@ async function stop() {
         :running="live"
         :stopping="!!stopping || run?.phase === 'cancelling'"
         :can-stop="controlsAvailable"
-        :can-back="controlsAvailable && !!ancestry?.parentId"
-        :can-root="canOpenRoot"
         :sending="sending"
         :steer="steerable"
         :error="sendError || undefined"
         :closed="closedReason"
         @send="send"
         @stop="stop"
-        @back="parent"
-        @root="root"
       />
       <Button
         v-if="needsExit && controlsAvailable && !live"
@@ -755,6 +782,10 @@ async function stop() {
 }
 .child-conversation[data-env-card] .child-timeline {
   padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+}
+/* The banner, like the timeline, stays clear of the floating card. */
+.child-conversation[data-env-card] .version-banner {
+  margin-inline-end: calc(var(--env-card-width) + 2 * var(--space-4));
 }
 .child-header {
   flex: none;
@@ -837,6 +868,15 @@ h1 {
   align-items: center;
   gap: var(--space-2);
   padding-top: var(--space-3);
+}
+/* VER-06: a failure for its version, why and what to do. */
+.version-banner {
+  flex: none;
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2-5) var(--space-3);
+  border-radius: var(--r-sm);
+  background: rgb(var(--state-error-soft));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-2);
 }
 .child-note,
 .child-more {

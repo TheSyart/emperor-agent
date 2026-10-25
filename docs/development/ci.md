@@ -2,26 +2,27 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-23<br>
-> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/check.sh`、`packages/core/vitest.config.ts`、`packages/core/vitest.serial.config.ts`、`packages/core/package.json`、`package.json`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
+> 最后核验：2026-10-26<br>
+> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`weekly-executor-upstream.yml`、`release-preview.yml`、`release.yml`、`scripts/check.sh`、`packages/core/vitest.config.ts`、`packages/core/vitest.serial.config.ts`、`packages/core/package.json`、`package.json`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`config/executor-upstream-baseline.json`、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
 
 CI 只跑 macOS（项目不支持 Windows 和 Linux）。各项检查都由仓库内脚本执行，本机可以用相同命令重跑；GitHub 只负责按时间或事件把它们排上 runner。
 
 ## 各 job 做什么
 
-| Workflow 与 job                                               | 触发                                            | Runner                       | 运行                                                                                                                        | 本机重跑                                                                                               |
-| ------------------------------------------------------------- | ----------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ci.yml` › macOS PR gate (arm64)                              | pull request；推送到 `main`、`release/**`；手动 | `macos-15`                   | `scripts/ci/pr-gate.sh`：`make check`、`package:verify`、未封签副本探测                                                     | `scripts/ci/pr-gate.sh`（`--dry-run` 只列步骤）                                                        |
-| `ci.yml` › macOS x64 build                                    | 同上                                            | `macos-15-intel`             | `scripts/ci/pr-gate.sh --build-only`：desktop build 代替 `make check`，其余相同                                             | Intel Mac 上 `scripts/ci/pr-gate.sh --build-only`                                                      |
-| `nightly.yml` › macOS nightly                                 | 每天 18:00 UTC；手动（可填 `only`）             | `macos-26`                   | `scripts/ci/nightly.mjs`：视觉套件、像素基线钩子、Electron e2e、kill -9、加固探测；失败时 `open-failure-issue.mjs` 开 issue | `node scripts/ci/nightly.mjs`，或 `--only e2e:settings,kill9`；`--list` 看全部步骤                     |
-| `weekly-model-metadata.yml` › models.dev snapshot             | 每周一 02:00 UTC；手动                          | `macos-15`                   | `scripts/ci/weekly-model-metadata.mjs`：models.dev 快照过期时刷新并开 PR                                                    | `node scripts/ci/weekly-model-metadata.mjs --dry-run`（只看计划，不改文件），或 `npm run models:check` |
-| `release-preview.yml`、`release.yml` 的第一步                 | Preview tag；Stable 手动                        | 各自的 job                   | `scripts/ci/require-green-nightly.mjs`：最近一次 nightly 不绿、超过 72 小时或有未关闭的失败 issue 时，发布直接失败          | 需要 `gh` 登录：`node scripts/ci/require-green-nightly.mjs`                                            |
-| `release-internal.yml`、`environment-installers-internal.yml` | 手动                                            | `macos-15`、`macos-15-intel` | 内部未签名包与 macOS 环境适配器回执                                                                                         | `npm --prefix desktop run package:verify`                                                              |
+| Workflow 与 job                                                 | 触发                                            | Runner                       | 运行                                                                                                                                              | 本机重跑                                                                                               |
+| --------------------------------------------------------------- | ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ci.yml` › macOS PR gate (arm64)                                | pull request；推送到 `main`、`release/**`；手动 | `macos-15`                   | `scripts/ci/pr-gate.sh`：`make check`、`package:verify`、未封签副本探测                                                                           | `scripts/ci/pr-gate.sh`（`--dry-run` 只列步骤）                                                        |
+| `ci.yml` › macOS x64 build                                      | 同上                                            | `macos-15-intel`             | `scripts/ci/pr-gate.sh --build-only`：desktop build 代替 `make check`，其余相同                                                                   | Intel Mac 上 `scripts/ci/pr-gate.sh --build-only`                                                      |
+| `nightly.yml` › macOS nightly                                   | 每天 18:00 UTC；手动（可填 `only`）             | `macos-26`                   | `scripts/ci/nightly.mjs`：视觉套件、像素基线钩子、Electron e2e、kill -9、加固探测；失败时 `open-failure-issue.mjs` 开 issue                       | `node scripts/ci/nightly.mjs`，或 `--only e2e:settings,kill9`；`--list` 看全部步骤                     |
+| `weekly-model-metadata.yml` › models.dev snapshot               | 每周一 02:00 UTC；手动                          | `macos-15`                   | `scripts/ci/weekly-model-metadata.mjs`：models.dev 快照过期时刷新并开 PR                                                                          | `node scripts/ci/weekly-model-metadata.mjs --dry-run`（只看计划，不改文件），或 `npm run models:check` |
+| `weekly-executor-upstream.yml` › Claude Code and Codex upstream | 每周一 03:00 UTC；手动                          | `macos-15`                   | `scripts/ci/weekly-executor-upstream.mjs`：把最新的 Claude Code 与 Codex 装进临时 prefix 离线自检，和记录不同时开或更新 `executor-upstream` issue | `node scripts/ci/weekly-executor-upstream.mjs --dry-run`（会装两个包，只看计划，不调用 `gh`）          |
+| `release-preview.yml`、`release.yml` 的第一步                   | Preview tag；Stable 手动                        | 各自的 job                   | `scripts/ci/require-green-nightly.mjs`：最近一次 nightly 不绿、超过 72 小时或有未关闭的失败 issue 时，发布直接失败                                | 需要 `gh` 登录：`node scripts/ci/require-green-nightly.mjs`                                            |
+| `release-internal.yml`、`environment-installers-internal.yml`   | 手动                                            | `macos-15`、`macos-15-intel` | 内部未签名包与 macOS 环境适配器回执                                                                                                               | `npm --prefix desktop run package:verify`                                                              |
 
 `make check`（`scripts/check.sh`）本身还运行 `scripts/ci/check-action-pins.mjs`、`scripts/ci/check-workflows.mjs` 与 `scripts/ci/check-unsigned-release.mjs`：
 
 - 每个 `uses:` 都必须写成 40 位提交哈希，版本号写在旁边的注释里，例如 `actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`。升级一个 action 时，先 `git ls-remote https://github.com/actions/checkout refs/tags/v4.4.0` 查到提交，再同时改哈希和注释。
-- 工作流 lint 检查上表的对应关系：PR gate 在 arm64 和 Intel 上调用 `pr-gate.sh`；nightly 只按计划运行，从不在 pull request 或 push 上运行，并在失败时开 issue；weekly 是每周一次并有开 PR 所需的权限；两个发布 workflow 都先检查 nightly；`release.yml` 在 arm64 和 Intel 上用 `scripts/build_desktop_release.sh` 构建、用 `scripts/verify-macos-release.sh` 核验 Stable 候选；除只检查 tag、汇总、证明和发布的 job（`release-preview.yml` 的 aggregate / publish，`release.yml` 的 release-policy / release-aggregate / publish-release）外，所有 job 都跑在 macOS 上；workflow 里引用的 `scripts/ci/*` 都存在。
+- 工作流 lint 检查上表的对应关系：PR gate 在 arm64 和 Intel 上调用 `pr-gate.sh`；nightly 只按计划运行，从不在 pull request 或 push 上运行，并在失败时开 issue；weekly 是每周一次并有开 PR 所需的权限；上游自检每周一次、有 `issues: write`、除 GitHub token 外不引用任何 secret；两个发布 workflow 都先检查 nightly；`release.yml` 在 arm64 和 Intel 上用 `scripts/build_desktop_release.sh` 构建、用 `scripts/verify-macos-release.sh` 核验 Stable 候选；除只检查 tag、汇总、证明和发布的 job（`release-preview.yml` 的 aggregate / publish，`release.yml` 的 release-policy / release-aggregate / publish-release）外，所有 job 都跑在 macOS 上；workflow 里引用的 `scripts/ci/*` 都存在。
 - 未签名检查：发布 workflow（`release*.yml`）除 GitHub token 外不引用任何 secret；所有 workflow、两份 electron-builder 发布配置和发布脚本里都没有签名变量（`CSC_LINK`、`APPLE_TEAM_ID` 等）、公证（`notarytool`、`stapler`）、钥匙串导入（`security import`）或 ad-hoc `-` 以外的 `codesign --sign`；`release.yml` 与 `release-preview.yml` 在整个 workflow 上关闭 `CSC_IDENTITY_AUTO_DISCOVERY`。`scripts/ci/fixtures/signed-release/` 是一份签名发布的反例，测试确认检查会拒绝它。
 
 Core 的 HTML 转换测试含 5 秒的大页面转换与 2 秒的深层嵌套计时上限，因此在并行单测结束后，由 `npm run test:serial --workspace @emperor/core` 用独立的单 worker 执行。`make check` 和根目录 `npm test` 均包含这一步；四个原有测试、断言与时限保持不变。单独重跑这组测试也使用该命令，避免与其他进程密集型测试争用 CPU。
@@ -73,6 +74,18 @@ PR 与发布的 arm64 / Intel 兼容构建仍在 macOS 15 上运行。失败时 
 `weekly-model-metadata.mjs` 先运行 `sync-model-metadata.ts --check`。快照仍是最新时什么都不做；过期时运行同步，在 `bot/model-metadata-<日期>` 分支上提交快照与清单，再开 PR，正文列出各供应商增删改的模型，并提醒核对 `packages/core/src/model/metadata/overrides.ts`（见[模型元数据规范](../design/model-metadata.md)）。读不到 models.dev 或数据不合法时退出码为 2，job 失败。
 
 GitHub 不会为 `GITHUB_TOKEN` 创建的 PR 自动触发 `ci.yml`：合并前推一个提交，或关闭后重新打开这个 PR，让 PR gate 跑一遍。仓库设置里需要允许 GitHub Actions 创建 pull request。
+
+## 每周上游自检（Claude Code 与 Codex）
+
+用户机器上的 `claude` 和 `codex` 会自己升级。`weekly-executor-upstream.mjs`（VER-05）每周替我们先装一次最新版，看它有没有改动 Emperor 依赖的东西：
+
+1. 从 npm 读两个包的最新版本（`published-versions.ts` 的 fetcher）；连不上时试 3 次，仍失败就以退出码 3 结束、不开 issue，job 失败即可见。
+2. `npm install --prefix "$RUNNER_TEMP/executors/<包>-<版本>"` 装进临时目录，不全局安装、不登录。
+3. Claude Code：`scripts/claude-init-handshake.mjs --raw` 列出这个版本自带的全部内置插件、MCP server 与 hooks 是否生效，和 `config/executor-upstream-baseline.json` 比。Codex：私有 HOME 与 CODEX_HOME 下生成协议 schema 算摘要，`codex features list`（不加任何开关）列出默认开启的功能，和版本号最高的 `packages/core/src/harness/delegation/protocol/codex-*/`（`digest.json`、`features.json`）比；Codex 不另存基线，避免与 `KNOWN_CODEX_PROTOCOLS` 用的快照不一致。两者再各跑一次产品自己的离线自检（`ExecutorSelfCheck`：假 Key、本机回环的接口替身，不发提示词，不调用模型）。脚本与握手一样用 esbuild 直接打包 core 源码，不需要先构建 core。
+
+版本号变了本身不算差异。下面这些才算：内置插件集合变化、出现 MCP server、hooks 没有生效、Codex 协议摘要不在记录里、默认开启的功能变化、安装失败（类型「安装失败」）、自检没能完成（类型「环境问题待确认」，例如 runner 的 Seatbelt 与本机行为不同，先在本机用临时 prefix 重跑确认）。有差异时开一个标题为「上游变化：Claude Code <版本> · Codex <版本>」、带 `executor-upstream` 标签的 issue，正文是差异表；协议摘要未知、MCP、hooks 或自检判定不兼容时加 `P0`。已经有未关闭的 `executor-upstream` issue 时只追加评论，同一周手动重跑也不会重复开。没有差异时什么都不做。
+
+脚本不改代码、不开 PR，也不改「已验证版本」：收到 issue 后按[开发与验证外部子智能体](external-agent-adapters.md#收到上游变化-issue-之后ver-05)评估。`--dry-run` 只打印计划，`--fixture <文件>` 用一份记录代替 npm、安装与两个 CLI（`desktop/src/main/ci-weekly-executors.test.ts`），`--issues-json <文件>` 代替 `gh issue list`；stdout 最后一行是 JSON 计划。
 
 ## 不做的事
 

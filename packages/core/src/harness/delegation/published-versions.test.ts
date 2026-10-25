@@ -12,7 +12,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { nodeUpdateTransport } from '../../updates/http'
-import type { CodexProtocol } from './compatibility'
+import {
+  KNOWN_CLAUDE_VERSIONS,
+  type CodexProtocol,
+  type VerifiedClaudeVersion,
+} from './compatibility'
 import {
   NPM_REGISTRY_URL,
   PublishedVersionStore,
@@ -273,16 +277,122 @@ const protocols = (...versions: string[]): CodexProtocol[] =>
   versions.map((version) => ({ version, files: [], digests: [] }))
 
 describe('upgrade targets', () => {
-  it('Claude Code: the latest release, when it is newer and at least the minimum', () => {
-    expect(claudeUpgradeTarget('2.1.281', '2.1.308')).toBe('2.1.308')
-    expect(claudeUpgradeTarget('2.1.308', '2.1.308')).toBeNull()
-    expect(claudeUpgradeTarget('2.1.400', '2.1.308')).toBeNull()
-    // Too old for Emperor: never offered.
-    expect(claudeUpgradeTarget('2.1.20', '2.1.50')).toBeNull()
-    // An old, refused claude upgrades to the latest.
-    expect(claudeUpgradeTarget('2.1.20', '2.1.308')).toBe('2.1.308')
-    expect(claudeUpgradeTarget(null, '2.1.308')).toBe('2.1.308')
-    expect(claudeUpgradeTarget('2.1.281', null)).toBeNull()
+  /** npm as Emperor reads it for Claude Code: only `latest`. */
+  const npm = (latest: string | null) => ({
+    latest,
+    versions: latest ? [latest] : [],
+  })
+  /** A verified list (VER-04); builtins do not matter here. */
+  const known = (...versions: string[]): VerifiedClaudeVersion[] =>
+    versions.map((version) => ({
+      version,
+      verifiedAt: '2026-10-24',
+      builtinPlugins: [],
+    }))
+
+  it('VER-04 · the verified Claude Code versions, as VER-01 checked them offline', () => {
+    expect(KNOWN_CLAUDE_VERSIONS).toEqual([
+      { version: '2.1.281', verifiedAt: '2026-10-22', builtinPlugins: [] },
+      {
+        version: '2.1.308',
+        verifiedAt: '2026-10-24',
+        builtinPlugins: [
+          'cc-plugin-agents-md@builtin',
+          'cc-plugin-plugin-authoring@builtin',
+        ],
+      },
+      {
+        version: '2.1.310',
+        verifiedAt: '2026-10-24',
+        builtinPlugins: [
+          'cc-plugin-agents-md@builtin',
+          'cc-plugin-plugin-authoring@builtin',
+        ],
+      },
+    ])
+  })
+
+  it('VER-04 · 1 · Claude Code: the highest verified release; npm’s newer one is 尚未验证', () => {
+    expect(
+      claudeUpgradeTarget('2.1.281', npm('2.1.312'), KNOWN_CLAUDE_VERSIONS),
+    ).toEqual({
+      target: '2.1.310',
+      unverified: '2.1.312',
+      verified: ['2.1.281', '2.1.308', '2.1.310'],
+    })
+    // npm's latest verified: offered as before (AGT-13).
+    expect(claudeUpgradeTarget('2.1.281', npm('2.1.308'))).toMatchObject({
+      target: '2.1.308',
+      unverified: null,
+    })
+    // Never above npm's latest, even when a newer one is verified.
+    expect(
+      claudeUpgradeTarget(
+        '2.1.281',
+        npm('2.1.308'),
+        known('2.1.308', '2.1.310'),
+      ),
+    ).toMatchObject({ target: '2.1.308', unverified: null })
+  })
+
+  it('VER-04 · 2 · already on the highest verified: nothing to install, the newer one 尚未验证', () => {
+    expect(
+      claudeUpgradeTarget('2.1.310', npm('2.1.312'), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: null, unverified: '2.1.312' })
+    // Newer than every verified one (installed by hand): never a downgrade.
+    expect(
+      claudeUpgradeTarget('2.1.312', npm('2.1.312'), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: null, unverified: null })
+    expect(
+      claudeUpgradeTarget('2.1.400', npm('2.1.308'), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: null, unverified: null })
+  })
+
+  it('VER-04 · 3 · a version the user went back from is skipped (skip)', () => {
+    expect(
+      claudeUpgradeTarget(
+        '2.1.281',
+        npm('2.1.312'),
+        KNOWN_CLAUDE_VERSIONS,
+        new Set(['2.1.310']),
+      ),
+    ).toMatchObject({ target: '2.1.308', unverified: '2.1.312' })
+    expect(
+      claudeUpgradeTarget(
+        '2.1.308',
+        npm('2.1.310'),
+        KNOWN_CLAUDE_VERSIONS,
+        new Set(['2.1.310']),
+      ),
+    ).toMatchObject({ target: null, unverified: null })
+    // An unverified release it left is not reported either.
+    expect(
+      claudeUpgradeTarget(
+        '2.1.310',
+        npm('2.1.312'),
+        KNOWN_CLAUDE_VERSIONS,
+        new Set(['2.1.312']),
+      ),
+    ).toMatchObject({ target: null, unverified: null })
+  })
+
+  it('Claude Code: an old, refused claude is offered a verified one; nothing without npm or a list', () => {
+    expect(
+      claudeUpgradeTarget('2.1.20', npm('2.1.308'), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: '2.1.308' })
+    // Not installed: what to install.
+    expect(
+      claudeUpgradeTarget(null, npm('2.1.308'), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: '2.1.308' })
+    // npm not checked yet (or offline): nothing is offered (AGT-13).
+    expect(
+      claudeUpgradeTarget('2.1.281', npm(null), KNOWN_CLAUDE_VERSIONS),
+    ).toMatchObject({ target: null, unverified: null })
+    expect(claudeUpgradeTarget('2.1.281', npm('2.1.312'), [])).toEqual({
+      target: null,
+      unverified: '2.1.312',
+      verified: [],
+    })
   })
 
   const published = {
@@ -345,5 +455,67 @@ describe('upgrade targets', () => {
       unverified: '0.163.0',
       verified: ['0.153'],
     })
+  })
+
+  it('7 · a version the user rolled back from is skipped until a newer one comes (VER-03)', () => {
+    const skip = new Set(['2.1.310'])
+    const only310 = known('2.1.310')
+    expect(
+      claudeUpgradeTarget('2.1.281', npm('2.1.310'), only310, skip).target,
+    ).toBeNull()
+    expect(
+      claudeUpgradeTarget(
+        '2.1.281',
+        npm('2.1.312'),
+        known('2.1.310', '2.1.312'),
+        skip,
+      ).target,
+    ).toBe('2.1.312')
+    expect(
+      claudeUpgradeTarget('2.1.281', npm('2.1.310'), only310, new Set()).target,
+    ).toBe('2.1.310')
+    // Codex: the next highest verified release, or nothing.
+    const both = protocols('0.153.4', '0.163.0')
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.1', versions: ['0.153.4', '0.163.0', '0.163.1'] },
+        both,
+        new Set(['0.163.1']),
+      ),
+    ).toEqual({
+      target: '0.163.0',
+      unverified: null,
+      verified: ['0.153', '0.163'],
+    })
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.0', versions: ['0.153.4', '0.163.0'] },
+        both,
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({ target: null, unverified: null, verified: ['0.153', '0.163'] })
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        { latest: '0.163.2', versions: ['0.153.4', '0.163.0', '0.163.2'] },
+        both,
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({
+      target: '0.163.2',
+      unverified: null,
+      verified: ['0.153', '0.163'],
+    })
+    // An unverified release it left is not reported as 尚未验证 either.
+    expect(
+      codexUpgradeTarget(
+        '0.153.4',
+        published,
+        protocols('0.153.4'),
+        new Set(['0.163.0']),
+      ),
+    ).toEqual({ target: null, unverified: null, verified: ['0.153'] })
   })
 })

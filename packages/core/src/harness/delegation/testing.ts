@@ -562,6 +562,8 @@ export interface FakeClaudeSdkOptions {
   honoursFlagSettings?: boolean
   /** reloadPlugins' error_count. */
   errorCount?: number
+  /** initialize's hooks_applied (default true). */
+  hooksApplied?: boolean
 }
 
 export interface FakeClaudeControlRequest {
@@ -657,7 +659,9 @@ export function fakeClaudeSdk(options: FakeClaudeSdkOptions = {}): {
           }
         })()
         return Object.assign(messages, {
-          initializationResult: async () => ({ hooks_applied: true }),
+          initializationResult: async () => ({
+            hooks_applied: options.hooksApplied ?? true,
+          }),
           reloadPlugins: async () => {
             control('reload_plugins')
             if (options.supportsReload === 'hang')

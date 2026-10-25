@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Renderer、工具与 Core 开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-25（对照 `59b9ccda`）<br>
 > 事实源：`components/conversation/resources/`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
 
 ## 身份与渲染
@@ -40,9 +40,9 @@ meta: {
 
 ### 网站图标
 
-网站图标默认关闭（「设置 › 常规 › 会话 › 显示网站图标」，偏好存于本机 `emperor.ui.prefs.v1`）：关闭时不发出任何图标请求，链接只显示通用图标；打开后，可见网页引用显示真实 favicon；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
+网站图标默认打开（「设置 › 常规 › 会话 › 显示网站图标」，偏好 `siteIconService` 存于本机 `emperor.ui.prefs.v1`；它取代了 0.2.0 默认关闭的 `siteIcons`，旧值不再读取）：关闭时不发出任何图标请求，链接只显示域名首字母；打开时，可见网页引用显示网站图标；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
 
-`references.siteIcon({ sessionId, referenceId })` 使用 opaque 引用，每次请求及返回前校验可读会话与引用归属。后端只读取 HTTPS origin 的 favicon／apple-touch-icon，必要时解析最多 256 KiB 的首页中的 icon link，不读取文章 URL 或 OpenGraph 预览图。第一方未提供可用栅格图标时，以公共 hostname 请求 `icons.duckduckgo.com/ip3/<hostname>.ico`；不发送链接路径、查询参数、Cookie 或浏览器登录状态。私网／非法地址在 DNS 与重定向校验处停止，不进入第三方 fallback。
+`references.siteIcon({ sessionId, referenceId })` 使用 opaque 引用，每次请求及返回前校验可读会话与引用归属。后端只向图标服务请求 `icons.duckduckgo.com/ip3/<hostname>.ico`，**不访问链接所在的网站本身**，所以网站不会因为链接出现在对话里而收到请求；不发送链接路径、查询参数、Cookie 或浏览器登录状态。只有公开的主机名才会发给图标服务：带端口的地址、IP 字面量、单段主机名，以及 `.local`、`.internal`、`.corp`、`.lan`、`.home`、`.test`、`.example` 等私有或保留后缀（`publicHostname()`）都直接显示首字母、不发请求。图标服务没有图标（非 200）时同样显示首字母。
 
 图标最多 256 KiB，支持经过帧结构与尺寸验证的 PNG、JPEG、GIF、WebP 和 ICO（PNG／未压缩 DIB）；SVG 不直接交给 renderer。renderer 只接受受限的 raster data URL，不请求第三方图片。前后端各最多 4 项并发、200 项待处理；后端成功图标按公开 origin 缓存最多 200 项、24 小时，失败缓存 1 分钟；renderer 会话资源缓存最多 600 项、10 分钟，公开品牌图标另供输入框复用。旧会话和卸载组件的响应不会更新当前 DOM。
 
@@ -78,6 +78,6 @@ meta: {
 
 消息和输入框中的图片附件只显示缩略图，不附带名称、大小或类型文字；输入框保留独立的移除按钮。缩略图打开灯箱，灯箱保留名称及「在文件中查看」入口；非图片附件仍以文件名打开 Files。
 
-`files.preview` 是只读 main_renderer 操作：`source: project` 携带 sessionId/path；`turn` 增加 turn 并验证确切记录；`reference` 使用 sessionId/referenceId；`attachment` 使用受管 attachmentId，沿用全局附件权限且不会创建会话。引用的 `actions` 含 `preview` 才读内容：项目（会话根）内的文件与已保存附件有 `preview`，会话根之外的文件（含指向外部的符号链接）只有 `reveal`，`files.preview` 对其报 `reference_action_denied`，renderer 改为在 Finder 中显示；不提供任意绝对路径读取入口。返回 FilePreviewResult，包含 canonical 身份、路径、名称、MIME、大小、内容类型及受限内容。文本上限 1 MiB，图片 8 MiB；PDF 已有提取文本时明确标记，其他不支持格式只显示元数据。外部目录不递归读取，Finder 继续只接收 opaque 引用。
+`files.preview` 是只读 main_renderer 操作：`source: project` 携带 sessionId/path；`turn` 增加 turn 并验证确切记录；`reference` 使用 sessionId/referenceId；`attachment` 使用受管 attachmentId，沿用全局附件权限且不会创建会话。引用的 `actions` 含 `preview` 才读内容：项目（会话根）内的文件与已保存附件有 `preview`，会话根之外的文件（含指向外部的符号链接）只有 `reveal`，`files.preview` 对其报 `reference_action_denied`，renderer 改为在 Finder 中显示；不提供任意绝对路径读取入口。返回 FilePreviewResult，包含 canonical 身份、路径、名称、MIME、大小、内容类型及受限内容。文本上限 1 MiB，图片 8 MiB；视频（mp4、m4v、webm、mov）不读内容，返回 `kind: 'video'`，界面再用同样输入调 `files.mediaUrl` 取 10 分钟有效的 `app://workspace-media/<token>` 播放地址（BUG-05）；PDF 已有提取文本时明确标记，其他不支持格式只显示元数据。外部目录不递归读取，Finder 继续只接收 opaque 引用。
 
 ImageViewerHost 按需加载 ImageLightbox，共用于附件、生成图片、资源图、文件图片、工具／轨迹截图和 Computer Use 放大。默认适应窗口，支持原始大小、缩放、拖动、旋转、同组切换和键盘退出；复用现有 modal stack 隐藏原生浏览器视图，约束焦点并恢复入口。图片只接受受管附件、已取得的栅格数据或本地 Blob，不直接读取第三方图片 URL。Computer Use 放大复制已经收到的帧，既有订阅与工具执行不变；关闭释放副本 URL。

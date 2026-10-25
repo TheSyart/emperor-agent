@@ -125,7 +125,7 @@ export function loadSiteIcon(
   sessionId: string,
   resource: Parameters<typeof loadSiteIconFromCore>[1],
 ): Promise<string | null> {
-  if (!uiPreferences().siteIcons) return Promise.resolve(null)
+  if (!uiPreferences().siteIconService) return Promise.resolve(null)
   return loadSiteIconFromCore(sessionId, resource)
 }
 

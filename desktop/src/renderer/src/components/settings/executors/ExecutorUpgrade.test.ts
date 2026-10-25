@@ -56,6 +56,7 @@ vi.setConfig({ testTimeout: 20_000 })
 const NPM = '/opt/homebrew/lib/node_modules'
 const CLAUDE_CMD = 'npm install -g @anthropic-ai/claude-code@2.1.308'
 const CODEX_CMD = 'npm install -g @openai/codex@0.163.0'
+const ROLLBACK_CMD = 'npm install -g @anthropic-ai/claude-code@2.1.310'
 
 function profiles() {
   return [
@@ -240,6 +241,21 @@ beforeEach(() => {
           state: 'waiting',
         }),
       }
+    if (operation === 'executors.rollback')
+      return {
+        upgrade: runOf({
+          profileId: input.profileId,
+          backend:
+            input.profileId === 'codex-default' ? 'codex' : 'claude-code',
+          kind: 'rollback',
+          from: '2.1.315',
+          target: input.target,
+          command: ROLLBACK_CMD,
+          state: 'waiting',
+        }),
+      }
+    if (operation === 'executors.selfCheck')
+      return { selfCheck: { status: 'ok' } }
     if (operation === 'executors.cancelUpgrade')
       return { upgrade: runOf({ state: 'cancelled', finishedAt: Date.now() }) }
     if (operation === 'executors.dismissUpgrades') {
@@ -633,5 +649,497 @@ describe('detail', () => {
         'Claude 官方安装器 · /Users/ada/.local/share/claude/versions/2.1.281',
       latest: '2.1.308',
     })
+  })
+})
+
+describe('退回 (VER-03)', () => {
+  /** Claude Code 2.1.315 failed twice for its version; 2.1.310 ran a task. */
+  function broken(over: Over = {}) {
+    return claudeVersion({
+      installed: '2.1.315',
+      latest: '2.1.315',
+      target: null,
+      upgrade: null,
+      rollback: {
+        target: '2.1.310',
+        because: '2.1.315 上有 2 次任务因版本不兼容失败',
+        oneClick: true,
+        command: ROLLBACK_CMD,
+      },
+      ...over,
+    })
+  }
+  async function detail(backend: string) {
+    await mount()
+    row(backend)
+      .querySelector<HTMLButtonElement>('[data-executor-details]')!
+      .click()
+    await settle()
+    return root.querySelector<HTMLElement>(
+      `[data-executor-detail="${backend}"]`,
+    )!
+  }
+  const rollbackDialog = () =>
+    document
+      .querySelector<HTMLElement>('[data-upgrade-kind="rollback"]')
+      ?.closest<HTMLElement>('[role="dialog"]') ?? null
+
+  it('11 · Claude Code: why and 「退回 2.1.310（上次正常）」 under 本机版本; the confirmation names the command and the auto-update note', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.315' }))
+    const page = await detail('claude-code')
+    const back = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      back.querySelector('[data-version-rollback-because]')!.textContent,
+    ).toBe('2.1.315 上有 2 次任务因版本不兼容失败')
+    const button = back.querySelector<HTMLButtonElement>(
+      '[data-version-rollback-button]',
+    )!
+    expect(button.textContent?.trim()).toBe('退回 2.1.310（上次正常）')
+    // Right under 本机版本.
+    const installed = page.querySelector('[data-version-fact="installed"]')!
+    expect(installed.textContent?.trim()).toBe('2.1.315')
+    expect(
+      installed
+        .closest('.fact')!
+        .nextElementSibling?.hasAttribute('data-version-rollback'),
+    ).toBe(true)
+    button.click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Claude Code 2.1.310？')
+    expect(box.textContent).toContain(
+      '2.1.315 上有 2 次任务因版本不兼容失败。退回会用你安装 Claude Code 的同一方式运行：',
+    )
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    const note = box.querySelector<HTMLElement>('[data-upgrade-note]')!
+    expect(note.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '你在终端里直接用 claude 时，它可能自动更新回新版本；需要时可在 shell 配置里加 export DISABLE_AUTOUPDATER=1。',
+    )
+    expect(note.querySelector('code')!.textContent).toBe(
+      'export DISABLE_AUTOUPDATER=1',
+    )
+    expect(
+      box.querySelector('[data-upgrade-dismiss]')!.textContent?.trim(),
+    ).toBe('取消')
+    // Nothing runs before the confirmation.
+    expect(calls('executors.rollback')).toEqual([])
+    const confirm = box.querySelector<HTMLButtonElement>(
+      '[data-upgrade-confirm]',
+    )!
+    expect(confirm.textContent?.trim()).toBe('退回')
+    confirm.click()
+    await settle()
+    expect(calls('executors.rollback')).toEqual([
+      { profileId: 'claude-default', target: '2.1.310' },
+    ])
+    expect(rollbackDialog()).toBeNull()
+  })
+
+  it('11 · Codex: the same confirmation without the line about claude updating itself', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.0',
+        target: null,
+        upgrade: null,
+        rollback: {
+          target: '0.153.4',
+          because: '0.163.0 上有 1 次任务因版本不兼容失败',
+          oneClick: true,
+          command: 'npm install -g @openai/codex@0.153.4',
+        },
+      }),
+    ])
+    const page = await detail('codex')
+    page
+      .querySelector<HTMLButtonElement>('[data-version-rollback-button]')!
+      .click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Codex 0.153.4？')
+    expect(box.textContent).toContain(
+      '0.163.0 上有 1 次任务因版本不兼容失败。退回会用你安装 Codex 的同一方式运行：',
+    )
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      'npm install -g @openai/codex@0.153.4',
+    )
+    expect(box.querySelector('[data-upgrade-note]')).toBeNull()
+    expect(box.textContent).not.toContain('DISABLE_AUTOUPDATER')
+  })
+
+  it('Homebrew: the button shows the npm command to copy, no one click', async () => {
+    setVersions([
+      broken({
+        install: {
+          kind: 'homebrew',
+          location: '/opt/homebrew/Caskroom/claude-code',
+        },
+        rollback: {
+          target: '2.1.310',
+          because: '2.1.315 上有 2 次任务因版本不兼容失败',
+          oneClick: false,
+          command: ROLLBACK_CMD,
+          manual: 'homebrew',
+        },
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    page
+      .querySelector<HTMLButtonElement>('[data-version-rollback-button]')!
+      .click()
+    await settle()
+    const box = rollbackDialog()!
+    expect(box.textContent).toContain('退回 Claude Code 到 2.1.310')
+    expect(box.textContent).toContain('Homebrew 装不了旧版本')
+    expect(box.querySelector('[data-upgrade-command]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    expect(box.querySelector('[data-upgrade-confirm]')).toBeNull()
+    expect(box.querySelector('[data-upgrade-copy]')!.textContent?.trim()).toBe(
+      '复制命令',
+    )
+  })
+
+  it('a desktop app’s copy: why, and no button', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.0',
+        target: null,
+        upgrade: null,
+        install: { kind: 'desktop', location: '/Applications/Codex.app' },
+        rollback: {
+          target: '0.153.4',
+          because: '0.163.0 上有 1 次任务因版本不兼容失败',
+          oneClick: false,
+          command: null,
+          manual: 'desktop',
+        },
+      }),
+    ])
+    const page = await detail('codex')
+    const back = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      back.querySelector('[data-version-rollback-note]')!.textContent,
+    ).toBe('Codex 随桌面版更新，不能在这里退回。')
+    expect(back.querySelector('[data-version-rollback-button]')).toBeNull()
+  })
+
+  it('running and done say 退回: the badge, the line, the toast; the version it left is not offered', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })])
+    await mount()
+    const running = runOf({
+      profileId: 'claude-default',
+      backend: 'claude-code',
+      kind: 'rollback',
+      from: '2.1.315',
+      target: '2.1.310',
+      command: ROLLBACK_CMD,
+      state: 'running',
+    })
+    push({ event: 'executor_upgrade', upgrade: running })
+    await settle()
+    const claude = row('claude-code')
+    expect(claude.querySelector('.readiness')!.textContent?.trim()).toBe(
+      '退回中',
+    )
+    expect(
+      claude.querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('正在退回到 2.1.310… 已用')
+    expect(
+      claude
+        .querySelector('[data-upgrade-progress]')!
+        .getAttribute('aria-label'),
+    ).toBe('退回进度')
+    const done = {
+      ...running,
+      state: 'succeeded',
+      installed: '2.1.310',
+      finishedAt: Date.now(),
+    }
+    setVersions(
+      [
+        claudeVersion({
+          installed: '2.1.310',
+          latest: '2.1.315',
+          target: null,
+          upgrade: null,
+        }),
+        codexVersion({ target: null, upgrade: null }),
+      ],
+      { upgrades: [done] },
+    )
+    push({ event: 'executor_upgrade', upgrade: done })
+    push({ event: 'executor_upgrade', versions: structuredClone(versions) })
+    await settle()
+    expect(pushToast).toHaveBeenCalledWith('Claude Code 已退回到 2.1.310', {
+      tone: 'ok',
+    })
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.310 · 已从 2.1.315 退回，暂不升级 · 刚刚退回')
+    // Core skips 2.1.315 now: no 「有新版本」 notice, no 升级 on the row.
+    expect(root.querySelector('[data-upgrade-notice]')).toBeNull()
+    expect(
+      row('claude-code').querySelector('[data-executor-upgrade]'),
+    ).toBeNull()
+  })
+
+  it('a failed rollback: 退回失败 with why and the command', async () => {
+    setVersions([broken(), codexVersion({ target: null, upgrade: null })], {
+      upgrades: [
+        runOf({
+          profileId: 'claude-default',
+          backend: 'claude-code',
+          kind: 'rollback',
+          from: '2.1.315',
+          target: '2.1.310',
+          command: ROLLBACK_CMD,
+          state: 'failed',
+          reason: 'network',
+          manualCommand: ROLLBACK_CMD,
+          finishedAt: Date.now(),
+        }),
+      ],
+    })
+    await mount()
+    const notice = root.querySelector<HTMLElement>('[data-upgrade-failed]')!
+    expect(notice.textContent).toContain(
+      'Claude Code 退回失败：连不上网络，没有下载到 2.1.310',
+    )
+    expect(notice.querySelector('[data-upgrade-manual]')!.textContent).toBe(
+      ROLLBACK_CMD,
+    )
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.315 · 退回没有完成')
+  })
+})
+
+describe('自检 (VER-04, preview § 8)', () => {
+  const VERIFIED = ['2.1.281', '2.1.308', '2.1.310']
+  function selfCheck(over: Over = {}) {
+    return {
+      backend: 'claude-code',
+      version: '2.1.310',
+      checkedAt: Date.now() - 60_000,
+      status: 'adapted',
+      adapted: {
+        builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+        since: { 'cc-plugin-plugin-authoring@builtin': '2.1.308' },
+      },
+      issues: [],
+      modelCalls: 0,
+      ...over,
+    }
+  }
+  async function detail(backend: string) {
+    await mount()
+    row(backend)
+      .querySelector<HTMLButtonElement>('[data-executor-details]')!
+      .click()
+    await settle()
+    return root.querySelector<HTMLElement>(
+      `[data-executor-detail="${backend}"]`,
+    )!
+  }
+  const badges = (page: HTMLElement) =>
+    [...page.querySelectorAll('[data-version-badge]')].map((b) =>
+      b.textContent?.trim(),
+    )
+  const notes = (page: HTMLElement) =>
+    [...page.querySelectorAll('[data-version-note]')].map((n) =>
+      n.textContent?.trim(),
+    )
+
+  it('自检通过 · 已自动关闭内置插件 …, and 重新检查 runs it now', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.310',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck(),
+      }),
+      codexVersion(),
+    ])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.310' }))
+    const page = await detail('claude-code')
+    expect(
+      page
+        .querySelector('[data-version-fact="installed"]')!
+        .textContent?.trim(),
+    ).toBe('2.1.310')
+    expect(badges(page)).toEqual(['自检通过'])
+    expect(notes(page)).toEqual([
+      '已自动关闭内置插件 cc-plugin-plugin-authoring（2.1.308 起自带）',
+    ])
+    const recheck = page.querySelector<HTMLButtonElement>(
+      '[data-version-recheck]',
+    )!
+    expect(recheck.textContent?.trim()).toBe('重新检查')
+    recheck.click()
+    await settle()
+    expect(calls('executors.selfCheck')).toEqual([
+      { profileId: 'claude-default' },
+    ])
+    // And the versions again, with the new result.
+    expect(calls('executors.versions').length).toBeGreaterThan(1)
+  })
+
+  it('x 尚未验证: the verified one stays, the newer one waits', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.312',
+        target: null,
+        upgrade: null,
+        unverified: '2.1.312',
+        verified: VERIFIED,
+        selfCheck: selfCheck({ status: 'ok', adapted: undefined }),
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['自检通过', '2.1.312 尚未验证'])
+    expect(notes(page)).toContain(
+      '已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级',
+    )
+  })
+
+  it('不兼容: why, 退回 x（上次正常） and 重新检查; no disabled 已是最新 beside them', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.315',
+        latest: '2.1.315',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck({
+          version: '2.1.315',
+          status: 'incompatible',
+          adapted: undefined,
+          issues: [
+            {
+              code: 'mcp_server',
+              detail:
+                'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+              blocking: true,
+            },
+          ],
+        }),
+        rollback: {
+          target: '2.1.310',
+          because:
+            '2.1.315 自检不兼容：Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+          oneClick: true,
+          command: ROLLBACK_CMD,
+        },
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['不兼容'])
+    expect(notes(page)).toEqual([
+      'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+    ])
+    // The same reason is not said twice.
+    expect(page.querySelector('[data-version-rollback-because]')).toBeNull()
+    const state = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      [...state.querySelectorAll('button')].map((b) => b.textContent?.trim()),
+    ).toEqual(['退回 2.1.310（上次正常）', '重新检查'])
+    expect(page.querySelector('[data-version-upgrade]')).toBeNull()
+    // On the main page, the row says so too.
+    root
+      .querySelector<HTMLButtonElement>('[data-testid="settings-crumb"]')
+      ?.click()
+  })
+
+  it('Codex whose protocol differs: 自检通过 and a warning line, still runnable', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.2',
+        latest: '0.163.2',
+        target: null,
+        upgrade: null,
+        selfCheck: selfCheck({
+          backend: 'codex',
+          version: '0.163.2',
+          status: 'ok',
+          adapted: undefined,
+          issues: [
+            {
+              code: 'protocol_unknown',
+              detail:
+                'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+              blocking: false,
+            },
+          ],
+        }),
+      }),
+    ])
+    const page = await detail('codex')
+    expect(badges(page)).toEqual(['自检通过'])
+    expect(
+      [...page.querySelectorAll('[data-version-warning]')].map((w) =>
+        w.textContent?.trim(),
+      ),
+    ).toEqual([
+      'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+    ])
+    expect(page.querySelector('[data-version-rollback-button]')).toBeNull()
+  })
+
+  it('while it checks: 正在自检… and 重新检查 waits', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.310',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: null,
+        selfChecking: true,
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['正在自检…'])
+    const recheck = page.querySelector<HTMLButtonElement>(
+      '[data-version-recheck]',
+    )!
+    expect(recheck.disabled).toBe(true)
+    expect(recheck.textContent?.trim()).toBe('检查中…')
+  })
+
+  it('the main row: 自检不兼容 after the version', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.315',
+        latest: '2.1.315',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck({
+          version: '2.1.315',
+          status: 'incompatible',
+          adapted: undefined,
+          issues: [{ code: 'mcp_server', detail: 'x', blocking: true }],
+        }),
+      }),
+      codexVersion(),
+    ])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.315' }))
+    await mount()
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.315 · 自检不兼容')
   })
 })

@@ -1281,6 +1281,19 @@ export interface QueuedPromptItem {
   payload?: ChatSendPayload
 }
 
+/**
+ * A message inserted into the running turn that the log has not shown yet
+ * (BUG-07): the chat shows it at once as a provisional bubble.
+ */
+export interface ProvisionalPrompt {
+  id: string
+  clientMessageId: string
+  content: string
+  references?: MessageReference[]
+  createdOrder: number
+  sessionId: string
+}
+
 export interface PendingState {
   label: string
   detail: string
@@ -1505,6 +1518,9 @@ export interface RightWorkspaceState {
   pane: 'launcher' | 'review' | 'terminal' | 'files' | 'browser'
 }
 
+/** The sections of the sidebar's session list (置顶 / 项目 / 对话). */
+export type SidebarSectionKey = 'pinned' | 'projects' | 'chats'
+
 export interface SidebarState {
   section_order: Array<'projects' | 'chats'>
   project_sort: SidebarSortMode
@@ -1513,6 +1529,8 @@ export interface SidebarState {
   chat_order: string[]
   project_session_order: Record<string, string[]>
   collapsed_project_ids: string[]
+  /** Folded sections, kept across restarts (BUG-06). */
+  collapsed_sections: SidebarSectionKey[]
   /** Pinned sessions in pin order (Core keeps ≤ 50, drops deleted/archived). */
   pinned_session_ids: string[]
   right_workspace: RightWorkspaceState

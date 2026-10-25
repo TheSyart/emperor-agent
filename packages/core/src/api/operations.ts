@@ -1212,6 +1212,27 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.upgrade(input, viewOf(ctx, 'executors.upgrade')),
   ),
+  // VER-03: 退回 to the last version a task ran on, after the confirmation;
+  // the target must be the one offered (rollbackOffer), and it runs like
+  // 升级 (cancelUpgrade stops it).
+  'executors.rollback': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          target: z.string().regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.rollback(input, viewOf(ctx, 'executors.rollback')),
+  ),
+  // VER-04: 重新检查, the offline self-check of the installed version.
+  'executors.selfCheck': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.selfCheck(input, viewOf(ctx, 'executors.selfCheck')),
+  ),
   'executors.cancelUpgrade': operation(
     z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
     (api, [input], ctx) =>
@@ -1740,12 +1761,24 @@ export const CORE_OPERATION_REGISTRY = {
   'files.preview': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
     api.files.preview(input),
   ),
+  'files.mediaUrl': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
+    api.files.mediaUrl(input),
+  ),
   'files.search': operation(
     z.tuple([workspaceFileSearchSchema]),
     (api, [input]) => api.files.search(input),
   ),
   'files.stat': operation(z.tuple([fileStatSchema]), (api, [input]) =>
     api.files.stat(input),
+  ),
+  // BUG-11: the 文件 pane follows the project while it is open.
+  'files.watch': operation(
+    z.tuple([z.object({ sessionId: idSchema }).strict()]),
+    (api, [input]) => api.files.watch(input),
+  ),
+  'files.unwatch': operation(
+    z.tuple([z.object({ sessionId: idSchema }).strict()]),
+    (api, [input]) => api.files.unwatch(input),
   ),
   'git.branches': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
     api.git.branches(input),

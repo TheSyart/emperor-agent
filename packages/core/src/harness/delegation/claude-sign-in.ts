@@ -85,7 +85,10 @@ export function prepareClaudeDirectories(root: string): ClaudeDirectories {
   return dirs
 }
 
-/** What every Claude Code process gets, so its login is found again. */
+/**
+ * What every Claude Code process gets, so its login is found again; and
+ * none of them updates the user's claude behind their back (VER-03).
+ */
 export function claudeProcessEnvironment(
   dirs: ClaudeDirectories,
 ): Record<string, string> {
@@ -95,6 +98,7 @@ export function claudeProcessEnvironment(
     USERPROFILE: dirs.home,
     XDG_CONFIG_HOME: join(dirs.home, '.config'),
     XDG_CACHE_HOME: join(dirs.home, '.cache'),
+    DISABLE_AUTOUPDATER: '1',
   }
 }
 

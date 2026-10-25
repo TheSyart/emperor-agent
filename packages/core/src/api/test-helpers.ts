@@ -159,6 +159,9 @@ export async function makeApi(
     // so 登录 Claude Code runs the fake's `auth login` (FIX-11). A fake
     // codex that only reports its version comes first too, so a probe sees
     // the same Codex on a developer's Mac and on CI.
+    // The offline self-check never starts by itself in tests (VER-04);
+    // a test that wants it says so.
+    executorSelfCheck: { automatic: false },
     executorHome:
       options.extra?.executorHome === undefined
         ? {

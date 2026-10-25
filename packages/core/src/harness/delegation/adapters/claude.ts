@@ -19,6 +19,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   DEFAULT_CLAUDE_MAX_TURNS,
   DelegationError,
+  ExecutorRefusal,
   type ExecutorAdapter,
   type ExecutorOpenInput,
   type ExecutorSession,
@@ -698,6 +699,9 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
               // credentials (AGT-02); it also pins the permission mode to
               // `default`, which is the mode requested above.
               CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+              // Never updates itself (VER-03): versions change only through
+              // 设置 › 子智能体, where 退回 can undo one.
+              DISABLE_AUTOUPDATER: '1',
             },
             signal: input.signal,
             policy: input.policy,
@@ -721,9 +725,9 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       query = warm.query(prompts)
       const init = await query.initializationResult()
       if (init.hooks_applied === false)
-        throw new DelegationError(
-          'EXECUTOR_INCOMPATIBLE',
-          'Claude did not apply required tool hooks',
+        throw new ExecutorRefusal(
+          'hooks_not_applied',
+          `${input.executableVersion ? `Claude Code ${input.executableVersion}` : 'Claude Code'} 没有应用 Emperor 的工具钩子，子智能体不能安全运行。`,
         )
       // Before any prompt: builtins a newer claude brought are turned off
       // in this process; anything else it loaded refuses the run (VER-02).
@@ -885,7 +889,13 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
           'OUTCOME_UNKNOWN',
           'Claude startup process termination is unproven',
         )
-      // Emperor refused what this claude loaded (VER-02): its own reason.
+      // Emperor refused what this claude loaded (VER-02): its own reason,
+      // and which check it was (VER-04, the self-check names it).
+      if (error instanceof ExecutorRefusal)
+        throw new ExecutorRefusal(
+          error.issue,
+          redactExecutorText(error.reason!, input.secretValues ?? []),
+        )
       if (error instanceof DelegationError && error.reason)
         throw new DelegationError(
           error.code,

@@ -712,3 +712,27 @@ it('FIX-16 · 3 · collect_agent says which model a run used instead of Codex’
     "Codex's own default model gpt-6.1-sol is not available to this login; this run used gpt-5.6-sol.",
   )
 })
+
+it('VER-06 · 5 · collect_agent on a version failure tells the parent why, the last good version and not to retry elsewhere', async () => {
+  const f = fixture()
+  f.state.runs['dgr-1'] = {
+    ...f.state.runs['dgr-1']!,
+    phase: 'failed',
+    failureCode: 'EXECUTOR_INCOMPATIBLE',
+    summary: 'Claude Code 2.1.310 加载了未批准的扩展：插件 foo。',
+    versionFailure: {
+      backend: 'claude-code',
+      profileId: 'claude-default',
+      current: '2.1.310',
+      lastGood: '2.1.281',
+      verifiedMax: '2.1.310',
+      reason: 'Claude Code 2.1.310 加载了未批准的扩展：插件 foo',
+      actions: ['rollback', 'open_settings'],
+    },
+  }
+  vi.mocked(f.service.wait).mockResolvedValue(f.state.runs['dgr-1']!)
+  const result = await f.call('collect_agent', { agent_id: 'dlg-test' })
+  const text = JSON.stringify(result.content)
+  expect(text).toContain('上次正常版本：2.1.281')
+  expect(text).toContain('不要换别的方式重试同一个子智能体')
+})

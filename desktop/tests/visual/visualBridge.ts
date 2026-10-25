@@ -201,10 +201,17 @@ function bundledPluginLogos(): Record<string, string> {
 
 export async function installVisualCoreBridge(
   page: Page,
-  options: { sessionLogs?: VisualSessionLog[] } = {},
+  options: {
+    sessionLogs?: VisualSessionLog[]
+    /**
+     * External agents the page `/chat/<root>/agents/<id>` reads: what
+     * `delegations.get` and `delegations.history` answer for that id.
+     */
+    delegations?: Record<string, { state: unknown; history: unknown }>
+  } = {},
 ) {
   await page.addInitScript(
-    ({ projectDir, sessionLogs, replyEvents, pluginLogos }) => {
+    ({ projectDir, sessionLogs, replyEvents, pluginLogos, delegations }) => {
       const now = '2026-06-26T12:00:00.000Z'
       const visualParams = new URLSearchParams(window.location.search)
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
@@ -242,7 +249,32 @@ export async function installVisualCoreBridge(
       // `unverified`: Emperor has verified only 0.153; `failed`: a Codex
       // upgrade failed without write permission. A spec moves an upgrade on
       // with window.__visualExecutorUpgrade('running' | 'done' | 'failed').
+      // VER-03 `rollback`: Claude Code 2.1.315 (npm's latest) failed twice
+      // for its version and 2.1.310 ran a task: 退回 2.1.310 is offered;
+      // VER-04: its self-check found an MCP server (不兼容). VER-04
+      // `selfcheck`: Claude Code 2.1.310, 自检通过 with its builtin turned
+      // off; `claude-unverified`: the same, and npm has 2.1.312, not
+      // verified yet.
       const visualUpgradeMode = visualParams.get('visualExecutorUpgrade')
+      const visualRollback = visualUpgradeMode === 'rollback'
+      const visualSelfCheck = visualUpgradeMode === 'selfcheck'
+      const visualClaudeUnverified = visualUpgradeMode === 'claude-unverified'
+      const VISUAL_VERIFIED_CLAUDE = ['2.1.281', '2.1.308', '2.1.310']
+      const visualClaudeCheck = (over: Record<string, unknown>) => ({
+        backend: 'claude-code',
+        version: '2.1.310',
+        checkedAt: Date.now() - 5 * 60_000,
+        status: 'adapted',
+        adapted: {
+          builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+          since: { 'cc-plugin-plugin-authoring@builtin': '2.1.308' },
+        },
+        issues: [],
+        modelCalls: 0,
+        ...over,
+      })
+      const VISUAL_ROLLBACK_COMMAND =
+        'npm install -g @anthropic-ai/claude-code@2.1.310'
       const visualUpgrade = {
         claude: '2.1.281',
         codex: '0.153.4',
@@ -288,10 +320,27 @@ export async function installVisualCoreBridge(
         visualUpgrade.claude = '2.1.308'
         visualUpgrade.upgrades = [visualFailedRun()]
       }
+      if (visualRollback) visualUpgrade.claude = '2.1.315'
+      if (visualSelfCheck || visualClaudeUnverified)
+        visualUpgrade.claude = '2.1.310'
       const visualVersions = () => {
         const unverified = visualUpgradeMode === 'unverified'
         const claudeTarget =
-          visualUpgrade.claude === '2.1.308' ? null : '2.1.308'
+          visualRollback ||
+          visualSelfCheck ||
+          visualClaudeUnverified ||
+          visualUpgrade.claude === '2.1.308'
+            ? null
+            : '2.1.308'
+        const claudeLatest = visualRollback
+          ? '2.1.315'
+          : visualClaudeUnverified
+            ? '2.1.312'
+            : visualSelfCheck
+              ? '2.1.310'
+              : '2.1.308'
+        const claudeVer04 =
+          visualRollback || visualSelfCheck || visualClaudeUnverified
         const codexTarget =
           unverified || visualUpgrade.codex === '0.163.0' ? null : '0.163.0'
         return {
@@ -310,10 +359,44 @@ export async function installVisualCoreBridge(
                 kind: 'npm',
                 location: `${VISUAL_NPM}/@anthropic-ai/claude-code`,
               },
-              latest: '2.1.308',
-              verified: [],
+              latest: claudeLatest,
+              verified: claudeVer04 ? VISUAL_VERIFIED_CLAUDE : [],
               target: claudeTarget,
-              unverified: null,
+              ...(claudeVer04
+                ? {
+                    selfChecking: false,
+                    selfCheck: visualRollback
+                      ? visualClaudeCheck({
+                          version: '2.1.315',
+                          status: 'incompatible',
+                          adapted: undefined,
+                          issues: [
+                            {
+                              code: 'mcp_server',
+                              detail:
+                                'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+                              blocking: true,
+                            },
+                          ],
+                        })
+                      : visualClaudeCheck(
+                          visualClaudeUnverified
+                            ? { status: 'ok', adapted: undefined }
+                            : {},
+                        ),
+                  }
+                : {}),
+              ...(visualRollback && visualUpgrade.claude === '2.1.315'
+                ? {
+                    rollback: {
+                      target: '2.1.310',
+                      because: '2.1.315 上有 2 次任务因版本不兼容失败',
+                      oneClick: true,
+                      command: VISUAL_ROLLBACK_COMMAND,
+                    },
+                  }
+                : {}),
+              unverified: visualClaudeUnverified ? '2.1.312' : null,
               upgrade: claudeTarget
                 ? {
                     oneClick: true,
@@ -5998,6 +6081,21 @@ export async function installVisualCoreBridge(
                   : '# Visual Build Project\n\nA project workspace visual fixture.\n'
               const bytes = new TextEncoder().encode(content).length
               const modifiedAt = Date.parse(now) + version
+              // BUG-05: videos are never read (files.mediaUrl plays them).
+              const video = /\.(?:mp4|m4v|webm|mov)$/i.exec(path)
+              if (video && operationKey !== 'files.stat')
+                return {
+                  id: `file:${projectDir}/${path}`,
+                  path: `${projectDir}/${path}`,
+                  projectRoot: projectDir,
+                  relativePath: path,
+                  name: path.split('/').pop(),
+                  kind: 'video',
+                  mimeType: path.endsWith('.webm') ? 'video/webm' : 'video/mp4',
+                  bytes: 18_065,
+                  modifiedAt: Date.parse(now),
+                  truncated: false,
+                }
               if (operationKey === 'files.stat') return { bytes, modifiedAt }
               return {
                 id: `file:${projectDir}/${path}`,
@@ -6011,6 +6109,14 @@ export async function installVisualCoreBridge(
                 modifiedAt,
                 truncated: false,
                 content,
+              }
+            }
+            case 'files.mediaUrl': {
+              // BUG-05: workspace.spec.ts routes /__visual-media/* to a clip
+              // (a same-origin address: CSP media-src 'self').
+              const input = (args[0] || {}) as { path?: string }
+              return {
+                url: `${location.origin}/__visual-media/${encodeURI(input.path || '')}`,
               }
             }
             case 'terminals.list':
@@ -8459,6 +8565,18 @@ export async function installVisualCoreBridge(
             case 'executors.dismissNotice':
               visualSignInNotice = false
               return {}
+            case 'delegations.get': {
+              const input = (args[0] || {}) as { id?: string }
+              const known = delegations[String(input.id)]
+              if (known) return known.state
+              return {}
+            }
+            case 'delegations.history': {
+              const input = (args[0] || {}) as { id?: string }
+              const known = delegations[String(input.id)]
+              if (known) return known.history
+              return {}
+            }
             case 'executors.versions': {
               if (!visualUpgradeMode) return {}
               // A spec moves an upgrade on the way Core pushes it.
@@ -8504,6 +8622,29 @@ export async function installVisualCoreBridge(
                 }),
               }
             }
+            case 'executors.rollback': {
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                upgrade: {
+                  profileId: String(input.profileId),
+                  backend: 'claude-code',
+                  kind: 'rollback',
+                  from: '2.1.315',
+                  target: '2.1.310',
+                  command: VISUAL_ROLLBACK_COMMAND,
+                  state: 'waiting',
+                  startedAt: visualRunStarted,
+                  log: [`$ ${VISUAL_ROLLBACK_COMMAND}`],
+                },
+              }
+            }
+            case 'executors.selfCheck': {
+              const input = (args[0] || {}) as { profileId?: string }
+              const row = visualVersions().executors.find(
+                (e) => e.profileId === input.profileId,
+              ) as { selfCheck?: unknown } | undefined
+              return { selfCheck: row?.selfCheck ?? null }
+            }
             case 'executors.cancelUpgrade':
               return {
                 upgrade: visualCodexRun({
@@ -8522,6 +8663,7 @@ export async function installVisualCoreBridge(
     },
     {
       projectDir: visualProjectDir,
+      delegations: options.delegations ?? {},
       sessionLogs: options.sessionLogs ?? defaultSessionLogs(),
       replyEvents: replyTemplate(),
       pluginLogos: bundledPluginLogos(),

@@ -89,6 +89,10 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     '它正在升级，升级完成前不接新的子任务；可以改用本地子智能体。',
   EXECUTOR_UPGRADE_UNAVAILABLE:
     '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
+  EXECUTOR_ROLLBACK_UNAVAILABLE:
+    '这个版本不能在这里一键退回，请在「设置 › 子智能体」重新检测后再试。',
+  EXECUTOR_SELF_CHECK_FAILED:
+    '这个版本自检不兼容，请在「设置 › 子智能体」退回上一个正常版本，或点「重新检查」。',
   CONTAINMENT_UNAVAILABLE:
     '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
   PROTOCOL_FRAMING: '子智能体返回了无法识别的数据。',
@@ -110,6 +114,7 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   workspace_path_missing: '文件或目录不存在。',
   workspace_path_not_directory: '目标路径不是目录。',
   workspace_path_not_file: '目标路径不是文件。',
+  workspace_media_unsupported: '这个文件不能在应用里播放。',
   workspace_agent_running: '这个工作区有 Agent 正在运行，等它结束后再试。',
   turn_already_reverted: '这些改动已经撤销过。',
   turn_file_not_recorded: '这份改动记录里没有这个文件。',

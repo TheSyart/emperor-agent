@@ -1,3 +1,4 @@
+import type { VersionFailureContext } from '@emperor/core/runtime-contract'
 // UI-S14: one row per subagent in the conversation. A subagent's row says
 // who it is (portrait, or the Claude Code / Codex logo), where it runs, its
 // status with how long it has run or took, and, once it has ended, one line
@@ -102,6 +103,8 @@ export interface SubagentRowView {
   readonly summary: string
   /** Claude Code / Codex: the run 任务详情 opens. */
   readonly run?: { readonly delegationId: string; readonly runId: string }
+  /** A failed run's version context (VER-06): its line and buttons. */
+  readonly versionFailure?: VersionFailureContext
 }
 
 const LOCAL_STOP: Readonly<Record<string, SubagentState>> = {
@@ -336,6 +339,9 @@ export function subagentRowOf(
       : {
           run: { delegationId: external.delegationId, runId: external.runId },
         }),
+    ...(external?.versionFailure && state === 'failed'
+      ? { versionFailure: external.versionFailure }
+      : {}),
   })
 }
 

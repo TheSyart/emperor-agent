@@ -83,6 +83,7 @@ export const RUNTIME_EVENT_NAMES = [
   'update_available',
   'update_status',
   'web_tools_changed',
+  'workspace_files_changed',
 ] as const
 
 export type RuntimeEventName = (typeof RUNTIME_EVENT_NAMES)[number]

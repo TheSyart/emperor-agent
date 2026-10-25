@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import codex01534 from './protocol/codex-0.153.4/digest.json'
 import codex01630 from './protocol/codex-0.163.0/digest.json'
+import codex01534Features from './protocol/codex-0.153.4/features.json'
+import codex01630Features from './protocol/codex-0.163.0/features.json'
 
 /**
  * Compatibility is a capability handshake (AGT-01), not an exact version
@@ -50,6 +52,44 @@ export const CLAUDE_REQUIRED_RANGE = `>= ${formatVersion(CLAUDE_MINIMUM_VERSION)
 export function claudeVersionSupported(version: SemanticVersion): boolean {
   return compare(version, CLAUDE_MINIMUM_VERSION) >= 0
 }
+
+/** A Claude Code release Emperor checked offline (VER-04). */
+export interface VerifiedClaudeVersion {
+  /** The exact release. */
+  version: string
+  /** YYYY-MM-DD */
+  verifiedAt: string
+  /** The builtin plugins it ships (VER-01's fixtures), all turned off. */
+  builtinPlugins: string[]
+}
+
+/**
+ * The Claude Code releases 升级 may install (VER-04), oldest first: each one
+ * passed `scripts/claude-init-handshake.mjs` and the offline self-check
+ * (VER-01, 2026-10-24: npm's latest was 2.1.310, stable 2.1.308). The
+ * builtins are what it loads with nothing turned off (`--raw`). A newer
+ * release is 「尚未验证」 until it is listed here; the process is in
+ * docs/development/external-agent-adapters.md.
+ */
+export const KNOWN_CLAUDE_VERSIONS: readonly VerifiedClaudeVersion[] = [
+  { version: '2.1.281', verifiedAt: '2026-10-22', builtinPlugins: [] },
+  {
+    version: '2.1.308',
+    verifiedAt: '2026-10-24',
+    builtinPlugins: [
+      'cc-plugin-agents-md@builtin',
+      'cc-plugin-plugin-authoring@builtin',
+    ],
+  },
+  {
+    version: '2.1.310',
+    verifiedAt: '2026-10-24',
+    builtinPlugins: [
+      'cc-plugin-agents-md@builtin',
+      'cc-plugin-plugin-authoring@builtin',
+    ],
+  },
+]
 
 /**
  * Capability fields of the SDK `system/init` message. Returns a reason when
@@ -114,6 +154,25 @@ export const KNOWN_CODEX_PROTOCOLS: readonly CodexProtocol[] = [
   protocol(codex01534),
   protocol(codex01630),
 ]
+
+/**
+ * Each verified protocol's feature defaults (`features.json`, `codex
+ * features list` with no overrides): name → on. The self-check (VER-04)
+ * compares a live Codex against them; codex-contract.test.ts pins what
+ * stays on under Emperor's overrides.
+ */
+export const CODEX_FEATURE_DEFAULTS: Readonly<
+  Record<string, Readonly<Record<string, boolean>>>
+> = Object.fromEntries(
+  [codex01534Features, codex01630Features].map((recorded) => [
+    recorded.codexVersion,
+    Object.fromEntries(
+      Object.entries(
+        recorded.features as Record<string, { enabled: boolean }>,
+      ).map(([name, f]) => [name, f.enabled]),
+    ),
+  ]),
+)
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value))

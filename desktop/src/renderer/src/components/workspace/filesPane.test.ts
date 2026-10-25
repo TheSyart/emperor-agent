@@ -2,8 +2,21 @@
 import { createApp, h, nextTick, ref, isProxy, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { core } = vi.hoisted(() => ({ core: vi.fn() }))
+const { core, coreListeners } = vi.hoisted(() => ({
+  core: vi.fn(),
+  coreListeners: new Set<(event: unknown) => void>(),
+}))
 vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/backend', async (original) => ({
+  ...(await original<typeof import('../../api/backend')>()),
+  onCoreEvent: (listener: (event: unknown) => void) => {
+    coreListeners.add(listener)
+    return () => coreListeners.delete(listener)
+  },
+}))
+function emitCore(event: Record<string, unknown>): void {
+  for (const listener of [...coreListeners]) listener(event)
+}
 
 import FilesPane from './FilesPane.vue'
 
@@ -569,6 +582,118 @@ describe('FilesPane', () => {
     expect(root.textContent).toContain('文件或目录不存在。')
   })
 
+  describe('BUG-05 · videos', () => {
+    const URL_A = `app://workspace-media/${'1'.repeat(32)}`
+    const URL_B = `app://workspace-media/${'2'.repeat(32)}`
+    const request = {
+      owner: 's1',
+      target: {
+        source: 'project' as const,
+        sessionId: 's1',
+        path: 'clips/飞行 测试.mp4',
+      },
+    }
+
+    /** files.mediaUrl answers these in turn (the last one repeats). */
+    function videoCore(...answers: Array<string | Error>) {
+      return (operation: string, payload?: Record<string, unknown>) => {
+        if (operation === 'files.preview')
+          return Promise.resolve({
+            id: 'file:/tmp/demo/clips/飞行 测试.mp4',
+            path: '/tmp/demo/clips/飞行 测试.mp4',
+            relativePath: 'clips/飞行 测试.mp4',
+            mimeType: 'video/mp4',
+            kind: 'video',
+            name: '飞行 测试.mp4',
+            truncated: false,
+            bytes: 17_829,
+          })
+        if (operation === 'files.mediaUrl') {
+          const answer = answers.length > 1 ? answers.shift()! : answers[0]!
+          return answer instanceof Error
+            ? Promise.reject(answer)
+            : Promise.resolve({ url: answer })
+        }
+        return fakeCore(operation, payload)
+      }
+    }
+
+    function mediaUrlCalls() {
+      return core.mock.calls.filter(([op]) => op === 'files.mediaUrl')
+    }
+
+    afterEach(() => {
+      delete (window as unknown as { emperor?: unknown }).emperor
+    })
+
+    it('7 · plays a video from its media address with the native controls', async () => {
+      core.mockImplementation(videoCore(URL_A))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      const video = root.querySelector<HTMLVideoElement>('video')!
+      expect(video).not.toBeNull()
+      expect(video.hasAttribute('controls')).toBe(true)
+      expect(video.getAttribute('preload')).toBe('metadata')
+      expect(video.getAttribute('src')).toBe(URL_A)
+      expect(mediaUrlCalls()).toEqual([['files.mediaUrl', request.target]])
+      expect(isProxy(mediaUrlCalls()[0]![1])).toBe(false)
+      expect(root.textContent).not.toContain('此格式暂不支持内容预览')
+      expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+        'video/mp4',
+      )
+    })
+
+    it('8 · a video that cannot play asks once more, then offers the default app', async () => {
+      const openWorkspaceMedia = vi.fn(async () => ({ ok: true }))
+      ;(window as unknown as { emperor: unknown }).emperor = {
+        openWorkspaceMedia,
+      }
+      core.mockImplementation(videoCore(URL_A))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      // The grant still runs (same address): the codec is the problem.
+      expect(mediaUrlCalls()).toHaveLength(2)
+      expect(root.querySelector('video')).toBeNull()
+      expect(root.textContent).toContain('这个视频的编码无法在应用里播放')
+      const open = [...root.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('用默认应用打开'),
+      )!
+      open.click()
+      await flush()
+      expect(openWorkspaceMedia).toHaveBeenCalledWith(URL_A)
+    })
+
+    it('an address that expired while watching is asked for again', async () => {
+      core.mockImplementation(videoCore(URL_A, URL_B))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      expect(root.querySelector('video')?.getAttribute('src')).toBe(URL_B)
+      expect(root.textContent).not.toContain('无法在应用里播放')
+    })
+
+    it('a video removed since it opened says the file is gone', async () => {
+      const gone = Object.assign(new Error('文件或目录不存在。'), {
+        code: 'workspace_path_missing',
+      })
+      core.mockImplementation(videoCore(URL_A, gone))
+      const root = mount('')
+      await exposed.openPreview(request)
+      await flush()
+      root.querySelector('video')!.dispatchEvent(new Event('error'))
+      await flush()
+      expect(root.querySelector('video')).toBeNull()
+      expect(root.textContent).toContain('文件已不存在')
+      expect(root.textContent).not.toContain('用默认应用打开')
+    })
+  })
+
   it('reports the tree width once a keyboard resize settles', async () => {
     const root = mount()
     await flush()
@@ -581,5 +706,198 @@ describe('FilesPane', () => {
     expect(
       root.querySelector<HTMLElement>('.file-tree-column')!.style.width,
     ).toBe('310px')
+  })
+})
+
+// BUG-11: the pane follows the project: the tree and open files refresh
+// when files change, a deleted open file says so, and a failed watch falls
+// back to refreshing when a turn ends.
+describe('FilesPane follows the project (BUG-11)', () => {
+  function disk() {
+    const state = {
+      entries: [...ENTRIES] as Array<Record<string, unknown>>,
+      content: 'const a = 1\n',
+      gone: false,
+    }
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.list')
+        return Promise.resolve({
+          projectRoot: '/tmp/demo',
+          relativePath: String(payload?.relativePath ?? ''),
+          entries: payload?.relativePath ? [] : state.entries,
+        })
+      if (op === 'files.preview') {
+        if (state.gone)
+          return Promise.reject(
+            Object.assign(new Error('文件或目录不存在。'), {
+              code: 'workspace_path_missing',
+            }),
+          )
+        const path = String(payload?.path ?? 'a.ts')
+        return Promise.resolve({
+          id: `file:/tmp/demo/${path}`,
+          path: `/tmp/demo/${path}`,
+          relativePath: path,
+          mimeType: 'text/plain',
+          kind: 'text',
+          name: path.split('/').pop(),
+          content: state.content,
+          truncated: false,
+          bytes: state.content.length,
+          modifiedAt: 1,
+        })
+      }
+      if (op === 'files.watch') return Promise.resolve({ watching: true })
+      if (op === 'files.unwatch') return Promise.resolve({ watching: false })
+      return fakeCore(op, payload)
+    })
+    return state
+  }
+  const calls = (op: string) => core.mock.calls.filter(([name]) => name === op)
+  const change = (patch: Record<string, unknown>) =>
+    emitCore({
+      event: 'workspace_files_changed',
+      session_id: 's1',
+      paths: [],
+      overflow: false,
+      ...patch,
+    })
+
+  it('1 · watches the project while mounted and stops when unmounted', async () => {
+    disk()
+    mount()
+    await flush()
+    expect(calls('files.watch')).toEqual([['files.watch', { sessionId: 's1' }]])
+    app!.unmount()
+    app = null
+    await flush()
+    expect(calls('files.unwatch')).toEqual([
+      ['files.unwatch', { sessionId: 's1' }],
+    ])
+  })
+
+  it('2 · a new file shows in the tree without a manual refresh', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    state.entries = [...ENTRIES, { name: 'b.ts', path: 'b.ts', kind: 'file' }]
+    change({ paths: ['b.ts'] })
+    await flush()
+    expect(treeRow(root, 'b.ts')).toBeTruthy()
+  })
+
+  it('3 · the open file re-reads when it changes on disk', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    state.content = 'const a = 2\n'
+    change({ paths: ['a.ts'] })
+    await flush()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 2',
+    )
+  })
+
+  it('4 · a background tab is marked, and re-read when it is shown', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await exposed.openPath('README.md')
+    await flush()
+    const reads = calls('files.preview').length
+    state.content = 'const a = 3\n'
+    change({ paths: ['a.ts'] })
+    await flush()
+    expect(calls('files.preview')).toHaveLength(reads)
+    const tab = [
+      ...root.querySelectorAll<HTMLElement>('.workspace-tab-bar .tab-item'),
+    ].find((item) => item.textContent?.includes('a.ts'))!
+    expect(tab.querySelector('[data-tab-mark]')).not.toBeNull()
+    tab.querySelector<HTMLElement>('[role="tab"]')!.click()
+    await flush()
+    expect(calls('files.preview')).toHaveLength(reads + 1)
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 3',
+    )
+  })
+
+  it('5 · a deleted open file says so, keeps what was shown, and can be closed', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    state.gone = true
+    change({ paths: ['a.ts'] })
+    await flush()
+    const banner = root.querySelector('[data-file-deleted]')
+    expect(banner?.textContent).toContain('这个文件已被删除')
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+    banner!.querySelector<HTMLButtonElement>('button')!.click()
+    await flush()
+    expect(tabLabels(root)).toEqual([])
+  })
+
+  it('6 · an overflow re-reads the loaded tree and the open file', async () => {
+    const state = disk()
+    mount()
+    await flush()
+    await exposed.openPath('a.ts')
+    await flush()
+    const lists = calls('files.list').length
+    const reads = calls('files.preview').length
+    state.content = 'changed'
+    change({ overflow: true })
+    await flush()
+    expect(calls('files.list').length).toBeGreaterThan(lists)
+    expect(calls('files.preview')).toHaveLength(reads + 1)
+  })
+
+  it('7 · changes of another session are ignored', async () => {
+    disk()
+    mount()
+    await flush()
+    const lists = calls('files.list').length
+    emitCore({
+      event: 'workspace_files_changed',
+      session_id: 'other',
+      paths: ['b.ts'],
+      overflow: false,
+    })
+    await flush()
+    expect(calls('files.list')).toHaveLength(lists)
+  })
+
+  it('8 · when the watch fails, a finished turn refreshes the tree instead', async () => {
+    const state = disk()
+    const root = mount()
+    await flush()
+    change({ overflow: true, unavailable: true })
+    await flush()
+    state.entries = [...ENTRIES, { name: 'c.ts', path: 'c.ts', kind: 'file' }]
+    emitCore({ event: 'assistant_done', session_id: 's1' })
+    await flush()
+    expect(treeRow(root, 'c.ts')).toBeTruthy()
+  })
+
+  it('9 · moves the watch with the session', async () => {
+    disk()
+    mount()
+    await flush()
+    owner.value = 's2'
+    app!.unmount()
+    app = null
+    container?.remove()
+    mount()
+    await flush()
+    expect(calls('files.watch').map(([, input]) => input)).toEqual([
+      { sessionId: 's1' },
+      { sessionId: 's2' },
+    ])
   })
 })

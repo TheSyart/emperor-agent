@@ -4,22 +4,36 @@
  * temp folder, a fake `npm` that rewrites their package.json, and the real
  * probe (`--version`) afterwards. Never the real npm, brew, claude or codex.
  */
-import { chmodSync, existsSync, readFileSync, realpathSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CodexProtocol } from './compatibility'
 import { defaultExecutorConfig } from './config'
 import { ExecutorDispatchGate } from './dispatch-gate'
+import { EXECUTOR_HEALTH_FILE, ExecutorHealthStore } from './executor-health'
 import { PublishedVersionStore } from './published-versions'
 import { ExecutorRegistry } from './registry'
 import { fixture as delegationFixture, spec } from './service-test-fixture'
-import { delegationTestDirectory, fakeNpmPrefix } from './testing'
+import { delegationTestDirectory, fakeClaude, fakeNpmPrefix } from './testing'
 import type {
   ExecutorProbe,
   ExecutorUpgradeView,
   ExternalBackend,
 } from './types'
-import { ExecutorUpgradeService } from './upgrade-service'
+import {
+  ExecutorUpgradeService,
+  type ExecutorUpgradeServiceOptions,
+} from './upgrade-service'
+import { BuiltinPluginLedger } from './claude-builtin-plugins'
+import { ExecutorSelfCheck } from './self-check'
+import { fakeClaudeSdk } from './testing'
 
 const cleanup: Array<() => void> = []
 /** Processes start and end slowly while the whole suite runs. */
@@ -36,7 +50,7 @@ const alive = (pid: number) => {
 }
 
 /** Both CLIs installed with a (fake) npm in a temp prefix (testing.ts). */
-function machine() {
+function machine(versions?: Parameters<typeof fakeNpmPrefix>[1]) {
   const d = delegationTestDirectory()
   const root = realpathSync(d.root)
   cleanup.push(() => {
@@ -47,7 +61,7 @@ function machine() {
     }
     d.cleanup()
   })
-  return { root, ...fakeNpmPrefix(root) }
+  return { root, ...fakeNpmPrefix(root, versions) }
 }
 
 function service(
@@ -58,11 +72,21 @@ function service(
     automatic?: boolean
     fetch?: () => Promise<void>
     now?: () => number
+    /** What each version did (VER-03). */
+    health?: ExecutorHealthStore
+    /** npm's latest Claude Code (default 2.1.308). */
+    claudeLatest?: string
+    /** Folders before /usr/bin:/bin (default: the npm prefix's bin). */
+    path?: string
+    /** VER-04: what runs after an install, and whether it runs now. */
+    selfCheck?: ExecutorUpgradeServiceOptions['selfCheck']
   } = {},
 ) {
   const config = defaultExecutorConfig()
   for (const p of config.profiles) p.enabled = true
-  const environment = { PATH: `${m.prefix}/bin:/usr/bin:/bin` }
+  const environment = {
+    PATH: `${options.path ?? `${m.prefix}/bin`}:/usr/bin:/bin`,
+  }
   const registry = new ExecutorRegistry({ home: m.root, environment })
   const probes = new Map<string, ExecutorProbe>()
   const profileOf = (id: string) => config.profiles.find((p) => p.id === id)!
@@ -78,7 +102,10 @@ function service(
             latest: '0.163.0',
             versions: ['0.153.0', '0.153.4', '0.160.0', '0.163.0'],
           }
-        : { latest: '2.1.308', versions: ['2.1.308'] }
+        : {
+            latest: options.claudeLatest ?? '2.1.308',
+            versions: [options.claudeLatest ?? '2.1.308'],
+          }
     },
   })
   const events: Array<Record<string, unknown>> = []
@@ -108,12 +135,24 @@ function service(
     graceMs: 200,
     startupDelayMs: 0,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.health ? { health: options.health } : {}),
+    ...(options.selfCheck ? { selfCheck: options.selfCheck } : {}),
   })
   cleanup.push(() => void upgrades.close())
   const probeAll = async () => {
     for (const p of config.profiles) await upgrades.options.probe(p.id)
   }
-  return { upgrades, events, gate, fetches, probes, config, probeAll }
+  return {
+    upgrades,
+    events,
+    gate,
+    fetches,
+    probes,
+    config,
+    probeAll,
+    registry,
+    environment,
+  }
 }
 
 const both = [
@@ -525,5 +564,370 @@ describe('no new delegations during an upgrade', () => {
       () => expect(f.service.activeRuns('codex')).toBe(0),
       LOADED,
     )
+  })
+})
+
+describe('退回 (VER-03)', () => {
+  /** 2.1.281 ran a task; the installed 2.1.308 failed twice for its version. */
+  function broken(m: ReturnType<typeof machine>) {
+    const health = new ExecutorHealthStore(join(m.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    for (const runId of ['dgr-bad-1', 'dgr-bad-2'])
+      health.recordFailure('claude-default', '2.1.308', {
+        code: 'EXECUTOR_INCOMPATIBLE',
+        reason: 'Claude Code 2.1.308 的内置插件关闭后仍在加载',
+        runId,
+      })
+    return health
+  }
+  const healthFile = (m: ReturnType<typeof machine>) =>
+    JSON.parse(
+      readFileSync(join(m.root, 'delegations', EXECUTOR_HEALTH_FILE), 'utf8'),
+    )
+
+  it('3 · 6 · the row offers the last good version; 退回 runs that prefix’s npm, probes again and remembers the version it left', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const s = service(m, { health: broken(m) })
+    await s.probeAll()
+    const before = await s.upgrades.versions({ refresh: true })
+    const claude = before.executors.find((e) => e.backend === 'claude-code')!
+    expect(claude).toMatchObject({
+      installed: '2.1.308',
+      target: null,
+      rollback: {
+        target: '2.1.281',
+        because: '2.1.308 上有 2 次任务因版本不兼容失败',
+        oneClick: true,
+        command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+      },
+    })
+    expect(claude.rollback).not.toHaveProperty('manual')
+    // Codex has no history: nothing to go back to.
+    expect(
+      before.executors.find((e) => e.backend === 'codex'),
+    ).not.toHaveProperty('rollback')
+    // Not an upgrade: no notice, nothing to dismiss.
+    expect(before.dismissed).toBe(false)
+
+    const { upgrade } = await s.upgrades.rollback({
+      profileId: 'claude-default',
+      target: '2.1.281',
+    })
+    expect(upgrade).toMatchObject({
+      kind: 'rollback',
+      backend: 'claude-code',
+      from: '2.1.308',
+      target: '2.1.281',
+      command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    })
+    const done = await settled(s.events, 'claude-default')
+    expect(done).toMatchObject({
+      kind: 'rollback',
+      state: 'succeeded',
+      installed: '2.1.281',
+    })
+    expect(done.log[0]).toBe(
+      '$ npm install -g @anthropic-ai/claude-code@2.1.281',
+    )
+    expect(
+      readFileSync(join(m.root, 'npm-calls'), 'utf8').trim().split('\n'),
+    ).toEqual(['install -g @anthropic-ai/claude-code@2.1.281'])
+    expect(s.probes.get('claude-default')?.executableVersion).toBe('2.1.281')
+    expect(
+      healthFile(m).profiles['claude-default'].versions['2.1.308']
+        .rolledBackFrom,
+    ).toEqual(expect.any(Number))
+    // Back on the last good version: no rollback, and 2.1.308 is not
+    // offered again as an upgrade.
+    const after = (await s.upgrades.versions()).executors.find(
+      (e) => e.backend === 'claude-code',
+    )!
+    expect(after).toMatchObject({ installed: '2.1.281', target: null })
+    expect(after).not.toHaveProperty('rollback')
+    expect(s.gate.refused('claude-code')).toBeUndefined()
+  })
+
+  it('5 · only the version offered: another target, or none offered, is refused before anything runs', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const s = service(m, { health: broken(m) })
+    await s.probeAll()
+    for (const target of ['2.1.300', '2.1.308'])
+      await expect(
+        s.upgrades.rollback({ profileId: 'claude-default', target }),
+      ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+    await expect(
+      s.upgrades.rollback({ profileId: 'codex-default', target: '0.153.0' }),
+    ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+    await expect(
+      s.upgrades.rollback({ profileId: 'nobody', target: '2.1.281' }),
+    ).rejects.toMatchObject({ code: 'EXECUTOR_NOT_FOUND' })
+    // Without any history there is never a rollback.
+    const fresh = service(
+      machine({ 'claude-code': '2.1.308', codex: '0.153.4' }),
+    )
+    await fresh.probeAll()
+    await expect(
+      fresh.upgrades.rollback({
+        profileId: 'claude-default',
+        target: '2.1.281',
+      }),
+    ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+    expect(existsSync(join(m.root, 'npm-calls'))).toBe(false)
+    expect(s.gate.refused('claude-code')).toBeUndefined()
+  })
+
+  it('7 · after a rollback 升级 skips the version it left, and offers the next newer one', async () => {
+    const m = machine()
+    const health = new ExecutorHealthStore(join(m.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    health.markRolledBack('claude-default', '2.1.308')
+    const same = service(m, { health })
+    await same.probeAll()
+    expect(
+      (await same.upgrades.versions({ refresh: true })).executors.find(
+        (e) => e.backend === 'claude-code',
+      ),
+    ).toMatchObject({ installed: '2.1.281', latest: '2.1.308', target: null })
+    const newer = service(m, { health, claudeLatest: '2.1.312' })
+    await newer.probeAll()
+    expect(
+      (await newer.upgrades.versions({ refresh: true })).executors.find(
+        (e) => e.backend === 'claude-code',
+      ),
+    ).toMatchObject({
+      // VER-04: the highest verified one; 2.1.312 is not verified yet.
+      installed: '2.1.281',
+      target: '2.1.310',
+      unverified: '2.1.312',
+      upgrade: {
+        oneClick: true,
+        command: 'npm install -g @anthropic-ai/claude-code@2.1.310',
+      },
+    })
+  })
+
+  it('8 · Homebrew: no one click, the npm command to copy instead', async () => {
+    const m = machine()
+    const brew = join(m.root, 'opt-homebrew')
+    fakeClaude(join(brew, 'Caskroom/claude-code/2.1.308'), {
+      version: '2.1.308',
+    })
+    mkdirSync(join(brew, 'bin'), { recursive: true })
+    symlinkSync(
+      '../Caskroom/claude-code/2.1.308/claude',
+      join(brew, 'bin/claude'),
+    )
+    const s = service(m, { health: broken(m), path: join(brew, 'bin') })
+    await s.probeAll()
+    const claude = (
+      await s.upgrades.versions({ refresh: true })
+    ).executors.find((e) => e.backend === 'claude-code')!
+    expect(claude).toMatchObject({
+      installed: '2.1.308',
+      install: { kind: 'homebrew' },
+      rollback: {
+        target: '2.1.281',
+        oneClick: false,
+        manual: 'homebrew',
+        command: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+      },
+    })
+    await expect(
+      s.upgrades.rollback({ profileId: 'claude-default', target: '2.1.281' }),
+    ).rejects.toMatchObject({ code: 'EXECUTOR_ROLLBACK_UNAVAILABLE' })
+    expect(existsSync(join(m.root, 'npm-calls'))).toBe(false)
+  })
+
+  it('waits for running subtasks and takes no new ones meanwhile; 取消 leaves the version as it was', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const s = service(m, { health: broken(m), activeRuns: () => 1 })
+    await s.probeAll()
+    const { upgrade } = await s.upgrades.rollback({
+      profileId: 'claude-default',
+      target: '2.1.281',
+    })
+    expect(upgrade).toMatchObject({
+      kind: 'rollback',
+      state: 'waiting',
+      waitingFor: 1,
+    })
+    expect(s.gate.refused('claude-code')).toMatch(/upgrad/i)
+    // A second click (either button) joins the one going.
+    expect(
+      (
+        await s.upgrades.upgrade({
+          profileId: 'claude-default',
+          target: '2.1.308',
+        })
+      ).upgrade.startedAt,
+    ).toBe(upgrade.startedAt)
+    expect(
+      (await s.upgrades.cancel({ profileId: 'claude-default' })).upgrade?.state,
+    ).toBe('cancelled')
+    expect(existsSync(join(m.root, 'npm-calls'))).toBe(false)
+    expect(s.gate.refused('claude-code')).toBeUndefined()
+    expect(
+      healthFile(m).profiles['claude-default'].versions['2.1.308'],
+    ).not.toHaveProperty('rolledBackFrom')
+  })
+
+  it('changed() pushes the versions, so a new version failure shows 退回 at once', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const health = new ExecutorHealthStore(join(m.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    const s = service(m, { health })
+    await s.probeAll()
+    health.recordFailure('claude-default', '2.1.308', {
+      code: 'EXECUTOR_INCOMPATIBLE',
+      reason: 'x',
+      runId: 'dgr-bad',
+    })
+    s.upgrades.changed()
+    await vi.waitFor(() => {
+      const pushed = s.events.filter((e) => e.versions).at(-1)?.versions as
+        | { executors: Array<{ backend: string; rollback?: unknown }> }
+        | undefined
+      expect(
+        pushed?.executors.find((e) => e.backend === 'claude-code')?.rollback,
+      ).toMatchObject({ target: '2.1.281' })
+    }, LOADED)
+  })
+
+  it('a rollback that fails leaves the version unmarked and gives the command', async () => {
+    const m = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    m.mode('eacces')
+    const s = service(m, { health: broken(m) })
+    await s.probeAll()
+    await s.upgrades.rollback({
+      profileId: 'claude-default',
+      target: '2.1.281',
+    })
+    expect(await settled(s.events, 'claude-default')).toMatchObject({
+      kind: 'rollback',
+      state: 'failed',
+      reason: 'permission',
+      manualCommand: 'npm install -g @anthropic-ai/claude-code@2.1.281',
+    })
+    expect(
+      healthFile(m).profiles['claude-default'].versions['2.1.308'],
+    ).not.toHaveProperty('rolledBackFrom')
+    // Still offered: the user may fix the folder and try again.
+    expect(
+      (await s.upgrades.versions()).executors.find(
+        (e) => e.backend === 'claude-code',
+      )?.rollback?.target,
+    ).toBe('2.1.281')
+  })
+})
+
+describe('self-check (VER-04)', () => {
+  it('8 · after an upgrade it checks the new version offline and keeps the result; the row shows it', async () => {
+    const m = machine()
+    const root = join(m.root, 'delegations')
+    const health = new ExecutorHealthStore(root)
+    const sdk = fakeClaudeSdk({
+      version: '2.1.308',
+      plugins: [
+        {
+          name: 'cc-plugin-plugin-authoring',
+          path: 'builtin',
+          source: 'cc-plugin-plugin-authoring@builtin',
+        },
+      ],
+    })
+    const reasons: string[] = []
+    const box: { check?: ExecutorSelfCheck } = {}
+    const s = service(m, {
+      health,
+      selfCheck: {
+        after: (profile, reason) => {
+          reasons.push(reason)
+          box.check!.background(profile, reason)
+        },
+        running: (profileId) => box.check!.running(profileId),
+      },
+    })
+    const check = new ExecutorSelfCheck({
+      root,
+      registry: s.registry,
+      environment: () => s.environment,
+      health,
+      ledger: new BuiltinPluginLedger(join(root, 'claude-code')),
+      claudeStartup: sdk.startup,
+      changed: () => s.upgrades.changed(),
+    })
+    box.check = check
+    cleanup.push(() => void check.close())
+    await s.probeAll()
+    await s.upgrades.versions({ refresh: true })
+    await s.upgrades.upgrade({ profileId: 'claude-default', target: '2.1.308' })
+    expect(await settled(s.events, 'claude-default')).toMatchObject({
+      state: 'succeeded',
+    })
+    expect(reasons).toEqual(['upgrade'])
+    await check.idle()
+    expect(health.selfCheckOf('claude-default', '2.1.308')).toMatchObject({
+      status: 'adapted',
+      adapted: {
+        builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+      },
+      modelCalls: 0,
+    })
+    expect(sdk.modelCalls).toBe(0)
+    const row = (await s.upgrades.versions()).executors.find(
+      (e) => e.backend === 'claude-code',
+    )!
+    expect(row).toMatchObject({
+      installed: '2.1.308',
+      verified: ['2.1.281', '2.1.308', '2.1.310'],
+      selfChecking: false,
+      selfCheck: { status: 'adapted', version: '2.1.308' },
+    })
+  })
+
+  it('a failed upgrade checks nothing; a rollback checks the version it went back to', async () => {
+    const m = machine()
+    m.mode('eacces')
+    const reasons: string[] = []
+    const s = service(m, {
+      selfCheck: {
+        after: (_profile, reason) => reasons.push(reason),
+        running: () => false,
+      },
+    })
+    await s.probeAll()
+    await s.upgrades.versions({ refresh: true })
+    await s.upgrades.upgrade({ profileId: 'claude-default', target: '2.1.308' })
+    await settled(s.events, 'claude-default')
+    expect(reasons).toEqual([])
+    const back = machine({ 'claude-code': '2.1.308', codex: '0.153.4' })
+    const health = new ExecutorHealthStore(join(back.root, 'delegations'))
+    health.recordSuccess('claude-default', '2.1.281', 'dgr-good')
+    health.recordFailure('claude-default', '2.1.308', {
+      code: 'EXECUTOR_INCOMPATIBLE',
+      reason: 'x',
+      runId: 'dgr-bad',
+    })
+    const r = service(back, {
+      health,
+      selfCheck: {
+        after: (_profile, reason) => reasons.push(reason),
+        running: () => true,
+      },
+    })
+    await r.probeAll()
+    const row = (await r.upgrades.versions()).executors.find(
+      (e) => e.backend === 'claude-code',
+    )!
+    expect(row.selfChecking).toBe(true)
+    expect(row.selfCheck).toBeNull()
+    await r.upgrades.rollback({
+      profileId: 'claude-default',
+      target: '2.1.281',
+    })
+    expect(await settled(r.events, 'claude-default')).toMatchObject({
+      state: 'succeeded',
+    })
+    expect(reasons).toEqual(['rollback'])
   })
 })

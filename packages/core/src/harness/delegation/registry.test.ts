@@ -243,6 +243,7 @@ describe('compatibility handshake (AGT-01)', () => {
       executableVersion: '0.153.4',
       compatibility: 'verified',
       protocolVersion: '0.153.4',
+      protocolCheck: 'matched',
     })
     expect(probe.diagnostic).toBeUndefined()
   })
@@ -262,11 +263,25 @@ describe('compatibility handshake (AGT-01)', () => {
       executableVersion: '0.153.9',
       compatibility: 'unverified',
       protocolVersion: '0.153.4',
+      // VER-04: the schema differs (the self-check refuses this one).
+      protocolCheck: 'differs',
     })
     expect(probe.diagnostic).toMatch(/may be incompatible/i)
     await expect(
       registry.requireAvailable(codexProfile(codex)),
     ).resolves.toMatchObject({ compatibility: 'unverified' })
+  })
+  it('VER-04 · a schema it cannot generate is told apart from one that differs', async () => {
+    const root = tempRoot()
+    const codex = versionScript(root, 'codex-broken', 'codex-cli 0.163.0')
+    const probe = await new ExecutorRegistry({ home: root }).probe(
+      codexProfile(codex),
+    )
+    expect(probe).toMatchObject({
+      status: 'available',
+      compatibility: 'unverified',
+      protocolCheck: 'unreadable',
+    })
   })
   it('6. refuses a Codex of another minor and names the supported range', async () => {
     const root = tempRoot()

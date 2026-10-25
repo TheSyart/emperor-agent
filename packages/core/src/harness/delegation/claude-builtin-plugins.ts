@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { durableReplaceSync } from '../../store/persistence'
 import { logger } from '../../util/log'
 import { describeUnapprovedExtensions } from './failure'
-import { DelegationError } from './types'
+import { DelegationError, ExecutorRefusal } from './types'
 
 const log = logger.child({ component: 'executors' })
 
@@ -30,6 +30,9 @@ export const SEED_BUILTIN_PLUGINS = [
   'telemetry@builtin',
   // Since 2.1.308 (VER-01).
   'cc-plugin-plugin-authoring@builtin',
+  // Also since 2.1.308; `agents-md@builtin: false` happens to turn it off
+  // too, but it is named here in its own right (VER-04, seen raw).
+  'cc-plugin-agents-md@builtin',
 ] as const
 
 /** A plugin as reloadPlugins() or system/init reports it. */
@@ -89,15 +92,22 @@ function valid(value: unknown): value is BuiltinPluginLedgerFile {
  * The builtins Emperor turns off. Without a folder (tests, tools) it keeps
  * what it learns in memory. A damaged file is left as it is: the seed
  * still applies, what this process learns is used but never written.
+ * `seed: false` (the self-check, `claude-init-handshake.mjs --raw`, VER-04)
+ * starts with nothing off, to see what a release ships.
  */
 export class BuiltinPluginLedger {
   readonly file: string | undefined
   private plugins: BuiltinPluginLedgerFile['plugins'] = {}
   private damagedFile = false
   private readonly now: () => number
-  constructor(root?: string, options: { now?: () => number } = {}) {
+  private readonly seed: readonly string[]
+  constructor(
+    root?: string,
+    options: { now?: () => number; seed?: boolean } = {},
+  ) {
     this.file = root ? join(root, BUILTIN_PLUGIN_LEDGER_FILE) : undefined
     this.now = options.now ?? Date.now
+    this.seed = options.seed === false ? [] : SEED_BUILTIN_PLUGINS
     this.plugins = this.read()
   }
   /** The file could not be read: only the seed and this process's own. */
@@ -122,9 +132,11 @@ export class BuiltinPluginLedger {
   }
   /** The seed and every builtin learned, sorted. */
   disabled(): string[] {
-    return [
-      ...new Set([...SEED_BUILTIN_PLUGINS, ...Object.keys(this.plugins)]),
-    ].sort()
+    return [...new Set([...this.seed, ...Object.keys(this.plugins)])].sort()
+  }
+  /** The Claude Code release a learned builtin first came with. */
+  firstSeen(source: string): string | undefined {
+    return this.read()[source]?.firstSeenVersion
   }
   /**
    * Remembers the builtins among `plugins` (anything else is ignored) and
@@ -220,8 +232,11 @@ function within<T>(run: () => Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer))
 }
 
-function refused(reason: string): DelegationError {
-  return new DelegationError('EXECUTOR_INCOMPATIBLE', reason, reason)
+function refused(
+  issue: ExecutorRefusal['issue'],
+  reason: string,
+): DelegationError {
+  return new ExecutorRefusal(issue, reason)
 }
 
 /**
@@ -249,9 +264,13 @@ export async function preflightClaudePlugins(
   ): { plugins: ReportedPlugin[]; servers: string[] } => {
     const servers = (answer.mcpServers ?? []).map((s) => String(s.name))
     if (servers.length)
-      throw refused(describeUnapprovedExtensions({ kind: 'mcp', servers }))
+      throw refused(
+        'mcp_server',
+        describeUnapprovedExtensions({ kind: 'mcp', servers }),
+      )
     if ((answer.error_count ?? 0) > 0)
       throw refused(
+        'unapproved_plugin',
         describeUnapprovedExtensions({
           kind: 'errors',
           claudeVersion,
@@ -265,6 +284,7 @@ export async function preflightClaudePlugins(
   const foreign = plugins.filter((p) => !isBuiltinPlugin(p))
   if (foreign.length)
     throw refused(
+      'unapproved_plugin',
       describeUnapprovedExtensions({
         kind: 'foreign',
         claudeVersion,
@@ -274,6 +294,7 @@ export async function preflightClaudePlugins(
   const disabled = plugins.map((p) => p.source!)
   const stuck = (still: readonly string[]) =>
     refused(
+      'builtin_not_disabled',
       describeUnapprovedExtensions({
         kind: 'stuck',
         claudeVersion,

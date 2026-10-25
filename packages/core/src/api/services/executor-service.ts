@@ -26,6 +26,8 @@ import type {
   ClaudeLoginOutcome,
 } from '../../harness/delegation/claude-sign-in'
 import type { ExecutorUpgradeService } from '../../harness/delegation/upgrade-service'
+import type { ExecutorHealthStore } from '../../harness/delegation/executor-health'
+import type { ExecutorSelfCheck } from '../../harness/delegation/self-check'
 import { logger } from '../../util/log'
 
 const log = logger.child({ component: 'executors' })
@@ -76,14 +78,20 @@ export class CoreExecutorService {
       }) => void
       /** 版本 and 升级 (AGT-13). */
       upgrades?: ExecutorUpgradeService
+      /** The version each probe found (VER-04: a new one is self-checked). */
+      health?: Pick<ExecutorHealthStore, 'noteVersion'>
+      /** The offline self-check (VER-04): 重新检查, and after a change. */
+      selfCheck?: Pick<ExecutorSelfCheck, 'run' | 'background' | 'close'>
     },
   ) {}
   async close() {
     // A sign-in still waiting for the browser ends with Emperor.
     await this.signInStarting?.catch(() => undefined)
     await this.signInRun?.login.cancel()
-    // So does an upgrade command (its whole process group).
+    // So does an upgrade command (its whole process group), and a
+    // self-check.
     await this.options.upgrades?.close()
+    await this.options.selfCheck?.close()
     return this.options.modelCatalog.close()
   }
   private upgradesOf(): ExecutorUpgradeService {
@@ -107,6 +115,28 @@ export class CoreExecutorService {
   upgrade(input: { profileId: string; target: string }, _view: ViewScope) {
     this.profile(input.profileId)
     return this.upgradesOf().upgrade(input)
+  }
+  /**
+   * 退回 after the confirmation (VER-03): `target` must be the version
+   * offered, the last good one; it runs and reports like 升级.
+   */
+  rollback(input: { profileId: string; target: string }, _view: ViewScope) {
+    this.profile(input.profileId)
+    return this.upgradesOf().rollback(input)
+  }
+  /**
+   * 重新检查 (VER-04): the offline self-check of the installed version, now;
+   * the versions carry the result too.
+   */
+  async selfCheck(input: { profileId: string }, _view: ViewScope) {
+    const profile = this.profile(input.profileId)
+    const check = this.options.selfCheck
+    if (!check)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'this Emperor does not self-check executors',
+      )
+    return { selfCheck: await check.run(profile, 'manual') }
   }
   cancelUpgrade(input: { profileId: string }, _view: ViewScope) {
     return this.upgradesOf().cancel(input)
@@ -167,6 +197,14 @@ export class CoreExecutorService {
     const check = this.options.checkAuth
     if (check) value = (await checkSignIn(value, () => check(profile))).probe
     this.options.facts.setProbe(profile, value)
+    // Another version than last time: checked offline in the background
+    // (VER-04; at most once in 30 s).
+    const version = value.executableVersion
+    if (
+      version &&
+      this.options.health?.noteVersion(profile.id, version).changed
+    )
+      this.options.selfCheck?.background(profile, 'version_changed')
     return value
   }
   private claudeProfile(profileId: string): ExecutorProfile {

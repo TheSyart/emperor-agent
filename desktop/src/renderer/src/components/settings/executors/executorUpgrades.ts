@@ -5,7 +5,8 @@
  * minute), kept current by Core's `executor_upgrade` events (an upgrade
  * as it goes, or the versions after a check). The confirmation dialog's state lives here
  * too, so the main page and the detail pages share it. Loaded with the
- * settings, never at startup.
+ * settings, never at startup. 退回 (VER-03) to the last good version runs
+ * through the same events, after its own confirmation.
  */
 import { computed, ref } from 'vue'
 import type {
@@ -17,12 +18,14 @@ import type {
 import { onCoreEvent } from '../../../api/backend'
 import { core } from '../../../api/http'
 import { pushToast } from '../../ui/toasts'
-import { attentionNeeded, executorTitle } from './upgradeText'
+import { attentionNeeded, executorTitle, runVerb } from './upgradeText'
 
 const versions = ref<ExecutorVersionsView | null>(null)
 const error = ref('')
 /** The profiles the confirmation is open for (null: closed). */
 const asking = ref<string[] | null>(null)
+/** The profile 退回's confirmation is open for (null: closed). */
+const askingRollback = ref<string | null>(null)
 /** Runs this window saw going: their success gets a toast once. */
 const watched = new Set<string>()
 const probeListeners = new Set<
@@ -47,7 +50,7 @@ function adoptRun(run: ExecutorUpgradeView) {
   if (run.state === 'waiting' || run.state === 'running') watched.add(key(run))
   else if (watched.delete(key(run)) && run.state === 'succeeded')
     pushToast(
-      `${executorTitle(run.backend)} 已升级到 ${run.installed ?? run.target}`,
+      `${executorTitle(run.backend)} 已${runVerb(run)}到 ${run.installed ?? run.target}`,
       {
         tone: 'ok',
       },
@@ -122,14 +125,43 @@ async function upgrade(profileIds: readonly string[]): Promise<void> {
   }
 }
 
+/** 退回 after its confirmation: to the version offered, the last good one. */
+async function rollback(profileId: string): Promise<void> {
+  askingRollback.value = null
+  const target = versionOf(profileId)?.rollback?.target
+  if (!target) return
+  try {
+    const { upgrade: run } = await core('executors.rollback', {
+      profileId,
+      target,
+    })
+    adoptRun(run)
+    error.value = ''
+  } catch (cause) {
+    error.value = `没有开始退回：${message(cause)}`
+  }
+}
+
+/** 重新检查 (VER-04): the offline self-check now, then the versions again. */
+async function selfCheck(profileId: string): Promise<void> {
+  try {
+    await core('executors.selfCheck', { profileId })
+    error.value = ''
+  } catch (cause) {
+    error.value = `自检没有完成：${message(cause)}`
+  }
+  await load()
+}
+
 async function cancel(profileId: string): Promise<void> {
+  const verb = runVerb(runOf(profileId))
   try {
     const { upgrade: run } = await core('executors.cancelUpgrade', {
       profileId,
     })
     if (run) adoptRun(run)
   } catch (cause) {
-    error.value = `取消升级失败：${message(cause)}`
+    error.value = `取消${verb}失败：${message(cause)}`
   }
 }
 
@@ -157,16 +189,22 @@ export function useExecutorUpgrades() {
     versions,
     error,
     asking,
+    askingRollback,
     attention,
     load,
     versionOf,
     runOf,
     upgrade,
+    rollback,
+    selfCheck,
     cancel,
     dismiss,
     onProbe,
     ask: (profileIds: string[]) => {
       asking.value = profileIds
+    },
+    askRollback: (profileId: string) => {
+      askingRollback.value = profileId
     },
   }
 }
@@ -178,6 +216,7 @@ export function resetExecutorUpgrades(): void {
   versions.value = null
   error.value = ''
   asking.value = null
+  askingRollback.value = null
   watched.clear()
   probeListeners.clear()
 }

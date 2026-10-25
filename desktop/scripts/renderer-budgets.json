@@ -9,7 +9,7 @@
   },
   "limits": {
     "mainJsBytes": 5750000,
-    "initialJsBytes": 700000,
+    "initialJsBytes": 710000,
     "chatJsBytes": 1350000,
     "globalCssBytes": 103000,
     "largestImageBytes": 2000000

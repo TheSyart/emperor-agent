@@ -16,6 +16,30 @@ export function formatClock(time: number, now = Date.now()): string {
 }
 
 /**
+ * A web source's 发布时间 (BUG-08): `10月16日` this year, `2025年3月2日`
+ * before, with the local time when it is not midnight. A plain date stays
+ * that date; text that is not an ISO date (「3 days ago」) stays as it is.
+ */
+export function formatPublishedDate(raw: string, now = Date.now()): string {
+  const text = raw.trim()
+  if (!text) return ''
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(text)
+  let date: Date
+  if (plain) date = new Date(+plain[1]!, +plain[2]! - 1, +plain[3]!)
+  else if (/^\d{4}-\d{2}-\d{2}T/u.test(text)) date = new Date(Date.parse(text))
+  else return text
+  if (Number.isNaN(date.getTime())) return text
+  const day =
+    date.getFullYear() === new Date(now).getFullYear()
+      ? `${date.getMonth() + 1}月${date.getDate()}日`
+      : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
+  const midnight = date.getHours() === 0 && date.getMinutes() === 0
+  return plain || midnight
+    ? day
+    : `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/**
  * Run duration as read in the flow (「用时」 of the process line and the turn
  * tail): `8 秒`, `1 分 12 秒`, `1 分`, `1 小时 2 分`.
  */

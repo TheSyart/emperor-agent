@@ -245,6 +245,10 @@ describe('readability of the semantic palette (DS-01 tests 4 and 8)', () => {
       expect(
         contrast(theme, '--text-link', '--surface-base'),
       ).toBeGreaterThanOrEqual(4.5)
+      // Settings nav group labels (BUG-04): muted gold on the window canvas.
+      expect(
+        contrast(theme, '--text-accent-muted', '--surface-canvas'),
+      ).toBeGreaterThanOrEqual(4.5)
     },
   )
 

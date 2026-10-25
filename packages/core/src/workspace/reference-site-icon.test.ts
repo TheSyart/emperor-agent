@@ -59,7 +59,7 @@ function fixture(
     }),
   })
   const reference = (
-    href = 'https://icons.example/article?secret=do-not-send',
+    href = 'https://icons.example.com/article?secret=do-not-send',
     sessionId = 's1',
   ) => {
     const ref = service.resolve({
@@ -80,14 +80,14 @@ function fixture(
   }
 }
 describe('reference website icons', () => {
-  it('loads a real icon without reading the article or fetching metadata/thumbnail', async () => {
+  it('asks only the icon service, by hostname, and never the site itself (BUG-01)', async () => {
     const f = fixture(() => ({ body: PNG }))
     expect(await f.service.siteIcon(f.reference())).toMatchObject({
       state: 'ready',
       dataUrl: `data:image/png;base64,${PNG.toString('base64')}`,
     })
     expect(f.calls.map((c) => c.url.toString())).toEqual([
-      'https://icons.example/favicon.ico',
+      'https://icons.duckduckgo.com/ip3/icons.example.com.ico',
     ])
     expect(f.calls[0]!.headers).not.toHaveProperty('cookie')
   })
@@ -98,7 +98,7 @@ describe('reference website icons', () => {
     })
     const results = await Promise.all([
       f.service.siteIcon(f.reference()),
-      f.service.siteIcon(f.reference('https://icons.example/other')),
+      f.service.siteIcon(f.reference('https://icons.example.com/other')),
     ])
     expect(results[0]).toMatchObject({
       state: 'ready',
@@ -107,26 +107,7 @@ describe('reference website icons', () => {
     expect(results[1]).toEqual(results[0])
     expect(f.calls).toHaveLength(1)
   })
-  it('discovers a nonstandard homepage icon after conventional paths fail', async () => {
-    const f = fixture((r) =>
-      r.url.pathname === '/'
-        ? {
-            body: '<link rel="icon" href="/brand.png"><meta property="og:image" content="/large.jpg">',
-            type: 'text/html',
-          }
-        : r.url.pathname === '/brand.png'
-          ? { body: PNG }
-          : { body: '', status: 404 },
-    )
-    expect(await f.service.siteIcon(f.reference())).toMatchObject({
-      state: 'ready',
-    })
-    expect(f.calls.some((c) => c.url.pathname === '/brand.png')).toBe(true)
-    expect(
-      f.calls.some((c) => /article|large.jpg/.test(c.url.toString())),
-    ).toBe(false)
-  })
-  it('uses only a public hostname for the icon-provider fallback, never the URL path or query', async () => {
+  it('sends the icon service only the public hostname, never the URL path or query', async () => {
     const f = fixture((r) =>
       r.url.hostname === 'icons.duckduckgo.com'
         ? { body: PNG }
@@ -135,9 +116,9 @@ describe('reference website icons', () => {
     expect(await f.service.siteIcon(f.reference())).toMatchObject({
       state: 'ready',
     })
-    expect(f.calls.at(-1)!.url.toString()).toBe(
-      'https://icons.duckduckgo.com/ip3/icons.example.ico',
-    )
+    expect(
+      f.calls.every((c) => c.url.hostname === 'icons.duckduckgo.com'),
+    ).toBe(true)
     expect(f.calls.every((c) => !c.url.toString().includes('secret'))).toBe(
       true,
     )
@@ -167,12 +148,29 @@ describe('reference website icons', () => {
       await f.service.siteIcon({ ...ref, sessionId: 'foreign' }),
     ).toMatchObject({ state: 'unavailable' })
   })
-  it('blocks private addresses before transport or provider fallback', async () => {
+  it('tells the icon service no private, local or non-default-port host', async () => {
     const f = fixture(() => ({ body: PNG }))
-    expect(
-      await f.service.siteIcon(f.reference('https://private.test')),
-    ).toMatchObject({ state: 'unavailable' })
+    for (const href of [
+      'https://private.test',
+      'https://jira.corp/browse/X-1',
+      'https://nas.local/share',
+      'https://build.internal:8443/',
+      'https://intranet/',
+      'https://192.168.1.20/admin',
+      'https://[::1]/',
+      'https://docs.example.com:8443/a',
+    ])
+      expect(await f.service.siteIcon(f.reference(href))).toMatchObject({
+        state: 'unavailable',
+      })
     expect(f.calls).toHaveLength(0)
+  })
+  it('shows no icon when the icon service has none', async () => {
+    const f = fixture(() => ({ body: '', status: 404 }))
+    expect(await f.service.siteIcon(f.reference())).toMatchObject({
+      state: 'unavailable',
+    })
+    expect(f.calls).toHaveLength(1)
   })
   it('rejects malformed, oversized and non-raster image payloads', async () => {
     for (const [body, type] of [
@@ -197,7 +195,7 @@ describe('reference website icons', () => {
       return { body: '', status: 404 }
     })
     const refs = Array.from({ length: 7 }, (_, i) =>
-      f.reference(`https://site${i}.example`),
+      f.reference(`https://site${i}.example.com`),
     )
     await Promise.all(refs.map((ref) => f.service.siteIcon(ref)))
     expect(peak).toBeLessThanOrEqual(4)

@@ -3,19 +3,18 @@
  * ChildComposer — the composer seat of a subagent's conversation (AGT-10):
  * 「给子智能体发消息」 goes to the child itself (a local subagent's next
  * turn, or Claude Code / Codex: straight in while it runs when it can be
- * steered, else after its turn); 停止 while it runs; below, the way back
- * to the parent and to the main conversation.
+ * steered, else after its turn); 停止 while it runs; below, the parent's
+ * name. The way back is the page header (BUG-03), not links here.
  *
  * Props: parentTitle?, running?, stopping?, sending?, steer? (a running
  * child takes the message now), error? (the last send failed), closed?
  * (why it takes no message — it ended, the main conversation is archived),
- * canStop, canBack, canRoot (hide what has nowhere to go).
+ * canStop (hide 停止 when there is nothing to stop).
  * Emits: send(text) — the parent clears the draft by calling `clear()`
- * once Core accepted it — stop, back, root.
+ * once Core accepted it — and stop.
  */
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
-import LinkButton from '../ui/LinkButton.vue'
 import TextArea from '../ui/TextArea.vue'
 
 const props = withDefaults(
@@ -28,8 +27,6 @@ const props = withDefaults(
     error?: string
     closed?: string
     canStop?: boolean
-    canBack?: boolean
-    canRoot?: boolean
   }>(),
   {
     parentTitle: undefined,
@@ -40,15 +37,11 @@ const props = withDefaults(
     error: undefined,
     closed: undefined,
     canStop: true,
-    canBack: true,
-    canRoot: true,
   },
 )
 const emit = defineEmits<{
   send: [text: string]
   stop: []
-  back: []
-  root: []
 }>()
 
 const draft = ref('')
@@ -121,12 +114,6 @@ defineExpose({
     <div class="links">
       <span v-if="parentTitle" class="parent"
         >父智能体：<strong>{{ parentTitle }}</strong></span
-      >
-      <LinkButton v-if="canBack" data-child-back @click="emit('back')"
-        >返回父智能体</LinkButton
-      >
-      <LinkButton v-if="canRoot" data-child-root @click="emit('root')"
-        >返回主会话</LinkButton
       >
     </div>
   </div>

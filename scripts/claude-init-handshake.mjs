@@ -2,7 +2,7 @@
 // Checks a Claude Code CLI against Emperor's real adapter, offline (VER-01).
 //
 //   node scripts/claude-init-handshake.mjs --claude <path> [--out <file>]
-//        [--golden <file>] [--expect-plugin <source>]...
+//        [--golden <file>] [--expect-plugin <source>]... [--raw]
 //
 // For a new Claude Code release, before it is listed as verified. Pass a
 // claude installed into a temporary prefix
@@ -39,6 +39,10 @@
 // prompt, and its initialize waits ~20 s for them to fail offline; none of
 // them reaches the Messages API (E5m). --golden writes the
 // scrubbed fixture (versions, plugin names and sources, MCP names only).
+// --raw (VER-04/05): nothing Emperor knows is turned off at launch (no
+// seed, no ledger), and E1 reports what the preflight first saw — the
+// plugins this release itself ships, to compare with the upstream
+// baseline. Without it, E1 shows what is left after Emperor's own list.
 // Exit 0 when every self-check passes, 1 when one fails, 2 on bad input.
 import { build } from 'esbuild'
 import { execFileSync, spawn as spawnChild } from 'node:child_process'
@@ -72,7 +76,7 @@ function usage(message) {
 const claudeArgument = argument('--claude')
 if (!claudeArgument)
   usage(
-    '用法：node scripts/claude-init-handshake.mjs --claude <装在临时 prefix 里的 claude> [--out <文件>] [--golden <文件>] [--expect-plugin <source>]',
+    '用法：node scripts/claude-init-handshake.mjs --claude <装在临时 prefix 里的 claude> [--out <文件>] [--golden <文件>] [--expect-plugin <source>] [--raw]',
   )
 if (!existsSync(resolve(claudeArgument)))
   usage(
@@ -98,6 +102,7 @@ const golden = argument('--golden')
 const expected = process.argv.flatMap((value, i) =>
   process.argv[i - 1] === '--expect-plugin' ? [value] : [],
 )
+const raw = process.argv.includes('--raw')
 
 const repo = resolve(import.meta.dirname, '..')
 const cache = join(repo, 'node_modules', '.cache', 'emperor-claude-handshake')
@@ -107,6 +112,7 @@ await build({
   stdin: {
     contents: [
       'export { ClaudeExecutorAdapter } from "./packages/core/src/harness/delegation/adapters/claude"',
+      'export { BuiltinPluginLedger } from "./packages/core/src/harness/delegation/claude-builtin-plugins"',
       'export { ManagedAgentProcess } from "./packages/core/src/harness/delegation/process"',
       'export { defaultExecutorConfig } from "./packages/core/src/harness/delegation/config"',
       'export { CLAUDE_SDK_VERSION } from "./packages/core/src/harness/delegation/compatibility"',
@@ -386,6 +392,13 @@ function recording(query, run) {
         return iterator[property].bind(iterator)
       if (property === 'initializationResult')
         return async () => (run.init = await target.initializationResult())
+      // Every answer, in order: the first is what the preflight saw.
+      if (property === 'reloadPlugins')
+        return async () => {
+          const answer = await target.reloadPlugins()
+          ;(run.reloads ??= []).push(answer)
+          return answer
+        }
       const value = Reflect.get(target, property, target)
       return typeof value === 'function' ? value.bind(target) : value
     },
@@ -411,6 +424,10 @@ async function open(
   current = run
   const adapter = new core.ClaudeExecutorAdapter({
     processes,
+    // --raw: no seed and no ledger, so the release's own plugins load.
+    ...(raw
+      ? { ledger: new core.BuiltinPluginLedger(undefined, { seed: false }) }
+      : {}),
     startup: async (options) => {
       mutate?.(options)
       run.options = options
@@ -498,6 +515,7 @@ const experiments = {}
 const report = {
   claudeVersion,
   sdkVersion: core.CLAUDE_SDK_VERSION,
+  raw,
   promptless: {
     hooksApplied: null,
     reload: null,
@@ -520,11 +538,11 @@ await step('E1', async () => {
       : null
   const started = Date.now()
   try {
-    const reloaded = await within(
-      first.query.reloadPlugins(),
-      10_000,
-      'reloadPlugins',
-    )
+    // --raw: the preflight's first answer, before it turned anything off.
+    const reloaded =
+      raw && first.reloads?.length
+        ? first.reloads[0]
+        : await within(first.query.reloadPlugins(), 10_000, 'reloadPlugins')
     report.promptless.reload = {
       supported: true,
       plugins: plugins(reloaded.plugins),
@@ -758,17 +776,36 @@ await sleep(2000)
 logger.kill('SIGTERM')
 closeSync(logFd)
 const denied = denials()
+/**
+ * A unix socket the CLI binds for itself (with its own plugins on, --raw:
+ * `/private/tmp/cc-socks/<pid>.sock`): denied by the profile, but local,
+ * never a connection off this Mac.
+ */
+const localSocket = (d) => /\bnetwork-bind \/\S+\.sock\b/.test(d.what)
 function attempts(run, from = 0, until = Infinity) {
   if (!run) return []
   return [
     ...run.proxy.log,
     ...denied.filter(
-      (d) => d.experiment === run.experiment && d.kind === 'net',
+      (d) =>
+        d.experiment === run.experiment && d.kind === 'net' && !localSocket(d),
     ),
   ]
     .filter((a) => a.at >= from && a.at < until)
     .sort((a, b) => a.at - b.at)
 }
+/** The local sockets a run tried to bind (reported, not counted). */
+const socketBinds = (run) =>
+  run
+    ? denied
+        .filter(
+          (d) =>
+            d.experiment === run.experiment &&
+            d.kind === 'net' &&
+            localSocket(d),
+        )
+        .map((d) => d.what)
+    : []
 const describe = (list, since) =>
   list.map((a) => ({
     ms: since ? a.at - since : undefined,
@@ -794,6 +831,7 @@ const promptlessAttempts = [
   ...attempts(first, 0, first?.promptAt ?? Infinity),
   ...attempts(seeded, 0, seeded?.promptAt ?? Infinity),
 ]
+const localSocketBinds = [...new Set([first, seeded].flatMap(socketBinds))]
 const modelRequest = (a) => a.method === 'POST' && /\/messages$/.test(a.path)
 if (modelPath) {
   const init = initOf(modelPath)
@@ -914,6 +952,7 @@ const userState = denied.filter((d) =>
 const fixture = {
   claudeVersion: report.claudeVersion,
   sdkVersion: report.sdkVersion,
+  ...(raw ? { raw: true } : {}),
   promptless: {
     hooksApplied: report.promptless.hooksApplied,
     reload: report.promptless.reload && {
@@ -1004,6 +1043,7 @@ const full = {
   network: {
     boundary: 'sandbox-exec: deny network*, allow only a local 403 proxy',
     logAvailable,
+    localSocketBinds,
   },
   ...report,
   experiments,

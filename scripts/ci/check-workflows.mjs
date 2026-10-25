@@ -9,6 +9,9 @@
 // - nightly.yml: on a schedule, never on pull requests or pushes; runs
 //   scripts/ci/nightly.mjs and, on failure, scripts/ci/open-failure-issue.mjs.
 // - weekly-model-metadata.yml: weekly; runs scripts/ci/weekly-model-metadata.mjs.
+// - weekly-executor-upstream.yml (VER-05), when present: weekly; runs
+//   scripts/ci/weekly-executor-upstream.mjs with issues: write and no secret
+//   beyond the run's own token.
 // - release-preview.yml, release.yml: refuse to build on a red nightly
 //   (scripts/ci/require-green-nightly.mjs).
 // - release.yml (REL-05): the unsigned Stable candidates are built with
@@ -31,6 +34,7 @@ const NON_MACOS_JOBS = {
 }
 const REQUIRED = ['ci.yml', 'nightly.yml', 'weekly-model-metadata.yml']
 const RELEASES = ['release-preview.yml', 'release.yml']
+const UPSTREAM = 'weekly-executor-upstream.yml'
 
 const isMacos = (runner) => /^macos-/.test(runner)
 const isIntel = (runner) => /^macos-.*-intel$|^macos-13$/.test(runner)
@@ -200,6 +204,37 @@ export function lintWorkflows(files, root = repoRoot) {
     )
       problems.push(
         'weekly-model-metadata.yml: needs contents: write and pull-requests: write to open its pull request',
+      )
+  }
+
+  const upstream = parsed.get(UPSTREAM)
+  if (upstream) {
+    const on = triggers(upstream)
+    const cron = Array.isArray(on.schedule)
+      ? on.schedule.map((entry) => String(entry?.cron ?? '')).filter(Boolean)
+      : []
+    if (!cron.some((value) => /^\S+ \S+ \* \* [0-7]$/.test(value)))
+      problems.push(`${UPSTREAM}: has no weekly schedule`)
+    const job = Object.values(upstream.jobs ?? {}).find((candidate) =>
+      runs(candidate).some((run) =>
+        run.includes('node scripts/ci/weekly-executor-upstream.mjs'),
+      ),
+    )
+    if (!job)
+      problems.push(
+        `${UPSTREAM}: no job runs scripts/ci/weekly-executor-upstream.mjs`,
+      )
+    else if (permission(upstream, job, 'issues') !== 'write')
+      problems.push(
+        `${UPSTREAM}: needs issues: write to open or update its issue`,
+      )
+    const text = files.find((file) => file.name === UPSTREAM)?.text ?? ''
+    const secrets = [...text.matchAll(/secrets\.(\w+)/g)]
+      .map((match) => match[1])
+      .filter((name) => name !== 'GITHUB_TOKEN')
+    if (secrets.length)
+      problems.push(
+        `${UPSTREAM}: uses secret ${[...new Set(secrets)].join(', ')}; it needs none beyond the run's own token`,
       )
   }
 
