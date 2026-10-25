@@ -1134,6 +1134,11 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :key="viewingId"
           :session-id="viewingId"
           :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
+          :provisional="
+            viewingId === ctx.sessionId.value
+              ? ctx.provisionalPrompts.value
+              : []
+          "
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
@@ -1232,7 +1237,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
           v-if="!takeoverOpen && !unknownSession"
-          :items="ctx.queuedPrompts.value"
+          :items="ctx.queueDockItems.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"

@@ -172,6 +172,8 @@ const runtime = useRuntime({
 })
 const {
   queuedPrompts,
+  provisionalPrompts,
+  queueDockItems,
   pendingInteractionsBySession,
   busy,
   status,
@@ -765,6 +767,8 @@ provideAppContext({
   configContent,
   mcpContent,
   queuedPrompts,
+  provisionalPrompts,
+  queueDockItems,
   pendingInteractionsBySession,
   busy,
   status,

@@ -171,6 +171,23 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+for (const theme of ['dark', 'light'] as const) {
+  test(`BUG-07 · 插入当前执行 shows the message in the chat at once (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/build-ui?visualQueue=on', { theme })
+    const dock = queueDock(page)
+    await expect(dock).toContainText('继续补充视觉验收细节')
+    await dock.getByRole('button', { name: '插入当前执行' }).click()
+    const bubble = page.locator('[data-provisional-prompt]')
+    await expect(bubble).toContainText('继续补充视觉验收细节')
+    await expect(bubble).toContainText('等这一步结束后加入')
+    // Shown once: in the chat, no longer in the queue dock.
+    await expect(queueDock(page)).toHaveCount(0)
+    await shot(page, `queue-interject-${theme}`)
+  })
+}
+
 test('6 · the queue dock discards a held message', async ({ page }) => {
   await open(page, '/chat/build-ui?visualQueue=held')
   await queueDock(page).getByRole('button', { name: '丢弃排队消息' }).click()

@@ -1,4 +1,4 @@
-import { reactive, ref, type Ref } from 'vue'
+import { computed, reactive, ref, type Ref } from 'vue'
 import { isRuntimeEventWire } from '@emperor/core/runtime-contract'
 import type {
   AttachmentRef,
@@ -7,6 +7,7 @@ import type {
   ControlInteraction,
   MessageReference,
   PendingState,
+  ProvisionalPrompt,
   QueuedPromptItem,
   RequestedSkill,
   RuntimeEventEnvelope,
@@ -142,6 +143,13 @@ export function useRuntime(options: {
   onNotify?: (notice: RuntimeNotice) => void
 }) {
   const queuedPrompts = ref<QueuedPromptItem[]>([])
+  /**
+   * Messages inserted into the running turn (插入当前执行, or a 插话 send)
+   * that its log has not shown yet (BUG-07). The host writes their user
+   * message when the next step starts; until then the chat shows them as
+   * provisional bubbles. Display only: nothing here reaches Core.
+   */
+  const interjections = ref<ProvisionalPrompt[]>([])
   /** Sends waiting for the host to take them, by client message id. */
   const admissions = new Map<string, (accepted: boolean) => void>()
   /**
@@ -160,6 +168,56 @@ export function useRuntime(options: {
   const busy = ref(false)
   const status = ref<RuntimeStatus>('connecting')
   const sessionId = ref<string>('')
+  const provisionalPrompts = computed<ProvisionalPrompt[]>(() => {
+    const own = interjections.value.filter(
+      (prompt) => prompt.sessionId === sessionId.value,
+    )
+    const shown = new Set(own.flatMap((p) => [p.id, p.clientMessageId]))
+    const sending = queuedPrompts.value
+      .filter(
+        (prompt) =>
+          prompt.status === 'interjecting' &&
+          !shown.has(prompt.id) &&
+          !shown.has(prompt.clientMessageId),
+      )
+      .map((prompt) => provisional(prompt, sessionId.value))
+    return [...own, ...sending].sort((a, b) => a.createdOrder - b.createdOrder)
+  })
+  /** The queue dock lists what waits for the turn; insertions show in the chat. */
+  const queueDockItems = computed(() =>
+    queuedPrompts.value.filter((prompt) => prompt.status !== 'interjecting'),
+  )
+  function provisional(
+    prompt: Pick<
+      QueuedPromptItem,
+      'id' | 'clientMessageId' | 'content' | 'references' | 'createdOrder'
+    >,
+    owner: string,
+  ): ProvisionalPrompt {
+    return {
+      id: prompt.id,
+      clientMessageId: prompt.clientMessageId || prompt.id,
+      content: prompt.content,
+      ...(prompt.references?.length ? { references: prompt.references } : {}),
+      createdOrder: prompt.createdOrder,
+      sessionId: owner,
+    }
+  }
+  function holdInterjection(prompt: ProvisionalPrompt) {
+    if (
+      interjections.value.some(
+        (held) => held.id === prompt.id || held.id === prompt.clientMessageId,
+      )
+    )
+      return
+    interjections.value = [...interjections.value, prompt]
+  }
+  function dropInterjection(id: string) {
+    if (!id) return
+    interjections.value = interjections.value.filter(
+      (held) => held.id !== id && held.clientMessageId !== id,
+    )
+  }
   const pending = reactive<PendingState>({ label: '', detail: '' })
   const taskProjection = reactive<TaskProjection>({ tasks: [] })
   const goalProjection = reactive<GoalProjectionState>(
@@ -537,6 +595,15 @@ export function useRuntime(options: {
             : [],
         ),
       )
+      // An insertion Core moved back to the queue (its turn ended first), or
+      // one gone while nothing runs, no longer shows as provisional (BUG-07).
+      interjections.value = interjections.value.filter((held) => {
+        if (held.sessionId !== ownerSessionId) return true
+        const record = records.find(
+          (r) => r.id === held.id || r.clientMessageId === held.clientMessageId,
+        )
+        return record ? record.delivery === 'interject' : busy.value
+      })
       queuedPrompts.value = records.map((record) => ({
         id: record.id,
         turnId: record.turnId,
@@ -596,6 +663,10 @@ export function useRuntime(options: {
       if (action === 'send') {
         await refreshQueuedPrompts()
         return true
+      }
+      if (action === 'interject') {
+        const prompt = queuedPrompts.value.find((p) => p.id === promptId)
+        if (prompt) holdInterjection(provisional(prompt, sessionId.value))
       }
       queuedPrompts.value = queuedPrompts.value.filter(
         (prompt) => prompt.id !== promptId,
@@ -1192,6 +1263,7 @@ export function useRuntime(options: {
       const owner = eventOwnerSessionId(data) || sessionId.value
       // A step took it (sending) or it was discarded: it leaves the tray.
       if (data.state === 'sending' || data.state === 'discarded') {
+        if (data.state === 'discarded') dropInterjection(String(data.prompt_id))
         if (owner === sessionId.value)
           queuedPrompts.value = queuedPrompts.value.filter(
             (prompt) => prompt.id !== data.prompt_id,
@@ -1283,6 +1355,7 @@ export function useRuntime(options: {
     switch (data.event) {
       case 'user_message': {
         const promptId = data.client_message_id || ''
+        dropInterjection(promptId)
         queuedPrompts.value = queuedPrompts.value.filter(
           (prompt) =>
             !(
@@ -1292,7 +1365,22 @@ export function useRuntime(options: {
         )
         return true
       }
-      case 'prompt_interjected':
+      case 'prompt_interjected': {
+        // Shown until its user message arrives (BUG-07).
+        const id = String(data.prompt_id || '')
+        const queued = queuedPrompts.value.find(
+          (prompt) => prompt.id === id || prompt.clientMessageId === id,
+        )
+        const owner = eventOwnerSessionId(data) || sessionId.value
+        if (queued) holdInterjection(provisional(queued, owner))
+        else if (id && typeof data.content === 'string')
+          holdInterjection({
+            id,
+            clientMessageId: id,
+            content: data.content,
+            createdOrder: Date.now(),
+            sessionId: owner,
+          })
         queuedPrompts.value = queuedPrompts.value.filter(
           (prompt) =>
             prompt.id !== data.prompt_id &&
@@ -1300,6 +1388,7 @@ export function useRuntime(options: {
         )
         busy.value = true
         return true
+      }
       case 'turn_phase':
         if (data.phase === 'started') busy.value = true
         return true
@@ -1479,6 +1568,8 @@ export function useRuntime(options: {
 
   return {
     queuedPrompts,
+    provisionalPrompts,
+    queueDockItems,
     pendingInteractionsBySession,
     busy,
     status,
