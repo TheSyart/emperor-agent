@@ -56,6 +56,8 @@ describe('files.mediaUrl', () => {
     expect(api.files.mediaGrant(token)).toMatchObject({
       token,
       absPath: join(root, path),
+      filePath: join(root, path),
+      streamable: true,
       sessionId,
       mimeType: 'video/mp4',
     })
@@ -68,7 +70,7 @@ describe('files.mediaUrl', () => {
     expect(api.files.mediaGrant('f'.repeat(32))).toBeNull()
   })
 
-  it('BUG-05 3 · refuses paths outside the project and files that are not videos', async () => {
+  it('BUG-05 3 · refuses paths outside the project; other files are named, not streamed', async () => {
     const { api, sessionId, root } = await setup()
     writeFileSync(join(root, '..', 'outside.mp4'), '')
     dirs.push(join(root, '..', 'outside.mp4'))
@@ -82,11 +84,20 @@ describe('files.mediaUrl', () => {
         { source: 'project', sessionId, path: join(root, '..', 'outside.mp4') },
       ]),
     ).rejects.toThrow()
+    // BUG-10: any file gets an address (it names the file for 用默认应用打开),
+    // but only media is ever streamed from it.
+    const notes = await invokeCoreOperation(api, 'files.mediaUrl', [
+      { source: 'project', sessionId, path: 'notes.md' },
+    ])
+    expect(api.files.mediaGrant(tokenOf(notes.url))).toMatchObject({
+      filePath: join(root, 'notes.md'),
+      streamable: false,
+    })
     await expect(
       invokeCoreOperation(api, 'files.mediaUrl', [
-        { source: 'project', sessionId, path: 'notes.md' },
+        { source: 'project', sessionId, path: 'clips' },
       ]),
-    ).rejects.toMatchObject({ code: 'workspace_media_unsupported' })
+    ).rejects.toMatchObject({ code: 'workspace_path_not_file' })
     await expect(
       invokeCoreOperation(api, 'files.mediaUrl', [
         { source: 'project', sessionId, path: 'clips/missing.mp4' },

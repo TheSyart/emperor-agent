@@ -540,12 +540,14 @@ registerOpenPathIpc({
   showItemInFolder: (target) => shell.showItemInFolder(target),
 })
 
-// BUG-05 「用默认应用打开」: a video Core granted the Files pane, by address.
+// 「用默认应用打开」 / 「在访达中显示」 for a file Core granted the Files pane,
+// by address (BUG-05, BUG-10).
 registerWorkspaceMediaIpc({
   ipcMain,
   authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
   lookup: (token) => coreApi?.files.mediaGrant(token) ?? null,
   openPath: (target) => shell.openPath(target),
+  showItemInFolder: (target) => shell.showItemInFolder(target),
 })
 
 // REL-01 导出诊断包: staged in a private temp folder, listed for the user,

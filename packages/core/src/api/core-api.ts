@@ -275,6 +275,12 @@ import {
   workspaceMediaUrl,
   type MediaGrant,
 } from '../workspace/media-grants'
+import {
+  enrichFilePreview,
+  PreviewConverter,
+  type EnrichedPreview,
+  type PreviewToolRunner,
+} from '../workspace/preview-convert'
 import type {
   GitHubPreviewTarget,
   ReferencePreview,
@@ -339,6 +345,10 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
     /** 登录 Claude Code's time limit (FIX-11; default ten minutes). */
     signInTimeoutMs?: number
   } | null
+  /** Test hook: runs sips, qlmanage, textutil and osascript (BUG-10). */
+  previewTools?: PreviewToolRunner | null
+  /** Test hook: the platform the preview converters believe they are on. */
+  previewPlatform?: NodeJS.Platform
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -437,8 +447,10 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
-  /** Videos the Files pane may stream (BUG-05; files.mediaUrl). */
+  /** Files the Files pane may stream or open (BUG-05, BUG-10; files.mediaUrl). */
   private readonly mediaGrants = new WorkspaceMediaGrants()
+  /** HEIC as PNG, a document's first page and text (BUG-10). */
+  private readonly previewConverter: PreviewConverter
   /** How long a write waits for a subagent's workspace before saying so (AGT-06). */
   workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
   readonly executorConfig: ExecutorConfigStore
@@ -1466,6 +1478,11 @@ export class CoreApi {
         opts.github?.resolveRuntime ??
         (() => this.resolveGhRuntime(this.paths.stateRoot)),
       run: opts.github?.run ?? runGh,
+    })
+    this.previewConverter = new PreviewConverter({
+      cacheDir: join(this.paths.stateRoot, 'cache', 'previews'),
+      ...(opts.previewTools ? { run: opts.previewTools } : {}),
+      ...(opts.previewPlatform ? { platform: opts.previewPlatform } : {}),
     })
     this.workspaceFilesService = new WorkspaceFilesService({
       resolveProject: resolveWorkspaceProject,
@@ -3125,79 +3142,37 @@ export class CoreApi {
   private readonly fileWatches = new Map<string, () => void>()
 
   readonly files = {
-    preview: async (input: FilePreviewInput): Promise<FilePreviewResult> => {
-      if (input.source === 'reference')
-        return this.workspaceReferenceService.previewFile(input)
-      if (input.source === 'attachment') {
-        const ref = this.attachmentStore.get(input.attachmentId)
-        if (!ref)
-          throw new WorkspaceOperationError(
-            'reference_attachment_unknown',
-            '附件不存在或已被移除。',
-          )
-        // Managed attachments have the same global access as attachments.rawPath.
-        const root = realpathSync(this.attachmentStore.root)
-        const path = resolve(root, ref.rel_path)
-        const canonical = realpathSync(path)
-        const fromRoot = relative(root, canonical)
-        if (
-          fromRoot.startsWith('..') ||
-          isAbsolute(fromRoot) ||
-          canonical !== path
-        )
-          throw new WorkspaceOperationError(
-            'reference_attachment_invalid',
-            '附件路径超出存储范围。',
-          )
-        const value = await previewCanonicalFile(canonical)
-        const extracted =
-          ref.mime === 'application/pdf' && ref.has_text
-            ? this.attachmentStore.readText(ref, 1024 * 1024)
-            : ''
-        return {
-          ...value,
-          name: ref.name,
-          mimeType: ref.mime,
-          revealable: true,
-          ...(extracted
-            ? {
-                kind: 'text' as const,
-                content: Buffer.from(extracted)
-                  .subarray(0, 1024 * 1024)
-                  .toString('utf8'),
-                extractedText: true,
-                truncated: Buffer.byteLength(extracted) >= 1024 * 1024,
-              }
-            : {}),
-        }
-      }
-      return filePreviewResult(
-        await this.files.read({
-          sessionId: input.sessionId,
-          relativePath: input.path,
-          ...(input.source === 'turn' ? { turn: input.turn } : {}),
-        }),
-      )
-    },
     /**
-     * An `app://workspace-media/<token>` address for a video the caller may
-     * preview (BUG-05): the same checks as files.preview, which reads
-     * nothing of a video; the token stands for the resolved file.
+     * What the Files pane shows (BUG-10 adds what macOS can make: HEIC as
+     * PNG, a document's first page and text, and whether the file may be
+     * opened in its default app).
+     */
+    preview: async (input: FilePreviewInput): Promise<FilePreviewResult> =>
+      (await this.enrichedPreview(input)).preview,
+    /**
+     * An `app://workspace-media/<token>` address for a file the caller may
+     * preview, under the same checks as files.preview (BUG-05, BUG-10). It
+     * streams what the pane shows — a video, a song, a picture (or the PNG
+     * of a HEIC), a document's first page — and nothing for other files;
+     * either way it names the file to 用默认应用打开 and 在访达中显示.
      */
     mediaUrl: async (input: FilePreviewInput): Promise<{ url: string }> => {
-      const preview = await this.files.preview(input)
-      if (preview.kind !== 'video')
+      const { preview, media } = await this.enrichedPreview(input)
+      if (preview.kind === 'directory')
         throw new WorkspaceOperationError(
           'workspace_media_unsupported',
-          '这个文件不能在应用里播放。',
+          '这个位置是目录，没有可以显示的内容。',
         )
       const grant = this.mediaGrants.grant({
-        absPath: preview.path,
+        absPath: media?.path ?? preview.path,
+        filePath: preview.path,
+        streamable: media !== null,
         sessionId: input.source === 'attachment' ? '' : input.sessionId,
         // An attachment carries the mime it was saved with.
-        mimeType: preview.mimeType.startsWith('video/')
-          ? preview.mimeType
-          : 'application/octet-stream',
+        mimeType:
+          media && /^(?:video|audio|image)\//.test(media.mimeType)
+            ? media.mimeType
+            : 'application/octet-stream',
       })
       return { url: workspaceMediaUrl(grant.token) }
     },
@@ -3225,13 +3200,16 @@ export class CoreApi {
       let failed = false
       const stop = this.projectFiles.subscribe(
         root,
-        (batch) =>
+        (batch) => {
+          // The pane re-lists on this event: no cached listing may answer.
+          this.workspaceFilesService.forgetListings(root)
           this.host.emitHost({
             event: 'workspace_files_changed',
             session_id: sessionId,
             paths: batch.paths,
             overflow: batch.overflow,
-          }),
+          })
+        },
         () => {
           failed = true
           this.fileWatches.delete(sessionId)
@@ -3293,6 +3271,72 @@ export class CoreApi {
         }),
       }).read({ sessionId, relativePath: input.relativePath })
     },
+  }
+
+  private async enrichedPreview(
+    input: FilePreviewInput,
+  ): Promise<EnrichedPreview> {
+    return enrichFilePreview(
+      await this.rawFilePreview(input),
+      this.previewConverter,
+    )
+  }
+
+  private async rawFilePreview(
+    input: FilePreviewInput,
+  ): Promise<FilePreviewResult> {
+    if (input.source === 'reference')
+      return this.workspaceReferenceService.previewFile(input)
+    if (input.source === 'attachment') {
+      const ref = this.attachmentStore.get(input.attachmentId)
+      if (!ref)
+        throw new WorkspaceOperationError(
+          'reference_attachment_unknown',
+          '附件不存在或已被移除。',
+        )
+      // Managed attachments have the same global access as attachments.rawPath.
+      const root = realpathSync(this.attachmentStore.root)
+      const path = resolve(root, ref.rel_path)
+      const canonical = realpathSync(path)
+      const fromRoot = relative(root, canonical)
+      if (
+        fromRoot.startsWith('..') ||
+        isAbsolute(fromRoot) ||
+        canonical !== path
+      )
+        throw new WorkspaceOperationError(
+          'reference_attachment_invalid',
+          '附件路径超出存储范围。',
+        )
+      const value = await previewCanonicalFile(canonical)
+      const extracted =
+        ref.mime === 'application/pdf' && ref.has_text
+          ? this.attachmentStore.readText(ref, 1024 * 1024)
+          : ''
+      return {
+        ...value,
+        name: ref.name,
+        mimeType: ref.mime,
+        revealable: true,
+        ...(extracted
+          ? {
+              kind: 'document' as const,
+              content: Buffer.from(extracted)
+                .subarray(0, 1024 * 1024)
+                .toString('utf8'),
+              extractedText: true,
+              truncated: Buffer.byteLength(extracted) >= 1024 * 1024,
+            }
+          : {}),
+      }
+    }
+    return filePreviewResult(
+      await this.files.read({
+        sessionId: input.sessionId,
+        relativePath: input.path,
+        ...(input.source === 'turn' ? { turn: input.turn } : {}),
+      }),
+    )
   }
 
   readonly terminals = {

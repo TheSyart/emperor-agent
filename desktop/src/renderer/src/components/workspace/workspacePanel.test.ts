@@ -435,6 +435,8 @@ describe('WorkspacePanel', () => {
         sessionId: 's1',
         relativePath: 'src',
         limit: 500,
+        showHidden: false,
+        showIgnored: false,
       }),
     )
     expect(useFrameState().workspacePane).toBe('files')

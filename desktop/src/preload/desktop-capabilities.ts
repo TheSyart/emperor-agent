@@ -95,9 +95,15 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
   return {
     revealReference: (input: { sessionId: string; referenceId: string }) =>
       ipcRenderer.invoke(REFERENCE_REVEAL_CHANNEL, input),
-    /** 「用默认应用打开」: the video behind a granted media address (BUG-05). */
+    /** 「用默认应用打开」: the file behind a granted media address (BUG-05, BUG-10). */
     openWorkspaceMedia: (url: string) =>
       ipcRenderer.invoke(WORKSPACE_MEDIA_OPEN_CHANNEL, { url }),
+    /** 「在访达中显示」: the file behind a granted media address (BUG-10). */
+    revealWorkspaceMedia: (url: string) =>
+      ipcRenderer.invoke(WORKSPACE_MEDIA_OPEN_CHANNEL, {
+        url,
+        action: 'reveal',
+      }),
     openExternal: (url: string) =>
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
     /** A clicked web link: main picks the system or the built-in browser. */

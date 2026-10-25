@@ -23,6 +23,10 @@ export interface UiPreferences {
    * opt-in `siteIcons`, so its old stored `false` no longer applies.
    */
   siteIconService: boolean
+  /** The 文件 tree lists dot files (`.env`, `.github`; BUG-12). */
+  showHiddenFiles: boolean
+  /** The 文件 tree lists what Git ignores (`dist/`; BUG-12). */
+  showIgnoredFiles: boolean
 }
 
 export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
@@ -30,6 +34,8 @@ export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
   showSystemSteps: false,
   processDisplay: 'collapse-when-done',
   siteIconService: true,
+  showHiddenFiles: false,
+  showIgnoredFiles: false,
 })
 
 const PROCESS_DISPLAYS: readonly ProcessDisplay[] = [
@@ -54,6 +60,8 @@ export function parseUiPreferences(raw: unknown): UiPreferences {
       ? (value.processDisplay as ProcessDisplay)
       : DEFAULT_UI_PREFERENCES.processDisplay,
     siteIconService: flag('siteIconService'),
+    showHiddenFiles: flag('showHiddenFiles'),
+    showIgnoredFiles: flag('showIgnoredFiles'),
   }
 }
 

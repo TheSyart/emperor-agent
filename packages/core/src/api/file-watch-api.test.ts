@@ -100,6 +100,33 @@ describe('files.watch (BUG-11)', () => {
     expect(f.changes().length).toBe(before)
   }, 10_000)
 
+  it('a folder listed just before a change lists the change right after it (e2e finding)', async () => {
+    const f = await setup()
+    await invokeCoreOperation(f.api, 'files.watch', [
+      { sessionId: f.sessionId },
+    ])
+    await new Promise((r) => setTimeout(r, 200))
+    const list = async () =>
+      (
+        await invokeCoreOperation(f.api, 'files.list', [
+          { sessionId: f.sessionId, relativePath: 'src', limit: 500 },
+        ])
+      ).entries.map((entry) => entry.name)
+    // Listed (and cached for a few seconds) …
+    expect(await list()).toEqual([])
+    writeFileSync(join(f.root, 'src', 'fresh.md'), '# new')
+    await until(() =>
+      f
+        .changes()
+        .some((e) =>
+          (e.paths as string[] | undefined)?.includes('src/fresh.md'),
+        ),
+    )
+    // … the change event is what the pane refreshes on: the listing it gets
+    // then must hold the new file, not the cached one.
+    expect(await list()).toEqual(['fresh.md'])
+  })
+
   it('refuses a session without a project', async () => {
     const { api } = await makeApi()
     apis.push(api)
