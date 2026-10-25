@@ -708,10 +708,15 @@ it('AGT-13 · the real 0.163 user agent passes the handshake', async () => {
   expect(session.providerSessionId).toBe('thread-fixture')
   await session.close()
   f.cleanup()
-  for (const version of ['0.162.0', '0.164.0']) {
+  // VER-07: 0.164 passes too.
+  const newer = fixture(USER_AGENT_0163.replace('0.163.0', '0.164.0'))
+  const opened = await newer.adapter.open(newer.input)
+  await opened.close()
+  newer.cleanup()
+  for (const version of ['0.162.0', '0.165.0']) {
     const other = fixture(USER_AGENT_0163.replace('0.163.0', version))
     await expect(other.adapter.open(other.input)).rejects.toThrow(
-      /EXECUTOR_INCOMPATIBLE.*0\.153\.x \/ 0\.163\.x/,
+      /EXECUTOR_INCOMPATIBLE.*0\.153\.x \/ 0\.163\.x \/ 0\.164\.x/,
     )
     other.cleanup()
   }

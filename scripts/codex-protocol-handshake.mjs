@@ -13,7 +13,9 @@
 //
 // 1. probe   `codex --version` and the protocol digest (ExecutorRegistry);
 //    features  `codex features list` with the adapter's overrides: every
-//            feature Emperor turns off is off (CODEX_FEATURES);
+//            feature Emperor turns off is off (CODEX_FEATURES), except one
+//            Codex marks `removed`, which ignores overrides (listed apart;
+//            0.164: worktrees, realtime_conversation — VER-07);
 // 2. open    `app-server --listen stdio://` with the adapter's flags:
 //            initialize, the user-agent check, initialized, thread/start;
 // 3. turn    turn/start (Codex waits for a network it cannot reach),
@@ -214,20 +216,30 @@ await step('features', async () => {
     { env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   )
   const effective = {}
+  const removed = new Set()
   for (const line of output.split('\n')) {
-    const [name, , state] = line.trim().split(/\s{2,}/)
-    if (name && (state === 'true' || state === 'false'))
+    const [name, stage, state] = line.trim().split(/\s{2,}/)
+    if (name && (state === 'true' || state === 'false')) {
       effective[name] = state === 'true'
+      if (stage === 'removed') removed.add(name)
+    }
   }
   const wrong = Object.entries(core.CODEX_FEATURES)
-    .filter(([name, on]) => name in effective && effective[name] !== on)
+    .filter(
+      ([name, on]) =>
+        name in effective && !removed.has(name) && effective[name] !== on,
+    )
     .map(([name]) => name)
   if (wrong.length)
     throw new Error('overrides not in effect: ' + wrong.join(', '))
   return {
     off: Object.entries(core.CODEX_FEATURES)
-      .filter(([name, on]) => !on && name in effective)
+      .filter(([name, on]) => !on && name in effective && !removed.has(name))
       .map(([name]) => name),
+    // Overridden but removed in this Codex: they keep their own value.
+    removedIgnoringOverride: Object.keys(core.CODEX_FEATURES)
+      .filter((name) => removed.has(name))
+      .map((name) => ({ name, on: effective[name] })),
     unknownToThisCodex: Object.keys(core.CODEX_FEATURES).filter(
       (name) => !(name in effective),
     ),

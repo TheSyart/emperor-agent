@@ -12,11 +12,11 @@ import { ManagedAgentProcess } from '../process'
 import { defaultExecutorConfig } from '../config'
 import { delegationTestDirectory } from '../testing'
 import { linkCodexAuth } from '../codex-auth'
-import { KNOWN_CODEX_PROTOCOLS } from '../compatibility'
+import { CODEX_REMOVED_FEATURES, KNOWN_CODEX_PROTOCOLS } from '../compatibility'
 import type { ExecutorOpenInput, NormalizedExecutorEvent } from '../types'
 
 /** Every Codex protocol Emperor has recorded and verified, oldest first. */
-const VERIFIED = ['0.153.4', '0.163.0'] as const
+const VERIFIED = ['0.153.4', '0.163.0', '0.164.0'] as const
 
 /**
  * Features Emperor turns off so a delegated Codex stays inside its
@@ -26,7 +26,9 @@ const VERIFIED = ['0.153.4', '0.163.0'] as const
  * worktrees outside Emperor's workspace lease, voice and realtime, browser
  * annotation, a speed tier, Daybreak, commands on a pseudo-terminal (their
  * own session, outside the process group), a new approval path and the
- * under-development instant interrupt.
+ * under-development instant interrupt; nor what 0.164 turned on (VER-07): a
+ * setup wizard for another model provider (Bedrock) and the MCP servers'
+ * OAuth refresh coordination (Emperor runs Codex with no MCP server).
  */
 const BOUNDARY_OFF = [
   'multi_agent',
@@ -62,7 +64,23 @@ const BOUNDARY_OFF = [
   'unified_exec_tty',
   'write_stdin_approval',
   'instant_interrupt',
+  'bedrock_setup_wizard',
+  'mcp_oauth_refresh_coordination',
 ]
+
+/**
+ * Boundary flags a protocol no longer lets anyone turn off: Codex marks the
+ * feature `removed` and ignores every override of it. 0.164 did so with
+ * worktrees and realtime_conversation, both on; VER-07 found neither reaches
+ * an app-server run: no worktree method or tool, the same tools offered to
+ * the model as 0.163 under Emperor's overrides, and realtime only through
+ * thread/realtime/* requests Emperor never sends.
+ */
+const REMOVED_ON: Record<(typeof VERIFIED)[number], string[]> = {
+  '0.153.4': [],
+  '0.163.0': [],
+  '0.164.0': ['realtime_conversation', 'worktrees'],
+}
 
 /**
  * What stays on under Emperor's overrides, from each protocol's recorded
@@ -142,15 +160,67 @@ const EFFECTIVE_ON: Record<(typeof VERIFIED)[number], string[]> = {
     'unified_exec',
     'view_image',
   ],
+  '0.164.0': [
+    // New in 0.164 and kept: tool lists re-declared incrementally within a
+    // thread (Emperor's tool set does not change during a run). Removed and
+    // always on: realtime_conversation and worktrees (REMOVED_ON).
+    'api_key_cyber_access_programs',
+    'api_key_model_discovery',
+    'auth_elicitation',
+    'code_mode_host',
+    'code_mode_interrupt',
+    'collaboration_modes',
+    'compaction_image_budget',
+    'content_item_kinds',
+    'default_mode_request_user_input',
+    'enable_request_compression',
+    'fast_mode',
+    'guardian_approval',
+    'guardian_reuse_parent_compaction',
+    'image_generation',
+    'in_app_dictation',
+    'in_app_updates',
+    'incremental_tools',
+    'item_ids',
+    'mentions_v2',
+    'plugin_sharing',
+    'realtime_conversation',
+    'resize_all_images',
+    'shell_tool',
+    'skip_host_skill_discovery',
+    'sqlite',
+    'standalone_web_search',
+    'steer',
+    'system_proxy_fallback',
+    'terminal_resize_reflow',
+    'tool_call_mcp_elicitation',
+    'tool_search_always_defer_mcp_tools',
+    'tui_app_server',
+    'unbounded_connection_retries',
+    'unified_exec',
+    'view_image',
+    'worktrees',
+  ],
+}
+
+/** A protocol's recorded features: name → stage and on by default. */
+function recordedFeatures(
+  version: string,
+): Record<string, { stage: string; enabled: boolean }> {
+  return (
+    recordedProtocol(version).file('features.json') as {
+      features: Record<string, { stage: string; enabled: boolean }>
+    }
+  ).features
 }
 
 /** A protocol's recorded feature defaults: name → on by default. */
 function featureDefaults(version: string): Record<string, boolean> {
-  const recorded = recordedProtocol(version).file('features.json') as {
-    features: Record<string, { enabled: boolean }>
-  }
   return Object.fromEntries(
-    Object.entries(recorded.features).map(([name, f]) => [name, f.enabled]),
+    Object.entries(recordedFeatures(version)).map(([name, f]) => [
+      name,
+      f.enabled,
+    ]),
   )
 }
 
@@ -452,16 +522,36 @@ describe.each(VERIFIED)('Codex %s protocol', (version) => {
   const protocol = () => recordedProtocol(version)
 
   it('the features left on under Emperor’s overrides are exactly the pinned ones', () => {
+    const recorded = recordedFeatures(version)
     const effective = featureDefaults(version)
+    // Codex ignores an override of a removed feature (0.164: `codex
+    // features list` with Emperor's flags still shows worktrees on).
     for (const [name, value] of Object.entries(CODEX_FEATURES))
-      if (name in effective) effective[name] = value
+      if (name in effective && recorded[name]!.stage !== 'removed')
+        effective[name] = value
     expect(
       Object.keys(effective)
         .filter((name) => effective[name])
         .sort(),
     ).toEqual(EFFECTIVE_ON[version])
     for (const name of BOUNDARY_OFF)
-      expect(effective[name] ?? false, name).toBe(false)
+      expect(effective[name] ?? false, name).toBe(
+        REMOVED_ON[version].includes(name),
+      )
+  })
+
+  it('the removed features are recorded as such (Core reads them for the self-check)', () => {
+    const removed = Object.entries(recordedFeatures(version))
+      .filter(([, f]) => f.stage === 'removed')
+      .map(([name]) => name)
+      .sort()
+    expect(CODEX_REMOVED_FEATURES[version]).toEqual(removed)
+    expect(
+      BOUNDARY_OFF.filter(
+        (name) =>
+          removed.includes(name) && recordedFeatures(version)[name]!.enabled,
+      ).sort(),
+    ).toEqual(REMOVED_ON[version])
   })
 
   it('every request the adapter sends is a valid request of this protocol', async () => {
@@ -626,18 +716,46 @@ describe.each(VERIFIED)('Codex %s protocol', (version) => {
   })
 })
 
-it('only 0.163 can split an answer into partial_answer messages (MessagePhase)', () => {
+it('since 0.163 an answer can be split into partial_answer messages (MessagePhase)', () => {
   const phases = (version: string) =>
     (
       recordedProtocol(version).file('v2/TurnCompletedNotification.json')
         .definitions as Record<string, { oneOf: { enum: string[] }[] }>
     ).MessagePhase!.oneOf.map((branch) => branch.enum[0])
   expect(phases('0.153.4')).toEqual(['commentary', 'final_answer'])
-  expect(phases('0.163.0')).toEqual([
-    'commentary',
-    'partial_answer',
-    'final_answer',
-  ])
+  for (const version of ['0.163.0', '0.164.0'])
+    expect(phases(version), version).toEqual([
+      'commentary',
+      'partial_answer',
+      'final_answer',
+    ])
+})
+
+it('an image item keeps what the adapter reads in every protocol (0.164: result optional, a fileId instead)', () => {
+  const imageItem = (version: string) =>
+    (
+      recordedProtocol(version).file('v2/TurnCompletedNotification.json')
+        .definitions as Record<
+        string,
+        {
+          oneOf: {
+            properties: Record<string, { enum?: string[] }>
+            required: string[]
+          }[]
+        }
+      >
+    ).ThreadItem!.oneOf.find(
+      (branch) => branch.properties.type?.enum?.[0] === 'imageGeneration',
+    )!
+  for (const version of VERIFIED) {
+    const item = imageItem(version)
+    // normalizeCodexNotification reads status, failure and savedPath.
+    for (const field of ['status', 'failure', 'savedPath'])
+      expect(item.properties, `${version} ${field}`).toHaveProperty(field)
+    expect(item.required, version).toContain('status')
+  }
+  expect(imageItem('0.163.0').required).toContain('result')
+  expect(imageItem('0.164.0').required).not.toContain('result')
 })
 
 it('the schema check rejects what a protocol rejects', () => {
@@ -667,9 +785,10 @@ it('the schema check rejects what a protocol rejects', () => {
   expect(recordedProtocol('0.153.4').methods('ClientRequest.json')).toContain(
     'thread/rollback',
   )
-  expect(
-    recordedProtocol('0.163.0').methods('ClientRequest.json'),
-  ).not.toContain('thread/rollback')
+  for (const version of ['0.163.0', '0.164.0'])
+    expect(
+      recordedProtocol(version).methods('ClientRequest.json'),
+    ).not.toContain('thread/rollback')
 })
 
 it('every boundary flag is overridden off, at spawn and in thread/start', async () => {
@@ -693,13 +812,14 @@ it('every boundary flag is overridden off, at spawn and in thread/start', async 
   f.cleanup()
 })
 
-it('0.163 knows every override; 0.153.4 does not know eight of them and ignores them silently', () => {
+it('0.163 and 0.164 know every override; 0.153.4 does not know eight of them and ignores them silently', () => {
   const unknown = (version: string) =>
     Object.keys(CODEX_FEATURES)
       .filter((name) => !(name in featureDefaults(version)))
       .sort()
   // 0.163 would log a configWarning for a key it does not know.
   expect(unknown('0.163.0')).toEqual([])
+  expect(unknown('0.164.0')).toEqual([])
   // Checked against the real 0.153.4 (AGT-13): no warning, no error, the
   // known features unchanged. The keys are sent to both versions.
   expect(unknown('0.153.4')).toEqual([

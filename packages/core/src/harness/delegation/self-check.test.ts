@@ -369,6 +369,34 @@ describe('Codex', () => {
     ).toBe(true)
   })
 
+  it('VER-07 · a boundary feature Codex no longer lets anyone turn off (0.164 removed worktrees) is not reported as unreviewed', async () => {
+    const recorded = JSON.parse(
+      readFileSync(
+        join(__dirname, 'protocol', 'codex-0.164.0', 'features.json'),
+        'utf8',
+      ),
+    ).features as Record<string, { stage: string; enabled: boolean }>
+    // What the real 0.164.0 prints with Emperor's overrides: a removed
+    // feature keeps its value, whatever the override says.
+    const list = Object.entries(recorded)
+      .map(
+        ([name, f]) =>
+          `${name}  ${f.stage}  ${name in CODEX_FEATURES && f.stage !== 'removed' ? CODEX_FEATURES[name] : f.enabled}`,
+      )
+      .join('\n')
+    expect(list).toMatch(/^worktrees {2}removed {2}true$/m)
+    const s = setup({ codexFeatures: async () => list })
+    s.probes.codex = probeOf({
+      executableVersion: '0.164.0',
+      compatibility: 'verified',
+      protocolVersion: '0.164.0',
+    })
+    expect(await s.check.run(codexProfile(), 'manual')).toMatchObject({
+      status: 'ok',
+      issues: [],
+    })
+  })
+
   it('the defaults as recorded: ok with no issue; a Codex without `features list` skips that check', async () => {
     expect(await setup().check.run(codexProfile(), 'manual')).toMatchObject({
       status: 'ok',

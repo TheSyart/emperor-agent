@@ -1,0 +1,252 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CyberAccessProgram": {
+      "description": "Requested cyber treatment for an OpenAI model turn. Authorization and model-tier restrictions remain server-owned.",
+      "enum": ["standard", "daybreakBlue", "daybreakRed"],
+      "type": "string"
+    },
+    "InputModality": {
+      "description": "Canonical user-input modality tags advertised by a model.",
+      "oneOf": [
+        {
+          "description": "Plain text turns and tool payloads.",
+          "enum": ["text"],
+          "type": "string"
+        },
+        {
+          "description": "Image attachments included in user turns.",
+          "enum": ["image"],
+          "type": "string"
+        },
+        {
+          "description": "Audio attachments included in user turns.",
+          "enum": ["audio"],
+          "type": "string"
+        }
+      ]
+    },
+    "Model": {
+      "properties": {
+        "additionalSpeedTiers": {
+          "default": [],
+          "description": "Deprecated: use `serviceTiers` instead.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "availabilityNux": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelAvailabilityNux"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "availableAccessPrograms": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelAccessPrograms"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Null when the catalog does not provide access-program metadata."
+        },
+        "defaultReasoningEffort": {
+          "$ref": "#/definitions/ReasoningEffort"
+        },
+        "defaultServiceTier": {
+          "default": null,
+          "description": "Catalog default service tier id for this model, when one is configured.",
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputModalities": {
+          "default": ["text", "image"],
+          "items": {
+            "$ref": "#/definitions/InputModality"
+          },
+          "type": "array"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelSpecialty": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "multiAgentVersion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MultiAgentVersion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Multi-agent runtime declared by this model, when available."
+        },
+        "serviceTiers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ModelServiceTier"
+          },
+          "type": "array"
+        },
+        "supportedReasoningEfforts": {
+          "items": {
+            "$ref": "#/definitions/ReasoningEffortOption"
+          },
+          "type": "array"
+        },
+        "supportsPersonality": {
+          "default": false,
+          "description": "@deprecated Always false; models no longer support personality selection.",
+          "type": "boolean"
+        },
+        "upgrade": {
+          "type": ["string", "null"]
+        },
+        "upgradeInfo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelUpgradeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "defaultReasoningEffort",
+        "description",
+        "displayName",
+        "hidden",
+        "id",
+        "isDefault",
+        "model",
+        "supportedReasoningEfforts"
+      ],
+      "type": "object"
+    },
+    "ModelAccessPrograms": {
+      "description": "Caller-specific explicit access programs advertised by model discovery.",
+      "properties": {
+        "cyber": {
+          "description": "Accepted explicit selections.",
+          "items": {
+            "$ref": "#/definitions/CyberAccessProgram"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["cyber"],
+      "type": "object"
+    },
+    "ModelAvailabilityNux": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["message"],
+      "type": "object"
+    },
+    "ModelServiceTier": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["description", "id", "name"],
+      "type": "object"
+    },
+    "ModelUpgradeInfo": {
+      "properties": {
+        "migrationMarkdown": {
+          "type": ["string", "null"]
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelLink": {
+          "type": ["string", "null"]
+        },
+        "retirementAt": {
+          "description": "Informational Unix timestamp for this upgrade's scheduled retirement, if known.",
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "upgradeCopy": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["model"],
+      "type": "object"
+    },
+    "MultiAgentVersion": {
+      "description": "Multi-agent runtime supported by a model.",
+      "enum": ["disabled", "v1", "v2"],
+      "type": "string"
+    },
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "ReasoningEffortOption": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "$ref": "#/definitions/ReasoningEffort"
+        }
+      },
+      "required": ["description", "reasoningEffort"],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "data": {
+      "items": {
+        "$ref": "#/definitions/Model"
+      },
+      "type": "array"
+    },
+    "nextCursor": {
+      "description": "Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
+      "type": ["string", "null"]
+    }
+  },
+  "required": ["data"],
+  "title": "ModelListResponse",
+  "type": "object"
+}

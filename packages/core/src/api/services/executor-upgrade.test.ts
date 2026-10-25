@@ -179,7 +179,7 @@ it('checks npm, upgrades Claude Code with its own npm and shows the new version'
   ).rejects.toThrow()
 })
 
-it('Codex 0.153.4 is offered 0.163.0, the highest release Emperor verified, and upgrades to it', async () => {
+it('Codex 0.153.4 is offered 0.163.0, the highest verified release npm has here, and upgrades to it', async () => {
   const { api: core, events } = await api(await registry())
   await enable(core)
   await invokeCoreOperation(core, 'executors.probe', [
@@ -193,7 +193,7 @@ it('Codex 0.153.4 is offered 0.163.0, the highest release Emperor verified, and 
   ).toMatchObject({
     installed: '0.153.4',
     latest: '0.163.0',
-    verified: ['0.153', '0.163'],
+    verified: ['0.153', '0.163', '0.164'],
     target: '0.163.0',
     unverified: null,
     upgrade: {
