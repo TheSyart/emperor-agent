@@ -244,6 +244,7 @@ import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { BuiltinPluginLedger } from '../harness/delegation/claude-builtin-plugins'
+import { ProjectFileWatcher } from '../workspace/file-watch'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
@@ -1800,6 +1801,8 @@ export class CoreApi {
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
+      this.projectFiles.close()
+      this.fileWatches.clear()
       this.onboardingService.dispose()
       for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()
       try {
@@ -3051,6 +3054,11 @@ export class CoreApi {
       this.pullRequestBrowser.diff(input),
   }
 
+  /** One recursive watch per project, shared by the sessions on it (BUG-11). */
+  private readonly projectFiles = new ProjectFileWatcher()
+  /** Session → its 文件 pane's subscription. */
+  private readonly fileWatches = new Map<string, () => void>()
+
   readonly files = {
     preview: async (input: FilePreviewInput): Promise<FilePreviewResult> => {
       if (input.source === 'reference')
@@ -3114,6 +3122,47 @@ export class CoreApi {
             sessionId: input.sessionId,
             relativePath: input.path,
           }),
+    /**
+     * The 文件 pane follows the project (BUG-11): changes arrive as
+     * workspace_files_changed; a watch that fails says so once
+     * (`unavailable`) and the pane falls back to refreshing at turn ends.
+     */
+    watch: (input: { sessionId: string }): { watching: boolean } => {
+      const sessionId = input.sessionId
+      const root = this.workspaceFilesService.projectRoot(sessionId)
+      this.fileWatches.get(sessionId)?.()
+      this.fileWatches.delete(sessionId)
+      let failed = false
+      const stop = this.projectFiles.subscribe(
+        root,
+        (batch) =>
+          this.host.emitHost({
+            event: 'workspace_files_changed',
+            session_id: sessionId,
+            paths: batch.paths,
+            overflow: batch.overflow,
+          }),
+        () => {
+          failed = true
+          this.fileWatches.delete(sessionId)
+          this.host.emitHost({
+            event: 'workspace_files_changed',
+            session_id: sessionId,
+            paths: [],
+            overflow: true,
+            unavailable: true,
+          })
+        },
+      )
+      if (failed) return { watching: false }
+      this.fileWatches.set(sessionId, stop)
+      return { watching: true }
+    },
+    unwatch: (input: { sessionId: string }): { watching: false } => {
+      this.fileWatches.get(input.sessionId)?.()
+      this.fileWatches.delete(input.sessionId)
+      return { watching: false }
+    },
     list: (
       input: Parameters<WorkspaceFilesService['list']>[0],
     ): Promise<WorkspaceFileListResult> =>

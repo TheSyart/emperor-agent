@@ -372,6 +372,11 @@ export class WorkspaceFilesService {
     }
   }
 
+  /** The session's project folder, canonical (the 文件 pane watches it, BUG-11). */
+  projectRoot(sessionId: string): string {
+    return realpathSync(this.scope(sessionId).projectRoot)
+  }
+
   /** Size and mtime only (no read): the same checks as read(). */
   stat(input: { sessionId: string; relativePath: string }): WorkspaceFileStat {
     const scope = this.scope(input.sessionId)

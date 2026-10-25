@@ -1747,6 +1747,15 @@ export const CORE_OPERATION_REGISTRY = {
   'files.stat': operation(z.tuple([fileStatSchema]), (api, [input]) =>
     api.files.stat(input),
   ),
+  // BUG-11: the 文件 pane follows the project while it is open.
+  'files.watch': operation(
+    z.tuple([z.object({ sessionId: idSchema }).strict()]),
+    (api, [input]) => api.files.watch(input),
+  ),
+  'files.unwatch': operation(
+    z.tuple([z.object({ sessionId: idSchema }).strict()]),
+    (api, [input]) => api.files.unwatch(input),
+  ),
   'git.branches': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
     api.git.branches(input),
   ),
