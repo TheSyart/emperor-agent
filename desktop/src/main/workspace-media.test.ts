@@ -43,7 +43,12 @@ function video(): {
   writeFileSync(path, bytes)
   const lookup = vi.fn((token: string) =>
     token === TOKEN
-      ? { absPath: path, filePath: path, streamable: true, mimeType: 'video/mp4' }
+      ? {
+          absPath: path,
+          filePath: path,
+          streamable: true,
+          mimeType: 'video/mp4',
+        }
       : null,
   )
   return { path, bytes, lookup }
@@ -252,7 +257,12 @@ describe('emperor:workspace-media:open (BUG-05 8)', () => {
     writeFileSync(page, 'png')
     const { invoke, openPath, showItemInFolder } = setup((token) =>
       token === TOKEN
-        ? { absPath: page, filePath: docx, streamable: true, mimeType: 'image/png' }
+        ? {
+            absPath: page,
+            filePath: docx,
+            streamable: true,
+            mimeType: 'image/png',
+          }
         : null,
     )
     const url = `app://workspace-media/${TOKEN}`
@@ -274,7 +284,12 @@ describe('emperor:workspace-media:open (BUG-05 8)', () => {
     for (const file of [script, tool]) {
       const { invoke, openPath, showItemInFolder } = setup((token) =>
         token === TOKEN
-          ? { absPath: file, filePath: file, streamable: false, mimeType: 'application/octet-stream' }
+          ? {
+              absPath: file,
+              filePath: file,
+              streamable: false,
+              mimeType: 'application/octet-stream',
+            }
           : null,
       )
       const url = `app://workspace-media/${TOKEN}`

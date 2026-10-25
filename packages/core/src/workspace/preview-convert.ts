@@ -58,7 +58,9 @@ const TEXTUTIL = '/usr/bin/textutil'
 const OSASCRIPT = '/usr/bin/osascript'
 const MAX_SIDE = 2400
 const MAX_TEXT_BYTES = 1024 * 1024
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const PNG_SIGNATURE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+])
 /** The text of a PDF through PDFKit (JavaScript for Automation); '' when locked. */
 const PDF_TEXT_SCRIPT = `ObjC.import('Quartz')
 function run(argv) {
@@ -118,9 +120,9 @@ export class PreviewConverter {
         this.toolOptions(work),
       )
       const side = Math.max(
-        ...[...size.toString('utf8').matchAll(/pixel(?:Width|Height):\s*(\d+)/g)].map(
-          (match) => Number(match[1]),
-        ),
+        ...[
+          ...size.toString('utf8').matchAll(/pixel(?:Width|Height):\s*(\d+)/g),
+        ].map((match) => Number(match[1])),
       )
       const out = join(work, 'preview.png')
       await this.run(
@@ -302,7 +304,10 @@ export async function enrichFilePreview(
   switch (shown.kind) {
     case 'video':
     case 'audio':
-      return { preview: shown, media: { path: shown.path, mimeType: shown.mimeType } }
+      return {
+        preview: shown,
+        media: { path: shown.path, mimeType: shown.mimeType },
+      }
     case 'image': {
       if (!/^image\/(?:heic|heif|tiff)$/.test(shown.mimeType))
         return {
@@ -319,7 +324,9 @@ export async function enrichFilePreview(
     case 'document': {
       const [page, text] = await Promise.all([
         converter.thumbnail(shown.path),
-        shown.content ? Promise.resolve(shown.content) : converter.text(shown.path),
+        shown.content
+          ? Promise.resolve(shown.content)
+          : converter.text(shown.path),
       ])
       if (!page && !text) return card()
       return {

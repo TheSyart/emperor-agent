@@ -24,11 +24,7 @@ const MISSING = new Set([
 ])
 
 export type MediaAddressState =
-  | 'loading'
-  | 'ready'
-  | 'unplayable'
-  | 'missing'
-  | 'failed'
+  'loading' | 'ready' | 'unplayable' | 'missing' | 'failed'
 
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)

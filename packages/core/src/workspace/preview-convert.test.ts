@@ -64,7 +64,10 @@ function fakeTools(
     }
     if (name === 'qlmanage') {
       const out = args[args.indexOf('-o') + 1]!
-      writeFileSync(join(out, `${args[args.length - 1]!.split('/').pop()}.png`), PNG)
+      writeFileSync(
+        join(out, `${args[args.length - 1]!.split('/').pop()}.png`),
+        PNG,
+      )
       return Buffer.from('produced one thumbnail\n')
     }
     if (name === 'textutil') return Buffer.from('需求说明\n第一段\n')
@@ -96,7 +99,13 @@ describe('PreviewConverter (BUG-10)', () => {
     expect(readFileSync(png!).subarray(0, 8)).toEqual(PNG.subarray(0, 8))
     const [probe, convert] = tools.calls
     expect(probe!.command).toBe('/usr/bin/sips')
-    expect(probe!.args).toEqual(['-g', 'pixelWidth', '-g', 'pixelHeight', photo])
+    expect(probe!.args).toEqual([
+      '-g',
+      'pixelWidth',
+      '-g',
+      'pixelHeight',
+      photo,
+    ])
     expect(convert!.args).toEqual([
       '-s',
       'format',
@@ -431,7 +440,14 @@ describe.skipIf(!hasTools)('PreviewConverter with the macOS tools', () => {
     writeBmp(bmp)
     for (const format of ['heic', 'tiff']) {
       const file = join(project, `photo.${format}`)
-      execFileSync('/usr/bin/sips', ['-s', 'format', format, bmp, '--out', file])
+      execFileSync('/usr/bin/sips', [
+        '-s',
+        'format',
+        format,
+        bmp,
+        '--out',
+        file,
+      ])
       const png = await converter.imagePng(file)
       expect(png, format).not.toBeNull()
       expect(readFileSync(png!).subarray(0, 8)).toEqual(PNG.subarray(0, 8))
@@ -456,7 +472,13 @@ describe.skipIf(!hasTools)('PreviewConverter with the macOS tools', () => {
       html,
       '<html><meta charset="utf-8"><body><h1>需求说明</h1><p>第一段</p></body></html>',
     )
-    execFileSync('/usr/bin/textutil', ['-convert', 'docx', '-output', docx, html])
+    execFileSync('/usr/bin/textutil', [
+      '-convert',
+      'docx',
+      '-output',
+      docx,
+      html,
+    ])
     expect(await converter.text(docx)).toMatch(/需求说明[\s\S]*第一段/)
   })
 

@@ -86,12 +86,7 @@ function onLoaded(event: Event): void {
       :aria-label="`放大图片：${name}`"
       @click="emit('enlarge', shown)"
     >
-      <img
-        :src="shown"
-        :alt="name"
-        @error="onError"
-        @load="onLoaded"
-      />
+      <img :src="shown" :alt="name" @error="onError" @load="onLoaded" />
       <span>点击放大</span>
     </button>
   </template>

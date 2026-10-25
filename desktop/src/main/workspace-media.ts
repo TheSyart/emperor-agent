@@ -142,13 +142,16 @@ export function registerWorkspaceMediaIpc(input: {
         : {}
     let url: URL
     try {
-      url = new URL(typeof record.url === 'string' ? record.url.slice(0, 512) : '')
+      url = new URL(
+        typeof record.url === 'string' ? record.url.slice(0, 512) : '',
+      )
     } catch {
       return { ok: false, error: NOT_ALLOWED }
     }
     const grant = grantOf(url, input.lookup)
     if (!grant) return { ok: false, error: NOT_ALLOWED }
-    if ((await sizeAt(grant.filePath)) === null) return { ok: false, error: GONE }
+    if ((await sizeAt(grant.filePath)) === null)
+      return { ok: false, error: GONE }
     if (record.action === 'reveal') {
       input.showItemInFolder(grant.filePath)
       return { ok: true }

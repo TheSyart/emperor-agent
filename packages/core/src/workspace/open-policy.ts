@@ -78,7 +78,7 @@ function extensionOf(name: string): string {
 export function isOpenableFile(path: string): boolean {
   if (RUNS_WHEN_OPENED.has(extensionOf(basename(path)))) return false
   // Anything inside an application or another bundle.
-  for (let parent = dirname(path); parent !== dirname(parent); ) {
+  for (let parent = dirname(path); parent !== dirname(parent);) {
     if (RUNS_WHEN_OPENED.has(extensionOf(basename(parent)))) return false
     parent = dirname(parent)
   }
