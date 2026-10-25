@@ -378,10 +378,10 @@ describe('upgrade targets', () => {
     expect(
       claudeUpgradeTarget(null, npm('2.1.308'), KNOWN_CLAUDE_VERSIONS),
     ).toMatchObject({ target: '2.1.308' })
-    // npm not checked yet: the verified list alone decides.
+    // npm not checked yet (or offline): nothing is offered (AGT-13).
     expect(
       claudeUpgradeTarget('2.1.281', npm(null), KNOWN_CLAUDE_VERSIONS),
-    ).toMatchObject({ target: '2.1.310', unverified: null })
+    ).toMatchObject({ target: null, unverified: null })
     expect(claudeUpgradeTarget('2.1.281', npm('2.1.312'), [])).toEqual({
       target: null,
       unverified: '2.1.312',

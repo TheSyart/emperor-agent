@@ -298,7 +298,8 @@ export class PublishedVersionStore {
 
 /**
  * Claude Code (VER-04, as Codex): the highest release Emperor verified that
- * is newer than what is installed and not above npm's latest;
+ * is newer than what is installed and not above npm's latest (none before
+ * npm answered);
  * `unverified`: npm's latest when it is not verified and newer than what
  * is installed or offered. Neither is ever a version in `skip` (one the
  * user went back from, VER-03). `verified`: the exact releases.
@@ -318,14 +319,17 @@ export function claudeUpgradeTarget(
     published?.latest && RELEASE.test(published.latest)
       ? parseVersion(published.latest)!
       : undefined
-  const best = verified
-    .filter(
-      (v) =>
-        !skip.has(formatVersion(v)) &&
-        (!current || compare(v, current) > 0) &&
-        (!latest || compare(v, latest) <= 0),
-    )
-    .at(-1)
+  // Nothing is offered before npm answered (as for Codex, AGT-13).
+  const best = latest
+    ? verified
+        .filter(
+          (v) =>
+            !skip.has(formatVersion(v)) &&
+            (!current || compare(v, current) > 0) &&
+            compare(v, latest) <= 0,
+        )
+        .at(-1)
+    : undefined
   const floor = [current, best].filter(Boolean) as SemanticVersion[]
   const unverified =
     latest &&
