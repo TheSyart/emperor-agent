@@ -776,17 +776,36 @@ await sleep(2000)
 logger.kill('SIGTERM')
 closeSync(logFd)
 const denied = denials()
+/**
+ * A unix socket the CLI binds for itself (with its own plugins on, --raw:
+ * `/private/tmp/cc-socks/<pid>.sock`): denied by the profile, but local,
+ * never a connection off this Mac.
+ */
+const localSocket = (d) => /\bnetwork-bind \/\S+\.sock\b/.test(d.what)
 function attempts(run, from = 0, until = Infinity) {
   if (!run) return []
   return [
     ...run.proxy.log,
     ...denied.filter(
-      (d) => d.experiment === run.experiment && d.kind === 'net',
+      (d) =>
+        d.experiment === run.experiment && d.kind === 'net' && !localSocket(d),
     ),
   ]
     .filter((a) => a.at >= from && a.at < until)
     .sort((a, b) => a.at - b.at)
 }
+/** The local sockets a run tried to bind (reported, not counted). */
+const socketBinds = (run) =>
+  run
+    ? denied
+        .filter(
+          (d) =>
+            d.experiment === run.experiment &&
+            d.kind === 'net' &&
+            localSocket(d),
+        )
+        .map((d) => d.what)
+    : []
 const describe = (list, since) =>
   list.map((a) => ({
     ms: since ? a.at - since : undefined,
@@ -812,6 +831,7 @@ const promptlessAttempts = [
   ...attempts(first, 0, first?.promptAt ?? Infinity),
   ...attempts(seeded, 0, seeded?.promptAt ?? Infinity),
 ]
+const localSocketBinds = [...new Set([first, seeded].flatMap(socketBinds))]
 const modelRequest = (a) => a.method === 'POST' && /\/messages$/.test(a.path)
 if (modelPath) {
   const init = initOf(modelPath)
@@ -1023,6 +1043,7 @@ const full = {
   network: {
     boundary: 'sandbox-exec: deny network*, allow only a local 403 proxy',
     logAvailable,
+    localSocketBinds,
   },
   ...report,
   experiments,
