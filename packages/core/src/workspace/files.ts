@@ -23,6 +23,8 @@ export interface WorkspaceFileEntry {
   bytes: number
   modifiedAt: number
   hidden: boolean
+  /** Ignored by Git: only listed (and so marked) when asked (BUG-12). */
+  ignored?: true
 }
 
 export interface WorkspaceFileListResult {
@@ -428,14 +430,14 @@ export class WorkspaceFilesService {
     return resolveOwnedProject(this.resolveProject, sessionId)
   }
 
+  /** Drop what Git ignores, or with `showIgnored` mark it (BUG-12). */
   private async withoutIgnored(
     sessionId: string,
     projectRoot: string,
     entries: WorkspaceFileEntry[],
     showIgnored?: boolean,
   ): Promise<WorkspaceFileEntry[]> {
-    if (showIgnored || !this.filterIgnored || entries.length === 0)
-      return entries
+    if (!this.filterIgnored || entries.length === 0) return entries
     let ignored: Set<string>
     try {
       ignored = await this.filterIgnored(
@@ -448,6 +450,10 @@ export class WorkspaceFilesService {
       // classification is optional metadata and must not break file browsing.
       return entries
     }
+    if (showIgnored)
+      return entries.map((entry) =>
+        ignored.has(entry.path) ? { ...entry, ignored: true } : entry,
+      )
     return entries.filter((entry) => !ignored.has(entry.path))
   }
 }

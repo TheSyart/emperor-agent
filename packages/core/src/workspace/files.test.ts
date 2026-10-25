@@ -258,7 +258,10 @@ describe('WorkspaceFilesService', () => {
       const text = '订单号,客户\nA1023,张三\n'
       writeFileSync(
         join(root, 'le.txt'),
-        Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
+        Buffer.concat([
+          Buffer.from([0xff, 0xfe]),
+          Buffer.from(text, 'utf16le'),
+        ]),
       )
       const be = Buffer.from(text, 'utf16le')
       for (let i = 0; i < be.length; i += 2) {
@@ -312,7 +315,10 @@ describe('WorkspaceFilesService', () => {
         join(root, 'blob.bin'),
         Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x00, 0xff, 0xfe]),
       )
-      writeFileSync(join(root, 'junk.dat'), Buffer.from([0x81, 0x30, 0xff, 0x41]))
+      writeFileSync(
+        join(root, 'junk.dat'),
+        Buffer.from([0x81, 0x30, 0xff, 0x41]),
+      )
       await expect(read(root, 'blob.bin')).resolves.toMatchObject({
         kind: 'binary',
       })
@@ -455,6 +461,43 @@ describe('WorkspaceFilesService', () => {
       'ignored.log',
     )
     expect(visible.entries.map((entry) => entry.path)).toContain('ignored.log')
+  })
+
+  it('BUG-12 · marks ignored entries when asked, instead of dropping them', async () => {
+    const root = fixture()
+    mkdirSync(join(root, 'dist'))
+    writeFileSync(join(root, 'dist', 'app.js'), 'x\n')
+    writeFileSync(join(root, '.env'), 'KEY=1\n')
+    const service = new WorkspaceFilesService({
+      resolveProject: () => ({ sessionId: 's1', projectRoot: root }),
+      filterIgnored: async (_sessionId, _projectRoot, paths) =>
+        new Set(paths.filter((path) => path.startsWith('dist'))),
+    })
+    const listed = await service.list({
+      sessionId: 's1',
+      relativePath: '',
+      showHidden: true,
+      showIgnored: true,
+    })
+    const byName = Object.fromEntries(
+      listed.entries.map((entry) => [entry.name, entry]),
+    )
+    expect(byName.dist).toMatchObject({ ignored: true, hidden: false })
+    expect(byName['.env']).toMatchObject({ hidden: true })
+    expect(byName['.env']!.ignored).toBeUndefined()
+    expect(byName.src!.ignored).toBeUndefined()
+    const found = await service.search({
+      sessionId: 's1',
+      query: 'app',
+      showIgnored: true,
+    })
+    expect(found.entries).toEqual([
+      expect.objectContaining({ path: 'dist/app.js', ignored: true }),
+    ])
+    // Not asked: dropped, as before.
+    expect(
+      (await service.search({ sessionId: 's1', query: 'app' })).entries,
+    ).toEqual([])
   })
 
   it('keeps file browsing available when ignore classification is unavailable', async () => {
