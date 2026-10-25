@@ -220,7 +220,7 @@ describe('Stable release bundle assembler (REL-05)', () => {
 
   it('rejects a tag that is not v<desktop version>', () => {
     const fixture = createFixture()
-    for (const tag of ['v0.2.0-preview.1', 'v9.9.9', '0.2.0']) {
+    for (const tag of [`${STABLE_TAG}-preview.1`, 'v9.9.9', STABLE_VERSION]) {
       const result = runAssembler(fixture, [], tag)
       expect(result.status, tag).toBe(1)
       expect(result.stderr, tag).toMatch(/tag/)

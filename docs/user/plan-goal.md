@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-10-22（对照 `1bb92495`）<br>
+> 最后核验：2026-10-26（对照 `aa8aa69c`）<br>
 > 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`desktop/src/renderer/src/components/conversation/takeover/PlanReviewPanel.vue`、`desktop/src/renderer/src/composables/composerLifecycle.ts`、`desktop/src/renderer/src/runtime/sessionDrafts.ts`、`packages/core/src/api/chat-service.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
 权限预设决定 Agent 能写哪里；计划模式决定 Agent 先提方案还是直接动手；目标让 Agent 在你不再输入时继续推进同一件事。三者可以组合使用。
@@ -34,7 +34,7 @@
 
 - `/plan` 进入计划模式；`/plan <消息>` 进入的同时把消息发给 Agent；`/plan off` 退出。
 - 计划模式下 Agent 会先只读探索、在必要时向你提问，然后提交一份以标题开头的完整计划。
-- 计划出现在底部审阅面板，有两个按钮：
+- 计划出现在底部审阅面板；等你确认时，对话里的计划只留一行「计划 · 标题 · 等待你在下方确认」，确认或忽略后展开留档。面板有两个按钮：
   - 「批准并执行」：退出计划模式，Agent 从下一步开始执行计划；
   - 「继续规划」：留在计划模式，你在「计划调整意见」里写下的意见会交给 Agent，修改后重新提交。
 - 点面板右上角的 ×（「忽略」）时仍停留在计划模式，本轮随即结束，等你输入自己的意见；审阅不可用时同样停留在计划模式。

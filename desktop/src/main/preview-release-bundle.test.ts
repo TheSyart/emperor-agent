@@ -25,7 +25,16 @@ const publicationContract = join(
   'scripts',
   'preview-publication-contract.mjs',
 )
-const tag = 'v0.2.0-preview.1'
+// A Preview tag must sit on the desktop's own base version, so the fixture
+// follows desktop/package.json instead of naming one.
+const desktopVersion = (
+  JSON.parse(
+    readFileSync(join(repoRoot, 'desktop', 'package.json'), 'utf8'),
+  ) as {
+    version: string
+  }
+).version
+const tag = `v${desktopVersion}-preview.1`
 const version = tag.slice(1)
 const commit = 'a'.repeat(40)
 const runId = '123456'
@@ -285,7 +294,7 @@ describe('unsigned Preview release bundle assembler', () => {
 
   it('rejects a non-Preview tag or a tag outside the desktop base version', () => {
     const fixture = createFixture()
-    const stable = runAssembler(fixture, 'v0.2.0')
+    const stable = runAssembler(fixture, `v${desktopVersion}`)
     expect(stable.status).toBe(1)
     expect(stable.stderr).toMatch(/Preview tag/i)
 

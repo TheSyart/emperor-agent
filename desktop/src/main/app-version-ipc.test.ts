@@ -51,7 +51,7 @@ describe('the app version over IPC (REL-05 test 5)', () => {
     expect(version).not.toHaveBeenCalled()
   })
 
-  it('ships 0.2.0: desktop, Core and both lockfiles agree', () => {
+  it('ships 0.2.1: desktop, Core and both lockfiles agree', () => {
     const desktop = readJson(resolve(desktopRoot, 'package.json'))
     const core = readJson(resolve(repoRoot, 'packages', 'core', 'package.json'))
     const desktopLock = readJson(resolve(desktopRoot, 'package-lock.json')) as {
@@ -62,11 +62,11 @@ describe('the app version over IPC (REL-05 test 5)', () => {
       packages?: Record<string, { version?: string }>
     }
 
-    expect(desktop.version).toBe('0.2.0')
-    expect(core.version).toBe('0.2.0')
-    expect(desktopLock.version).toBe('0.2.0')
-    expect(desktopLock.packages?.['']?.version).toBe('0.2.0')
-    expect(desktopLock.packages?.['../packages/core']?.version).toBe('0.2.0')
-    expect(rootLock.packages?.['packages/core']?.version).toBe('0.2.0')
+    expect(desktop.version).toBe('0.2.1')
+    expect(core.version).toBe('0.2.1')
+    expect(desktopLock.version).toBe('0.2.1')
+    expect(desktopLock.packages?.['']?.version).toBe('0.2.1')
+    expect(desktopLock.packages?.['../packages/core']?.version).toBe('0.2.1')
+    expect(rootLock.packages?.['packages/core']?.version).toBe('0.2.1')
   })
 })
