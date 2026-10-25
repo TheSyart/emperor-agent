@@ -5941,7 +5941,62 @@ export async function installVisualCoreBridge(
             case 'git.switchBranch':
               return visualGitStatus
             case 'files.list':
-            case 'files.search':
+            case 'files.search': {
+              // BUG-12 (`?visualTree=big`): dot files and an ignored folder
+              // when asked, and a folder of 600 frames in pages.
+              if (visualParams.get('visualTree') === 'big') {
+                const input = (args[0] || {}) as {
+                  relativePath?: string
+                  cursor?: string
+                  limit?: number
+                  showHidden?: boolean
+                  showIgnored?: boolean
+                }
+                const entry = (
+                  path: string,
+                  kind: 'file' | 'directory',
+                  extra: Record<string, unknown> = {},
+                ) => ({
+                  name: path.split('/').pop(),
+                  path,
+                  kind,
+                  bytes: 1024,
+                  modifiedAt: Date.parse(now),
+                  hidden: path.split('/').pop()!.startsWith('.'),
+                  ...extra,
+                })
+                const all =
+                  input.relativePath === 'frames'
+                    ? Array.from({ length: 600 }, (_, index) =>
+                        entry(
+                          `frames/frame-${String(index + 1).padStart(4, '0')}.png`,
+                          'file',
+                        ),
+                      )
+                    : [
+                        ...(input.showHidden
+                          ? [
+                              entry('.github', 'directory'),
+                              entry('.env', 'file'),
+                            ]
+                          : []),
+                        ...(input.showIgnored
+                          ? [entry('dist', 'directory', { ignored: true })]
+                          : []),
+                        entry('frames', 'directory'),
+                        entry('src', 'directory'),
+                        entry('package.json', 'file'),
+                      ]
+                const start = Number(input.cursor ?? 0)
+                const end = start + (input.limit ?? 200)
+                return {
+                  projectRoot: projectDir,
+                  relativePath: input.relativePath ?? '',
+                  entries: all.slice(start, end),
+                  nextCursor: end < all.length ? String(end) : null,
+                  truncated: false,
+                }
+              }
               return {
                 projectRoot: projectDir,
                 relativePath: '',
@@ -5974,6 +6029,7 @@ export async function installVisualCoreBridge(
                 nextCursor: null,
                 truncated: false,
               }
+            }
             case 'files.stat':
             case 'files.read':
             case 'files.preview': {

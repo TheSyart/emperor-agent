@@ -24,6 +24,8 @@
  *   tree (flashing) within seconds, unasked; rewriting the open file shows
  *   the new text; deleting it shows 「这个文件已被删除。」 and 关闭标签 closes
  *   it (the real Core watcher, FSEvents).
+ *   BUG-12: the tree's ⋯ menu shows dot files and what Git ignores (real
+ *   `git check-ignore`), paler, and hides them again.
  *   BUG-10: a song plays; a PDF and a docx show Quick Look's first page and
  *   their text; a HEIC shows as sips's PNG; GBK text names GB18030; a CSV
  *   is a table; a zip is a card that opens in its default app, a program
@@ -306,6 +308,11 @@ function prepareProject(): string {
     Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1, 0, 0, 0, 0]),
   )
   chmodSync(join(root, 'scripts', 'tool'), 0o755)
+  // BUG-12: a dot file and a folder Git ignores.
+  writeFileSync(join(root, '.gitignore'), 'dist/\n')
+  writeFileSync(join(root, '.env'), 'TOKEN=example\n')
+  mkdirSync(join(root, 'dist'), { recursive: true })
+  writeFileSync(join(root, 'dist', 'bundle.js'), 'console.log(1)\n')
   git(root, 'init', '-q', '-b', 'main')
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'init')
@@ -632,6 +639,58 @@ async function followsProject(page: Page, project: string): Promise<void> {
         // Whatever happened, leave the project as Git knows it.
         rmSync(file, { force: true })
       }
+    },
+  )
+}
+
+/** BUG-12: the tree's options in the real app (Core marks what Git ignores). */
+async function treeOptions(page: Page): Promise<void> {
+  await check(
+    page,
+    'BUG-12 · the tree shows dot files and ignored ones on request, paler',
+    async () => {
+      const tree = page.locator('.file-tree-column')
+      const row = (path: string) =>
+        tree.locator(`.file-tree-row[data-path="${path}"]`)
+      if ((await row('.env').count()) || (await row('dist').count()))
+        throw new Error('hidden or ignored entries shown by default')
+      const toggle = async (label: string) => {
+        if (!(await page.getByRole('menu', { name: '目录树选项' }).count()))
+          await tree.getByRole('button', { name: '目录树选项' }).click()
+        await page
+          .getByRole('menu', { name: '目录树选项' })
+          .getByRole('menuitem', { name: label })
+          .click()
+      }
+      await toggle('显示隐藏文件')
+      await toggle('显示被 Git 忽略的文件')
+      await row('dist').waitFor({ timeout: 10_000 })
+      await row('.env').waitFor({ timeout: 10_000 })
+      const classes = {
+        env: await row('.env').getAttribute('class'),
+        gitignore: await row('.gitignore').getAttribute('class'),
+        dist: await row('dist').getAttribute('class'),
+        src: await row('src').getAttribute('class'),
+      }
+      if (
+        !classes.env?.includes('dim') ||
+        !classes.dist?.includes('dim') ||
+        classes.src?.includes('dim')
+      )
+        throw new Error(JSON.stringify(classes))
+      await page.screenshot({ path: join(shots, 'bug12-tree.png') })
+      // Back to the defaults, so the steps after see the usual tree.
+      await toggle('显示隐藏文件')
+      await toggle('显示被 Git 忽略的文件')
+      await page.keyboard.press('Escape')
+      await until(
+        async () =>
+          (await row('dist').count()) === 0 &&
+          (await row('.env').count()) === 0,
+        10_000,
+        'the defaults again',
+      )
+      return { dim: ['.env', '.gitignore', 'dist'], plain: ['src'] }
     },
   )
 }
@@ -2811,6 +2870,7 @@ async function main(): Promise<void> {
       await videoPreview(launched.page)
       await followsProject(launched.page, project)
       await fileFormats(app, launched.page)
+      await treeOptions(launched.page)
       await turnFileRecord(launched.page, model, project)
       await referencesAndCard(launched.page, model, project)
       // The Build session exists once its first message went out.

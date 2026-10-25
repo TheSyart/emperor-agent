@@ -381,6 +381,62 @@ for (const theme of ['dark', 'light'] as const) {
     ).toBeVisible()
   })
 
+  test(`BUG-12 8 · the tree's options and a folder with more (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(
+      page,
+      '/chat/build-ui?visualProgress=final&visualTree=big',
+      theme,
+      'files',
+    )
+    const tree = page.locator('.file-tree-column')
+    const rows = tree.locator('.file-tree-row')
+    await expect(rows).toHaveText(['frames', 'src', 'package.json'])
+    // The widest tree (320 px), so the open menu leaves the names in view.
+    await tree.locator('.file-tree-resizer').focus()
+    for (let step = 0; step < 4; step += 1)
+      await page.keyboard.press('ArrowLeft')
+    await expect
+      .poll(async () => Math.round((await tree.boundingBox())!.width))
+      .toBe(320)
+    await tree.getByRole('button', { name: '目录树选项' }).click()
+    const menu = page.getByRole('menu', { name: '目录树选项' })
+    await menu.getByRole('menuitem', { name: '显示隐藏文件' }).click()
+    await menu.getByRole('menuitem', { name: '显示被 Git 忽略的文件' }).click()
+    await expect(rows.first()).toHaveText('.github')
+    await expect(tree.locator('.file-tree-row[data-path="dist"]')).toHaveClass(
+      /dim/,
+    )
+    await expect(tree.locator('.file-tree-row[data-path=".env"]')).toHaveClass(
+      /dim/,
+    )
+    await expect(
+      menu.getByRole('menuitem', { name: '显示隐藏文件' }),
+    ).toHaveAttribute('aria-checked', 'true')
+    await page.mouse.move(400, 450)
+    await shot(page, `tree-options-${theme}`)
+    await expectBaseline(tree, 'workspace', `tree-options-${theme}`)
+
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await tree.locator('.file-tree-row[data-path="frames"]').click()
+    const more = tree.locator('.file-tree-more')
+    await expect(more).toHaveText('这个目录有更多文件 · 再加载 500 项')
+    await expect(
+      tree.locator('.file-tree-row[data-path^="frames/"]'),
+    ).toHaveCount(500)
+    await more.scrollIntoViewIfNeeded()
+    await page.mouse.move(400, 450)
+    await shot(page, `tree-more-${theme}`)
+    await expectBaseline(tree, 'workspace', `tree-more-${theme}`)
+    await more.click()
+    await expect(
+      tree.locator('.file-tree-row[data-path^="frames/"]'),
+    ).toHaveCount(600)
+    await expect(more).toHaveCount(0)
+  })
+
   test(`browser: only the user's own browsing (${theme})`, async ({ page }) => {
     // The tab the Agent holds shows in the conversation preview instead.
     await open(page, '/chat/chat-main?visualAgentTab=agent', theme, 'browser')
