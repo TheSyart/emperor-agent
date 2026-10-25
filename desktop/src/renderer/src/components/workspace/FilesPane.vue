@@ -17,6 +17,8 @@
  * current text. Turn snapshots and attachments never change and are reused.
  * WorkspacePanel keeps this pane alive across pane switches (KeepAlive); the
  * scroll positions are put back on reactivation.
+ * Videos play in FileVideoPreview (BUG-05), streamed from an address Core
+ * grants; nothing of them is read into the preview.
  *
  * Following the project (BUG-11): while mounted the pane watches its
  * project (files.watch). A change re-reads the loaded folders that hold it
@@ -82,6 +84,7 @@ import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
 import WorkspaceTabBar from './WorkspaceTabBar.vue'
+import FileVideoPreview from './FileVideoPreview.vue'
 import {
   FILES_TREE_MAX,
   FILES_TREE_MIN,
@@ -949,6 +952,12 @@ function message(value: unknown): string {
           <p v-else-if="activeTab.preview.kind === 'image'" class="files-muted">
             图片超过预览大小限制（8 MiB）。
           </p>
+          <FileVideoPreview
+            v-else-if="activeTab.preview.kind === 'video'"
+            :key="activeTab.key"
+            :target="activeTab.request.target"
+            :name="activeTab.preview.name"
+          />
           <div
             v-else-if="isMarkdown && !activeTab.sourceMode"
             class="markdown-body file-markdown-preview"

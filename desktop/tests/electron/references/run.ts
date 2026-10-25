@@ -18,6 +18,8 @@
  *   file line navigation and SVGs, output/source lists, GitHub routes, and
  *   ordinary Chat attachments. Only Finder's final native launch is recorded.
  *   These added checks use the local scripted model, not a paid real model.
+ *   BUG-05: a project video plays in 文件 through Core's grant and the
+ *   app://workspace-media stream (metadata, a 206 part, a seek).
  *   FIX-14: first, in a fresh Emperor Home of its own (no session at all),
  *   the start page offers the slash commands and Skills, /plan runs as the
  *   command, and a Build draft lists its project's Skills.
@@ -48,6 +50,8 @@ import { startFixtureSite } from '../fixtures/site'
 /** 文件's tabs (UI-S06: the shared editor tab bar, no draft tab). */
 const FILE_TABS = '.files-pane .workspace-tab-bar .tab-item'
 const ACTIVE_FILE_TAB = `${FILE_TABS}[data-active]`
+/** BUG-05's clip in the temporary project (a name with CJK and a space). */
+const VIDEO_CLIP = 'clips/飞行 测试.mp4'
 import {
   startFakeModel,
   type ChatRequest,
@@ -238,6 +242,12 @@ function prepareProject(): string {
     'export const first = 1\nexport const second = 2\nexport const third = 3\n',
   )
   writeFileSync(join(root, 'docs', 'guide.md'), '# Guide\n\nHello.\n')
+  // BUG-05: a 2 s H.264 clip, committed so no turn record sees it.
+  mkdirSync(join(root, 'clips'), { recursive: true })
+  copyFileSync(
+    join(desktop, 'tests', 'fixtures', 'media', 'clip-h264.mp4'),
+    join(root, VIDEO_CLIP),
+  )
   git(root, 'init', '-q', '-b', 'main')
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'init')
@@ -429,6 +439,70 @@ async function documentLinks(
 
   if (model.errors.length > 0)
     throw new Error(`model step errors: ${String(model.errors[0])}`)
+}
+
+/**
+ * BUG-05: a project video plays in 文件 through the real grant and the real
+ * app://workspace-media stream: metadata loads, a part comes back as 206,
+ * and a seek lands.
+ */
+async function videoPreview(page: Page): Promise<void> {
+  await check(
+    page,
+    'BUG-05 · an H.264 clip in the project plays in 文件',
+    async () => {
+      const folder = page.locator('.file-tree-row[data-path="clips"]')
+      if ((await folder.getAttribute('aria-expanded')) !== 'true')
+        await folder.click()
+      await page.locator(`.file-tree-row[data-path="${VIDEO_CLIP}"]`).click()
+      const video = page.locator('.files-pane video.file-video')
+      await video.waitFor({ timeout: 10_000 })
+      const src = (await video.getAttribute('src')) ?? ''
+      if (!/^app:\/\/workspace-media\/[0-9a-f]{32}$/.test(src))
+        throw new Error(`src ${src}`)
+      await until(
+        async () =>
+          (await video.evaluate((node: HTMLVideoElement) => node.readyState)) >=
+          1,
+        15_000,
+        'video metadata',
+      )
+      const seeked = await video.evaluate(
+        (node: HTMLVideoElement) =>
+          new Promise<number>((resolve, reject) => {
+            node.addEventListener('seeked', () => resolve(node.currentTime), {
+              once: true,
+            })
+            node.addEventListener('error', () => reject(new Error('error')), {
+              once: true,
+            })
+            node.currentTime = 1.5
+          }),
+      )
+      const facts = await video.evaluate((node: HTMLVideoElement) => ({
+        readyState: node.readyState,
+        duration: node.duration,
+        width: node.videoWidth,
+        height: node.videoHeight,
+        error: node.error?.code ?? null,
+      }))
+      if (facts.error !== null || Math.round(facts.duration) !== 2)
+        throw new Error(JSON.stringify(facts))
+      const ranged = await page.evaluate(async (url) => {
+        const response = await fetch(url, { headers: { Range: 'bytes=0-99' } })
+        return {
+          status: response.status,
+          type: response.headers.get('content-type'),
+          range: response.headers.get('content-range'),
+          bytes: (await response.arrayBuffer()).byteLength,
+        }
+      }, src)
+      if (ranged.status !== 206 || ranged.bytes !== 100)
+        throw new Error(JSON.stringify(ranged))
+      await page.screenshot({ path: join(shots, 'video-preview.png') })
+      return { ...facts, seeked, ranged }
+    },
+  )
 }
 
 interface TurnFiles {
@@ -2409,6 +2483,7 @@ async function main(): Promise<void> {
     if (model === null) await realModel(launched.page)
     else {
       await documentLinks(launched.page, model, project)
+      await videoPreview(launched.page)
       await turnFileRecord(launched.page, model, project)
       await referencesAndCard(launched.page, model, project)
       // The Build session exists once its first message went out.

@@ -2,6 +2,7 @@ import type {
   ProjectInfo,
   SessionInfo,
   SidebarSortMode,
+  SidebarSectionKey,
   SidebarState,
 } from '../types'
 
@@ -62,6 +63,7 @@ export const defaultSidebarState: SidebarState = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  collapsed_sections: [],
   pinned_session_ids: [],
   right_workspace: {
     version: 3,
@@ -85,6 +87,7 @@ export function normalizeSidebarState(
       value?.project_session_order,
     ),
     collapsed_project_ids: arrayOfStrings(value?.collapsed_project_ids),
+    collapsed_sections: normalizeCollapsedSections(value?.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(value?.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(value?.right_workspace),
   }
@@ -407,6 +410,20 @@ function normalizeSectionOrder(value: unknown): Array<'projects' | 'chats'> {
     if (!out.includes(item)) out.push(item)
   }
   return out.slice(0, 2)
+}
+
+const SECTION_KEYS: readonly SidebarSectionKey[] = [
+  'pinned',
+  'projects',
+  'chats',
+]
+
+/** Folded sections like Core: known keys only, each once (BUG-06). */
+function normalizeCollapsedSections(value: unknown): SidebarSectionKey[] {
+  return [...new Set(arrayOfStrings(value))].filter(
+    (key): key is SidebarSectionKey =>
+      SECTION_KEYS.includes(key as SidebarSectionKey),
+  )
 }
 
 function normalizeProjectSessionOrder(

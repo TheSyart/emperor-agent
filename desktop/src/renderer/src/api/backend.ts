@@ -139,6 +139,9 @@ interface EmperorBridge {
     sessionId: string
     referenceId: string
   }) => Promise<{ ok?: boolean; error?: string } | void>
+  openWorkspaceMedia?: (
+    url: string,
+  ) => Promise<{ ok?: boolean; error?: string } | void>
   openExternal?: (
     url: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
@@ -408,6 +411,19 @@ export async function revealReference(input: {
   const result = await reveal(input)
   if (result && typeof result === 'object' && result.ok === false)
     throw new Error(result.error || 'Failed to reveal reference')
+}
+
+/**
+ * 「用默认应用打开」 a video of the Files pane by the media address Core
+ * granted it (BUG-05); main opens that granted file only.
+ */
+export async function openWorkspaceMedia(url: string): Promise<void> {
+  const opener = bridge()?.openWorkspaceMedia
+  if (typeof opener !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await opener(url)
+  if (result && typeof result === 'object' && result.ok === false)
+    throw new Error(result.error || '无法打开这个视频')
 }
 
 export async function openExternal(url: string): Promise<void> {

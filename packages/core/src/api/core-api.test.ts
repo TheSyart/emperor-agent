@@ -99,6 +99,7 @@ const EXPECTED_OPERATIONS = [
   'executors.upgrade',
   'executors.versions',
   'files.list',
+  'files.mediaUrl',
   'files.preview',
   'files.read',
   'files.search',
@@ -1646,6 +1647,7 @@ describe('CoreApi sessions and kept services', () => {
       chat_order: [],
       project_session_order: {},
       collapsed_project_ids: [],
+      collapsed_sections: [],
       pinned_session_ids: [],
       right_workspace: {
         version: 3,
@@ -1686,6 +1688,32 @@ describe('CoreApi sessions and kept services', () => {
       right_workspace: { width: 960, pane: 'files', workbenchOpen: true },
     })
     expect(api.sidebar.get()).toEqual(patched)
+  })
+
+  it('BUG-06 3–5 · keeps collapsed sections: known keys once, none in an old file', async () => {
+    const { api, stateRoot } = await setup()
+    mkdirSync(join(stateRoot, 'memory'), { recursive: true })
+    writeFileSync(
+      join(stateRoot, 'memory', 'sidebar_state.json'),
+      JSON.stringify({ project_sort: 'manual', collapsed_project_ids: ['p1'] }),
+    )
+    expect(api.sidebar.get()).toMatchObject({
+      project_sort: 'manual',
+      collapsed_project_ids: ['p1'],
+      collapsed_sections: [],
+    })
+    expect(
+      api.sidebar.patch({
+        collapsed_sections: ['chats', 'archive', 'chats', 7, 'pinned', null],
+      }).collapsed_sections,
+    ).toEqual(['chats', 'pinned'])
+    expect(api.sidebar.get()).toMatchObject({
+      project_sort: 'manual',
+      collapsed_sections: ['chats', 'pinned'],
+    })
+    expect(
+      api.sidebar.patch({ collapsed_sections: 'projects' }).collapsed_sections,
+    ).toEqual([])
   })
 
   it('normalizes pinned sessions and unpins deleted or archived sessions', async () => {

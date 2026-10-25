@@ -9,8 +9,13 @@
  * contents after a pause (useContentSearch); ↑ / ↓ on a focused row move to
  * the next one and open it. Collapsed, the column renders the 56px
  * SidebarRail instead. Geometry is owned by AppFrame; this fills the column
- * it is given. The persisted layout (sorts, orders, pins) lives in
- * useSidebarState.
+ * it is given. The persisted layout (sorts, orders, pins, folded projects
+ * and sections) lives in useSidebarState.
+ *
+ * Folded sections (BUG-06) only hide rows: search and ↑ / ↓ still reach
+ * them, and a section opens again when the open conversation changes into
+ * it. The conversation open at start-up keeps the sections as saved, and
+ * folding the section of the open conversation keeps it folded.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
@@ -28,7 +33,7 @@ import {
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
-import type { ProjectInfo, SessionInfo } from '../../types'
+import type { ProjectInfo, SessionInfo, SidebarSectionKey } from '../../types'
 import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
@@ -87,9 +92,6 @@ const newProjectMenuOpen = ref(false)
 const newProjectMenuAnchor = ref<HTMLElement | null>(null)
 const chatMenuOpen = ref(false)
 const chatMenuAnchor = ref<HTMLElement | null>(null)
-const pinnedCollapsed = ref(false)
-const projectsCollapsed = ref(false)
-const chatsCollapsed = ref(false)
 
 const chatDayGroups = computed(() =>
   sidebarState.value.chat_sort === 'manual'
@@ -178,24 +180,60 @@ const selectedRootId = computed(() => {
   const id = route.params.sessionId
   return typeof id === 'string' ? id : activeId.value
 })
-// Opening a child reveals only its owning main row/project group.
+/** Where the open conversation's main row is (null while it has none). */
+const selectedPlace = computed<{
+  root: string
+  section: SidebarSectionKey
+  projectId?: string
+} | null>(() => {
+  const root = layoutLoaded.value ? selectedRootId.value : ''
+  if (!root) return null
+  if (grouped.value.pinned.some((session) => session.id === root))
+    return { root, section: 'pinned' }
+  const project = grouped.value.projects.find((item) =>
+    item.sessions.some((session) => session.id === root),
+  )
+  if (project) return { root, section: 'projects', projectId: project.id }
+  if (grouped.value.chats.some((session) => session.id === root))
+    return { root, section: 'chats' }
+  return null
+})
+/** The conversation last revealed; the open one once the layout loads. */
+let revealedRoot = ''
+// Opening a child reveals only its owning main row/project group; its
+// section opens only when the open conversation changed (BUG-06).
 watch(
-  () => (layoutLoaded.value ? selectedRootId.value : ''),
-  (root) => {
-    if (!root) return
-    if (grouped.value.pinned.some((session) => session.id === root))
-      pinnedCollapsed.value = false
-    const project = grouped.value.projects.find((item) =>
-      item.sessions.some((session) => session.id === root),
-    )
-    if (project) {
-      projectsCollapsed.value = false
-      if (layout.isProjectCollapsed(project.id))
-        layout.toggleProject(project.id)
-    } else chatsCollapsed.value = false
+  () => {
+    const place = selectedPlace.value
+    return place ? [place.root, place.section, place.projectId].join('\0') : ''
   },
-  { immediate: true },
+  () => {
+    const place = selectedPlace.value
+    if (!place) return
+    if (place.projectId && layout.isProjectCollapsed(place.projectId))
+      layout.toggleProject(place.projectId)
+    if (place.root === revealedRoot) return
+    revealedRoot = place.root
+    if (layout.isSectionCollapsed(place.section))
+      layout.toggleSection(place.section)
+  },
 )
+/** Main rows in list order, folded sections included (↑ / ↓). */
+const keyboardOrder = computed(() => [
+  ...grouped.value.pinned.map((session) => session.id),
+  ...(sidebarState.value.section_order.includes('projects')
+    ? grouped.value.projects.flatMap((project) =>
+        layout.isProjectCollapsed(project.id)
+          ? []
+          : project.sessions.map((session) => session.id),
+      )
+    : []),
+  ...(sidebarState.value.section_order.includes('chats')
+    ? chatDayGroups.value.flatMap((group) =>
+        group.sessions.map((session) => session.id),
+      )
+    : []),
+])
 
 function indicator(session: SessionInfo) {
   return sessionRuntimeIndicator(
@@ -375,21 +413,30 @@ function commitSearch() {
   if (result) openSearchResult(result.id)
 }
 
-/** ↑ / ↓ on a focused row: focus the next row in the list and open it. */
-function moveRow(event: KeyboardEvent, delta: -1 | 1) {
+/**
+ * ↑ / ↓ on a focused row: open the next main row in list order and focus
+ * it. A row of a folded section has no element yet: it takes the focus
+ * once opening it has unfolded the section.
+ */
+async function moveRow(event: KeyboardEvent, delta: -1 | 1): Promise<void> {
   const row = event.target as HTMLElement | null
   if (!row?.classList.contains('session-row')) return
-  const rows = [
-    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
-      '.session-row',
-    ),
-  ]
-  const next = rows[rows.indexOf(row) + delta]
   event.preventDefault()
-  if (!next) return
-  next.focus()
-  const id = next.dataset.sessionId
-  if (id) openSession(id)
+  const list = event.currentTarget as HTMLElement
+  const order = keyboardOrder.value
+  const index = order.indexOf(row.dataset.sessionId ?? '')
+  const id = index < 0 ? undefined : order[index + delta]
+  if (!id) return
+  const rowOf = () =>
+    [...list.querySelectorAll<HTMLElement>('.session-row')].find(
+      (element) => element.dataset.sessionId === id,
+    )
+  const next = rowOf()
+  next?.focus()
+  await router.push(sessionLocation(id)).catch(() => undefined)
+  if (next) return
+  await nextTick()
+  rowOf()?.focus()
 }
 
 watch(searchQuery, () => {
@@ -402,6 +449,7 @@ onMounted(async () => {
     sessions.value.length ? Promise.resolve() : load(),
   ])
   layoutLoaded.value = true
+  revealedRoot = selectedRootId.value
 })
 
 defineExpose({ focusSearch })
@@ -472,10 +520,11 @@ defineExpose({ focusSearch })
           data-sidebar-section="pinned"
         >
           <SidebarSectionHeader
-            v-model:collapsed="pinnedCollapsed"
+            :collapsed="layout.isSectionCollapsed('pinned')"
             label="置顶"
+            @update:collapsed="layout.toggleSection('pinned')"
           />
-          <template v-if="!pinnedCollapsed">
+          <template v-if="!layout.isSectionCollapsed('pinned')">
             <template v-for="session in grouped.pinned" :key="session.id">
               <SessionRow
                 pinned
@@ -503,8 +552,9 @@ defineExpose({ focusSearch })
           data-sidebar-section="projects"
         >
           <SidebarSectionHeader
-            v-model:collapsed="projectsCollapsed"
+            :collapsed="layout.isSectionCollapsed('projects')"
             label="项目"
+            @update:collapsed="layout.toggleSection('projects')"
           >
             <IconButton
               :ref="(c) => (projectMenuAnchor = elementOf(c))"
@@ -518,7 +568,7 @@ defineExpose({ focusSearch })
               <DsPlus :size="16" />
             </IconButton>
           </SidebarSectionHeader>
-          <template v-if="!projectsCollapsed">
+          <template v-if="!layout.isSectionCollapsed('projects')">
             <template v-for="project in grouped.projects" :key="project.id">
               <SidebarProjectRow
                 :project="project"
@@ -563,7 +613,11 @@ defineExpose({ focusSearch })
           class="section"
           data-sidebar-section="chats"
         >
-          <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
+          <SidebarSectionHeader
+            :collapsed="layout.isSectionCollapsed('chats')"
+            label="对话"
+            @update:collapsed="layout.toggleSection('chats')"
+          >
             <IconButton
               :ref="(c) => (chatMenuAnchor = elementOf(c))"
               class="head-button"
@@ -576,7 +630,7 @@ defineExpose({ focusSearch })
               <DsMore :size="16" />
             </IconButton>
           </SidebarSectionHeader>
-          <template v-if="!chatsCollapsed">
+          <template v-if="!layout.isSectionCollapsed('chats')">
             <template v-for="group in chatDayGroups" :key="group.key">
               <div v-if="group.label" class="day-label">{{ group.label }}</div>
               <template v-for="session in group.sessions" :key="session.id">

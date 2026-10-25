@@ -38,7 +38,8 @@ export interface WorkspaceFileReadResult {
   projectRoot: string
   relativePath: string
   name: string
-  kind: 'text' | 'image' | 'binary'
+  /** `video`: never read here; the Files pane plays it (files.mediaUrl). */
+  kind: 'text' | 'image' | 'binary' | 'video'
   mimeType: string
   bytes: number
   /** mtime (ms) of the file read; absent for recorded turn snapshots. */
@@ -347,6 +348,9 @@ export class WorkspaceFilesService {
       bytes: metadata.size,
       modifiedAt: metadata.mtimeMs,
     }
+    // A video can be gigabytes: nothing is read, it streams when played.
+    if (isVideoMime(mimeType))
+      return { ...common, kind: 'video', truncated: false }
     if (isPreviewableImageMime(mimeType)) {
       if (metadata.size > this.maxImageBytes)
         return { ...common, kind: 'image', truncated: true }
@@ -507,11 +511,18 @@ function mimeFor(path: string): string {
   if (extension === 'gif') return 'image/gif'
   if (extension === 'webp') return 'image/webp'
   if (extension === 'svg') return 'image/svg+xml'
+  if (extension === 'mp4' || extension === 'm4v') return 'video/mp4'
+  if (extension === 'webm') return 'video/webm'
+  if (extension === 'mov') return 'video/quicktime'
   if (extension === 'json') return 'application/json'
   if (extension === 'html') return 'text/html'
   if (extension === 'css') return 'text/css'
   if (extension === 'md') return 'text/markdown'
   return 'text/plain'
+}
+
+function isVideoMime(mimeType: string): boolean {
+  return mimeType.startsWith('video/')
 }
 
 function isPreviewableImageMime(mimeType: string): boolean {

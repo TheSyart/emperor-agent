@@ -1,6 +1,6 @@
 import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 
@@ -11,6 +11,8 @@ import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 // The native browser view cannot render in this bridge: the stub records
 // the bounds the pane sends (window.__visualBrowserBounds).
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'workspace')
+/** A 2 s VP9 clip (BUG-05); the Electron suite plays the H.264 one. */
+const clip = resolve(process.cwd(), 'tests/fixtures/media/clip-vp9.webm')
 
 type Theme = 'dark' | 'light'
 
@@ -234,6 +236,46 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(fileTabs).toHaveCount(1)
     await expect(pane.locator('.tab-item[title="package.json"]')).toHaveCount(0)
     await expect(activeFile).toHaveAttribute('title', 'README.md')
+  })
+
+  test(`BUG-05 9 · a video plays in 文件; one it cannot decode offers the default app (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await page.route('**/__visual-media/**', (route) =>
+      route.request().url().endsWith('broken.mp4')
+        ? route.fulfill({ contentType: 'video/mp4', body: 'not a video' })
+        : route.fulfill({
+            contentType: 'video/webm',
+            body: readFileSync(clip),
+          }),
+    )
+    await open(page, '/chat/build-ui?visualProgress=final', theme, 'files')
+    const pane = page.locator('.files-pane')
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'clips/飞行 测试.webm' },
+    })
+    const video = pane.locator('video.file-video')
+    await expect(video).toHaveAttribute('controls', '')
+    await expect(video).toHaveAttribute('preload', 'metadata')
+    await expect
+      .poll(() => video.evaluate((node: HTMLVideoElement) => node.readyState))
+      .toBeGreaterThanOrEqual(2)
+    await expect(pane.locator('.file-preview-meta')).toContainText('video/webm')
+    await shot(page, `video-${theme}`)
+    await expectBaseline(pane, 'workspace', `video-${theme}`)
+
+    await requestWorkspace(page, {
+      pane: 'files',
+      file: { path: 'clips/broken.mp4' },
+    })
+    await expect(pane.getByText('这个视频的编码无法在应用里播放')).toBeVisible()
+    await expect(
+      pane.getByRole('button', { name: '用默认应用打开' }),
+    ).toBeVisible()
+    await expect(pane.locator('video')).toHaveCount(0)
+    await shot(page, `video-unplayable-${theme}`)
+    await expectBaseline(pane, 'workspace', `video-unplayable-${theme}`)
   })
 
   test(`browser: only the user's own browsing (${theme})`, async ({ page }) => {

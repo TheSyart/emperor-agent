@@ -35,6 +35,13 @@ export const BROWSER_HISTORY_OPEN_CHANNEL = 'emperor:browser:history-open'
  */
 export const BROWSER_CLEAR_DATA_CHANNEL = 'emperor:browser:clear-data'
 export const REFERENCE_REVEAL_CHANNEL = 'emperor:reference:reveal'
+/**
+ * Renderer → main `{ url }`: 「用默认应用打开」 for a video of the Files pane
+ * (BUG-05). `url` is the `app://workspace-media/<token>` address Core
+ * granted; main opens that granted file, never a path the renderer names,
+ * and answers `{ ok, error? }`.
+ */
+export const WORKSPACE_MEDIA_OPEN_CHANNEL = 'emperor:workspace-media:open'
 export const EXTERNAL_OPEN_CHANNEL = 'emperor:external:open'
 /**
  * Renderer → main `url`: a web link the user clicked in Emperor's UI. Main

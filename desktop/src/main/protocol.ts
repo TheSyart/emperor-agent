@@ -8,6 +8,7 @@ const TRUSTED_CROSS_ORIGIN: Readonly<Record<string, string>> = {
   pet: 'app://pet',
   'pet-assets': 'app://pet',
   'plugin-assets': 'app://bundle',
+  'workspace-media': 'app://bundle',
 }
 
 /**

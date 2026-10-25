@@ -109,6 +109,40 @@ describe('WorkspaceFilesService', () => {
     })
   })
 
+  it('BUG-05 1–2 · names video types and reads none of a video', async () => {
+    const root = fixture()
+    // Bytes that would read as binary: a video is never opened at all.
+    writeFileSync(join(root, 'clip.mp4'), Buffer.from([0x00, 0xff, 0x00, 0x7f]))
+    writeFileSync(join(root, 'take.MOV'), '')
+    writeFileSync(join(root, 'cut.m4v'), '')
+    writeFileSync(join(root, 'loop.webm'), '')
+    const service = new WorkspaceFilesService({
+      resolveProject: () => ({ sessionId: 's1', projectRoot: root }),
+    })
+    const read = (relativePath: string) =>
+      service.read({ sessionId: 's1', relativePath })
+
+    const clip = await read('clip.mp4')
+    expect(clip).toMatchObject({
+      kind: 'video',
+      mimeType: 'video/mp4',
+      bytes: 4,
+      truncated: false,
+    })
+    expect(clip.content).toBeUndefined()
+    expect(clip.dataBase64).toBeUndefined()
+    await expect(read('take.MOV')).resolves.toMatchObject({
+      kind: 'video',
+      mimeType: 'video/quicktime',
+    })
+    await expect(read('cut.m4v')).resolves.toMatchObject({
+      mimeType: 'video/mp4',
+    })
+    await expect(read('loop.webm')).resolves.toMatchObject({
+      mimeType: 'video/webm',
+    })
+  })
+
   it('trims only an incomplete UTF-8 tail', () => {
     const text = Buffer.from('a设😀', 'utf8')
     expect(trimPartialUtf8(text)).toEqual(text)

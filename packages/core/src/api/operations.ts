@@ -1740,6 +1740,9 @@ export const CORE_OPERATION_REGISTRY = {
   'files.preview': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
     api.files.preview(input),
   ),
+  'files.mediaUrl': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
+    api.files.mediaUrl(input),
+  ),
   'files.search': operation(
     z.tuple([workspaceFileSearchSchema]),
     (api, [input]) => api.files.search(input),
