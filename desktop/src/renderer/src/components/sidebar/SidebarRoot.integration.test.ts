@@ -463,3 +463,156 @@ it('moves between sessions with ↑ and ↓ (UI-S11 9)', async () => {
   await settle()
   expect(document.activeElement).toBe(rows()[0])
 })
+
+// ── BUG-06: section folding you can see, kept in Core ──
+
+function sectionLabel(section: string): HTMLButtonElement {
+  return root.querySelector<HTMLButtonElement>(
+    `[data-sidebar-section="${section}"] .section-label`,
+  )!
+}
+
+function rowsIn(section: string): Array<string | null> {
+  return [
+    ...root.querySelectorAll<HTMLElement>(
+      `[data-sidebar-section="${section}"] .session-row`,
+    ),
+  ].map((el) => el.getAttribute('title'))
+}
+
+/** sidebar.get / sidebar.patch over one saved state, like Core's file. */
+function keepSidebarState(initial: Record<string, unknown> = {}) {
+  let saved: Record<string, unknown> = {
+    ...defaultSidebarState,
+    pinned_session_ids: ['pinned'],
+    ...initial,
+  }
+  const base = mock.core.getMockImplementation()!
+  mock.core.mockImplementation(async (key: string, input: any) => {
+    if (key === 'sidebar.get') return saved
+    if (key === 'sidebar.patch') {
+      saved = { ...saved, ...input }
+      return saved
+    }
+    return base(key, input)
+  })
+  return () => saved
+}
+
+it('BUG-06 1–2 · each section header has a chevron that turns as the section folds', async () => {
+  keepSidebarState()
+  await mount('/chat/pinned')
+  for (const section of ['pinned', 'projects', 'chats'])
+    expect(
+      sectionLabel(section).querySelector('.section-chevron'),
+      section,
+    ).not.toBeNull()
+  const chats = sectionLabel('chats')
+  expect(chats.getAttribute('aria-expanded')).toBe('true')
+  expect(
+    chats.querySelector('.section-chevron')!.hasAttribute('data-collapsed'),
+  ).toBe(false)
+  expect(rowsIn('chats')).toEqual(['chat-root'])
+  chats.click()
+  await settle()
+  expect(chats.getAttribute('aria-expanded')).toBe('false')
+  expect(
+    chats.querySelector('.section-chevron')!.hasAttribute('data-collapsed'),
+  ).toBe(true)
+  expect(rowsIn('chats')).toEqual([])
+})
+
+it('BUG-06 3 · a folded section is written to Core and stays folded after a restart', async () => {
+  const saved = keepSidebarState()
+  await mount('/chat/chat-root')
+  sectionLabel('projects').click()
+  await settle()
+  // The section of the open chat folds as well.
+  sectionLabel('chats').click()
+  await settle()
+  expect(mock.core).toHaveBeenCalledWith(
+    'sidebar.patch',
+    expect.objectContaining({ collapsed_sections: ['projects', 'chats'] }),
+  )
+  expect(saved().collapsed_sections).toEqual(['projects', 'chats'])
+  app!.unmount()
+  root.remove()
+  app = undefined
+  await mount('/chat/chat-root')
+  expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('false')
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+  expect(rowsIn('chats')).toEqual([])
+})
+
+it('BUG-06 4 · a state saved before the field existed shows every section', async () => {
+  const { collapsed_sections: _dropped, ...old } = defaultSidebarState
+  keepSidebarState()
+  const base = mock.core.getMockImplementation()!
+  mock.core.mockImplementation(async (key: string, input: any) =>
+    key === 'sidebar.get'
+      ? { ...old, pinned_session_ids: ['pinned'] }
+      : base(key, input),
+  )
+  await mount('/chat/pinned')
+  for (const section of ['pinned', 'projects', 'chats'])
+    expect(sectionLabel(section).getAttribute('aria-expanded'), section).toBe(
+      'true',
+    )
+})
+
+it('BUG-06 6 · opening a chat of the folded 对话 unfolds it', async () => {
+  const saved = keepSidebarState({ collapsed_sections: ['chats'] })
+  const router = await mount('/chat/pinned')
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+  await router.push('/chat/chat-root')
+  await settle()
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('true')
+  expect(rowsIn('chats')).toEqual(['chat-root'])
+  expect(saved().collapsed_sections).toEqual([])
+  // Opening a pinned chat reveals 置顶 only, never 对话 as well.
+  sectionLabel('chats').click()
+  await settle()
+  await router.push('/chat/pinned')
+  await settle()
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+})
+
+it('BUG-06 7 · folding the section of the open chat keeps it folded', async () => {
+  const saved = keepSidebarState()
+  await mount('/chat/chat-root')
+  sectionLabel('chats').click()
+  await settle()
+  // The list changes meanwhile (a session added elsewhere): still folded.
+  mock.session.sessions.value = [
+    ...mock.session.sessions.value,
+    {
+      id: 'later',
+      mode: 'chat',
+      title: 'later',
+      created_at: '2026-10-17T02:00:00Z',
+      updated_at: '2026-10-17T02:00:00Z',
+    },
+  ]
+  await settle()
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+  expect(rowsIn('chats')).toEqual([])
+  expect(saved().collapsed_sections).toEqual(['chats'])
+})
+
+it('BUG-06 · ↑ and ↓ still reach the chats of a folded section, which unfolds', async () => {
+  keepSidebarState({ collapsed_sections: ['chats'] })
+  const router = await mount('/chat/pinned')
+  const row = (id: string) =>
+    root.querySelector<HTMLElement>(`.session-row[data-session-id="${id}"]`)
+  const last = row('project-root')!
+  last.focus()
+  last.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+  )
+  // The route change, then the unfolded row taking the focus.
+  await settle()
+  await settle()
+  expect(router.currentRoute.value.params.sessionId).toBe('chat-root')
+  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('true')
+  expect(document.activeElement).toBe(row('chat-root'))
+})

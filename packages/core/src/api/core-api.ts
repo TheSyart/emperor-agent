@@ -249,6 +249,7 @@ import {
   ExecutorSelfCheck,
   type ExecutorSelfCheckOptions,
 } from '../harness/delegation/self-check'
+import { ProjectFileWatcher } from '../workspace/file-watch'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
@@ -269,6 +270,11 @@ import {
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
 import { WorkspaceReferenceService } from '../workspace/references'
+import {
+  WorkspaceMediaGrants,
+  workspaceMediaUrl,
+  type MediaGrant,
+} from '../workspace/media-grants'
 import type {
   GitHubPreviewTarget,
   ReferencePreview,
@@ -431,6 +437,8 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  /** Videos the Files pane may stream (BUG-05; files.mediaUrl). */
+  private readonly mediaGrants = new WorkspaceMediaGrants()
   /** How long a write waits for a subagent's workspace before saying so (AGT-06). */
   workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
   readonly executorConfig: ExecutorConfigStore
@@ -1855,6 +1863,8 @@ export class CoreApi {
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
+      this.projectFiles.close()
+      this.fileWatches.clear()
       this.onboardingService.dispose()
       for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()
       try {
@@ -3106,6 +3116,11 @@ export class CoreApi {
       this.pullRequestBrowser.diff(input),
   }
 
+  /** One recursive watch per project, shared by the sessions on it (BUG-11). */
+  private readonly projectFiles = new ProjectFileWatcher()
+  /** Session → its 文件 pane's subscription. */
+  private readonly fileWatches = new Map<string, () => void>()
+
   readonly files = {
     preview: async (input: FilePreviewInput): Promise<FilePreviewResult> => {
       if (input.source === 'reference')
@@ -3161,6 +3176,31 @@ export class CoreApi {
         }),
       )
     },
+    /**
+     * An `app://workspace-media/<token>` address for a video the caller may
+     * preview (BUG-05): the same checks as files.preview, which reads
+     * nothing of a video; the token stands for the resolved file.
+     */
+    mediaUrl: async (input: FilePreviewInput): Promise<{ url: string }> => {
+      const preview = await this.files.preview(input)
+      if (preview.kind !== 'video')
+        throw new WorkspaceOperationError(
+          'workspace_media_unsupported',
+          '这个文件不能在应用里播放。',
+        )
+      const grant = this.mediaGrants.grant({
+        absPath: preview.path,
+        sessionId: input.source === 'attachment' ? '' : input.sessionId,
+        // An attachment carries the mime it was saved with.
+        mimeType: preview.mimeType.startsWith('video/')
+          ? preview.mimeType
+          : 'application/octet-stream',
+      })
+      return { url: workspaceMediaUrl(grant.token) }
+    },
+    /** Electron main only (not an operation): the file behind a media token. */
+    mediaGrant: (token: string): MediaGrant | null =>
+      this.mediaGrants.lookup(token),
     /** Size and mtime of a preview that can change on disk (FIX-05). */
     stat: async (input: FileStatInput): Promise<FileStatResult> =>
       input.source === 'reference'
@@ -3169,6 +3209,47 @@ export class CoreApi {
             sessionId: input.sessionId,
             relativePath: input.path,
           }),
+    /**
+     * The 文件 pane follows the project (BUG-11): changes arrive as
+     * workspace_files_changed; a watch that fails says so once
+     * (`unavailable`) and the pane falls back to refreshing at turn ends.
+     */
+    watch: (input: { sessionId: string }): { watching: boolean } => {
+      const sessionId = input.sessionId
+      const root = this.workspaceFilesService.projectRoot(sessionId)
+      this.fileWatches.get(sessionId)?.()
+      this.fileWatches.delete(sessionId)
+      let failed = false
+      const stop = this.projectFiles.subscribe(
+        root,
+        (batch) =>
+          this.host.emitHost({
+            event: 'workspace_files_changed',
+            session_id: sessionId,
+            paths: batch.paths,
+            overflow: batch.overflow,
+          }),
+        () => {
+          failed = true
+          this.fileWatches.delete(sessionId)
+          this.host.emitHost({
+            event: 'workspace_files_changed',
+            session_id: sessionId,
+            paths: [],
+            overflow: true,
+            unavailable: true,
+          })
+        },
+      )
+      if (failed) return { watching: false }
+      this.fileWatches.set(sessionId, stop)
+      return { watching: true }
+    },
+    unwatch: (input: { sessionId: string }): { watching: false } => {
+      this.fileWatches.get(input.sessionId)?.()
+      this.fileWatches.delete(input.sessionId)
+      return { watching: false }
+    },
     list: (
       input: Parameters<WorkspaceFilesService['list']>[0],
     ): Promise<WorkspaceFileListResult> =>
@@ -4745,6 +4826,7 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
   chat_order: [],
   project_session_order: {},
   collapsed_project_ids: [],
+  collapsed_sections: [],
   pinned_session_ids: [],
   right_workspace: {
     version: 3,
@@ -4767,6 +4849,7 @@ function normalizeSidebarState(value: unknown): Dict {
       raw.project_session_order,
     ),
     collapsed_project_ids: stringList(raw.collapsed_project_ids),
+    collapsed_sections: normalizeCollapsedSections(raw.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(raw.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(raw.right_workspace),
   }
@@ -4854,6 +4937,15 @@ function normalizeSidebarSectionOrder(value: unknown): string[] {
     if (!out.includes(item)) out.push(item)
   }
   return out.slice(0, 2)
+}
+
+/**
+ * Folded sidebar sections (BUG-06): known keys only, each once; a state
+ * written before the field existed has none folded.
+ */
+function normalizeCollapsedSections(value: unknown): string[] {
+  const known = new Set(['pinned', 'projects', 'chats'])
+  return [...new Set(stringList(value))].filter((key) => known.has(key))
 }
 
 function normalizeSidebarProjectSessionOrder(

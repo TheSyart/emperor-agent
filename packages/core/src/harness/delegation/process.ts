@@ -39,6 +39,7 @@ import type { SandboxExecutionPolicy } from '../sandbox/policy'
 import { DelegationError } from './types'
 import { redactExecutorText } from './redaction'
 import { systemBootMarker } from '../../util/stable-process-identity'
+import { logger } from '../../util/log'
 import type {
   OwnedProcessIdentity,
   ProcessExitReceipt,
@@ -46,11 +47,15 @@ import type {
 } from './process-types'
 export type { ProcessExitReceipt } from './process-types'
 const execute = promisify(execFile)
+const log = logger.child({ component: 'executors' })
 
 /** The wait between each step of a stop: interrupt, SIGTERM, SIGKILL. */
 export const STOP_GRACE_MS = 5000
 /** After SIGKILL, how long the group may take to disappear. */
 const KILL_SETTLE_MS = 1000
+/** Reads of the process table when the group outlives KILL_SETTLE_MS. */
+const TABLE_READS = 3
+const TABLE_RETRY_MS = 100
 /** Seatbelt boundary markers (diagnostics mode) live here. */
 export const BOUNDARY_MARKER_DIR = '/private/tmp'
 const BOUNDARY_MARKER = /^emperor-boundary-[a-f0-9-]{36}-(?:denied|allowed)$/
@@ -242,7 +247,12 @@ export async function processTable(): Promise<Map<number, ProcessRow> | null> {
     return null
   }
 }
-/** True while any process is in group `pgid` (or it cannot be signalled). */
+/**
+ * True while any process is in group `pgid` (or it cannot be signalled).
+ * macOS answers EPERM, not ESRCH, for a group whose only members are
+ * zombies (BUG-09), so a group that is all but gone still "exists" here;
+ * the process table tells the two apart (`stoppedAfterKill`).
+ */
 function groupExists(pgid: number): boolean {
   try {
     process.kill(-pgid, 0)
@@ -259,18 +269,52 @@ function pidExists(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
-/** Members of `pgid` that are still running (zombies excluded); null if unknown. */
+/**
+ * Members of `pgid` that are still running; null if unknown. Zombies are
+ * excluded, and so are processes macOS `ps` flags E (trying to exit): they
+ * cannot return to their own code.
+ */
 function liveMembers(
   rows: Map<number, ProcessRow> | null,
   pgid: number,
 ): ProcessRow[] | null {
   return rows
     ? [...rows.values()].filter(
-        (row) => row.group === pgid && !row.state.startsWith('Z'),
+        (row) =>
+          row.group === pgid &&
+          !row.state.startsWith('Z') &&
+          !row.state.includes('E'),
       )
     : null
 }
+/** A signal to a group failed only because none of its members could take it. */
+function isEperm(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'EPERM'
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/**
+ * The group still answers after SIGKILL and KILL_SETTLE_MS. It has stopped
+ * if it is gone by the time the table is read, or the table lists nothing
+ * in it but zombies and exiting processes; any other member did not stop.
+ * A table that cannot be read is read again (TABLE_READS in all); if none
+ * can be read the stop stays unconfirmed.
+ */
+async function stoppedAfterKill(
+  pgid: number,
+  table: () => Promise<Map<number, ProcessRow> | null>,
+): Promise<boolean> {
+  for (let read = 0; read < TABLE_READS; read++) {
+    if (read) await sleep(TABLE_RETRY_MS)
+    if (!groupExists(pgid)) return true
+    const live = liveMembers(await table(), pgid)
+    if (live) return live.length === 0
+  }
+  log.warn('process table unavailable (ps 不可用); stop not confirmed', {
+    pgid,
+    reads: TABLE_READS,
+  })
+  return false
+}
 let bootTime: string | null | undefined
 /**
  * This boot of the computer (kern.bootsessionuuid, else kern.boottime).
@@ -619,6 +663,19 @@ export class ManagedAgentProcess {
       }
       await closed
     }
+    /**
+     * Signal what is left of the group after the root exited. EPERM means no
+     * member could take the signal: on macOS, a group of zombies waiting for
+     * launchd answers that way. It is not a failure of the stop; the process
+     * table decides below whether anything is still running (BUG-09).
+     */
+    const signalRest = (kind: NodeJS.Signals) => {
+      try {
+        signalGroup(kind)
+      } catch (error) {
+        if (!isEperm(error)) throw error
+      }
+    }
     /** The root exited: whatever is left of its group gets the same stop. */
     const finish = async (code: number | null, sig: NodeJS.Signals | null) => {
       if (done || finishing) return
@@ -630,18 +687,18 @@ export class ManagedAgentProcess {
         try {
           if (groupExists(pgid)) {
             if (killAt === undefined) {
-              signalGroup('SIGTERM')
+              signalRest('SIGTERM')
               killAt = Date.now() + grace
             }
             while (groupExists(pgid) && Date.now() < killAt) await sleep(50)
             if (groupExists(pgid)) {
-              signalGroup('SIGKILL')
+              signalRest('SIGKILL')
               const until = Date.now() + KILL_SETTLE_MS
               while (groupExists(pgid) && Date.now() < until) await sleep(25)
             }
             // Only zombies may still answer; anything else did not stop.
             if (groupExists(pgid))
-              quiescent = (liveMembers(await table(), pgid)?.length ?? 1) === 0
+              quiescent = await stoppedAfterKill(pgid, table)
           }
         } catch {
           quiescent = false
@@ -807,7 +864,10 @@ export async function terminateRecordedProcess(
       try {
         process.kill(-pgid, kind)
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        // EPERM: no member could take it (on macOS: only zombies are left);
+        // the final table decides whether anything is still running.
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ESRCH' && code !== 'EPERM') throw error
       }
     for (const d of strays(table))
       if (processBirth(d.pid) === d.fingerprint)

@@ -29,6 +29,7 @@ import { useSessionConversation } from '../../composables/useSessionConversation
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { PictureInPicture2 } from 'lucide-vue-next'
 import IconButton from '../ui/IconButton.vue'
+import { DsChevronLeft } from '../icons/ds'
 const EnvironmentCard = defineAsyncComponent(
   () => import('./environment/EnvironmentCard.vue'),
 )
@@ -201,6 +202,17 @@ async function navigate(id: string) {
     if (current === generation) fail(cause)
   }
 }
+/** The header's ‹ (BUG-03): up one level, else to the main conversation. */
+const canGoBack = computed(
+  () =>
+    (controlsAvailable.value && !!ancestry.value?.parentId) ||
+    canOpenRoot.value,
+)
+const backLabel = computed(() =>
+  controlsAvailable.value && ancestry.value?.parentId
+    ? `返回「${ancestry.value.ancestors.at(-1)?.title ?? '主会话'}」`
+    : '返回「主会话」',
+)
 function parent() {
   if (controlsAvailable.value && ancestry.value?.parentId)
     void navigate(ancestry.value.parentId)
@@ -532,6 +544,14 @@ async function stop() {
         <span v-else>子智能体</span>
       </nav>
       <div class="child-title">
+        <IconButton
+          v-if="canGoBack"
+          :label="backLabel"
+          size="sm"
+          data-child-header-back
+          @click="parent"
+          ><DsChevronLeft :size="16"
+        /></IconButton>
         <h1 :title="title" :aria-label="title">{{ title }}</h1>
         <Avatar
           kind="logo"
@@ -702,16 +722,12 @@ async function stop() {
         :running="live"
         :stopping="!!stopping || run?.phase === 'cancelling'"
         :can-stop="controlsAvailable"
-        :can-back="controlsAvailable && !!ancestry?.parentId"
-        :can-root="canOpenRoot"
         :sending="sending"
         :steer="steerable"
         :error="sendError || undefined"
         :closed="closedReason"
         @send="send"
         @stop="stop"
-        @back="parent"
-        @root="root"
       />
       <Button
         v-if="needsExit && controlsAvailable && !live"

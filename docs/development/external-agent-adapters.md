@@ -36,7 +36,7 @@ Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限�
 ## 进程与停止（AGT-04）
 
 - 只经 `ManagedAgentProcess` 启动：进程是自己进程组的组长（`detached`），句柄只有 `terminate()`（`SIGTERM` 给组，5 秒后 `SIGKILL`）和 `interrupt()`（`SIGINT`，5 秒后转 `terminate()`）。`closed` 收据的 `quiescent` 表示进程组已空；根进程退出后组里剩下的成员也按同样时间线停止。没有 `captureDescendants`、`onObserved` 或任何轮询；适配器不要再自己扫描进程。
-- 测试可用 `stopGraceMs` 缩短 5 秒间隔、用 `observeProcesses` 注入进程表（只在组还回应信号时读一次）。`identityMatches` 用来模拟无法核实身份、拒绝发信号的情况。
+- 测试可用 `stopGraceMs` 缩短 5 秒间隔、用 `observeProcesses` 注入进程表（只在 `SIGKILL` 后组仍回应信号时读，读不到最多再读两次）。`identityMatches` 用来模拟无法核实身份、拒绝发信号的情况。
 - 读进程身份统一用 `processBirth(pid)` / `processTable()`（`LC_ALL=C`）；空出生时间永不匹配，进程表缺少 Emperor 自身即返回 null。ownership 记录带 `bootTime`（`currentBootTime()`），`terminateRecordedProcess(ownership, { bootTime, graceMs })` 遇到不同开机标记直接返回已停止、不发信号，PID 出生时间不符返回 `OWNER_MISMATCH`。
 - 诊断模式（子智能体配置 `diagnosticsMode`）打开时，`ManagedAgentProcess` 的 `diagnostics()` 返回 true，才会写 `/private/tmp/emperor-boundary-<tag>-{denied,allowed}` 并在运行结束时用扫描器处理逃逸进程；扫描器缺失时静默跳过。`cleanBoundaryMarkers()` 在 `DelegationService.reconcile` 中删除超过一天的标记，服务测试用 `boundaryMarkerDir` 指向临时目录，避免碰真实 `/private/tmp`。
 - 委派日志在 `DelegationJournal` 内存中折叠，`append` 返回 `changed`；不改变状态的事件不写入，`DelegationService.append` 也不会为它调用 `onState`。新增事件类型时注意 fold 的结果要能区分「有变化」。`run-changed` 不会覆盖已结束轮次已有的 `failureCode`，也不会为没有变化的补丁增加 revision。

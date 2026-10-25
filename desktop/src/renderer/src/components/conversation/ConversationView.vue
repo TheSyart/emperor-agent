@@ -85,6 +85,7 @@ import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
 import ChildComposer from '../composer/ChildComposer.vue'
+import { useProvisionalPrompts } from './provisionalPrompts'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import { useAgentTree } from '../sidebar/agentTree'
@@ -451,11 +452,6 @@ function toggleEnvCard(): void {
 
 function closeEnvCard(): void {
   frameActions.setEnvCard(frame, false)
-}
-
-function backToParent(): void {
-  const target = parentCrumb.value?.sessionId
-  if (target) navigate(target)
 }
 
 // ── composer inputs ───────────────────────────────────────────────────────
@@ -1078,8 +1074,16 @@ async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   )
 }
 
+// Inserted messages shown before the log has them (BUG-07).
+const provisional = useProvisionalPrompts({
+  queuedPrompts: ctx.queuedPrompts,
+  busy: ctx.busy,
+  sessionId: ctx.sessionId,
+})
+
 async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
-  await ctx.manageQueuedPrompt(item.id, 'interject')
+  if (await ctx.manageQueuedPrompt(item.id, 'interject'))
+    provisional.interjected(item)
 }
 
 async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
@@ -1139,6 +1143,9 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :key="viewingId"
           :session-id="viewingId"
           :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
+          :provisional="
+            viewingId === ctx.sessionId.value ? provisional.shown.value : []
+          "
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
@@ -1209,8 +1216,6 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :error="childSendError || undefined"
           :closed="childClosed || undefined"
           @send="sendToChild"
-          @back="backToParent"
-          @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
           @stop="stopChild"
         />
       </template>
@@ -1239,7 +1244,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
           v-if="!takeoverOpen && !unknownSession"
-          :items="ctx.queuedPrompts.value"
+          :items="provisional.dock.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"

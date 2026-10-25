@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 最后核验：2026-10-25（对照 `e962d116`）<br>
 > 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`、`nodes/SubagentGroup.vue`、`nodes/SubagentRow.vue`、`nodes/ToolCallTree.vue`、`subagentRows.ts`、`useSubagentDock.ts`）、`components/composer/SubagentDock.vue`、`conversation/nodes/turnFiles.ts`、`nodes/TurnFilesCard.vue`、`packages/core/src/harness/host/turn-opener.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`subagentRows.test.ts`、`ChatTimeline.test.ts`、`composer/SubagentDock.test.ts`、`TurnFilesCard.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`、`desktop/tests/visual/subagents.spec.ts`、`desktop/tests/visual/chat-gallery.spec.ts`
 
 对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、轮末操作；一个任务结束时，它最后一轮的轮末之前多一张改动卡。默认只显示结论，过程收成一行，细节按需展开。
@@ -76,7 +76,7 @@
 
 - **用户气泡**：`--bubble-user` 底色、`--r-xl` 圆角、内边距 10/16、正文 15/26、最宽为内容列的 80%、无边框；附件用 Tag 显示在气泡上方。气泡下方的来源小字只写有意义的两种：「运行中插入」「定时任务」；其他来源（`chat` 等原始值）不显示（UI-S13）。
 - **回答正文**：不套容器，15/26，段落之间 12px。Markdown 标题用 `--md-h1` / `--md-h2` / `--md-h3`（20 / 18 / 16，都小于页面标题）；表格 14/22。
-- **链接与行内引用**：文字用 `--text-link`，前面是 12px 的来源图标：本地文件用文件类型图标，网页用站点图标（打开「设置 › 常规 › 会话 › 显示网站图标」时取网站自己的图标，否则是首字母）。
+- **链接与行内引用**：文字用 `--text-link`，前面是 12px 的来源图标：本地文件用文件类型图标，网页用站点图标（「设置 › 常规 › 会话 › 显示网站图标」默认打开，按域名从图标服务获取；关闭、私有地址或取不到时是首字母）。
 - 过程组里的叙述文字是 `--text-2`，比回答低一级。
 
 ## 改动卡（一个任务一张）

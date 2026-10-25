@@ -51,6 +51,7 @@ import {
   MAC_HELPER_RESET_CHANNEL,
   MAC_HELPER_STATUS_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
+  WORKSPACE_MEDIA_OPEN_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
   VAULT_EXPORT_CHANNEL,
@@ -94,6 +95,9 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
   return {
     revealReference: (input: { sessionId: string; referenceId: string }) =>
       ipcRenderer.invoke(REFERENCE_REVEAL_CHANNEL, input),
+    /** 「用默认应用打开」: the video behind a granted media address (BUG-05). */
+    openWorkspaceMedia: (url: string) =>
+      ipcRenderer.invoke(WORKSPACE_MEDIA_OPEN_CHANNEL, { url }),
     openExternal: (url: string) =>
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
     /** A clicked web link: main picks the system or the built-in browser. */

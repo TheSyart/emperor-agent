@@ -10,7 +10,7 @@
  * Scripts come from the bundle only (no inline script, no eval). Inline
  * styles stay allowed: Vue style bindings, highlight.js and xterm set them.
  * Images and media come from the bundle, `app:` (attachments, media,
- * plugin logos) and `data:`/`blob:`; a remote image in a reply is fetched by
+ * plugin logos, the Files pane's videos) and `data:`/`blob:`; a remote image in a reply is fetched by
  * main on request (remote-image-ipc.ts), never by the renderer. `connect-src`
  * allows `app:` (the packaged smoke reads an attachment through it) and
  * `blob:` (the preview stack copies a frame it already holds); neither

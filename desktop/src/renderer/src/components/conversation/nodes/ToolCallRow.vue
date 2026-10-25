@@ -24,7 +24,12 @@ import Avatar from '../../ui/Avatar.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
-import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
+import {
+  argsOf,
+  errorSummary,
+  planOutcome,
+  toolRowState,
+} from '../tools/toolModel'
 
 const props = withDefaults(
   defineProps<{ data: ToolChatData; agent?: AgentView; preparing?: boolean }>(),
@@ -63,9 +68,13 @@ const truncatedNote = computed(() =>
     ? '参数过长，已截断显示；在轨迹中查看完整内容'
     : '参数过长，已截断显示',
 )
+// A plan waiting for review stays one line: the review card below shows it
+// in full (BUG-02); once decided the row opens and keeps it on record.
 const open = useExpansion(
   () => `tool:${props.data.callId}`,
-  () => props.data.name === 'exit_plan_mode',
+  () =>
+    props.data.name === 'exit_plan_mode' &&
+    planOutcome(props.data).outcome !== 'waiting',
 )
 const body = computed(() => TOOL_BODIES[view.value.body])
 const stateLabel = computed(() => {

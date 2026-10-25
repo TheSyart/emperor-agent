@@ -181,6 +181,7 @@ export const NOT_OPERATIONS = new Map([
   ['chat.runBackground', 'CoreApi 在 Core 进程内的方法，不经 IPC'],
   ['skills.folderPath', 'CoreApi 只给 main 的方法（打开 Skill 文件夹）'],
   ['plugins.logo', 'CoreApi 只给 main 的方法（app:// 读插件 Logo）'],
+  ['files.mediaGrant', 'CoreApi 只给 main 的方法（app:// 播放视频，BUG-05）'],
   ['tools.register', 'HarnessHost.compose() 里工具注册表的方法'],
   ['mcp.servers', 'MCP 导入格式里的 JSON 键'],
   ['sessions.defaultPermission', 'settings.json 的键'],

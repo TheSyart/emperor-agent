@@ -17,15 +17,19 @@ export interface UiPreferences {
   showSystemSteps: boolean
   /** How a turn's tool steps are shown once it finishes. */
   processDisplay: ProcessDisplay
-  /** Fetch real site icons for web links (contacts those sites). */
-  siteIcons: boolean
+  /**
+   * Show site icons for web links, asked of the icon service by hostname
+   * only; the sites themselves are never contacted (BUG-01). Renamed from the
+   * opt-in `siteIcons`, so its old stored `false` no longer applies.
+   */
+  siteIconService: boolean
 }
 
 export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
   showTrajectory: false,
   showSystemSteps: false,
   processDisplay: 'collapse-when-done',
-  siteIcons: false,
+  siteIconService: true,
 })
 
 const PROCESS_DISPLAYS: readonly ProcessDisplay[] = [
@@ -49,7 +53,7 @@ export function parseUiPreferences(raw: unknown): UiPreferences {
     )
       ? (value.processDisplay as ProcessDisplay)
       : DEFAULT_UI_PREFERENCES.processDisplay,
-    siteIcons: flag('siteIcons'),
+    siteIconService: flag('siteIconService'),
   }
 }
 

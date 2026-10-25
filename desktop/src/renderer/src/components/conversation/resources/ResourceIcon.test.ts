@@ -41,8 +41,8 @@ function mount(content: () => ReturnType<typeof h>) {
 }
 describe('website identity icons', () => {
   // These cases exercise real site icons, which are opt-in (W-3).
-  beforeEach(() => setUiPreference('siteIcons', true))
-  afterEach(() => setUiPreference('siteIcons', false))
+  beforeEach(() => setUiPreference('siteIconService', true))
+  afterEach(() => setUiPreference('siteIconService', true))
   it('ignores an old-session response after switching and a response after unmount', async () => {
     let finish!: (value: unknown) => void
     const session = ref('old-icon-session')

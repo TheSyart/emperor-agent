@@ -11,6 +11,8 @@ export interface TabItem {
   count?: number
   /** Editor tabs: a close button (emits `close`). */
   closable?: boolean
+  /** Editor tabs: a small dot after the label (the file changed since). */
+  marked?: boolean
   /**
    * Hover text (a full path, why a tab is disabled). Set on the tab's
    * wrapper, so a disabled tab shows it too.

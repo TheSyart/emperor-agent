@@ -31,6 +31,7 @@
   --text-disabled: var(--ink-400); /* disabled text */
   --text-inverted: var(--ink-100); /* text on inverted fills */
   --text-link: var(--gold-400); /* links and inline references */
+  --text-accent-muted: 197 169 117; /* muted gold: settings nav group labels */
   --text-on-accent: 26 20 8; /* text on the accent fill */
 
   /* ── Strokes (full colours; drawn as 0.5px box-shadow from DS-02 on) ── */
