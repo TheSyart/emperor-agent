@@ -201,10 +201,17 @@ function bundledPluginLogos(): Record<string, string> {
 
 export async function installVisualCoreBridge(
   page: Page,
-  options: { sessionLogs?: VisualSessionLog[] } = {},
+  options: {
+    sessionLogs?: VisualSessionLog[]
+    /**
+     * External agents the page `/chat/<root>/agents/<id>` reads: what
+     * `delegations.get` and `delegations.history` answer for that id.
+     */
+    delegations?: Record<string, { state: unknown; history: unknown }>
+  } = {},
 ) {
   await page.addInitScript(
-    ({ projectDir, sessionLogs, replyEvents, pluginLogos }) => {
+    ({ projectDir, sessionLogs, replyEvents, pluginLogos, delegations }) => {
       const now = '2026-06-26T12:00:00.000Z'
       const visualParams = new URLSearchParams(window.location.search)
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
@@ -8558,6 +8565,18 @@ export async function installVisualCoreBridge(
             case 'executors.dismissNotice':
               visualSignInNotice = false
               return {}
+            case 'delegations.get': {
+              const input = (args[0] || {}) as { id?: string }
+              const known = delegations[String(input.id)]
+              if (known) return known.state
+              return {}
+            }
+            case 'delegations.history': {
+              const input = (args[0] || {}) as { id?: string }
+              const known = delegations[String(input.id)]
+              if (known) return known.history
+              return {}
+            }
             case 'executors.versions': {
               if (!visualUpgradeMode) return {}
               // A spec moves an upgrade on the way Core pushes it.
@@ -8644,6 +8663,7 @@ export async function installVisualCoreBridge(
     },
     {
       projectDir: visualProjectDir,
+      delegations: options.delegations ?? {},
       sessionLogs: options.sessionLogs ?? defaultSessionLogs(),
       replyEvents: replyTemplate(),
       pluginLogos: bundledPluginLogos(),

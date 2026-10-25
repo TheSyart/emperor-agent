@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-25（对照 `e3fb36f2`）<br>
+> 最后核验：2026-10-26（对照 `be39413f`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -90,6 +90,13 @@ Claude Code 一个月发几十个版本，外部 CLI 的一次正常变化就可
 - **派任务**：`DelegationService` 在准备工作区之前调用 `gate(profile, version)`：这个版本已有结果就用它，没有就当场自检，最多等 15 秒，超时、出错都放行（自检在后台跑完再记）。结果是 `incompatible` 时这次运行立即以 `EXECUTOR_SELF_CHECK_FAILED` 失败，不准备工作区、不启动进程，摘要先写「Claude Code 2.1.315 自检不兼容：」和阻断项的原因，再提示可以在「设置 › 子智能体」退回上一个正常版本或重新检查，并按版本失败记进健康记录。
 - **界面**（BUG-00 预览 § 8）：详情页本机版本旁「自检通过」「不兼容」「正在自检…」「自检没有完成」，Claude Code 另有「尚未验证」（本机版本不在已验证列表）或「x 尚未验证」（npm 有更新、未验证的版本）；下面一行灰字写原因（「已自动关闭内置插件 …（2.1.308 起自带）」、阻断项的原因、「已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级」），不阻断的发现（Codex 协议不同、未核对的默认功能）用警示色另起一行，再是「退回」（有时）与「重新检查」。不兼容或可以退回时不再显示禁用的「已是最新」。主页那一行写「自检不兼容」。
 - **测试开关**：CoreApi 的 `executorSelfCheck: { automatic: false }`（测试默认）不让自检自己开始，只有「重新检查」会运行。
+
+### 版本相关的失败：说清楚、能点着处理（VER-06）
+
+- **运行记录**：运行以版本相关的失败结束（`isVersionFailure`）时，`DelegationService` 在最后一次 `run-changed` 里写 `versionFailure: VersionFailureContext`（`backend`、`profileId`、`current`、`lastGood?`、`verifiedMax?`、`reason`、`actions`）。版本全部来自健康记录和这次运行自己的探测，不从错误文字里解析；`reason` 是 Emperor 自己的一句话（拒绝的原因、自检的阻断项，或未验证的 Codex 协议意味着什么）。其他失败不带。
+- **按钮规则**（`describeVersionFailure`）：有 `lastGood` 且不是当前版本 → `rollback`；否则 `verifiedMax` 比当前版本新 → `install_verified`（当前版本比所有已验证版本都新、又没有上次正常的版本时，不从这里降级）；总有 `open_settings`；这个版本的自检没完成 → `recheck`。
+- **传到界面**：`delegation/projection` 的 `task.version_failure`（`externalTask`）；子智能体页从 `delegations.get` 的运行记录读。对话里那一行失败时第二行写原因和「上次正常的版本：x」，下面是「退回 x」「装 x（已验证）」「打开设置」「重新检查」（`VersionFailureActions.vue`）；子智能体页顶部同样内容的横幅。「退回」「装」只打开「设置 › 子智能体」里该执行器的确认框（`executorUpgrades` 的 `askRollback` / `ask`），不在对话里直接执行；进行中显示「正在退回…」并禁用。没有这个字段的旧运行照旧显示，不显示按钮。
+- **父智能体收到的**：运行通知（`settlementNotice`）、`collect_agent` / `inspect_agent` 的结果和前台失败的错误后面追加一行固定格式（`versionFailureLine`）：先是「失败原因：<reason>。上次正常版本：x。」，再请主智能体告诉用户可以在「设置 › 子智能体」退回、不要换别的方式重试同一个子智能体；没有上次正常的版本时改为已验证的版本或「查看并重新检查」。
 
 ## 专长与原生能力事实
 

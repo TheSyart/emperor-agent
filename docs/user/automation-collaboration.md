@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-25（对照 `e3fb36f2`）<br>
+> 最后核验：2026-10-26（对照 `be39413f`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -121,6 +121,7 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 - **发现新版本**：打开着的 Claude Code 或 Codex 有新版本时，页面顶部提示「Claude Code 和 Codex 有新版本」，写明从哪个版本升到哪个版本，可以「全部升级」或「稍后」（这些版本不再提示，出了更新的版本再提示）。对应那一行写「本机 x · 可升级到 y」并多一个「升级」，左侧导航的「子智能体」带一个小点。
 - **升级到哪个版本**：只升到 Emperor 验证过的版本。Claude Code 目前验证过 2.1.281、2.1.308、2.1.310；Codex 只升到验证过的次版本里最新的发布版（目前验证过 0.153 和 0.163，所以 0.153.4 升到 0.163.0）。更新、但 Emperor 还没验证的版本显示「尚未验证」，不提供升级；你自己装上的这类版本仍然可以用，以自检结果为准。
 - **自检**：升级或退回之后、发现版本变了、点「重新检查」时，Emperor 会在一个临时目录里离线启动一次 Claude Code 或 Codex，只看它启动时加载了什么（插件、MCP server、工具钩子，Codex 的协议和默认打开的功能），不发任何提示词，不花额度，也不碰你的登录和设置，结束就删掉临时目录。详情页「版本」里本机版本旁边写结果：「自检通过」（下面写已自动关闭哪些内置插件）、「不兼容」（下面写原因，有上次正常的版本时可以退回）、「尚未验证」，以及「重新检查」。自检判定不兼容的版本不会再接新任务：任务马上失败并说明原因，不准备工作区。
+- **版本问题导致的失败**：对话里那一行写明是哪个版本、为什么，以及上次正常的版本，下面有「退回 x」（或「装 x（已验证）」）、「打开设置」，自检没完成时还有「重新检查」；子智能体页顶部也有同样的提示。点「退回」「装」会打开设置里的确认框，确认后才运行。主智能体也会收到这些信息，并被告知不要换别的方式重试同一个子智能体。
 - **怎么升级**：按你当初安装它的方式。npm 全局安装的，用装它的那个 npm 运行 `npm install -g <包>@<版本>`；Homebrew 安装的运行 `brew upgrade <名字>`（Homebrew 提供的正是这个版本时）；用 Claude 官方安装命令装的运行 `claude install <版本>`。点「升级」后先确认：弹窗写明要运行的命令和不会改动的东西，确认后才运行。Emperor 从不自动升级，也不用管理员权限。Codex 桌面版自带的 Codex 随桌面版更新；认不出安装方式时，只给出一条命令让你复制到终端运行。
 - **升级中**：那一行显示「升级中」、进度条和已用的时间，「查看过程」显示命令的输出（令牌和你的用户目录已去掉），可以「取消」。升级期间不把新的子任务交给它；正在运行的子任务先跑完，然后才开始升级。
 - **完成与失败**：完成后 Emperor 重新检测，那一行写出新版本，并提示「Codex 已升级到 0.163.0」。失败时页面顶部写明原因，例如「Codex 升级失败：没有写入 /opt/homebrew/lib/node_modules 的权限」，并给出同一条命令：「复制命令」后在终端里自己运行，完成后点「重新检测」；那一行的「重试」再试一次，「查看过程」看命令输出。
