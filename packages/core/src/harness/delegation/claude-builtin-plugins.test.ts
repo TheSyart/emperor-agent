@@ -47,9 +47,11 @@ const authoring = {
 }
 const novel = { name: 'x', path: 'builtin', source: 'x@builtin' }
 
-it('1 · the seed turns off the three known builtins, 2.1.308’s among them, all false', () => {
+it('1 · the seed turns off the known builtins, 2.1.308’s two among them, all false', () => {
   expect([...SEED_BUILTIN_PLUGINS].sort()).toEqual([
     'agents-md@builtin',
+    // VER-04: 2.1.308+ ship it too (seen with nothing turned off).
+    'cc-plugin-agents-md@builtin',
     'cc-plugin-plugin-authoring@builtin',
     'telemetry@builtin',
   ])

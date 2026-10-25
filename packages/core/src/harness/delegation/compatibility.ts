@@ -66,7 +66,8 @@ export interface VerifiedClaudeVersion {
 /**
  * The Claude Code releases 升级 may install (VER-04), oldest first: each one
  * passed `scripts/claude-init-handshake.mjs` and the offline self-check
- * (VER-01, 2026-10-24: npm's latest was 2.1.310, stable 2.1.308). A newer
+ * (VER-01, 2026-10-24: npm's latest was 2.1.310, stable 2.1.308). The
+ * builtins are what it loads with nothing turned off (`--raw`). A newer
  * release is 「尚未验证」 until it is listed here; the process is in
  * docs/development/external-agent-adapters.md.
  */
@@ -75,12 +76,18 @@ export const KNOWN_CLAUDE_VERSIONS: readonly VerifiedClaudeVersion[] = [
   {
     version: '2.1.308',
     verifiedAt: '2026-10-24',
-    builtinPlugins: ['cc-plugin-plugin-authoring@builtin'],
+    builtinPlugins: [
+      'cc-plugin-agents-md@builtin',
+      'cc-plugin-plugin-authoring@builtin',
+    ],
   },
   {
     version: '2.1.310',
     verifiedAt: '2026-10-24',
-    builtinPlugins: ['cc-plugin-plugin-authoring@builtin'],
+    builtinPlugins: [
+      'cc-plugin-agents-md@builtin',
+      'cc-plugin-plugin-authoring@builtin',
+    ],
   },
 ]
 

@@ -414,6 +414,7 @@ describe('VER-02 · builtin plugins are turned off before the first prompt', () 
   const novel = { name: 'x', path: 'builtin', source: 'x@builtin' }
   const SEED = {
     'agents-md@builtin': false,
+    'cc-plugin-agents-md@builtin': false,
     'cc-plugin-plugin-authoring@builtin': false,
     'telemetry@builtin': false,
   }

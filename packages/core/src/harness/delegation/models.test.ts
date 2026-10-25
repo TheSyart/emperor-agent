@@ -479,6 +479,7 @@ it('VER-04 · the Claude model list launches with the ledger’s builtins off, n
   expect(rows).toEqual([{ id: 'opus', name: 'Opus' }])
   expect(settings?.enabledPlugins).toEqual({
     'agents-md@builtin': false,
+    'cc-plugin-agents-md@builtin': false,
     'cc-plugin-plugin-authoring@builtin': false,
     'telemetry@builtin': false,
     'x@builtin': false,

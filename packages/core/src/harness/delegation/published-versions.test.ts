@@ -296,12 +296,18 @@ describe('upgrade targets', () => {
       {
         version: '2.1.308',
         verifiedAt: '2026-10-24',
-        builtinPlugins: ['cc-plugin-plugin-authoring@builtin'],
+        builtinPlugins: [
+          'cc-plugin-agents-md@builtin',
+          'cc-plugin-plugin-authoring@builtin',
+        ],
       },
       {
         version: '2.1.310',
         verifiedAt: '2026-10-24',
-        builtinPlugins: ['cc-plugin-plugin-authoring@builtin'],
+        builtinPlugins: [
+          'cc-plugin-agents-md@builtin',
+          'cc-plugin-plugin-authoring@builtin',
+        ],
       },
     ])
   })

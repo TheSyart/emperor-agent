@@ -30,6 +30,9 @@ export const SEED_BUILTIN_PLUGINS = [
   'telemetry@builtin',
   // Since 2.1.308 (VER-01).
   'cc-plugin-plugin-authoring@builtin',
+  // Also since 2.1.308; `agents-md@builtin: false` happens to turn it off
+  // too, but it is named here in its own right (VER-04, seen raw).
+  'cc-plugin-agents-md@builtin',
 ] as const
 
 /** A plugin as reloadPlugins() or system/init reports it. */
