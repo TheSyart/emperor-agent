@@ -15,10 +15,12 @@
  *   and checks that they are off, then mcpServerStatus(). Builtins learned
  *   go to Emperor's ledger. A plugin that is not builtin, one that stays
  *   on, an MCP server or hooks not applied make the version incompatible.
- * - Codex: the probe's protocol digest (one Emperor did not verify is
- *   incompatible), `codex features list` with Emperor's overrides against
- *   the recorded defaults (a new feature on by default is noted, not
- *   blocking), and the app-server opened the way a run opens it.
+ * - Codex: the probe's protocol digest (one Emperor did not verify is a
+ *   warning, not a block: AGT-13 runs it as 「可能不兼容」, and only a run
+ *   that really fails counts against the version), `codex features list`
+ *   with Emperor's overrides against the recorded defaults (a new feature
+ *   on by default is noted, not blocking), and the app-server opened the
+ *   way a run opens it.
  *
  * The result goes into ExecutorHealthStore (versions[v].selfCheck). The
  * user's ~/.claude, ~/.codex and Emperor's own Claude login folder are
@@ -616,23 +618,21 @@ export class ExecutorSelfCheck {
           },
         ],
       }
-    if (probe.compatibility === 'unverified') {
-      if (probe.protocolCheck !== 'unreadable')
-        return {
-          issues: [
-            {
+    if (probe.compatibility === 'unverified')
+      issues.push(
+        probe.protocolCheck === 'unreadable'
+          ? {
+              code: 'start_failed',
+              detail: `Codex ${version} 没能生成协议说明，无法核对它的协议。`,
+              blocking: false,
+            }
+          : {
+              // Runnable, as AGT-13 decided: a warning, never a block.
               code: 'protocol_unknown',
               detail: `Codex ${version} 的协议与 Emperor 验证过的 ${probe.protocolVersion ?? '版本'} 不同，可能不兼容。`,
-              blocking: true,
+              blocking: false,
             },
-          ],
-        }
-      issues.push({
-        code: 'start_failed',
-        detail: `Codex ${version} 没能生成协议说明，无法核对它的协议。`,
-        blocking: false,
-      })
-    }
+      )
     const ambient = this.options.environment()
     const environment: Record<string, string> = {
       PATH: ambient.PATH ?? '',

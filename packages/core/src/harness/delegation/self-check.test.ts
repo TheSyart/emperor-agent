@@ -306,8 +306,9 @@ describe('Claude Code', () => {
 })
 
 describe('Codex', () => {
-  it('6 · a protocol digest Emperor did not verify: protocol_unknown, blocking', async () => {
-    const s = setup()
+  it('6 · a protocol digest Emperor did not verify: protocol_unknown as a warning, never a block (AGT-13: runnable, 可能不兼容)', async () => {
+    const open = codexOpen()
+    const s = setup({ codexAdapter: open.adapter })
     s.probes.codex = probeOf({
       executableVersion: '0.163.2',
       compatibility: 'unverified',
@@ -318,12 +319,18 @@ describe('Codex', () => {
     expect(result).toMatchObject({
       backend: 'codex',
       version: '0.163.2',
-      status: 'incompatible',
+      status: 'ok',
     })
     expect(result.issues).toMatchObject([
-      { code: 'protocol_unknown', blocking: true },
+      { code: 'protocol_unknown', blocking: false },
     ])
-    expect(result.issues[0]!.detail).toContain('0.163.0')
+    expect(result.issues[0]!.detail).toBe(
+      'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+    )
+    // The rest of the check still runs: the app-server is opened.
+    expect(open.opened).toHaveLength(1)
+    // Only a run that really fails counts against the version (VER-03).
+    expect(s.health.selfCheckOf('codex-default', '0.163.2')?.status).toBe('ok')
   })
 
   it('a schema it could not generate is an error, not a block', async () => {

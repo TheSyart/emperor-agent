@@ -242,7 +242,6 @@ export function selfCheckNotes(version: ExecutorVersionView): string[] {
         `已自动关闭内置插件 ${off.map((s) => s.replace(/@builtin$/u, '')).join('、')}${since.length === 1 ? `（${since[0]} 起自带）` : ''}`,
       )
     }
-    notes.push(...check.issues.filter((i) => !i.blocking).map((i) => i.detail))
   }
   if (version.backend === 'claude-code' && check?.status !== 'incompatible') {
     if (installedUnverified(version))
@@ -255,6 +254,19 @@ export function selfCheckNotes(version: ExecutorVersionView): string[] {
       notes.push('已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级')
   }
   return notes
+}
+
+/**
+ * Under 本机版本, in the warning colour (VER-04): what the self-check
+ * noted without blocking — a Codex protocol that differs from the verified
+ * one (可能不兼容, still runnable), a feature on by default Emperor never
+ * reviewed.
+ */
+export function selfCheckWarnings(version: ExecutorVersionView): string[] {
+  const check = version.selfCheck
+  if (!check || check.status === 'incompatible' || check.status === 'error')
+    return []
+  return check.issues.filter((i) => !i.blocking).map((i) => i.detail)
 }
 
 /**

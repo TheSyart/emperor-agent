@@ -1061,6 +1061,42 @@ describe('自检 (VER-04, preview § 8)', () => {
       ?.click()
   })
 
+  it('Codex whose protocol differs: 自检通过 and a warning line, still runnable', async () => {
+    setVersions([
+      claudeVersion(),
+      codexVersion({
+        installed: '0.163.2',
+        latest: '0.163.2',
+        target: null,
+        upgrade: null,
+        selfCheck: selfCheck({
+          backend: 'codex',
+          version: '0.163.2',
+          status: 'ok',
+          adapted: undefined,
+          issues: [
+            {
+              code: 'protocol_unknown',
+              detail:
+                'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+              blocking: false,
+            },
+          ],
+        }),
+      }),
+    ])
+    const page = await detail('codex')
+    expect(badges(page)).toEqual(['自检通过'])
+    expect(
+      [...page.querySelectorAll('[data-version-warning]')].map((w) =>
+        w.textContent?.trim(),
+      ),
+    ).toEqual([
+      'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+    ])
+    expect(page.querySelector('[data-version-rollback-button]')).toBeNull()
+  })
+
   it('while it checks: 正在自检… and 重新检查 waits', async () => {
     setVersions([
       claudeVersion({

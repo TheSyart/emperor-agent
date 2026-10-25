@@ -21,6 +21,7 @@ import {
   runningLine,
   selfCheckBadges,
   selfCheckNotes,
+  selfCheckWarnings,
 } from './upgradeText'
 
 // AGT-13: what 设置 › 子智能体 says about versions and 升级, word for word
@@ -834,7 +835,7 @@ describe('自检与尚未验证 (VER-04, preview § 8)', () => {
     expect(selfCheckNotes(latest({ selfCheck: null }))).toEqual([])
   })
 
-  it('Codex: a feature on by default it never reviewed is a note, not a block', () => {
+  it('Codex: a feature on by default it never reviewed, or a protocol that differs, is a warning, not a block', () => {
     const noted = codex({
       selfCheck: {
         backend: 'codex',
@@ -853,8 +854,33 @@ describe('自检与尚未验证 (VER-04, preview § 8)', () => {
       },
     })
     expect(selfCheckBadges(noted)).toEqual([{ text: '自检通过', tone: 'ok' }])
-    expect(selfCheckNotes(noted)).toEqual([
+    expect(selfCheckNotes(noted)).toEqual([])
+    expect(selfCheckWarnings(noted)).toEqual([
       'Codex 0.163.0 默认打开了 Emperor 没有核对过的功能：shiny。',
     ])
+    const differs = codex({
+      installed: '0.163.2',
+      selfCheck: {
+        backend: 'codex',
+        version: '0.163.2',
+        checkedAt: NOW,
+        status: 'ok',
+        issues: [
+          {
+            code: 'protocol_unknown',
+            detail:
+              'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+            blocking: false,
+          },
+        ],
+        modelCalls: 0,
+      },
+    })
+    expect(selfCheckWarnings(differs)).toEqual([
+      'Codex 0.163.2 的协议与 Emperor 验证过的 0.163.0 不同，可能不兼容。',
+    ])
+    // Not 不兼容, no 退回 for it, and 已是最新 stays.
+    expect(selfCheckBadges(differs)).toEqual([{ text: '自检通过', tone: 'ok' }])
+    expect(primaryShown(differs, null)).toBe(true)
   })
 })

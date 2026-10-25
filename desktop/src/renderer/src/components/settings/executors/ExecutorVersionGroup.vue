@@ -38,6 +38,7 @@ import {
   runVerb,
   selfCheckBadges,
   selfCheckNotes,
+  selfCheckWarnings,
   upgradeOffered,
 } from './upgradeText'
 
@@ -135,6 +136,9 @@ const badges = computed(() =>
 const notes = computed(() =>
   version.value ? selfCheckNotes(version.value) : [],
 )
+const warnings = computed(() =>
+  version.value ? selfCheckWarnings(version.value) : [],
+)
 const selfChecking = ref(false)
 const rechecking = computed(
   () => !!version.value?.selfChecking || selfChecking.value,
@@ -212,6 +216,13 @@ async function check() {
                 class="because"
                 data-version-note
                 >{{ note }}</span
+              >
+              <span
+                v-for="warning in warnings"
+                :key="warning"
+                class="warning"
+                data-version-warning
+                >{{ warning }}</span
               >
               <span
                 v-if="rollback?.because"
@@ -349,6 +360,12 @@ async function check() {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--text-3));
+}
+
+.warning {
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--state-warn-label));
 }
 
 .location {
