@@ -38,14 +38,20 @@ export interface WorkspaceFileReadResult {
   projectRoot: string
   relativePath: string
   name: string
-  /** `video`: never read here; the Files pane plays it (files.mediaUrl). */
-  kind: 'text' | 'image' | 'binary' | 'video'
+  /**
+   * `video`, `audio`: never read here; the Files pane plays them
+   * (files.mediaUrl). `document` (PDF, Office, iWork, RTF): read by the
+   * preview converters (preview-convert.ts), not here (BUG-10).
+   */
+  kind: 'text' | 'image' | 'binary' | 'video' | 'audio' | 'document'
   mimeType: string
   bytes: number
   /** mtime (ms) of the file read; absent for recorded turn snapshots. */
   modifiedAt?: number
   truncated: boolean
   content?: string
+  /** Text that is not UTF-8: `UTF-16LE`, `UTF-16BE` or `GB18030` (BUG-10). */
+  encoding?: string
   dataBase64?: string
 }
 
@@ -339,7 +345,9 @@ export class WorkspaceFilesService {
         'workspace_path_not_file',
         '目标路径不是文件。',
       )
-    const mimeType = mimeFor(target)
+    const document = isDocument(target)
+    const mimeType =
+      document || !isZipOnlyDocument(target) ? mimeFor(target) : 'text/plain'
     const common = {
       projectRoot: scope.projectRoot,
       relativePath: toProjectPath(canonicalRoot, target),
@@ -348,10 +356,20 @@ export class WorkspaceFilesService {
       bytes: metadata.size,
       modifiedAt: metadata.mtimeMs,
     }
-    // A video can be gigabytes: nothing is read, it streams when played.
-    if (isVideoMime(mimeType))
+    if (metadata.size === 0)
+      return { ...common, kind: 'text', truncated: false, content: '' }
+    // A video or a song can be gigabytes: nothing is read, it streams when
+    // played. Documents and HEIC/TIFF go to the preview converters.
+    if (mimeType.startsWith('video/'))
       return { ...common, kind: 'video', truncated: false }
-    if (isPreviewableImageMime(mimeType)) {
+    if (mimeType.startsWith('audio/'))
+      return { ...common, kind: 'audio', truncated: false }
+    if (document) return { ...common, kind: 'document', truncated: false }
+    if (CONVERTED_IMAGES.has(mimeType))
+      return { ...common, kind: 'image', truncated: false }
+    if (INLINE_IMAGES.has(mimeType)) {
+      // Past the inline limit no data comes inline (`truncated`); the
+      // Files pane streams it from its media address (BUG-10).
       if (metadata.size > this.maxImageBytes)
         return { ...common, kind: 'image', truncated: true }
       return {
@@ -362,17 +380,14 @@ export class WorkspaceFilesService {
       }
     }
     const read = readBounded(target, this.maxTextBytes)
-    // A cut at the byte limit can split a multi-byte character; drop the
-    // partial tail so UTF-8 text is not mistaken for binary.
-    const bounded =
-      metadata.size > read.byteLength ? trimPartialUtf8(read) : read
-    if (looksBinary(bounded))
-      return { ...common, kind: 'binary', truncated: metadata.size > 0 }
+    const decoded = decodeText(read, metadata.size > read.byteLength)
+    if (!decoded) return { ...common, kind: 'binary', truncated: true }
     return {
       ...common,
       kind: 'text',
-      truncated: metadata.size > bounded.byteLength,
-      content: bounded.toString('utf8'),
+      truncated: metadata.size > read.byteLength,
+      content: decoded.text,
+      ...(decoded.encoding ? { encoding: decoded.encoding } : {}),
     }
   }
 
@@ -504,31 +519,165 @@ function paginate<T>(
   }
 }
 
+/** MIME types by extension; anything else is text/plain until it is read. */
+const MIME_TYPES: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  svg: 'image/svg+xml',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  pages: 'application/vnd.apple.pages',
+  numbers: 'application/vnd.apple.numbers',
+  key: 'application/vnd.apple.keynote',
+  rtf: 'application/rtf',
+  odt: 'application/vnd.oasis.opendocument.text',
+  json: 'application/json',
+  html: 'text/html',
+  css: 'text/css',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  mdown: 'text/markdown',
+  mkd: 'text/markdown',
+  csv: 'text/csv',
+  tsv: 'text/tab-separated-values',
+}
+
+/** Shown from the bytes themselves (data: inline, or streamed past the limit). */
+const INLINE_IMAGES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+  'image/x-icon',
+])
+/** Shown as the PNG sips makes of them (preview-convert.ts). */
+const CONVERTED_IMAGES = new Set(['image/heic', 'image/heif', 'image/tiff'])
+const DOCUMENTS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'pages',
+  'numbers',
+  'key',
+  'rtf',
+  'odt',
+])
+/** iWork files are zip packages; a `.key` that is not one is a key file (PEM). */
+const ZIP_ONLY_DOCUMENTS = new Set(['pages', 'numbers', 'key'])
+
+function extensionOf(path: string): string {
+  const name = basename(path).toLocaleLowerCase()
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1) : ''
+}
+
 function mimeFor(path: string): string {
-  const extension = path.toLocaleLowerCase().split('.').pop()
-  if (extension === 'png') return 'image/png'
-  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
-  if (extension === 'gif') return 'image/gif'
-  if (extension === 'webp') return 'image/webp'
-  if (extension === 'svg') return 'image/svg+xml'
-  if (extension === 'mp4' || extension === 'm4v') return 'video/mp4'
-  if (extension === 'webm') return 'video/webm'
-  if (extension === 'mov') return 'video/quicktime'
-  if (extension === 'json') return 'application/json'
-  if (extension === 'html') return 'text/html'
-  if (extension === 'css') return 'text/css'
-  if (extension === 'md') return 'text/markdown'
-  return 'text/plain'
+  return MIME_TYPES[extensionOf(path)] ?? 'text/plain'
 }
 
-function isVideoMime(mimeType: string): boolean {
-  return mimeType.startsWith('video/')
+function isZipOnlyDocument(path: string): boolean {
+  return ZIP_ONLY_DOCUMENTS.has(extensionOf(path))
 }
 
-function isPreviewableImageMime(mimeType: string): boolean {
-  return new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']).has(
-    mimeType,
-  )
+function isDocument(path: string): boolean {
+  const extension = extensionOf(path)
+  if (!DOCUMENTS.has(extension)) return false
+  if (!ZIP_ONLY_DOCUMENTS.has(extension)) return true
+  const head = readBounded(path, 4)
+  return head.length === 4 && head.readUInt32BE(0) === 0x504b0304
+}
+
+/**
+ * Text in the encodings people actually have (BUG-10): UTF-16 by its byte
+ * order mark, UTF-8 (a BOM is dropped), else GB18030 — the superset of
+ * GBK and GB2312 — when every byte decodes. Null: binary. `truncated`: the
+ * buffer is a cut of a longer file, so a split last character is dropped.
+ */
+export function decodeText(
+  buffer: Buffer,
+  truncated: boolean,
+): { text: string; encoding?: string } | null {
+  // A BOM first: UTF-16 has NUL bytes the binary check would trip on.
+  if (buffer[0] === 0xff && buffer[1] === 0xfe)
+    return utf16(buffer.subarray(2), 'utf-16le', 'UTF-16LE', truncated)
+  if (buffer[0] === 0xfe && buffer[1] === 0xff)
+    return utf16(buffer.subarray(2), 'utf-16be', 'UTF-16BE', truncated)
+  const body =
+    buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+      ? buffer.subarray(3)
+      : buffer
+  // A cut at the byte limit can split a multi-byte character; drop the
+  // partial tail so UTF-8 text is not mistaken for binary.
+  const utf8 = truncated ? trimPartialUtf8(body) : body
+  if (!looksBinary(utf8)) return { text: utf8.toString('utf8') }
+  if (body.includes(0)) return null
+  for (let cut = 0; cut <= (truncated ? 3 : 0); cut += 1) {
+    let text: string
+    try {
+      text = new TextDecoder('gb18030', { fatal: true }).decode(
+        body.subarray(0, body.length - cut),
+      )
+    } catch {
+      continue
+    }
+    return controlHeavy(text) ? null : { text, encoding: 'GB18030' }
+  }
+  return null
+}
+
+function utf16(
+  body: Buffer,
+  label: 'utf-16le' | 'utf-16be',
+  encoding: string,
+  truncated: boolean,
+): { text: string; encoding: string } | null {
+  if (body.length % 2 !== 0 && !truncated) return null
+  const even = body.subarray(0, body.length - (body.length % 2))
+  const text = new TextDecoder(label).decode(even)
+  return controlHeavy(text) ? null : { text, encoding }
+}
+
+/** More than 1% control characters (other than tab, newlines, form feed). */
+function controlHeavy(text: string): boolean {
+  let controls = 0
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    if (code < 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
+      controls += 1
+  }
+  return text.length > 0 && controls / text.length > 0.01
 }
 
 /** Drop an incomplete UTF-8 sequence at the end of a truncated buffer. */

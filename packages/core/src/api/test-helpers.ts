@@ -169,6 +169,11 @@ export async function makeApi(
             loginShell: { read: async () => ({}) },
           }
         : options.extra.executorHome,
+    // Tests never run sips, qlmanage, textutil or osascript (BUG-10): the
+    // converters see tools that fail, unless a test brings its own.
+    previewTools: async () => {
+      throw new Error('preview tools are not run in tests')
+    },
     ...options.extra,
   })
   ref.api = api

@@ -113,9 +113,10 @@ describe('WorkspaceFilesService', () => {
     const root = fixture()
     // Bytes that would read as binary: a video is never opened at all.
     writeFileSync(join(root, 'clip.mp4'), Buffer.from([0x00, 0xff, 0x00, 0x7f]))
-    writeFileSync(join(root, 'take.MOV'), '')
-    writeFileSync(join(root, 'cut.m4v'), '')
-    writeFileSync(join(root, 'loop.webm'), '')
+    // (Non-empty: an empty file reads as empty text, BUG-10.)
+    writeFileSync(join(root, 'take.MOV'), 'x')
+    writeFileSync(join(root, 'cut.m4v'), 'x')
+    writeFileSync(join(root, 'loop.webm'), 'x')
     const service = new WorkspaceFilesService({
       resolveProject: () => ({ sessionId: 's1', projectRoot: root }),
     })
@@ -140,6 +141,202 @@ describe('WorkspaceFilesService', () => {
     })
     await expect(read('loop.webm')).resolves.toMatchObject({
       mimeType: 'video/webm',
+    })
+  })
+
+  describe('BUG-10 · formats', () => {
+    function service(root: string, maxImageBytes?: number) {
+      return new WorkspaceFilesService({
+        resolveProject: () => ({ sessionId: 's1', projectRoot: root }),
+        ...(maxImageBytes ? { maxImageBytes } : {}),
+      })
+    }
+    const read = (root: string, relativePath: string, maxImageBytes?: number) =>
+      service(root, maxImageBytes).read({ sessionId: 's1', relativePath })
+
+    it('3 · audio is kind audio, and nothing of it is read', async () => {
+      const root = fixture()
+      const types: Record<string, string> = {
+        'a.mp3': 'audio/mpeg',
+        'a.m4a': 'audio/mp4',
+        'a.aac': 'audio/aac',
+        'a.wav': 'audio/wav',
+        'a.flac': 'audio/flac',
+        'a.ogg': 'audio/ogg',
+        'a.OPUS': 'audio/ogg',
+      }
+      for (const name of Object.keys(types))
+        writeFileSync(join(root, name), Buffer.from([0, 1, 2, 255]))
+      for (const [name, mimeType] of Object.entries(types)) {
+        const result = await read(root, name)
+        expect(result, name).toMatchObject({
+          kind: 'audio',
+          mimeType,
+          truncated: false,
+        })
+        expect(result.content).toBeUndefined()
+      }
+    })
+
+    it('4–5 · PDF, Office, iWork and RTF are kind document, read by the converters', async () => {
+      const root = fixture()
+      const names = [
+        'a.pdf',
+        'a.docx',
+        'a.doc',
+        'a.xlsx',
+        'a.xls',
+        'a.pptx',
+        'a.ppt',
+        'a.pages',
+        'a.numbers',
+        'a.key',
+        'a.rtf',
+        'a.odt',
+      ]
+      for (const name of names)
+        writeFileSync(
+          join(root, name),
+          /\.(?:pages|numbers|key)$/.test(name)
+            ? Buffer.from([0x50, 0x4b, 3, 4, 0])
+            : '%PDF-1.4\n',
+        )
+      for (const name of names) {
+        const result = await read(root, name)
+        expect(result.kind, name).toBe('document')
+        expect(result.content, name).toBeUndefined()
+      }
+      // iWork files are zip packages: a PEM `.key` stays text.
+      writeFileSync(join(root, 'server.key'), '-----BEGIN PRIVATE KEY-----\n')
+      await expect(read(root, 'server.key')).resolves.toMatchObject({
+        kind: 'text',
+        mimeType: 'text/plain',
+      })
+      expect((await read(root, 'a.pdf')).mimeType).toBe('application/pdf')
+      expect((await read(root, 'a.docx')).mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      )
+    })
+
+    it('1–2 · avif, bmp and ico come inline; heic, tiff and big images come without data', async () => {
+      const root = fixture()
+      const bytes = Buffer.from([1, 2, 3, 4])
+      for (const name of ['a.avif', 'a.bmp', 'a.ico', 'a.heic', 'a.HEIF'])
+        writeFileSync(join(root, name), bytes)
+      writeFileSync(join(root, 'a.tif'), bytes)
+      writeFileSync(join(root, 'big.png'), Buffer.alloc(64, 7))
+      await expect(read(root, 'a.avif')).resolves.toMatchObject({
+        kind: 'image',
+        mimeType: 'image/avif',
+        dataBase64: bytes.toString('base64'),
+      })
+      await expect(read(root, 'a.bmp')).resolves.toMatchObject({
+        mimeType: 'image/bmp',
+        dataBase64: bytes.toString('base64'),
+      })
+      await expect(read(root, 'a.ico')).resolves.toMatchObject({
+        mimeType: 'image/x-icon',
+        dataBase64: bytes.toString('base64'),
+      })
+      for (const [name, mimeType] of [
+        ['a.heic', 'image/heic'],
+        ['a.HEIF', 'image/heif'],
+        ['a.tif', 'image/tiff'],
+      ] as const) {
+        const result = await read(root, name)
+        expect(result, name).toMatchObject({ kind: 'image', mimeType })
+        expect(result.dataBase64, name).toBeUndefined()
+      }
+      // Past the inline limit no data comes inline; the pane streams it.
+      const big = await read(root, 'big.png', 16)
+      expect(big).toMatchObject({ kind: 'image', truncated: true })
+      expect(big.dataBase64).toBeUndefined()
+    })
+
+    it('6 · UTF-16 with a byte order mark reads as text', async () => {
+      const root = fixture()
+      const text = '订单号,客户\nA1023,张三\n'
+      writeFileSync(
+        join(root, 'le.txt'),
+        Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
+      )
+      const be = Buffer.from(text, 'utf16le')
+      for (let i = 0; i < be.length; i += 2) {
+        const first = be[i]!
+        be[i] = be[i + 1]!
+        be[i + 1] = first
+      }
+      writeFileSync(
+        join(root, 'be.txt'),
+        Buffer.concat([Buffer.from([0xfe, 0xff]), be]),
+      )
+      await expect(read(root, 'le.txt')).resolves.toMatchObject({
+        kind: 'text',
+        content: text,
+        encoding: 'UTF-16LE',
+      })
+      await expect(read(root, 'be.txt')).resolves.toMatchObject({
+        kind: 'text',
+        content: text,
+        encoding: 'UTF-16BE',
+      })
+    })
+
+    it('7 · GB18030 (GBK) text reads as text and names its encoding', async () => {
+      const root = fixture()
+      // 订单号,客户\nA1023,张三,199.00\n in GBK.
+      writeFileSync(
+        join(root, 'orders.csv'),
+        Buffer.from(
+          'b6a9b5a5bac52cbfcdbba70a41313032332cd5c5c8fd2c3139392e30300a',
+          'hex',
+        ),
+      )
+      const result = await read(root, 'orders.csv')
+      expect(result).toMatchObject({
+        kind: 'text',
+        mimeType: 'text/csv',
+        content: '订单号,客户\nA1023,张三,199.00\n',
+        encoding: 'GB18030',
+      })
+      // UTF-8 stays unmarked.
+      writeFileSync(join(root, 'plain.txt'), '订单号\n')
+      const plain = await read(root, 'plain.txt')
+      expect(plain).toMatchObject({ kind: 'text', content: '订单号\n' })
+      expect(plain.encoding).toBeUndefined()
+    })
+
+    it('8 · real binary data stays binary', async () => {
+      const root = fixture()
+      writeFileSync(
+        join(root, 'blob.bin'),
+        Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x00, 0xff, 0xfe]),
+      )
+      writeFileSync(join(root, 'junk.dat'), Buffer.from([0x81, 0x30, 0xff, 0x41]))
+      await expect(read(root, 'blob.bin')).resolves.toMatchObject({
+        kind: 'binary',
+      })
+      await expect(read(root, 'junk.dat')).resolves.toMatchObject({
+        kind: 'binary',
+      })
+    })
+
+    it('9–10 · Markdown variants, CSV and TSV have their types; an empty file is empty text', async () => {
+      const root = fixture()
+      for (const name of ['a.markdown', 'a.mdown', 'a.mkd'])
+        writeFileSync(join(root, name), '# Title\n')
+      writeFileSync(join(root, 'a.tsv'), 'a\tb\n')
+      writeFileSync(join(root, 'empty.pdf'), '')
+      for (const name of ['a.markdown', 'a.mdown', 'a.mkd'])
+        expect((await read(root, name)).mimeType, name).toBe('text/markdown')
+      expect((await read(root, 'a.tsv')).mimeType).toBe(
+        'text/tab-separated-values',
+      )
+      await expect(read(root, 'empty.pdf')).resolves.toMatchObject({
+        kind: 'text',
+        content: '',
+        bytes: 0,
+      })
     })
   })
 

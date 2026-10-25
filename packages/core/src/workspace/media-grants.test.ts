@@ -8,7 +8,13 @@ import {
 // BUG-05: a video in the Files pane plays from app://workspace-media/<token>;
 // the token stands for one file Core already resolved, for ten minutes.
 
-const FILE = { absPath: '/p/clip.mp4', sessionId: 's1', mimeType: 'video/mp4' }
+const FILE = {
+  absPath: '/p/clip.mp4',
+  filePath: '/p/clip.mp4',
+  streamable: true,
+  sessionId: 's1',
+  mimeType: 'video/mp4',
+}
 
 describe('WorkspaceMediaGrants', () => {
   it('maps a 128-bit random token to the resolved file and reuses it per file', () => {
@@ -28,6 +34,10 @@ describe('WorkspaceMediaGrants', () => {
     const other = grants.grant({ ...FILE, absPath: '/p/other.mp4' })
     expect(other.token).not.toBe(first.token)
     expect(grants.grant({ ...FILE, sessionId: 's2' }).token).not.toBe(
+      first.token,
+    )
+    // The same file named for opening only: a grant of its own.
+    expect(grants.grant({ ...FILE, streamable: false }).token).not.toBe(
       first.token,
     )
     expect(workspaceMediaUrl(first.token)).toBe(
