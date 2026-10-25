@@ -12,9 +12,15 @@
  * 「退回 x（上次正常）」 (its confirmation first; without one click it shows
  * the command to copy); a desktop app's copy only says why not.
  *
+ * 自检 (VER-04, preview § 8): beside 本机版本 自检通过 / 不兼容 / 正在自检…
+ * and, for Claude Code, 尚未验证; under it why (已自动关闭内置插件 …, the
+ * reason it is incompatible) and 重新检查. A disabled 已是最新 never sits
+ * beside 退回 or a refused version.
+ *
  * Props: profileId. Emits: recheck(profileId).
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
+import Badge from '../../ui/Badge.vue'
 import Button from '../../ui/Button.vue'
 import { SettingsGroup, SettingsRow } from '../ui'
 import ExecutorUpgradeNotice from './ExecutorUpgradeNotice.vue'
@@ -25,10 +31,13 @@ import {
   checkedText,
   heldBack,
   installText,
+  primaryShown,
   rollbackAction,
   rollbackOffered,
   runningLine,
   runVerb,
+  selfCheckBadges,
+  selfCheckNotes,
   upgradeOffered,
 } from './upgradeText'
 
@@ -110,10 +119,39 @@ const action = computed(() => {
 const rollback = computed(() => {
   const v = version.value
   if (!v?.rollback || !rollbackOffered(v, run.value)) return null
-  return { because: v.rollback.because, ...rollbackAction(v) }
+  return {
+    // A reason the self-check already gave is not said twice (VER-04).
+    because: v.rollback.because.includes('自检不兼容')
+      ? ''
+      : v.rollback.because,
+    ...rollbackAction(v),
+  }
 })
 
+/** Beside and under 本机版本 (VER-04). */
+const badges = computed(() =>
+  version.value ? selfCheckBadges(version.value) : [],
+)
+const notes = computed(() =>
+  version.value ? selfCheckNotes(version.value) : [],
+)
+const selfChecking = ref(false)
+const rechecking = computed(
+  () => !!version.value?.selfChecking || selfChecking.value,
+)
+async function recheck() {
+  if (rechecking.value) return
+  selfChecking.value = true
+  try {
+    await upgrades.selfCheck(props.profileId)
+  } finally {
+    selfChecking.value = false
+  }
+}
+
 const unverifiedLine = computed(() => {
+  // Codex's line (AGT-13); Claude Code says it beside 本机版本 (VER-04).
+  if (version.value?.backend !== 'codex') return ''
   const next = version.value?.unverified
   if (!next) return ''
   const line = next.split('.').slice(0, 2).join('.')
@@ -142,7 +180,17 @@ async function check() {
         <template v-for="item in facts" :key="item.key">
           <div class="fact">
             <dt>{{ item.term }}</dt>
-            <dd :data-version-fact="item.key">
+            <dd v-if="item.key === 'installed'" class="installed">
+              <span data-version-fact="installed">{{ item.value }}</span
+              ><Badge
+                v-for="badge in badges"
+                :key="badge.text"
+                :tone="badge.tone"
+                data-version-badge
+                >{{ badge.text }}</Badge
+              >
+            </dd>
+            <dd v-else :data-version-fact="item.key">
               {{ item.value
               }}<template v-if="item.location"
                 >{{ ' · '
@@ -151,28 +199,47 @@ async function check() {
             </dd>
           </div>
           <div
-            v-if="item.key === 'installed' && rollback"
+            v-if="item.key === 'installed' && version.installed && !running"
             class="fact"
-            data-version-rollback
+            data-version-state
+            :data-version-rollback="rollback ? '' : undefined"
           >
             <dt />
             <dd class="rollback">
-              <span class="because" data-version-rollback-because>{{
-                rollback.because
-              }}</span>
               <span
-                v-if="rollback.note"
+                v-for="note in notes"
+                :key="note"
+                class="because"
+                data-version-note
+                >{{ note }}</span
+              >
+              <span
+                v-if="rollback?.because"
+                class="because"
+                data-version-rollback-because
+                >{{ rollback.because }}</span
+              >
+              <span
+                v-if="rollback?.note"
                 class="because"
                 data-version-rollback-note
                 >{{ rollback.note }}</span
               >
-              <span v-if="rollback.label" class="rollback-actions"
+              <span class="rollback-actions"
                 ><Button
+                  v-if="rollback?.label"
                   size="sm"
                   variant="secondary"
                   data-version-rollback-button
                   @click="upgrades.askRollback(profileId)"
                   >{{ rollback.label }}</Button
+                ><Button
+                  size="sm"
+                  variant="ghost"
+                  data-version-recheck
+                  :disabled="rechecking"
+                  @click="recheck"
+                  >{{ rechecking ? '检查中…' : '重新检查' }}</Button
                 ></span
               >
             </dd>
@@ -191,6 +258,7 @@ async function check() {
       />
       <div class="actions">
         <Button
+          v-if="version && primaryShown(version, run)"
           size="sm"
           variant="primary"
           data-version-upgrade
@@ -254,6 +322,19 @@ async function check() {
   margin: 0;
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
+}
+
+.installed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.rollback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
 }
 
 .rollback {

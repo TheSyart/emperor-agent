@@ -3,7 +3,9 @@
  * from the approved design: the row line, the top notice, the
  * confirmation, a failure, the detail page's 版本 group and the nav dot.
  * 退回 to the last good version (VER-03, BUG-00 preview § 8) runs the same
- * way and says 退回 wherever an upgrade says 升级.
+ * way and says 退回 wherever an upgrade says 升级. The offline self-check
+ * (VER-04, preview § 8): 自检通过 / 不兼容 / 尚未验证 on the 本机版本 line,
+ * why under it, and 重新检查.
  * Pure functions over Core's `executors.versions`.
  */
 import type {
@@ -130,6 +132,8 @@ export function rowUpgradeLine(
     .join(' · ')
   if (failedRun(version, run))
     return { text: `${base} · ${runVerb(run)}没有完成` }
+  if (version.selfCheck?.status === 'incompatible')
+    return { text: `${base} · 自检不兼容` }
   if (version.target && version.upgrade?.manual === 'desktop')
     return { text: `${base} · ${version.target} 随桌面版更新` }
   if (version.target && version.upgrade)
@@ -179,6 +183,91 @@ export function rollbackAction(version: ExecutorVersionView): {
       note: `${NAME[version.backend]} 随桌面版更新，不能在这里退回。`,
     }
   return { label: `退回 ${offer.target}（上次正常）`, note: null }
+}
+
+type Tone = 'ok' | 'warn' | 'error' | 'neutral'
+
+/** Claude Code installed above every verified release (by hand). */
+function installedUnverified(version: ExecutorVersionView): boolean {
+  return (
+    version.backend === 'claude-code' &&
+    version.verified.length > 0 &&
+    !!version.installed &&
+    !version.verified.includes(version.installed)
+  )
+}
+
+/**
+ * Beside 本机版本 (VER-04): what the self-check found (正在自检… while it
+ * runs) and, for Claude Code, 尚未验证 — the installed version, or the
+ * newer release 升级 does not offer yet. Codex keeps its own 尚未验证 line.
+ */
+export function selfCheckBadges(
+  version: ExecutorVersionView,
+): Array<{ text: string; tone: Tone }> {
+  const badges: Array<{ text: string; tone: Tone }> = []
+  const status = version.selfCheck?.status
+  if (version.selfChecking) badges.push({ text: '正在自检…', tone: 'neutral' })
+  else if (status === 'ok' || status === 'adapted')
+    badges.push({ text: '自检通过', tone: 'ok' })
+  else if (status === 'incompatible')
+    badges.push({ text: '不兼容', tone: 'error' })
+  else if (status === 'error')
+    badges.push({ text: '自检没有完成', tone: 'neutral' })
+  if (version.backend !== 'claude-code' || status === 'incompatible')
+    return badges
+  if (installedUnverified(version))
+    badges.push({ text: '尚未验证', tone: 'warn' })
+  else if (version.unverified)
+    badges.push({ text: `${version.unverified} 尚未验证`, tone: 'warn' })
+  return badges
+}
+
+/** Under 本机版本 (VER-04): why, in the tertiary colour. */
+export function selfCheckNotes(version: ExecutorVersionView): string[] {
+  const check = version.selfCheck
+  const notes: string[] = []
+  if (check?.status === 'incompatible') {
+    const issue = check.issues.find((i) => i.blocking)
+    if (issue) notes.push(issue.detail)
+  } else if (check?.status === 'error') {
+    if (check.issues[0]) notes.push(check.issues[0].detail)
+  } else if (check) {
+    const off = check.adapted?.builtinPluginsDisabled ?? []
+    if (off.length) {
+      const since = [
+        ...new Set(off.map((s) => check.adapted?.since?.[s]).filter(Boolean)),
+      ]
+      notes.push(
+        `已自动关闭内置插件 ${off.map((s) => s.replace(/@builtin$/u, '')).join('、')}${since.length === 1 ? `（${since[0]} 起自带）` : ''}`,
+      )
+    }
+    notes.push(...check.issues.filter((i) => !i.blocking).map((i) => i.detail))
+  }
+  if (version.backend === 'claude-code' && check?.status !== 'incompatible') {
+    if (installedUnverified(version))
+      notes.push(
+        check && check.status !== 'error'
+          ? '这个版本 Emperor 还没验证；自检通过，可以使用。'
+          : '这个版本 Emperor 还没验证。',
+      )
+    else if (version.unverified)
+      notes.push('已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级')
+  }
+  return notes
+}
+
+/**
+ * The 版本 group's main button: an upgrade, its progress, or 已是最新 as
+ * designed (AGT-13) — but not a disabled 已是最新 beside 退回 or a version
+ * the self-check refused (VER-04).
+ */
+export function primaryShown(
+  version: ExecutorVersionView,
+  run: ExecutorUpgradeView | null | undefined,
+): boolean {
+  if (activeRun(run) || upgradeOffered(version, run)) return true
+  return !version.rollback && version.selfCheck?.status !== 'incompatible'
 }
 
 /** The line about the auto-updater: prose, the export as code, the end. */

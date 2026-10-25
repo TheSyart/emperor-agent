@@ -254,6 +254,8 @@ beforeEach(() => {
           state: 'waiting',
         }),
       }
+    if (operation === 'executors.selfCheck')
+      return { selfCheck: { status: 'ok' } }
     if (operation === 'executors.cancelUpgrade')
       return { upgrade: runOf({ state: 'cancelled', finishedAt: Date.now() }) }
     if (operation === 'executors.dismissUpgrades') {
@@ -915,5 +917,193 @@ describe('退回 (VER-03)', () => {
     expect(
       row('claude-code').querySelector('[data-executor-summary]')!.textContent,
     ).toContain('本机 2.1.315 · 退回没有完成')
+  })
+})
+
+describe('自检 (VER-04, preview § 8)', () => {
+  const VERIFIED = ['2.1.281', '2.1.308', '2.1.310']
+  function selfCheck(over: Over = {}) {
+    return {
+      backend: 'claude-code',
+      version: '2.1.310',
+      checkedAt: Date.now() - 60_000,
+      status: 'adapted',
+      adapted: {
+        builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+        since: { 'cc-plugin-plugin-authoring@builtin': '2.1.308' },
+      },
+      issues: [],
+      modelCalls: 0,
+      ...over,
+    }
+  }
+  async function detail(backend: string) {
+    await mount()
+    row(backend)
+      .querySelector<HTMLButtonElement>('[data-executor-details]')!
+      .click()
+    await settle()
+    return root.querySelector<HTMLElement>(
+      `[data-executor-detail="${backend}"]`,
+    )!
+  }
+  const badges = (page: HTMLElement) =>
+    [...page.querySelectorAll('[data-version-badge]')].map((b) =>
+      b.textContent?.trim(),
+    )
+  const notes = (page: HTMLElement) =>
+    [...page.querySelectorAll('[data-version-note]')].map((n) =>
+      n.textContent?.trim(),
+    )
+
+  it('自检通过 · 已自动关闭内置插件 …, and 重新检查 runs it now', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.310',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck(),
+      }),
+      codexVersion(),
+    ])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.310' }))
+    const page = await detail('claude-code')
+    expect(
+      page
+        .querySelector('[data-version-fact="installed"]')!
+        .textContent?.trim(),
+    ).toBe('2.1.310')
+    expect(badges(page)).toEqual(['自检通过'])
+    expect(notes(page)).toEqual([
+      '已自动关闭内置插件 cc-plugin-plugin-authoring（2.1.308 起自带）',
+    ])
+    const recheck = page.querySelector<HTMLButtonElement>(
+      '[data-version-recheck]',
+    )!
+    expect(recheck.textContent?.trim()).toBe('重新检查')
+    recheck.click()
+    await settle()
+    expect(calls('executors.selfCheck')).toEqual([
+      { profileId: 'claude-default' },
+    ])
+    // And the versions again, with the new result.
+    expect(calls('executors.versions').length).toBeGreaterThan(1)
+  })
+
+  it('x 尚未验证: the verified one stays, the newer one waits', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.312',
+        target: null,
+        upgrade: null,
+        unverified: '2.1.312',
+        verified: VERIFIED,
+        selfCheck: selfCheck({ status: 'ok', adapted: undefined }),
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['自检通过', '2.1.312 尚未验证'])
+    expect(notes(page)).toContain(
+      '已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级',
+    )
+  })
+
+  it('不兼容: why, 退回 x（上次正常） and 重新检查; no disabled 已是最新 beside them', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.315',
+        latest: '2.1.315',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck({
+          version: '2.1.315',
+          status: 'incompatible',
+          adapted: undefined,
+          issues: [
+            {
+              code: 'mcp_server',
+              detail:
+                'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+              blocking: true,
+            },
+          ],
+        }),
+        rollback: {
+          target: '2.1.310',
+          because:
+            '2.1.315 自检不兼容：Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+          oneClick: true,
+          command: ROLLBACK_CMD,
+        },
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['不兼容'])
+    expect(notes(page)).toEqual([
+      'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+    ])
+    // The same reason is not said twice.
+    expect(page.querySelector('[data-version-rollback-because]')).toBeNull()
+    const state = page.querySelector<HTMLElement>('[data-version-rollback]')!
+    expect(
+      [...state.querySelectorAll('button')].map((b) => b.textContent?.trim()),
+    ).toEqual(['退回 2.1.310（上次正常）', '重新检查'])
+    expect(page.querySelector('[data-version-upgrade]')).toBeNull()
+    // On the main page, the row says so too.
+    root
+      .querySelector<HTMLButtonElement>('[data-testid="settings-crumb"]')
+      ?.click()
+  })
+
+  it('while it checks: 正在自检… and 重新检查 waits', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.310',
+        latest: '2.1.310',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: null,
+        selfChecking: true,
+      }),
+      codexVersion(),
+    ])
+    const page = await detail('claude-code')
+    expect(badges(page)).toEqual(['正在自检…'])
+    const recheck = page.querySelector<HTMLButtonElement>(
+      '[data-version-recheck]',
+    )!
+    expect(recheck.disabled).toBe(true)
+    expect(recheck.textContent?.trim()).toBe('检查中…')
+  })
+
+  it('the main row: 自检不兼容 after the version', async () => {
+    setVersions([
+      claudeVersion({
+        installed: '2.1.315',
+        latest: '2.1.315',
+        target: null,
+        upgrade: null,
+        verified: VERIFIED,
+        selfCheck: selfCheck({
+          version: '2.1.315',
+          status: 'incompatible',
+          adapted: undefined,
+          issues: [{ code: 'mcp_server', detail: 'x', blocking: true }],
+        }),
+      }),
+      codexVersion(),
+    ])
+    listExecutors.mockResolvedValue(listing({ 'claude-default': '2.1.315' }))
+    await mount()
+    expect(
+      row('claude-code').querySelector('[data-executor-summary]')!.textContent,
+    ).toContain('本机 2.1.315 · 自检不兼容')
   })
 })

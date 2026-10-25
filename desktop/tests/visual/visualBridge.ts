@@ -243,9 +243,29 @@ export async function installVisualCoreBridge(
       // upgrade failed without write permission. A spec moves an upgrade on
       // with window.__visualExecutorUpgrade('running' | 'done' | 'failed').
       // VER-03 `rollback`: Claude Code 2.1.315 (npm's latest) failed twice
-      // for its version and 2.1.310 ran a task: 退回 2.1.310 is offered.
+      // for its version and 2.1.310 ran a task: 退回 2.1.310 is offered;
+      // VER-04: its self-check found an MCP server (不兼容). VER-04
+      // `selfcheck`: Claude Code 2.1.310, 自检通过 with its builtin turned
+      // off; `claude-unverified`: the same, and npm has 2.1.312, not
+      // verified yet.
       const visualUpgradeMode = visualParams.get('visualExecutorUpgrade')
       const visualRollback = visualUpgradeMode === 'rollback'
+      const visualSelfCheck = visualUpgradeMode === 'selfcheck'
+      const visualClaudeUnverified = visualUpgradeMode === 'claude-unverified'
+      const VISUAL_VERIFIED_CLAUDE = ['2.1.281', '2.1.308', '2.1.310']
+      const visualClaudeCheck = (over: Record<string, unknown>) => ({
+        backend: 'claude-code',
+        version: '2.1.310',
+        checkedAt: Date.now() - 5 * 60_000,
+        status: 'adapted',
+        adapted: {
+          builtinPluginsDisabled: ['cc-plugin-plugin-authoring@builtin'],
+          since: { 'cc-plugin-plugin-authoring@builtin': '2.1.308' },
+        },
+        issues: [],
+        modelCalls: 0,
+        ...over,
+      })
       const VISUAL_ROLLBACK_COMMAND =
         'npm install -g @anthropic-ai/claude-code@2.1.310'
       const visualUpgrade = {
@@ -294,12 +314,26 @@ export async function installVisualCoreBridge(
         visualUpgrade.upgrades = [visualFailedRun()]
       }
       if (visualRollback) visualUpgrade.claude = '2.1.315'
+      if (visualSelfCheck || visualClaudeUnverified)
+        visualUpgrade.claude = '2.1.310'
       const visualVersions = () => {
         const unverified = visualUpgradeMode === 'unverified'
         const claudeTarget =
-          visualRollback || visualUpgrade.claude === '2.1.308'
+          visualRollback ||
+          visualSelfCheck ||
+          visualClaudeUnverified ||
+          visualUpgrade.claude === '2.1.308'
             ? null
             : '2.1.308'
+        const claudeLatest = visualRollback
+          ? '2.1.315'
+          : visualClaudeUnverified
+            ? '2.1.312'
+            : visualSelfCheck
+              ? '2.1.310'
+              : '2.1.308'
+        const claudeVer04 =
+          visualRollback || visualSelfCheck || visualClaudeUnverified
         const codexTarget =
           unverified || visualUpgrade.codex === '0.163.0' ? null : '0.163.0'
         return {
@@ -318,9 +352,33 @@ export async function installVisualCoreBridge(
                 kind: 'npm',
                 location: `${VISUAL_NPM}/@anthropic-ai/claude-code`,
               },
-              latest: visualRollback ? '2.1.315' : '2.1.308',
-              verified: [],
+              latest: claudeLatest,
+              verified: claudeVer04 ? VISUAL_VERIFIED_CLAUDE : [],
               target: claudeTarget,
+              ...(claudeVer04
+                ? {
+                    selfChecking: false,
+                    selfCheck: visualRollback
+                      ? visualClaudeCheck({
+                          version: '2.1.315',
+                          status: 'incompatible',
+                          adapted: undefined,
+                          issues: [
+                            {
+                              code: 'mcp_server',
+                              detail:
+                                'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+                              blocking: true,
+                            },
+                          ],
+                        })
+                      : visualClaudeCheck(
+                          visualClaudeUnverified
+                            ? { status: 'ok', adapted: undefined }
+                            : {},
+                        ),
+                  }
+                : {}),
               ...(visualRollback && visualUpgrade.claude === '2.1.315'
                 ? {
                     rollback: {
@@ -331,7 +389,7 @@ export async function installVisualCoreBridge(
                     },
                   }
                 : {}),
-              unverified: null,
+              unverified: visualClaudeUnverified ? '2.1.312' : null,
               upgrade: claudeTarget
                 ? {
                     oneClick: true,
@@ -8537,6 +8595,13 @@ export async function installVisualCoreBridge(
                   log: [`$ ${VISUAL_ROLLBACK_COMMAND}`],
                 },
               }
+            }
+            case 'executors.selfCheck': {
+              const input = (args[0] || {}) as { profileId?: string }
+              const row = visualVersions().executors.find(
+                (e) => e.profileId === input.profileId,
+              ) as { selfCheck?: unknown } | undefined
+              return { selfCheck: row?.selfCheck ?? null }
             }
             case 'executors.cancelUpgrade':
               return {

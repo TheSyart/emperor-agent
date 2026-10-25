@@ -142,6 +142,17 @@ async function rollback(profileId: string): Promise<void> {
   }
 }
 
+/** 重新检查 (VER-04): the offline self-check now, then the versions again. */
+async function selfCheck(profileId: string): Promise<void> {
+  try {
+    await core('executors.selfCheck', { profileId })
+    error.value = ''
+  } catch (cause) {
+    error.value = `自检没有完成：${message(cause)}`
+  }
+  await load()
+}
+
 async function cancel(profileId: string): Promise<void> {
   const verb = runVerb(runOf(profileId))
   try {
@@ -185,6 +196,7 @@ export function useExecutorUpgrades() {
     runOf,
     upgrade,
     rollback,
+    selfCheck,
     cancel,
     dismiss,
     onProbe,

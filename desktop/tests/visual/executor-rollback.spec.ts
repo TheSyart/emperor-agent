@@ -8,8 +8,10 @@ import { installVisualCoreBridge } from './visualBridge'
 // preview (BUG-00 § 8): Claude Code 2.1.315 failed twice for its version
 // and 2.1.310 ran a task, so under 本机版本 the reason and 「退回 2.1.310
 // （上次正常）」; the confirmation names why, the command and that the
-// claude in the user's own Terminal may update itself again. The visual
-// bridge plays Core (`?visualExecutorUpgrade=rollback`). Baseline
+// claude in the user's own Terminal may update itself again. VER-04: its
+// self-check found an MCP server, so 不兼容 beside the version, why under
+// it, 退回 and 重新检查, and no disabled 已是最新. The visual bridge plays
+// Core (`?visualExecutorUpgrade=rollback`). Baseline
 // settings/executors-rollback; screenshots in screenshots/executor-rollback/.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'executor-rollback')
 
@@ -48,13 +50,19 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(group.locator('[data-version-fact="installed"]')).toHaveText(
       '2.1.315',
     )
+    await expect(group.locator('[data-version-badge]')).toHaveText(['不兼容'])
     const back = group.locator('[data-version-rollback]')
+    await expect(back.locator('[data-version-note]')).toHaveText([
+      'Claude Code 加载了 MCP server：x。子智能体不允许使用 MCP。',
+    ])
     await expect(back.locator('[data-version-rollback-because]')).toHaveText(
       '2.1.315 上有 2 次任务因版本不兼容失败',
     )
     await expect(back.locator('[data-version-rollback-button]')).toHaveText(
       '退回 2.1.310（上次正常）',
     )
+    await expect(back.locator('[data-version-recheck]')).toHaveText('重新检查')
+    await expect(group.locator('[data-version-upgrade]')).toHaveCount(0)
     await shot(page, `detail-${theme}`)
     await expectBaseline(page, 'settings', `executors-rollback-${theme}`)
 
