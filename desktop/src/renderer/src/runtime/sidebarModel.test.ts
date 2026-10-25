@@ -23,6 +23,7 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
     chat_order: [],
     project_session_order: {},
     collapsed_project_ids: [],
+    collapsed_sections: [],
     pinned_session_ids: [],
     right_workspace: {
       version: 3,
@@ -399,6 +400,22 @@ describe('pinned sessions', () => {
     const capped = normalizeSidebarState({ pinned_session_ids: many })
     expect(capped.pinned_session_ids).toHaveLength(MAX_PINNED_SESSIONS)
     expect(capped.pinned_session_ids[0]).toBe('s-0')
+  })
+
+  it('BUG-06 4–5 · keeps collapsed sections like Core: known keys, once, none when absent', async () => {
+    const { normalizeSidebarState, defaultSidebarState } =
+      await import('./sidebarModel')
+    expect(defaultSidebarState.collapsed_sections).toEqual([])
+    expect(normalizeSidebarState(undefined).collapsed_sections).toEqual([])
+    expect(
+      normalizeSidebarState({
+        collapsed_sections: ['chats', 'nope', 'chats', 3, 'pinned'],
+      } as never).collapsed_sections,
+    ).toEqual(['chats', 'pinned'])
+    expect(
+      normalizeSidebarState({ collapsed_sections: 'projects' } as never)
+        .collapsed_sections,
+    ).toEqual([])
   })
 
   it('keeps the pins through a partial patch merged onto the full state', async () => {

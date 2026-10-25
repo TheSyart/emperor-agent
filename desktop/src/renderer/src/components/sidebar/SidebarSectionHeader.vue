@@ -2,7 +2,11 @@
 /**
  * Sticky section heading of the session list (置顶 / 项目 / 对话): the
  * label toggles the section open; the default slot holds trailing actions.
+ * A chevron after the label (BUG-06) shows while the header is hovered or
+ * focused and stays while the section is folded, turned a quarter left.
  */
+import { DsChevronDown } from '../icons/ds'
+
 defineProps<{ label: string }>()
 const collapsed = defineModel<boolean>('collapsed', { default: false })
 </script>
@@ -16,6 +20,11 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
       @click="collapsed = !collapsed"
     >
       {{ label }}
+      <DsChevronDown
+        :size="14"
+        class="section-chevron"
+        :data-collapsed="collapsed || undefined"
+      />
     </button>
     <div v-if="$slots.default" class="section-actions"><slot /></div>
   </header>
@@ -36,6 +45,9 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 }
 
 .section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   padding: 0 var(--space-1);
   border: none;
   border-radius: var(--r-xs);
@@ -53,6 +65,24 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 
 .section-label[aria-expanded='false'] {
   color: rgb(var(--text-3));
+}
+
+.section-chevron {
+  flex: none;
+  opacity: 0;
+  transition:
+    opacity var(--motion-base) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+
+.section-chevron[data-collapsed] {
+  transform: rotate(-90deg);
+}
+
+.section-header:hover .section-chevron,
+.section-header:focus-within .section-chevron,
+.section-chevron[data-collapsed] {
+  opacity: 1;
 }
 
 /* Trailing actions (+, ⋯) only while the header is hovered or focused, or
