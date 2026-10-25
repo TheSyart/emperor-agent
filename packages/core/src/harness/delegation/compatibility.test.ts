@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import {
   CLAUDE_REQUIRED_RANGE,
+  CODEX_REMOVED_FEATURES,
   KNOWN_CODEX_PROTOCOLS,
   claudeInitIssue,
   codexProtocolsFor,
@@ -53,26 +54,31 @@ it('requires a claude with auth status and auth login --console, never an exact 
     /tool list/,
   )
 })
-it('accepts any patch of a verified Codex minor: 0.153 and, since AGT-13, 0.163', () => {
-  expect(codexRequiredRange()).toBe('0.153.x / 0.163.x')
+it('accepts any patch of a verified Codex minor: 0.153, 0.163 (AGT-13) and 0.164 (VER-07)', () => {
+  expect(codexRequiredRange()).toBe('0.153.x / 0.163.x / 0.164.x')
   for (const agent of [
     'codex/0.153.4',
     'codex/0.153.12',
     'codex/0.163.0',
     'codex/0.163.7',
+    'codex/0.164.0',
+    'codex/0.164.3',
     // What the real app-servers answer to Emperor's clientInfo.
     'emperor-agent/0.153.4 (Mac OS 26.4.1; arm64) unknown (emperor-agent; 0.1.0)',
     'emperor-agent/0.163.0 (Mac OS 26.4.1; arm64) unknown (emperor-agent; 0.1.0)',
+    'emperor-agent/0.164.0 (Mac OS 26.4.1; arm64) unknown (emperor-agent; 0.1.0)',
   ])
     expect(codexUserAgentIssue(agent), agent).toBeUndefined()
   for (const agent of [
     'codex/0.154.0',
     'codex/0.162.9',
-    'codex/0.164.0',
+    'codex/0.165.0',
     'codex/1.163.0',
-    'codex/1.153.4',
+    'codex/1.164.0',
   ])
-    expect(codexUserAgentIssue(agent), agent).toContain('0.153.x / 0.163.x')
+    expect(codexUserAgentIssue(agent), agent).toContain(
+      '0.153.x / 0.163.x / 0.164.x',
+    )
   expect(codexUserAgentIssue(undefined)).toMatch(/version/)
 })
 it('a Codex is checked against the verified protocol of its own minor', () => {
@@ -82,14 +88,17 @@ it('a Codex is checked against the verified protocol of its own minor', () => {
   expect(versions('0.153.9')).toEqual(['0.153.4'])
   expect(versions('0.163.0')).toEqual(['0.163.0'])
   expect(versions('0.163.5')).toEqual(['0.163.0'])
+  expect(versions('0.164.0')).toEqual(['0.164.0'])
+  expect(versions('0.164.2')).toEqual(['0.164.0'])
   expect(versions('0.162.3')).toEqual([])
-  expect(versions('0.164.0')).toEqual([])
+  expect(versions('0.165.0')).toEqual([])
 })
 it('the maintainer script computes the same digest as the runtime, for each verified protocol', () => {
   const repo = resolve(__dirname, '../../../../..')
   expect(KNOWN_CODEX_PROTOCOLS.map((p) => p.version)).toEqual([
     '0.153.4',
     '0.163.0',
+    '0.164.0',
   ])
   for (const protocol of KNOWN_CODEX_PROTOCOLS) {
     const output = execFileSync(
@@ -108,14 +117,22 @@ it('the maintainer script computes the same digest as the runtime, for each veri
     expect(record.digests).toEqual(protocol.digests)
   }
 })
-it('both verified protocols digest the same files, the user agent and model/list included', () => {
-  const [older, newer] = KNOWN_CODEX_PROTOCOLS
-  expect(newer!.files).toEqual(older!.files)
-  expect(newer!.files).toEqual(
+it('every verified protocol digests the same files, the user agent and model/list included', () => {
+  const newest = KNOWN_CODEX_PROTOCOLS.at(-1)!
+  for (const protocol of KNOWN_CODEX_PROTOCOLS)
+    expect(protocol.files, protocol.version).toEqual(newest.files)
+  expect(newest.files).toEqual(
     expect.arrayContaining([
       'v1/InitializeResponse.json',
       'v2/ModelListResponse.json',
     ]),
   )
-  expect(newer!.digests).not.toEqual(older!.digests)
+  const digests = KNOWN_CODEX_PROTOCOLS.flatMap((p) => p.digests)
+  expect(new Set(digests).size).toBe(digests.length)
+})
+it('VER-07 · features Codex marks removed ignore overrides; since 0.164 worktrees and realtime_conversation are among them', () => {
+  expect(CODEX_REMOVED_FEATURES['0.163.0']).not.toContain('worktrees')
+  expect(CODEX_REMOVED_FEATURES['0.164.0']).toEqual(
+    expect.arrayContaining(['realtime_conversation', 'worktrees']),
+  )
 })

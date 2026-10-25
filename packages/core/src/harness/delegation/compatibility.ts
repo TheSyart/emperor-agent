@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
 import codex01534 from './protocol/codex-0.153.4/digest.json'
 import codex01630 from './protocol/codex-0.163.0/digest.json'
+import codex01640 from './protocol/codex-0.164.0/digest.json'
 import codex01534Features from './protocol/codex-0.153.4/features.json'
 import codex01630Features from './protocol/codex-0.163.0/features.json'
+import codex01640Features from './protocol/codex-0.164.0/features.json'
 
 /**
  * Compatibility is a capability handshake (AGT-01), not an exact version
@@ -153,7 +155,14 @@ function protocol(value: {
 export const KNOWN_CODEX_PROTOCOLS: readonly CodexProtocol[] = [
   protocol(codex01534),
   protocol(codex01630),
+  protocol(codex01640),
 ]
+
+const RECORDED_FEATURES = [
+  codex01534Features,
+  codex01630Features,
+  codex01640Features,
+] as const
 
 /**
  * Each verified protocol's feature defaults (`features.json`, `codex
@@ -164,13 +173,30 @@ export const KNOWN_CODEX_PROTOCOLS: readonly CodexProtocol[] = [
 export const CODEX_FEATURE_DEFAULTS: Readonly<
   Record<string, Readonly<Record<string, boolean>>>
 > = Object.fromEntries(
-  [codex01534Features, codex01630Features].map((recorded) => [
+  RECORDED_FEATURES.map((recorded) => [
     recorded.codexVersion,
     Object.fromEntries(
       Object.entries(
         recorded.features as Record<string, { enabled: boolean }>,
       ).map(([name, f]) => [name, f.enabled]),
     ),
+  ]),
+)
+
+/**
+ * Each verified protocol's features in stage `removed`: Codex ignores any
+ * override of them and they keep their recorded value (VER-07: since 0.164
+ * worktrees and realtime_conversation stay on whatever Emperor sets).
+ */
+export const CODEX_REMOVED_FEATURES: Readonly<
+  Record<string, readonly string[]>
+> = Object.fromEntries(
+  RECORDED_FEATURES.map((recorded) => [
+    recorded.codexVersion,
+    Object.entries(recorded.features as Record<string, { stage: string }>)
+      .filter(([, f]) => f.stage === 'removed')
+      .map(([name]) => name)
+      .sort(),
   ]),
 )
 

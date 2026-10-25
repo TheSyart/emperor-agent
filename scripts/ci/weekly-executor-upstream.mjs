@@ -180,9 +180,17 @@ export function compare(observed, baseline, snapshot) {
       if (features.added.length || features.removed.length)
         add(backend, 'features', `默认开启的功能${listed(features)}`)
     }
-    if (seen.selfCheck === 'incompatible')
-      add(backend, 'self_check', '离线自检判定不兼容', { p0: true })
-    else if (seen.selfCheck === 'error')
+    if (seen.selfCheck === 'incompatible') {
+      // Why, in the self-check's own words (VER-07: issue #10 had to be
+      // traced through the run log).
+      const why = (seen.selfCheckIssues ?? [])
+        .map((detail) => String(detail).replace(/\s+/g, ' ').replace(/。$/, ''))
+        .filter(Boolean)
+        .join('；')
+      add(backend, 'self_check', `离线自检判定不兼容${why ? `：${why}` : ''}`, {
+        p0: true,
+      })
+    } else if (seen.selfCheck === 'error')
       add(backend, 'self_check_error', '离线自检没有完成', {
         environment: true,
       })
@@ -403,7 +411,11 @@ async function selfCheck(core, workDir, key, bin) {
     ledger: new core.BuiltinPluginLedger(join(root, 'claude-code')),
   })
   try {
-    return (await check.run(profile, 'manual')).status
+    const result = await check.run(profile, 'manual')
+    return {
+      status: result.status,
+      blocking: result.issues.filter((i) => i.blocking).map((i) => i.detail),
+    }
   } finally {
     await check.close()
   }
@@ -514,9 +526,11 @@ async function observeLive(options, snapshot) {
         key === 'claude'
           ? claudeHandshake(workDir, installed.bin)
           : codexFacts(core, workDir, installed.bin, snapshot)
+      const checked = await selfCheck(core, workDir, key, installed.bin)
       observed[key] = {
         ...facts,
-        selfCheck: await selfCheck(core, workDir, key, installed.bin),
+        selfCheck: checked.status,
+        selfCheckIssues: checked.blocking,
       }
     } catch (error) {
       observed[key] = {

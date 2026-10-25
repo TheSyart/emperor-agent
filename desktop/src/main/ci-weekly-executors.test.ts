@@ -269,6 +269,27 @@ describe('weekly executor upstream (VER-05)', () => {
     expect(String(env.plan.body)).toContain('环境问题待确认')
   })
 
+  it('a self-check that refuses says why (VER-07: issue #10 only said 离线自检判定不兼容)', () => {
+    const { plan } = run(
+      unchanged({
+        codex: {
+          digest: newestCodex().digest,
+          defaultOn: newestCodex().defaultOn,
+          selfCheck: 'incompatible',
+          selfCheckIssues: [
+            'Codex 0.165.0 不在 Emperor 支持的范围（0.153.x / 0.163.x / 0.164.x）。',
+          ],
+        },
+      }),
+    )
+    expect(plan).toMatchObject({ labels: ['executor-upstream', 'P0'] })
+    expect(String(plan.body)).toContain(
+      '离线自检判定不兼容：Codex 0.165.0 不在 Emperor 支持的范围（0.153.x / 0.163.x / 0.164.x）',
+    )
+    // The cell stays one table cell.
+    expect(String(plan.body)).not.toMatch(/支持的范围[^|\n]*\n[^|]/)
+  })
+
   it('7 · Codex is compared with the newest protocol/codex-*/ snapshot', () => {
     const dir = temp('emperor-protocols-')
     for (const name of fs.readdirSync(protocolRoot))

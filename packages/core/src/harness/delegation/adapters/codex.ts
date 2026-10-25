@@ -92,6 +92,17 @@ const disabledFeatures = [
   'write_stdin_approval',
   // Under development; changes how an interrupt ends a turn.
   'instant_interrupt',
+  // On by default since Codex 0.164 (VER-07); 0.153 and 0.163 know both
+  // keys (off by default there), so nothing changes for them.
+  // A setup wizard for another model provider (Amazon Bedrock): the
+  // provider and its billing are the user's choice, never the run's.
+  'bedrock_setup_wizard',
+  // OAuth refresh of MCP servers behind a lock shared between Codex
+  // processes; Emperor runs Codex with no MCP server at all.
+  'mcp_oauth_refresh_coordination',
+  // worktrees and realtime_conversation stay in the list for 0.163, though
+  // 0.164 marks both removed and ignores the override: neither reaches an
+  // app-server run (codex-contract.test.ts, REMOVED_ON).
 ]
 /**
  * The Codex features Emperor sets for every app-server it starts (runs and
