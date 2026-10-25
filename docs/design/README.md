@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-26（对照 `cb1e999b`）<br>
+> 最后核验：2026-10-26（对照 `aa8aa69c`）<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/components/ui/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`desktop/tests/visual/__baselines__/`、`scripts/lib/design-docs.mjs`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
@@ -36,7 +36,7 @@
 | 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外；裸控件、字重、1px 边框、图标尺寸、层级与退役令牌的 ratchet 计数在 `style-audit-ratchet.json`（只降不升，见[设计令牌](tokens.md)）；旧令牌名用 `scripts/codemods/tokens-v2.mjs` 改写 |
 | 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                                                                                                                                                                              |
 | 组件           | `components/ui/`（见[组件规范](components.md)），开发模式下打开 `?ui-gallery` 查看；设置页的布局原语在 `components/settings/ui/`，打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md)                                                                |
-| 像素基线       | `desktop/tests/visual/__baselines__/`：约 90 张关键界面截图（每个界面深浅各一），视觉测试逐像素比对；比对与重新生成的命令见[开发指南](../development/README.md#质量门禁)                                                                                                                  |
+| 像素基线       | `desktop/tests/visual/__baselines__/`：约 106 张关键界面截图（每个界面深浅各一，上限 110 张），视觉测试逐像素比对；比对与重新生成的命令见[开发指南](../development/README.md#质量门禁)                                                                                                    |
 | 品牌与产品图   | 见[品牌资源规范](brand.md)；`assets/generated/` 下的标、首启插图、产品图和插件 Logo，图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                                                                                 |
 
 ## 新增规范

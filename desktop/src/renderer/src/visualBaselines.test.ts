@@ -35,11 +35,14 @@ describe('pixel baselines (DS-06)', () => {
   })
 
   // Started at 30 key screens (60 images); 0.2.1's UI fixes add a few
-  // (BUG-05 video, BUG-06 folded sections). Still a curated set.
-  it('has under 100 key images, one dark and one light of each screen', async () => {
+  // (BUG-05 video, BUG-06 folded sections, BUG-10 audio, documents, tables
+  // and the card for the rest, BUG-12 the tree's options). Still a curated
+  // set: a new screen earns a baseline only where a pixel slip would go
+  // unnoticed otherwise.
+  it('has at most 110 key images, one dark and one light of each screen', async () => {
     const files = (await load()).committedBaselines()
     expect(files.length).toBeGreaterThanOrEqual(50)
-    expect(files.length).toBeLessThanOrEqual(100)
+    expect(files.length).toBeLessThanOrEqual(110)
     for (const file of files) {
       expect(file).toMatch(/^[a-z0-9-]+\/[a-z0-9-]+-(dark|light)\.png$/)
       const twin = file.endsWith('-dark.png')
