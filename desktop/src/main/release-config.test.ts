@@ -458,6 +458,8 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'const lazy = () => import("@scope/lazy/sub");',
       // A string that only looks like an import is not one.
       'const text = `require("ajv-formats/dist/formats")`;',
+      // Nor is a method named import: JXA's ObjC.import (BUG-10's PDF text).
+      "const pdf = `ObjC.import('Quartz')`;",
       '',
     ].join('\n')
     const ptyPackage = JSON.stringify({

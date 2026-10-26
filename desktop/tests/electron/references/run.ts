@@ -1779,25 +1779,39 @@ async function conversationResources(
           .locator('.assistant-step a.md-link-chip')
           .filter({ hasText: 'Hugging Face' })
           .scrollIntoViewIfNeeded()
-        await until(
-          async () =>
-            page
-              .locator('.assistant-step a.md-link-chip')
-              .evaluateAll(
-                (anchors, sites) =>
-                  sites.every((site) =>
-                    anchors.some(
-                      (anchor) =>
-                        new URL((anchor as HTMLAnchorElement).href).hostname ===
-                          site &&
-                        (anchor.querySelector('img')?.naturalWidth ?? 0) > 0,
-                    ),
+        // The icons come over the real network from a public icon service
+        // (BUG-01), which cannot always reach every site from where the run
+        // is: on the 2026-10-25 nightly it had nothing for modelscope.cn
+        // from a GitHub runner. One such miss is the network, not Emperor;
+        // two are not. A missing one keeps the chip's own mark (its letter),
+        // and the receipt says why it is missing.
+        const decoded = () =>
+          page
+            .locator('.assistant-step a.md-link-chip')
+            .evaluateAll(
+              (anchors, sites) =>
+                sites.filter((site) =>
+                  anchors.some(
+                    (anchor) =>
+                      new URL((anchor as HTMLAnchorElement).href).hostname ===
+                        site &&
+                      (anchor.querySelector('img')?.naturalWidth ?? 0) > 0,
                   ),
-                sites,
-              ),
+                ),
+              sites,
+            )
+        await until(
+          async () => (await decoded()).length >= sites.length - 1,
           35_000,
-          'six decoded public website icons',
+          'five of the six public website icons decoded',
         )
+        await until(
+          async () => (await decoded()).length === sites.length,
+          10_000,
+          'the sixth website icon',
+        ).catch(() => undefined)
+        const decodedNow = await decoded()
+        const unreachable = sites.filter((site) => !decodedNow.includes(site))
         const icons = await page
           .locator('.assistant-step a.md-link-chip[data-site-icon="ready"]')
           .evaluateAll((anchors) =>
@@ -1827,8 +1841,34 @@ async function conversationResources(
                 icon.width > 0,
             ),
         )
-        if (missing.length)
+        if (missing.length > 1)
           throw new Error(`real site icons missing: ${missing.join(', ')}`)
+        const letters = await page
+          .locator('.assistant-step a.md-link-chip')
+          .evaluateAll(
+            (anchors, missing) =>
+              missing.filter((site) =>
+                anchors.some(
+                  (anchor) =>
+                    new URL((anchor as HTMLAnchorElement).href).hostname ===
+                      site &&
+                    !anchor.querySelector('img.site-icon') &&
+                    getComputedStyle(anchor, '::before').content !== 'none',
+                ),
+              ),
+            missing,
+          )
+        if (letters.length !== missing.length)
+          throw new Error(
+            `a site without its icon lost its mark: ${missing.join(', ')}`,
+          )
+        const reasons = (await resourceObservation(app)).operations
+          .filter(
+            (entry) =>
+              entry.operation === 'references.siteIcon' &&
+              entry.preview?.state !== 'ready',
+          )
+          .map((entry) => entry.preview?.reason ?? entry.preview?.state)
         // UI-S03: the source icon in front of a link is 12px, 6px from it.
         if (
           icons.some(
@@ -1843,7 +1883,13 @@ async function conversationResources(
           .locator('.assistant-step .ds-md-html p')
           .filter({ hasText: '网站图标：' })
           .screenshot({ path: join(shots, 'website-links-detail.png') })
-        return { sites, icons, network: 'real-public-https', paidModel: false }
+        return {
+          sites,
+          icons,
+          ...(unreachable.length ? { unreachable, reasons } : {}),
+          network: 'real-public-https',
+          paidModel: false,
+        }
       },
     )
 
