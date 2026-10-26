@@ -45,6 +45,7 @@ import { BuiltinPluginLedger } from './claude-builtin-plugins'
 import { installClaudeSecurity } from './claude-keychain'
 import {
   CODEX_FEATURE_DEFAULTS,
+  CODEX_REMOVED_FEATURES,
   KNOWN_CLAUDE_VERSIONS,
   type VerifiedClaudeVersion,
 } from './compatibility'
@@ -649,6 +650,7 @@ export class ExecutorSelfCheck {
       profile.executablePath
     // Features on by default that Emperor never reviewed (not blocking).
     const defaults = CODEX_FEATURE_DEFAULTS[probe.protocolVersion ?? '']
+    const removed = CODEX_REMOVED_FEATURES[probe.protocolVersion ?? ''] ?? []
     try {
       const effective = parseFeatureList(
         await (this.options.codexFeatures ?? runFeatureList)(
@@ -658,8 +660,10 @@ export class ExecutorSelfCheck {
         ),
       )
       if (defaults) {
+        // A removed feature keeps its recorded value: Codex ignores the
+        // override (VER-07), and the contract test pins what that leaves on.
         const expected = (feature: string) =>
-          feature in CODEX_FEATURES
+          feature in CODEX_FEATURES && !removed.includes(feature)
             ? CODEX_FEATURES[feature]
             : defaults[feature] === true
         const extra = Object.keys(effective)

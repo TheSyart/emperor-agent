@@ -143,6 +143,7 @@ describe('executor registry', () => {
 describe('compatibility handshake (AGT-01)', () => {
   const protocolRoot = join(__dirname, 'protocol', 'codex-0.153.4')
   const protocolRoot0163 = join(__dirname, 'protocol', 'codex-0.163.0')
+  const protocolRoot0164 = join(__dirname, 'protocol', 'codex-0.164.0')
   function tempRoot() {
     const root = mkdtempSync(join(tmpdir(), 'emperor-handshake-'))
     roots.push(root)
@@ -285,19 +286,21 @@ describe('compatibility handshake (AGT-01)', () => {
   })
   it('6. refuses a Codex of another minor and names the supported range', async () => {
     const root = tempRoot()
-    for (const version of ['0.154.0', '0.162.9', '0.164.0']) {
+    for (const version of ['0.154.0', '0.162.9', '0.165.0']) {
       const codex = codexScript(root, version, protocolRoot0163)
       const registry = new ExecutorRegistry({ home: root })
       const probe = await registry.probe(codexProfile(codex))
       expect(probe).toMatchObject({
         status: 'incompatible',
         executableVersion: version,
-        requiredVersion: '0.153.x / 0.163.x',
+        requiredVersion: '0.153.x / 0.163.x / 0.164.x',
       })
-      expect(probe.diagnostic).toContain('0.153.x / 0.163.x')
+      expect(probe.diagnostic).toContain('0.153.x / 0.163.x / 0.164.x')
       await expect(
         registry.requireAvailable(codexProfile(codex)),
-      ).rejects.toThrow(/EXECUTOR_INCOMPATIBLE.*0\.153\.x \/ 0\.163\.x/)
+      ).rejects.toThrow(
+        /EXECUTOR_INCOMPATIBLE.*0\.153\.x \/ 0\.163\.x \/ 0\.164\.x/,
+      )
     }
   })
   it('AGT-13 · treats Codex 0.163 whose protocol digest is known as compatible', async () => {
@@ -310,12 +313,30 @@ describe('compatibility handshake (AGT-01)', () => {
       expect(probe).toMatchObject({
         status: 'available',
         executableVersion: version,
-        requiredVersion: '0.153.x / 0.163.x',
+        requiredVersion: '0.153.x / 0.163.x / 0.164.x',
         compatibility: 'verified',
         protocolVersion: '0.163.0',
       })
       expect(probe.diagnostic).toBeUndefined()
     }
+  })
+  it('VER-07 · Codex 0.164 with its recorded protocol is verified; with the 0.163 one it is not', async () => {
+    const root = tempRoot()
+    for (const version of ['0.164.0', '0.164.2']) {
+      const codex = codexScript(root, version, protocolRoot0164)
+      expect(
+        await new ExecutorRegistry({ home: root }).probe(codexProfile(codex)),
+      ).toMatchObject({
+        status: 'available',
+        executableVersion: version,
+        compatibility: 'verified',
+        protocolVersion: '0.164.0',
+      })
+    }
+    const changed = codexScript(root, '0.164.1', protocolRoot0163)
+    expect(
+      await new ExecutorRegistry({ home: root }).probe(codexProfile(changed)),
+    ).toMatchObject({ compatibility: 'unverified', protocolVersion: '0.164.0' })
   })
   it('AGT-13 · a 0.163 Codex is checked against the 0.163 protocol, never the 0.153 one', async () => {
     const root = tempRoot()

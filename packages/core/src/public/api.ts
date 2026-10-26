@@ -10,6 +10,8 @@ export type {
 } from '../api/operations'
 export type { ViewScope } from '../harness/host/scope'
 export { EnvironmentError } from '../environment/errors'
+// BUG-10: main checks again right before 用默认应用打开.
+export { isOpenableFile } from '../workspace/open-policy'
 export type {
   CommandCompletion,
   CommandDescriptor,

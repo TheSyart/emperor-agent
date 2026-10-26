@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Renderer、工具与 Core 开发者<br>
-> 最后核验：2026-10-25（对照 `59b9ccda`）<br>
+> 最后核验：2026-10-26（对照 `cb1e999b`）<br>
 > 事实源：`components/conversation/resources/`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
 
 ## 身份与渲染
@@ -78,6 +78,6 @@ meta: {
 
 消息和输入框中的图片附件只显示缩略图，不附带名称、大小或类型文字；输入框保留独立的移除按钮。缩略图打开灯箱，灯箱保留名称及「在文件中查看」入口；非图片附件仍以文件名打开 Files。
 
-`files.preview` 是只读 main_renderer 操作：`source: project` 携带 sessionId/path；`turn` 增加 turn 并验证确切记录；`reference` 使用 sessionId/referenceId；`attachment` 使用受管 attachmentId，沿用全局附件权限且不会创建会话。引用的 `actions` 含 `preview` 才读内容：项目（会话根）内的文件与已保存附件有 `preview`，会话根之外的文件（含指向外部的符号链接）只有 `reveal`，`files.preview` 对其报 `reference_action_denied`，renderer 改为在 Finder 中显示；不提供任意绝对路径读取入口。返回 FilePreviewResult，包含 canonical 身份、路径、名称、MIME、大小、内容类型及受限内容。文本上限 1 MiB，图片 8 MiB；视频（mp4、m4v、webm、mov）不读内容，返回 `kind: 'video'`，界面再用同样输入调 `files.mediaUrl` 取 10 分钟有效的 `app://workspace-media/<token>` 播放地址（BUG-05）；PDF 已有提取文本时明确标记，其他不支持格式只显示元数据。外部目录不递归读取，Finder 继续只接收 opaque 引用。
+`files.preview` 是只读 main_renderer 操作：`source: project` 携带 sessionId/path；`turn` 增加 turn 并验证确切记录；`reference` 使用 sessionId/referenceId；`attachment` 使用受管 attachmentId，沿用全局附件权限且不会创建会话。引用的 `actions` 含 `preview` 才读内容：项目（会话根）内的文件与已保存附件有 `preview`，会话根之外的文件（含指向外部的符号链接）只有 `reveal`，`files.preview` 对其报 `reference_action_denied`，renderer 改为在 Finder 中显示；不提供任意绝对路径读取入口。返回 FilePreviewResult，包含 canonical 身份、路径、名称、MIME、大小、内容类型及受限内容。文本上限 1 MiB，图片 8 MiB；视频（mp4、m4v、webm、mov）和音频（mp3、m4a、aac、wav、flac、ogg、opus）不读内容，返回 `kind: 'video'`／`'audio'`；PDF、Office、iWork、RTF 返回 `kind: 'document'`，带第一页预览图（`thumbnail`）和能取到的文字；HEIC／HEIF／TIFF 转成 PNG（`converted: 'png'`）；超过 8 MiB 的图片不内联；界面再用同样输入调 `files.mediaUrl` 取 10 分钟有效的 `app://workspace-media/<token>` 地址来播放或显示（BUG-05、BUG-10）；看不了的格式显示统一卡片，「用默认应用打开」只对 `openable` 的文件提供；其他不支持格式只显示元数据。外部目录不递归读取，Finder 继续只接收 opaque 引用。
 
 ImageViewerHost 按需加载 ImageLightbox，共用于附件、生成图片、资源图、文件图片、工具／轨迹截图和 Computer Use 放大。默认适应窗口，支持原始大小、缩放、拖动、旋转、同组切换和键盘退出；复用现有 modal stack 隐藏原生浏览器视图，约束焦点并恢复入口。图片只接受受管附件、已取得的栅格数据或本地 Blob，不直接读取第三方图片 URL。Computer Use 放大复制已经收到的帧，既有订阅与工具执行不变；关闭释放副本 URL。

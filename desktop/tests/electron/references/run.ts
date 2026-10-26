@@ -20,6 +20,17 @@
  *   These added checks use the local scripted model, not a paid real model.
  *   BUG-05: a project video plays in 文件 through Core's grant and the
  *   app://workspace-media stream (metadata, a 206 part, a seek).
+ *   BUG-11: with 文件 open, a file written into the project shows in the
+ *   tree (flashing) within seconds, unasked; rewriting the open file shows
+ *   the new text; deleting it shows 「这个文件已被删除。」 and 关闭标签 closes
+ *   it (the real Core watcher, FSEvents).
+ *   BUG-12: the tree's ⋯ menu shows dot files and what Git ignores (real
+ *   `git check-ignore`), paler, and hides them again.
+ *   BUG-10: a song plays; a PDF and a docx show Quick Look's first page and
+ *   their text; a HEIC shows as sips's PNG; GBK text names GB18030; a CSV
+ *   is a table; a zip is a card that opens in its default app, a program
+ *   one that only shows in Finder (shell.openPath / showItemInFolder recorded,
+ *   nothing launched).
  *   FIX-14: first, in a fresh Emperor Home of its own (no session at all),
  *   the start page offers the slash commands and Skills, /plan runs as the
  *   command, and a Build draft lists its project's Skills.
@@ -30,9 +41,10 @@
  *     EMPEROR_E2E_MODEL_CONFIG points at a model_config.json to copy)
  */
 
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -248,6 +260,59 @@ function prepareProject(): string {
     join(desktop, 'tests', 'fixtures', 'media', 'clip-h264.mp4'),
     join(root, VIDEO_CLIP),
   )
+  // BUG-10: one file of each format, made here (macOS tools) or copied.
+  const media = join(desktop, 'tests', 'fixtures', 'media')
+  mkdirSync(join(root, 'media'), { recursive: true })
+  mkdirSync(join(root, 'data'), { recursive: true })
+  mkdirSync(join(root, 'assets'), { recursive: true })
+  mkdirSync(join(root, 'scripts'), { recursive: true })
+  copyFileSync(join(media, 'tone.mp3'), join(root, 'media', 'tone.mp3'))
+  execFileSync('/usr/bin/sips', [
+    '-s',
+    'format',
+    'heic',
+    join(media, 'document-page.png'),
+    '--out',
+    join(root, 'media', 'photo.heic'),
+  ])
+  writeFileSync(join(root, 'docs', 'spec.pdf'), tinyPdf('Requirements page'))
+  const html = join(root, 'docs', 'draft.html')
+  writeFileSync(
+    html,
+    '<html><meta charset="utf-8"><body><h1>需求说明</h1><p>第一段</p></body></html>',
+  )
+  execFileSync('/usr/bin/textutil', [
+    '-convert',
+    'docx',
+    '-output',
+    join(root, 'docs', '需求说明.docx'),
+    html,
+  ])
+  rmSync(html)
+  // 订单号,客户 / A1023,张三 in GBK.
+  writeFileSync(
+    join(root, 'data', 'orders.txt'),
+    Buffer.from('b6a9b5a5bac52cbfcdbba70a41313032332cd5c5c8fd0a', 'hex'),
+  )
+  writeFileSync(
+    join(root, 'data', 'sales.csv'),
+    '日期,渠道,销量\n10-21,京东,"1,204"\n10-22,天猫,986\n',
+  )
+  writeFileSync(
+    join(root, 'assets', 'bundle.zip'),
+    Buffer.from([0x50, 0x4b, 3, 4, 0, 0, 0, 0, 0xff]),
+  )
+  // A program (Mach-O header, executable bit): only 在访达中显示.
+  writeFileSync(
+    join(root, 'scripts', 'tool'),
+    Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1, 0, 0, 0, 0]),
+  )
+  chmodSync(join(root, 'scripts', 'tool'), 0o755)
+  // BUG-12: a dot file and a folder Git ignores.
+  writeFileSync(join(root, '.gitignore'), 'dist/\n')
+  writeFileSync(join(root, '.env'), 'TOKEN=example\n')
+  mkdirSync(join(root, 'dist'), { recursive: true })
+  writeFileSync(join(root, 'dist', 'bundle.js'), 'console.log(1)\n')
   git(root, 'init', '-q', '-b', 'main')
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'init')
@@ -501,6 +566,325 @@ async function videoPreview(page: Page): Promise<void> {
         throw new Error(JSON.stringify(ranged))
       await page.screenshot({ path: join(shots, 'video-preview.png') })
       return { ...facts, seeked, ranged }
+    },
+  )
+}
+
+/**
+ * BUG-11 (card test 11): the 文件 pane follows the project through the real
+ * Core watcher. Only a new file is used (created, edited, deleted), so the
+ * turn records later compared with `git diff` see nothing of it.
+ */
+async function followsProject(page: Page, project: string): Promise<void> {
+  await check(
+    page,
+    'BUG-11 · 文件 follows files written, rewritten and deleted on disk',
+    async () => {
+      const file = join(project, 'bug11-note.md')
+      try {
+        const row = page.locator('.file-tree-row[data-path="bug11-note.md"]')
+        const startedAt = Date.now()
+        writeFileSync(file, '# 第一版\n')
+        await until(
+          async () =>
+            (await row.count()) > 0 &&
+            (await row.getAttribute('class'))!.includes('fresh'),
+          3_000,
+          'the new file flashing in the tree',
+        )
+        const appeared = Date.now() - startedAt
+        await row.click()
+        const preview = page.locator('.files-pane .file-markdown-preview')
+        await until(
+          async () => (await preview.innerText()).includes('第一版'),
+          5_000,
+          'the new file open',
+        )
+        const rewrittenAt = Date.now()
+        writeFileSync(file, '# 第二版\n\n磁盘上改过。\n')
+        await until(
+          async () => (await preview.innerText()).includes('第二版'),
+          3_000,
+          'the open file re-read',
+        )
+        const reread = Date.now() - rewrittenAt
+        const deletedAt = Date.now()
+        rmSync(file)
+        const notice = page.locator('.files-pane [data-file-deleted]')
+        await notice.waitFor({ timeout: 3_000 })
+        const noticed = Date.now() - deletedAt
+        if (!(await notice.innerText()).includes('这个文件已被删除。'))
+          throw new Error(`notice: ${await notice.innerText()}`)
+        await page.screenshot({ path: join(shots, 'bug11-deleted.png') })
+        await notice.getByRole('button', { name: '关闭标签' }).click()
+        await until(
+          async () =>
+            (await page
+              .locator(`${FILE_TABS}[title="bug11-note.md"]`)
+              .count()) === 0,
+          3_000,
+          'the tab closed',
+        )
+        await until(
+          async () => (await row.count()) === 0,
+          3_000,
+          'the row gone',
+        )
+        return {
+          appearedMs: appeared,
+          rereadMs: reread,
+          deletedNoticeMs: noticed,
+        }
+      } finally {
+        // Whatever happened, leave the project as Git knows it.
+        rmSync(file, { force: true })
+      }
+    },
+  )
+}
+
+/** BUG-12: the tree's options in the real app (Core marks what Git ignores). */
+async function treeOptions(page: Page): Promise<void> {
+  await check(
+    page,
+    'BUG-12 · the tree shows dot files and ignored ones on request, paler',
+    async () => {
+      const tree = page.locator('.file-tree-column')
+      const row = (path: string) =>
+        tree.locator(`.file-tree-row[data-path="${path}"]`)
+      if ((await row('.env').count()) || (await row('dist').count()))
+        throw new Error('hidden or ignored entries shown by default')
+      const toggle = async (label: string) => {
+        if (!(await page.getByRole('menu', { name: '目录树选项' }).count()))
+          await tree.getByRole('button', { name: '目录树选项' }).click()
+        await page
+          .getByRole('menu', { name: '目录树选项' })
+          .getByRole('menuitem', { name: label })
+          .click()
+      }
+      await toggle('显示隐藏文件')
+      await toggle('显示被 Git 忽略的文件')
+      await row('dist').waitFor({ timeout: 10_000 })
+      await row('.env').waitFor({ timeout: 10_000 })
+      const classes = {
+        env: await row('.env').getAttribute('class'),
+        gitignore: await row('.gitignore').getAttribute('class'),
+        dist: await row('dist').getAttribute('class'),
+        src: await row('src').getAttribute('class'),
+      }
+      if (
+        !classes.env?.includes('dim') ||
+        !classes.dist?.includes('dim') ||
+        classes.src?.includes('dim')
+      )
+        throw new Error(JSON.stringify(classes))
+      await page.screenshot({ path: join(shots, 'bug12-tree.png') })
+      // Back to the defaults, so the steps after see the usual tree.
+      await toggle('显示隐藏文件')
+      await toggle('显示被 Git 忽略的文件')
+      await page.keyboard.press('Escape')
+      await until(
+        async () =>
+          (await row('dist').count()) === 0 &&
+          (await row('.env').count()) === 0,
+        10_000,
+        'the defaults again',
+      )
+      return { dim: ['.env', '.gitignore', 'dist'], plain: ['src'] }
+    },
+  )
+}
+
+/** A one-page PDF with a line of text, built by hand (a few hundred bytes). */
+function tinyPdf(text: string): Buffer {
+  const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+  let body = '%PDF-1.4\n'
+  const offsets: number[] = []
+  objects.forEach((object, index) => {
+    offsets.push(body.length)
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`
+  })
+  const xref = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const offset of offsets)
+    body += `${String(offset).padStart(10, '0')} 00000 n \n`
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  return Buffer.from(body, 'latin1')
+}
+
+/** Open a project file from the tree, its folder unfolded first. */
+async function openFromTree(page: Page, path: string): Promise<void> {
+  const folder = path.split('/').slice(0, -1).join('/')
+  if (folder) {
+    const row = page.locator(`.file-tree-row[data-path="${folder}"]`)
+    if ((await row.getAttribute('aria-expanded')) !== 'true') await row.click()
+  }
+  await page.locator(`.file-tree-row[data-path="${path}"]`).click()
+}
+
+/**
+ * BUG-10 in the real app: real Core, real sips / qlmanage / textutil /
+ * osascript, the real app://workspace-media stream. 用默认应用打开 and
+ * 在访达中显示 reach main's shell, which records them instead.
+ */
+async function fileFormats(
+  app: ElectronApplication,
+  page: Page,
+): Promise<void> {
+  await check(
+    page,
+    'BUG-10 · songs, documents, HEIC, GBK, CSV and the card in 文件',
+    async () => {
+      await app.evaluate(({ shell }) => {
+        const state = globalThis as {
+          __bug10?: { opened: string[]; revealed: string[] }
+          __bug10Restore?: () => void
+        }
+        const openPath = shell.openPath
+        const reveal = shell.showItemInFolder
+        const seen = { opened: [] as string[], revealed: [] as string[] }
+        state.__bug10 = seen
+        shell.openPath = async (target) => {
+          seen.opened.push(target)
+          return ''
+        }
+        shell.showItemInFolder = (target) => {
+          seen.revealed.push(target)
+        }
+        state.__bug10Restore = () => {
+          shell.openPath = openPath
+          shell.showItemInFolder = reveal
+        }
+      })
+      const pane = page.locator('.files-pane')
+      const meta = pane.locator('.file-preview-meta')
+      const facts: Record<string, unknown> = {}
+      try {
+        await openFromTree(page, 'media/tone.mp3')
+        const audio = pane.locator('audio.file-audio')
+        await audio.waitFor({ timeout: 10_000 })
+        await until(
+          async () =>
+            (await audio.evaluate(
+              (node: HTMLAudioElement) => node.readyState,
+            )) >= 1,
+          15_000,
+          'audio metadata',
+        )
+        facts.audio = await audio.evaluate((node: HTMLAudioElement) =>
+          Math.round(node.duration),
+        )
+
+        await openFromTree(page, 'docs/spec.pdf')
+        const firstPage = pane.locator('img.file-document-page')
+        await firstPage.waitFor({ timeout: 20_000 })
+        await until(
+          async () =>
+            (await firstPage.evaluate((node: HTMLImageElement) =>
+              node.complete ? node.naturalWidth : 0,
+            )) > 0,
+          15_000,
+          'the first page',
+        )
+        await page.screenshot({ path: join(shots, 'bug10-pdf.png') })
+        await pane.getByRole('radio', { name: '文字' }).click()
+        const pdfText = await pane.locator('.file-document-text').innerText()
+        if (!pdfText.includes('Requirements page'))
+          throw new Error(`pdf text: ${pdfText}`)
+
+        await openFromTree(page, 'docs/需求说明.docx')
+        await pane
+          .locator('img.file-document-page')
+          .waitFor({ timeout: 20_000 })
+        await pane.getByRole('radio', { name: '文字' }).click()
+        const docxText = await pane.locator('.file-document-text').innerText()
+        if (!/需求说明[\s\S]*第一段/.test(docxText))
+          throw new Error(`docx text: ${docxText}`)
+        facts.documents = 'first page + text'
+
+        await openFromTree(page, 'media/photo.heic')
+        const photo = pane.locator('.file-image-preview img')
+        await photo.waitFor({ timeout: 20_000 })
+        await until(
+          async () =>
+            (await photo.evaluate(
+              (node: HTMLImageElement) => node.naturalWidth,
+            )) > 0,
+          15_000,
+          'the HEIC as PNG',
+        )
+        if (!(await meta.innerText()).includes('已转成 PNG 预览'))
+          throw new Error('no conversion note')
+        facts.heic = await photo.getAttribute('src')
+
+        await openFromTree(page, 'data/orders.txt')
+        await pane.locator('.file-code-view').waitFor({ timeout: 10_000 })
+        const orders = await pane.locator('.file-code-view').innerText()
+        if (!orders.includes('订单号') || !orders.includes('张三'))
+          throw new Error(`gbk text: ${orders}`)
+        if (!(await meta.innerText()).includes('GB18030（已自动识别）'))
+          throw new Error('no encoding note')
+
+        await openFromTree(page, 'data/sales.csv')
+        await pane.locator('table.file-table').waitFor({ timeout: 10_000 })
+        facts.csv = await pane.locator('table.file-table th').allInnerTexts()
+
+        await openFromTree(page, 'assets/bundle.zip')
+        const card = pane.locator('.file-unsupported')
+        await card.waitFor({ timeout: 10_000 })
+        await card.getByRole('button', { name: '用默认应用打开' }).click()
+        await openFromTree(page, 'scripts/tool')
+        await until(
+          async () => (await card.locator('b').innerText()) === 'tool',
+          10_000,
+          'the program card',
+        )
+        if (await card.getByRole('button', { name: '用默认应用打开' }).count())
+          throw new Error('a program can be opened')
+        await card.getByRole('button', { name: '在访达中显示' }).click()
+        await page.screenshot({ path: join(shots, 'bug10-card.png') })
+        const recorded = () =>
+          app.evaluate(
+            () =>
+              (
+                globalThis as {
+                  __bug10?: { opened: string[]; revealed: string[] }
+                }
+              ).__bug10!,
+          )
+        await until(
+          async () => {
+            const value = await recorded()
+            return value.opened.length > 0 && value.revealed.length > 0
+          },
+          10_000,
+          'open and reveal',
+        )
+        const seen = await recorded()
+        if (
+          !seen.opened.every((path) => path.endsWith('assets/bundle.zip')) ||
+          !seen.revealed.every((path) => path.endsWith('scripts/tool'))
+        )
+          throw new Error(JSON.stringify(seen))
+        facts.opened = seen.opened.map((path) =>
+          path.split('/').slice(-2).join('/'),
+        )
+        facts.revealed = seen.revealed.map((path) =>
+          path.split('/').slice(-2).join('/'),
+        )
+        return facts
+      } finally {
+        await app.evaluate(() =>
+          (globalThis as { __bug10Restore?: () => void }).__bug10Restore?.(),
+        )
+      }
     },
   )
 }
@@ -2484,6 +2868,9 @@ async function main(): Promise<void> {
     else {
       await documentLinks(launched.page, model, project)
       await videoPreview(launched.page)
+      await followsProject(launched.page, project)
+      await fileFormats(app, launched.page)
+      await treeOptions(launched.page)
       await turnFileRecord(launched.page, model, project)
       await referencesAndCard(launched.page, model, project)
       // The Build session exists once its first message went out.

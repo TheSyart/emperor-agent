@@ -1,31 +1,39 @@
 /**
- * `app://workspace-media/<token>` — the videos of the Files pane (BUG-05).
- * The token is Core's (files.mediaUrl): it stands for one file Core resolved
- * under the files.preview checks, for ten minutes. The address names no
- * path, so whatever follows the token is ignored; an unknown or expired
- * token, a file gone, or a path that is no longer that same file (a symlink
- * put in its place) answers 404. Bodies stream from disk with Range support,
- * so a long video seeks without being read whole.
+ * `app://workspace-media/<token>` — what the Files pane streams (BUG-05,
+ * BUG-10): videos, songs, pictures (or the PNG Core made of a HEIC) and a
+ * document's first page. The token is Core's (files.mediaUrl): it stands
+ * for one file Core resolved under the files.preview checks, for ten
+ * minutes. The address names no path, so whatever follows the token is
+ * ignored; an unknown or expired token, a grant that only names a file, a
+ * file gone, or a path that is no longer that same file (a symlink put in
+ * its place) answers 404. Bodies stream from disk with Range support, so a
+ * long video seeks without being read whole.
  *
- * `emperor:workspace-media:open` (「用默认应用打开」) opens the file behind
- * such an address with `shell.openPath`: only a video Core granted, never a
- * path the renderer names.
+ * `emperor:workspace-media:open` acts on the file a grant names: 「用默认应
+ * 用打开」 (`shell.openPath`, never for a program, script or bundle —
+ * isOpenableFile is checked again here) or 「在访达中显示」. Never a path the
+ * renderer names.
  */
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
+import { isOpenableFile } from '@emperor/core/api'
 import { WORKSPACE_MEDIA_OPEN_CHANNEL } from '../shared/ipc-contract'
 
 export const WORKSPACE_MEDIA_HOST = 'workspace-media'
 
 /** What main needs of a grant (Core's files.mediaGrant). */
-export type WorkspaceMediaLookup = (
-  token: string,
-) => { absPath: string; mimeType: string } | null
+export type WorkspaceMediaLookup = (token: string) => {
+  absPath: string
+  filePath: string
+  streamable: boolean
+  mimeType: string
+} | null
 
 const TOKEN = /^[0-9a-f]{32}$/
 const GONE = '文件已不存在'
-const NOT_ALLOWED = '这个视频地址已失效，请重新打开文件'
+const NOT_ALLOWED = '这个文件地址已失效，请重新打开文件'
+const RUNNABLE = '这个文件可能会运行程序，只能在访达中显示'
 
 export interface ByteRange {
   start: number
@@ -61,31 +69,32 @@ function tokenOf(url: URL): string | null {
   return TOKEN.test(token) ? token : null
 }
 
-/** The granted file, still a regular file at that exact path; else null. */
-async function grantedFile(
-  url: URL,
-  lookup: WorkspaceMediaLookup,
-): Promise<{ absPath: string; mimeType: string; size: number } | null> {
-  if (url.protocol !== 'app:' || url.host !== WORKSPACE_MEDIA_HOST) return null
-  const token = tokenOf(url)
-  const grant = token ? lookup(token) : null
-  if (!grant) return null
+/** A regular file still at that exact path (no symlink put there): its size. */
+async function sizeAt(path: string): Promise<number | null> {
   try {
-    if ((await realpath(grant.absPath)) !== grant.absPath) return null
-    const metadata = await stat(grant.absPath)
-    if (!metadata.isFile()) return null
-    return { ...grant, size: metadata.size }
+    if ((await realpath(path)) !== path) return null
+    const metadata = await stat(path)
+    return metadata.isFile() ? metadata.size : null
   } catch {
     return null
   }
+}
+
+function grantOf(url: URL, lookup: WorkspaceMediaLookup) {
+  if (url.protocol !== 'app:' || url.host !== WORKSPACE_MEDIA_HOST) return null
+  const token = tokenOf(url)
+  return token ? lookup(token) : null
 }
 
 export async function workspaceMediaResponse(
   request: Request,
   lookup: WorkspaceMediaLookup,
 ): Promise<Response> {
-  const file = await grantedFile(new URL(request.url), lookup)
-  if (!file) return new Response('media not found', { status: 404 })
+  const grant = grantOf(new URL(request.url), lookup)
+  const size = grant?.streamable ? await sizeAt(grant.absPath) : null
+  if (!grant || size === null)
+    return new Response('media not found', { status: 404 })
+  const file = { absPath: grant.absPath, mimeType: grant.mimeType, size }
   const headers: Record<string, string> = {
     'content-type': file.mimeType,
     'accept-ranges': 'bytes',
@@ -123,25 +132,32 @@ export function registerWorkspaceMediaIpc(input: {
   lookup: WorkspaceMediaLookup
   /** `shell.openPath`: '' on success, else the error. */
   openPath(path: string): Promise<string>
+  showItemInFolder(path: string): void
 }): void {
   input.ipcMain.handle(WORKSPACE_MEDIA_OPEN_CHANNEL, async (event, payload) => {
     input.authorize(event)
-    const address =
+    const record =
       payload && typeof payload === 'object' && !Array.isArray(payload)
-        ? (payload as { url?: unknown }).url
-        : undefined
+        ? (payload as { url?: unknown; action?: unknown })
+        : {}
     let url: URL
     try {
-      url = new URL(typeof address === 'string' ? address.slice(0, 512) : '')
+      url = new URL(
+        typeof record.url === 'string' ? record.url.slice(0, 512) : '',
+      )
     } catch {
       return { ok: false, error: NOT_ALLOWED }
     }
-    const token = url.host === WORKSPACE_MEDIA_HOST ? tokenOf(url) : null
-    if (url.protocol !== 'app:' || !token || !input.lookup(token))
-      return { ok: false, error: NOT_ALLOWED }
-    const file = await grantedFile(url, input.lookup)
-    if (!file) return { ok: false, error: GONE }
-    const error = await input.openPath(file.absPath)
+    const grant = grantOf(url, input.lookup)
+    if (!grant) return { ok: false, error: NOT_ALLOWED }
+    if ((await sizeAt(grant.filePath)) === null)
+      return { ok: false, error: GONE }
+    if (record.action === 'reveal') {
+      input.showItemInFolder(grant.filePath)
+      return { ok: true }
+    }
+    if (!isOpenableFile(grant.filePath)) return { ok: false, error: RUNNABLE }
+    const error = await input.openPath(grant.filePath)
     return error ? { ok: false, error } : { ok: true }
   })
 }

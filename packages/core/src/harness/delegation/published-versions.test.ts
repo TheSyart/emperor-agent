@@ -417,17 +417,24 @@ describe('upgrade targets', () => {
     })
   })
 
-  it('Codex with the protocols Emperor ships (0.153 and 0.163 verified): 0.153.4 is offered 0.163.0', () => {
+  it('Codex with the protocols Emperor ships (0.153, 0.163 and, since VER-07, 0.164 verified): 0.164.0 is offered', () => {
+    const npm = {
+      latest: '0.164.0',
+      versions: ['0.153.4', '0.160.0', '0.162.1', '0.163.0', '0.164.0'],
+    }
+    for (const installed of ['0.153.4', '0.163.0'])
+      expect(codexUpgradeTarget(installed, npm), installed).toEqual({
+        target: '0.164.0',
+        unverified: null,
+        verified: ['0.153', '0.163', '0.164'],
+      })
+    // Before npm has 0.164, 0.153.4 is still offered 0.163.0.
     expect(
       codexUpgradeTarget('0.153.4', {
         latest: '0.163.0',
-        versions: ['0.153.4', '0.160.0', '0.162.1', '0.163.0'],
-      }),
-    ).toEqual({
-      target: '0.163.0',
-      unverified: null,
-      verified: ['0.153', '0.163'],
-    })
+        versions: ['0.153.4', '0.163.0'],
+      }).target,
+    ).toBe('0.163.0')
   })
 
   it('Codex: never a downgrade, never a prerelease, nothing without the list', () => {

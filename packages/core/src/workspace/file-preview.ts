@@ -34,13 +34,20 @@ export interface FilePreviewResult extends Omit<
   relativePath?: string
   extractedText?: boolean
   revealable?: boolean
+  /** HEIC/HEIF/TIFF shown as the PNG macOS made of it (BUG-10). */
+  converted?: 'png'
+  /** A document's first page is available from files.mediaUrl (BUG-10). */
+  thumbnail?: boolean
+  /** 用默认应用打开 may open it: not a program, script or bundle (BUG-10). */
+  openable?: boolean
 }
 
 export function filePreviewResult(
   value: WorkspaceFileReadResult,
 ): FilePreviewResult {
   const path = join(realpathSync(value.projectRoot), value.relativePath)
-  const unsupported = /\.(?:pdf|docx?|xlsx?|pptx?|zip|rtf)$/i.test(value.name)
+  // PDF, Office and RTF read as documents (BUG-10); a zip is never text.
+  const unsupported = /\.zip$/i.test(value.name)
   return {
     ...value,
     id: `file:${path}`,
@@ -102,9 +109,5 @@ export async function previewCanonicalFile(
     sessionId: 'preview',
     relativePath: basename(canonical),
   })
-  const result = filePreviewResult(value)
-  // Documents with an ASCII header (e.g. PDF) are still binary, not source text.
-  if (/\.(?:pdf|docx?|xlsx?|pptx?|zip|rtf)$/i.test(canonical))
-    return { ...result, kind: 'binary', content: undefined, truncated: false }
-  return result
+  return filePreviewResult(value)
 }

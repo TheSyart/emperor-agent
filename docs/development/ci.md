@@ -83,7 +83,7 @@ GitHub 不会为 `GITHUB_TOKEN` 创建的 PR 自动触发 `ci.yml`：合并前�
 2. `npm install --prefix "$RUNNER_TEMP/executors/<包>-<版本>"` 装进临时目录，不全局安装、不登录。
 3. Claude Code：`scripts/claude-init-handshake.mjs --raw` 列出这个版本自带的全部内置插件、MCP server 与 hooks 是否生效，和 `config/executor-upstream-baseline.json` 比。Codex：私有 HOME 与 CODEX_HOME 下生成协议 schema 算摘要，`codex features list`（不加任何开关）列出默认开启的功能，和版本号最高的 `packages/core/src/harness/delegation/protocol/codex-*/`（`digest.json`、`features.json`）比；Codex 不另存基线，避免与 `KNOWN_CODEX_PROTOCOLS` 用的快照不一致。两者再各跑一次产品自己的离线自检（`ExecutorSelfCheck`：假 Key、本机回环的接口替身，不发提示词，不调用模型）。脚本与握手一样用 esbuild 直接打包 core 源码，不需要先构建 core。
 
-版本号变了本身不算差异。下面这些才算：内置插件集合变化、出现 MCP server、hooks 没有生效、Codex 协议摘要不在记录里、默认开启的功能变化、安装失败（类型「安装失败」）、自检没能完成（类型「环境问题待确认」，例如 runner 的 Seatbelt 与本机行为不同，先在本机用临时 prefix 重跑确认）。有差异时开一个标题为「上游变化：Claude Code <版本> · Codex <版本>」、带 `executor-upstream` 标签的 issue，正文是差异表；协议摘要未知、MCP、hooks 或自检判定不兼容时加 `P0`。已经有未关闭的 `executor-upstream` issue 时只追加评论，同一周手动重跑也不会重复开。没有差异时什么都不做。
+版本号变了本身不算差异。下面这些才算：内置插件集合变化、出现 MCP server、hooks 没有生效、Codex 协议摘要不在记录里、默认开启的功能变化、安装失败（类型「安装失败」）、自检没能完成（类型「环境问题待确认」，例如 runner 的 Seatbelt 与本机行为不同，先在本机用临时 prefix 重跑确认）。有差异时开一个标题为「上游变化：Claude Code <版本> · Codex <版本>」、带 `executor-upstream` 标签的 issue，正文是差异表；协议摘要未知、MCP、hooks 或自检判定不兼容时加 `P0`，自检判定不兼容时写出自检给的原因（VER-07）。已经有未关闭的 `executor-upstream` issue 时只追加评论，同一周手动重跑也不会重复开。没有差异时什么都不做。
 
 脚本不改代码、不开 PR，也不改「已验证版本」：收到 issue 后按[开发与验证外部子智能体](external-agent-adapters.md#收到上游变化-issue-之后ver-05)评估。`--dry-run` 只打印计划，`--fixture <文件>` 用一份记录代替 npm、安装与两个 CLI（`desktop/src/main/ci-weekly-executors.test.ts`），`--issues-json <文件>` 代替 `gh issue list`；stdout 最后一行是 JSON 计划。
 

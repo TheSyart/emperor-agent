@@ -13,6 +13,11 @@ import type { SelfCheckResult } from './self-check'
 import { fixture, spec } from './service-test-fixture'
 import { DelegationError, type ExecutorProbe } from './types'
 import { WorkspaceOperationError } from '../../workspace/common'
+import { KNOWN_CODEX_PROTOCOLS } from './compatibility'
+
+/** The newest Codex Emperor verified, and a patch of it past what was recorded. */
+const NEWEST = KNOWN_CODEX_PROTOCOLS.at(-1)!.version
+const PAST_NEWEST = NEWEST.replace(/\.\d+$/, '.9')
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -61,7 +66,7 @@ it('1 · 3 · EXECUTOR_INCOMPATIBLE carries the version context; a last good ver
       profileId: 'codex-default',
       current: '0.165.0',
       lastGood: '0.163.0',
-      verifiedMax: '0.163.0',
+      verifiedMax: NEWEST,
       reason: 'Codex 0.165.0 的握手与 Emperor 验证过的不同',
       actions: ['rollback', 'open_settings'],
     },
@@ -92,14 +97,14 @@ it('4 · no last good version, an older one than verified: 装 the verified one'
   const { run } = await settle(f)
   expect(run.versionFailure).toMatchObject({
     current: '0.153.4',
-    verifiedMax: '0.163.0',
+    verifiedMax: NEWEST,
     actions: ['install_verified', 'open_settings'],
   })
   expect(run.versionFailure).not.toHaveProperty('lastGood')
 })
 
 it('newer than every verified one and nothing good before: only 打开设置 (no downgrade from here)', async () => {
-  const { f } = setup('0.163.9')
+  const { f } = setup(PAST_NEWEST)
   vi.spyOn(f.adapter, 'open').mockRejectedValueOnce(incompatible('x。'))
   const { run } = await settle(f)
   expect(run.versionFailure?.actions).toEqual(['open_settings'])

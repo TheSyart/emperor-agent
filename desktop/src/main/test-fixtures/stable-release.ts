@@ -6,7 +6,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { packagedSmokeFixture } from './packaged-smoke'
 
-export const STABLE_VERSION = '0.2.0'
+// The release accepts only v<desktop version>, so the fixture follows
+// desktop/package.json instead of naming one.
+export const STABLE_VERSION = (
+  JSON.parse(
+    readFileSync(join(__dirname, '..', '..', '..', 'package.json'), 'utf8'),
+  ) as { version: string }
+).version
 export const STABLE_TAG = `v${STABLE_VERSION}`
 
 export type StableArch = 'arm64' | 'x64'

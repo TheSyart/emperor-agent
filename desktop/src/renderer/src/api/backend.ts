@@ -142,6 +142,9 @@ interface EmperorBridge {
   openWorkspaceMedia?: (
     url: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
+  revealWorkspaceMedia?: (
+    url: string,
+  ) => Promise<{ ok?: boolean; error?: string } | void>
   openExternal?: (
     url: string,
   ) => Promise<{ ok?: boolean; error?: string } | void>
@@ -414,8 +417,9 @@ export async function revealReference(input: {
 }
 
 /**
- * 「用默认应用打开」 a video of the Files pane by the media address Core
- * granted it (BUG-05); main opens that granted file only.
+ * 「用默认应用打开」 a file of the Files pane by the media address Core
+ * granted it (BUG-05, BUG-10); main opens that granted file only, and never
+ * a program or script.
  */
 export async function openWorkspaceMedia(url: string): Promise<void> {
   const opener = bridge()?.openWorkspaceMedia
@@ -423,7 +427,17 @@ export async function openWorkspaceMedia(url: string): Promise<void> {
     throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
   const result = await opener(url)
   if (result && typeof result === 'object' && result.ok === false)
-    throw new Error(result.error || '无法打开这个视频')
+    throw new Error(result.error || '无法打开这个文件')
+}
+
+/** 「在访达中显示」 a file of the Files pane by its media address (BUG-10). */
+export async function revealWorkspaceMedia(url: string): Promise<void> {
+  const reveal = bridge()?.revealWorkspaceMedia
+  if (typeof reveal !== 'function')
+    throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const result = await reveal(url)
+  if (result && typeof result === 'object' && result.ok === false)
+    throw new Error(result.error || '无法在访达中显示这个文件')
 }
 
 export async function openExternal(url: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  chmodSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -41,7 +42,14 @@ function video(): {
   for (let i = 0; i < SIZE; i += 1) bytes[i] = i % 251
   writeFileSync(path, bytes)
   const lookup = vi.fn((token: string) =>
-    token === TOKEN ? { absPath: path, mimeType: 'video/mp4' } : null,
+    token === TOKEN
+      ? {
+          absPath: path,
+          filePath: path,
+          streamable: true,
+          mimeType: 'video/mp4',
+        }
+      : null,
   )
   return { path, bytes, lookup }
 }
@@ -166,6 +174,17 @@ describe('app://workspace-media (BUG-05 5)', () => {
     expect((await workspaceMediaResponse(get(), lookup)).status).toBe(404)
   })
 
+  it('BUG-10 · serves nothing for a grant that only names a file', async () => {
+    const { path } = video()
+    const lookup = () => ({
+      absPath: path,
+      filePath: path,
+      streamable: false,
+      mimeType: 'application/octet-stream',
+    })
+    expect((await workspaceMediaResponse(get(), lookup)).status).toBe(404)
+  })
+
   it('answers HEAD with the headers only', async () => {
     const { lookup } = video()
     const response = await workspaceMediaResponse(
@@ -201,6 +220,7 @@ describe('emperor:workspace-media:open (BUG-05 8)', () => {
       (event: unknown, payload: unknown) => unknown
     >()
     const openPath = vi.fn(async (_path: string) => '')
+    const showItemInFolder = vi.fn((_path: string) => undefined)
     const authorize = vi.fn((event: unknown) => {
       if (event !== 'main') throw new Error('IPC caller is not trusted')
     })
@@ -209,10 +229,11 @@ describe('emperor:workspace-media:open (BUG-05 8)', () => {
       authorize,
       lookup,
       openPath,
+      showItemInFolder,
     })
     const invoke = async (payload: unknown, event: unknown = 'main') =>
       await handlers.get(WORKSPACE_MEDIA_OPEN_CHANNEL)!(event, payload)
-    return { invoke, openPath, authorize }
+    return { invoke, openPath, showItemInFolder, authorize }
   }
 
   it('opens the granted video in its default app', async () => {
@@ -226,6 +247,60 @@ describe('emperor:workspace-media:open (BUG-05 8)', () => {
       invoke({ url: `app://workspace-media/${TOKEN}` }, 'other'),
     ).rejects.toThrow(/not trusted/)
     expect(authorize).toHaveBeenCalledTimes(2)
+  })
+
+  it('BUG-10 · opens the document itself, never its first-page picture', async () => {
+    const { path } = video()
+    const docx = join(path, '..', '需求说明.docx')
+    writeFileSync(docx, 'PK')
+    const page = join(path, '..', 'page.png')
+    writeFileSync(page, 'png')
+    const { invoke, openPath, showItemInFolder } = setup((token) =>
+      token === TOKEN
+        ? {
+            absPath: page,
+            filePath: docx,
+            streamable: true,
+            mimeType: 'image/png',
+          }
+        : null,
+    )
+    const url = `app://workspace-media/${TOKEN}`
+    await expect(invoke({ url })).resolves.toEqual({ ok: true })
+    expect(openPath).toHaveBeenCalledWith(docx)
+    await expect(invoke({ url, action: 'reveal' })).resolves.toEqual({
+      ok: true,
+    })
+    expect(showItemInFolder).toHaveBeenCalledWith(docx)
+  })
+
+  it('BUG-10 · never opens a program or script, only shows it in Finder', async () => {
+    const { path } = video()
+    const script = join(path, '..', 'deploy.command')
+    const tool = join(path, '..', 'tool')
+    writeFileSync(script, 'echo hi\n')
+    writeFileSync(tool, 'x')
+    chmodSync(tool, 0o755)
+    for (const file of [script, tool]) {
+      const { invoke, openPath, showItemInFolder } = setup((token) =>
+        token === TOKEN
+          ? {
+              absPath: file,
+              filePath: file,
+              streamable: false,
+              mimeType: 'application/octet-stream',
+            }
+          : null,
+      )
+      const url = `app://workspace-media/${TOKEN}`
+      expect(await invoke({ url }), file).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('访达'),
+      })
+      expect(openPath).not.toHaveBeenCalled()
+      expect(await invoke({ url, action: 'reveal' })).toEqual({ ok: true })
+      expect(showItemInFolder).toHaveBeenCalledWith(file)
+    }
   })
 
   it('opens nothing the renderer names, nor a grant that ended or a file gone', async () => {

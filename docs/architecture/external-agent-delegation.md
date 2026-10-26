@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-26（对照 `be39413f`）<br>
+> 最后核验：2026-10-26（对照 `41838be4`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -32,7 +32,7 @@ flowchart TD
 
 ## 版本兼容
 
-兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 与 `executableSource` 读取时忽略并清除）。Claude Code 运行用户本机安装的、未经修改的 `claude`（AGT-12：安装包不再附带 Claude Code；`executable.ts` 依次在 `PATH`、常见安装位置与登录 shell 的 `PATH` 里找，`registry.locate`），检测要求 `>= 2.1.79`（`claude auth status` 自 2.1.41、`claude auth login --console` 自 2.1.79），运行时由 SDK `init` 消息再核对版本与权限模式；找不到时探测为 `missing`（`claude is not installed`），设置页给出官方安装命令。Codex 使用本机 CLI：已验证的协议是 0.153.4（AGT-01）与 0.163.0（AGT-13），所需范围写作 `0.153.x / 0.163.x`；major.minor 不在其中即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要（只与同一 minor 的协议比，0.163 的 CLI 不会被当成 0.153），已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
+兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 与 `executableSource` 读取时忽略并清除）。Claude Code 运行用户本机安装的、未经修改的 `claude`（AGT-12：安装包不再附带 Claude Code；`executable.ts` 依次在 `PATH`、常见安装位置与登录 shell 的 `PATH` 里找，`registry.locate`），检测要求 `>= 2.1.79`（`claude auth status` 自 2.1.41、`claude auth login --console` 自 2.1.79），运行时由 SDK `init` 消息再核对版本与权限模式；找不到时探测为 `missing`（`claude is not installed`），设置页给出官方安装命令。Codex 使用本机 CLI：已验证的协议是 0.153.4（AGT-01）、0.163.0（AGT-13）与 0.164.0（VER-07），所需范围写作 `0.153.x / 0.163.x / 0.164.x`；major.minor 不在其中即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要（只与同一 minor 的协议比，0.163 的 CLI 不会被当成 0.153），已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
 
 ### Codex 0.163 与 0.153 的差异（AGT-13）
 
@@ -49,6 +49,18 @@ flowchart TD
 - 未登录时的内置模型目录，默认模型从 `gpt-6-astra` 变为 `gpt-6.1-sol`。
 
 两份协议对同样 21 个文件计算摘要：AGT-13 起加入 `v1/InitializeResponse.json`（握手读的 user agent）与 `v2/ModelListResponse.json`（FIX-16 读的 `isDefault`），0.153.4 的摘要按同一清单重算，原来 19 个文件与官方 0.153.4 重新生成的逐字节一致。适配器的 contract 测试对两份协议逐一校验它发出的每个请求和回复、读取的每个字段；`scripts/codex-protocol-handshake.mjs` 在 Seatbelt 断网、不登录的条件下，用真实的 0.163.0 与 0.153.4 跑通探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`。需要登录的部分（模型回答、工具、用量、ChatGPT 登录下的模型列表与 `gpt-6.1-sol` 是否可用、刷新令牌时 `auth.json` 的写法）还没有用 0.163 在真机上运行验证。
+
+### Codex 0.164 与 0.163 的差异（VER-07）
+
+0.164.0 是 2026-10-26 每周上游自检第一次运行时发现的（issue「上游变化：Claude Code 2.1.310 · Codex 0.164.0」）。同样对照两版官方包生成的完整 schema，差异很小，对 Emperor 都是加法：
+
+- 新方法 `feedback/save`；`HookEventName` 与托管 hooks 多了 `preModelRequest`、`postModelRequest`（Emperor 关掉 hooks）；`McpServerStatus` 多可选 `toolListMeta`；`PlanType` 多 `sci`、`sci_plus`；`ApplicationRequirements` 多可选 `storage`。适配器都不发也不读。
+- 唯一不是纯加法的：`ThreadItem` 的 `imageGeneration` 不再必填 `result`，改为 `fileId` 或 `result` 二选一，并多了 `inputImages`。适配器只读 `status`、`failure`、`savedPath`，三者都还在（contract 测试固定）。
+- 摘要清单的 21 个文件里只有 `ClientRequest.json`（多了 `feedback/save`）与内嵌 `ThreadItem` 的 `v2/ThreadStartResponse.json`、`v2/TurnStartResponse.json`、`v2/TurnCompletedNotification.json` 不同；握手、`thread/*`、`turn/*`、审批与提问、`model/list` 都不变。
+- feature：0.164 默认新打开 3 个。关掉 2 个：`bedrock_setup_wizard`（为另一家模型提供方 Amazon Bedrock 做设置，提供方与计费由用户决定，不由一次运行决定）、`mcp_oauth_refresh_coordination`（MCP server 的 OAuth 刷新，借一把 Codex 进程之间共享的锁；Emperor 运行 Codex 时没有任何 MCP server）。保留 `incremental_tools`（一个线程里工具清单按增量重新声明；一次运行里 Emperor 的工具不变）。0.153.4 与 0.163.0 都认识这两个键（默认关），对它们没有变化。
+- `worktrees` 与 `realtime_conversation` 在 0.164 被标为 `removed` 且开着：Codex 不再理会任何覆盖项，Emperor 关不掉它们。核对过两者都碰不到 app-server 里的运行：协议里没有任何 worktree 方法；管理 worktree 的工具在 TUI 里（`tui/src/managed_worktree_tools.rs`）；按任务完全相同的参数启动、让 Codex 连本机 127.0.0.1 上的替身 Responses 端点（假 Key，Seatbelt 只放行本机），0.164.0 发给模型的工具定义与 0.163.0 逐字节相同（`exec_command`、`request_user_input`、`view_image`、`web_search`、`write_stdin`），提示里也没有 worktree；实时语音只能由客户端发 `thread/realtime/*` 请求打开，适配器从不发（contract 测试固定它发出的方法）。这两个键仍然发给 0.163。Core 的 `CODEX_REMOVED_FEATURES` 记录每份协议里 `removed` 的功能，自检和 contract 测试按「覆盖项对它无效、保持记录的值」计算；关掉之后仍开着的 feature 0.164.0 为 36 个，与真实二进制在同样参数下报告的逐项相同。
+- 离线握手（`scripts/codex-protocol-handshake.mjs`）对真实 0.164.0 全部通过：`verified`，握手、`thread/start`、steer 与 interrupt、关闭后无残留进程与 socket、恢复与历史、`config/read` 与 `model/list`（未登录默认仍是 `gpt-6.1-sol`）；`removed` 的两个功能单独列出。产品自检对 0.164.0 为 `ok`，没有任何问题，对外连接 0 次。
+- 0.164 之前，0.164.x 不在任何已验证的次版本里，探测直接判为 `incompatible`，所以每周自检的离线自检报的是「不兼容」（阻断项 `protocol_unknown`：「Codex 0.164.0 不在 Emperor 支持的范围」），这是现有规则的结果，不是 CI 环境的问题；注册 0.164.0 后为 `verified`、自检 `ok`。
 
 ### 版本检测与一键升级（AGT-13）
 
@@ -83,9 +95,9 @@ Claude Code 一个月发几十个版本，外部 CLI 的一次正常变化就可
 - **已验证的版本**（`compatibility.ts` 的 `KNOWN_CLAUDE_VERSIONS`，每项 `version`、`verifiedAt`、`builtinPlugins`）：2.1.281（2026-10-22）、2.1.308 与 2.1.310（2026-10-24，VER-01 离线核对）。一键升级只升到其中的版本（见上「升级目标」）；用户自己装的更新版本可以照常使用，界面写「尚未验证」，以自检结果为准。新版本怎么列入见[适配器开发](../development/external-agent-adapters.md)。
 - **自检**（`self-check.ts` 的 `ExecutorSelfCheck`）：先探测版本（读不到版本不自检），在 `<delegations>/self-check/<随机 id>/` 里放私有的 HOME、`CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`、TMPDIR 和一个答「找不到」的 `security`，结束即删；不读写用户的 `~/.claude`、`~/.codex`，也不碰 Emperor 为 Claude Code 准备的专用登录目录。不发提示词，所以不会调用模型。
   - Claude Code：假 Key（`sk-ant-api03-offline-probe`）、`ANTHROPIC_BASE_URL` 指向本机 127.0.0.1 上一个只回错误的替身（VER-01 发现不这样做时它启动要重试 api.anthropic.com 约 20 秒；指向本机后启动不到 1 秒，替身一次请求也收不到）、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`DISABLE_AUTOUPDATER=1`。经真实适配器的 `open()` 启动（与任务完全相同的 SDK 选项，Seatbelt 只读，只放行它自己的目录），但启动时不关任何内置插件（不带种子的账本），再由任务同一个 `preflightClaudePlugins` 关掉它报告的内置插件并确认关掉，最后 `mcpServerStatus()`。关掉的内置插件记进 Emperor 的账本。非内置插件、关了还在、MCP server、`hooks_applied === false` 都是阻断项（`ExecutorRefusal.issue` 区分）。
-  - Codex：主次版本不支持为阻断项；协议摘要不在已验证列表（`protocolCheck: 'differs'`）只记一条 `protocol_unknown` 警告（`blocking: false`，结论仍是 `ok`），沿用 AGT-13「可能不兼容、照常运行」的做法，只有真实运行失败才算版本失败并提供退回；生成不了协议说明（`'unreadable'`）只算没完成。`codex features list`（带 Emperor 的覆盖项，参数同 `codexFeatureListArgs()`，握手脚本也用它）与该协议记录的默认值（`CODEX_FEATURE_DEFAULTS`，来自 `protocol/codex-*/features.json`）对比，多出来的默认开启功能记 `feature_default_on`，不阻断；0.153 不认识 `features list` 时跳过。最后用任务同一个适配器打开 app-server 再关掉，握手被拒为阻断项。
+  - Codex：主次版本不支持为阻断项；协议摘要不在已验证列表（`protocolCheck: 'differs'`）只记一条 `protocol_unknown` 警告（`blocking: false`，结论仍是 `ok`），沿用 AGT-13「可能不兼容、照常运行」的做法，只有真实运行失败才算版本失败并提供退回；生成不了协议说明（`'unreadable'`）只算没完成。`codex features list`（带 Emperor 的覆盖项，参数同 `codexFeatureListArgs()`，握手脚本也用它）与该协议记录的默认值（`CODEX_FEATURE_DEFAULTS`，来自 `protocol/codex-*/features.json`）对比，多出来的默认开启功能记 `feature_default_on`，不阻断；Codex 标为 `removed` 的功能不受覆盖项影响，按记录的值算（`CODEX_REMOVED_FEATURES`，0.164 起有 `worktrees`、`realtime_conversation`，VER-07）；0.153 不认识 `features list` 时跳过。最后用任务同一个适配器打开 app-server 再关掉，握手被拒为阻断项。
   - 结论：有阻断项为 `incompatible`，否则关掉过内置插件为 `adapted`，启动失败或超时（15 秒）为 `error`，其余为 `ok`；`modelCalls` 恒为 0。结果写进健康记录 `versions[v].selfCheck`，`rollbackOffer` 也据此提供退回。
-  - 实测（2026-10-25，临时 prefix 里的真实二进制，所有进程的 HTTPS 代理指向本机只回 403 的记录器）：2.1.281、2.1.308、2.1.310 都是 `adapted`，0.7–0.9 秒；Codex 0.163.0 `ok`，0.4 秒；对外连接尝试 0 次，替身收到请求 0 次，临时目录都删掉了。不带种子启动时 2.1.308、2.1.310 自带 `cc-plugin-agents-md` 与 `cc-plugin-plugin-authoring`，2.1.281 自带 `agents-md`；两者都写进了 `KNOWN_CLAUDE_VERSIONS` 与随包种子（`agents-md: false` 恰好也关掉 `cc-plugin-agents-md`，但种子单独列出它）。
+  - 实测（2026-10-25，临时 prefix 里的真实二进制，所有进程的 HTTPS 代理指向本机只回 403 的记录器）：2.1.281、2.1.308、2.1.310 都是 `adapted`，0.7–0.9 秒；Codex 0.163.0 `ok`，0.4 秒；对外连接尝试 0 次，替身收到请求 0 次，临时目录都删掉了。2026-10-26（VER-07）Codex 0.164.0 同样 `ok`，0.4 秒，没有任何问题，对外连接 0 次。不带种子启动时 2.1.308、2.1.310 自带 `cc-plugin-agents-md` 与 `cc-plugin-plugin-authoring`，2.1.281 自带 `agents-md`；两者都写进了 `KNOWN_CLAUDE_VERSIONS` 与随包种子（`agents-md: false` 恰好也关掉 `cc-plugin-agents-md`，但种子单独列出它）。
 - **什么时候自检**：升级或退回成功后（`ExecutorUpgradeService` 的 `selfCheck.after`）；`executors.probe` 发现版本与上次不同时（`noteVersion().changed`，后台运行，同一执行器 30 秒内只一次）；设置页「重新检查」（`executors.selfCheck { profileId }`，按 view 校验，立即运行，返回结果）；派任务时（下一条）。同一执行器同时只跑一个自检，后来的共享结果；开始和结束都推 `executor_upgrade { versions }`，行里带 `selfCheck` 与 `selfChecking`。
 - **派任务**：`DelegationService` 在准备工作区之前调用 `gate(profile, version)`：这个版本已有结果就用它，没有就当场自检，最多等 15 秒，超时、出错都放行（自检在后台跑完再记）。结果是 `incompatible` 时这次运行立即以 `EXECUTOR_SELF_CHECK_FAILED` 失败，不准备工作区、不启动进程，摘要先写「Claude Code 2.1.315 自检不兼容：」和阻断项的原因，再提示可以在「设置 › 子智能体」退回上一个正常版本或重新检查，并按版本失败记进健康记录。
 - **界面**（BUG-00 预览 § 8）：详情页本机版本旁「自检通过」「不兼容」「正在自检…」「自检没有完成」，Claude Code 另有「尚未验证」（本机版本不在已验证列表）或「x 尚未验证」（npm 有更新、未验证的版本）；下面一行灰字写原因（「已自动关闭内置插件 …（2.1.308 起自带）」、阻断项的原因、「已是 Emperor 验证过的最新版；更新的版本验证后才会推荐升级」），不阻断的发现（Codex 协议不同、未核对的默认功能）用警示色另起一行，再是「退回」（有时）与「重新检查」。不兼容或可以退回时不再显示禁用的「已是最新」。主页那一行写「自检不兼容」。

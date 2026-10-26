@@ -167,6 +167,7 @@ describe('desktop capability preload bridge', () => {
       'revealDiagnosticsBundle',
       'revealHomeBackup',
       'revealReference',
+      'revealWorkspaceMedia',
       'revokeBrowserPairing',
       'runBrowserImport',
       'selectFile',
@@ -192,6 +193,11 @@ describe('desktop capability preload bridge', () => {
     const url = `app://workspace-media/${'a'.repeat(32)}`
     await bridge.openWorkspaceMedia(url)
     expect(ipc.invoked.at(-1)).toEqual([WORKSPACE_MEDIA_OPEN_CHANNEL, { url }])
+    await bridge.revealWorkspaceMedia(url)
+    expect(ipc.invoked.at(-1)).toEqual([
+      WORKSPACE_MEDIA_OPEN_CHANNEL,
+      { url, action: 'reveal' },
+    ])
   })
 
   it('asks main for 备份与恢复 by id, forwarding only known fields (REL-03)', async () => {
