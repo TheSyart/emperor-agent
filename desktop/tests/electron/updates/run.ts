@@ -2,7 +2,7 @@
  * REL-02 in the real desktop app (dev build, isolated Emperor Home) against
  * a fake GitHub feed on 127.0.0.1 (scripts/test-update-feed.mjs), never the
  * real one: the first check about 30 s after start, the bell and 设置 ›
- * 常规 offering 0.2.1, the download verified against SHA256SUMS.txt into a
+ * 常规 offering the next release, the download verified against SHA256SUMS.txt into a
  * temporary Downloads folder with the downloaded-file mark, a tampered
  * release refused and deleted, what Electron's net actually sends (no
  * cookie, token or id), 诊断 naming the test feed and the Electron
@@ -51,6 +51,20 @@ const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'updates')
 const SUITE = 'updates'
 const DMG = randomBytes(3 * 1024 * 1024)
+// The app's own version and the two releases the test feed offers after it,
+// so the suite follows desktop/package.json instead of naming them.
+const CURRENT = (
+  JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
+    version: string
+  }
+).version
+const [MAJOR, MINOR, PATCH] = CURRENT.split('.').map(Number) as [
+  number,
+  number,
+  number,
+]
+const NEXT = `${MAJOR}.${MINOR}.${PATCH + 1}`
+const LATER = `${MAJOR}.${MINOR}.${PATCH + 2}`
 
 interface Result {
   suite: string
@@ -222,7 +236,7 @@ async function updates(
 ): Promise<void> {
   await check(
     page,
-    '1 · the first check runs 30 s after start and the bell offers 0.2.1',
+    `1 · the first check runs 30 s after start and the bell offers ${NEXT}`,
     async () => {
       await until(() => feedRequests(feed).length > 0, 60_000, 'a check')
       const after = feedRequests(feed)[0]!.at - startedAt
@@ -236,7 +250,7 @@ async function updates(
       )
       await bell.click()
       const popover = page.getByRole('dialog', { name: '通知' })
-      const row = popover.locator('li', { hasText: 'Emperor 0.2.1 可用' })
+      const row = popover.locator('li', { hasText: `Emperor ${NEXT} 可用` })
       await row.waitFor({ timeout: 10_000 })
       if (!(await row.innerText()).includes('查看更新说明'))
         throw new Error('the row has no 查看更新说明')
@@ -254,7 +268,7 @@ async function updates(
       const names = new Set<string>()
       for (const request of feed.requests) {
         for (const name of Object.keys(request.headers)) names.add(name)
-        if (request.headers['user-agent'] !== 'Emperor-Agent/0.2.0')
+        if (request.headers['user-agent'] !== `Emperor-Agent/${CURRENT}`)
           throw new Error(`user-agent ${request.headers['user-agent']}`)
       }
       for (const name of [
@@ -302,8 +316,8 @@ async function updates(
       if (!text.includes('测试更新源'))
         throw new Error(`attestation line: ${text}`)
       await page.screenshot({ path: join(shots, 'ready.png') })
-      const file = join(downloads, 'Emperor-Agent-0.2.1-macos-arm64.dmg')
-      const x64 = join(downloads, 'Emperor-Agent-0.2.1-macos-x64.dmg')
+      const file = join(downloads, `Emperor-Agent-${NEXT}-macos-arm64.dmg`)
+      const x64 = join(downloads, `Emperor-Agent-${NEXT}-macos-x64.dmg`)
       const path = existsSync(file) ? file : x64
       if (!existsSync(path))
         throw new Error(`Downloads holds ${readdirSync(downloads).join(', ')}`)
@@ -323,14 +337,15 @@ async function updates(
     page,
     '4 · a release whose SHA-256 does not match is refused and deleted',
     async () => {
-      feed.set({ version: '0.2.2', tamper: true })
+      feed.set({ version: LATER, tamper: true })
       const dialog = await openGeneral(page)
       await dialog.locator('[data-update-check]').click()
       const notice = dialog.locator('[data-update-state="available"]')
       await until(
-        async () => (await notice.innerText()).includes('Emperor 0.2.2 可用'),
+        async () =>
+          (await notice.innerText()).includes(`Emperor ${LATER} 可用`),
         30_000,
-        '0.2.2 offered',
+        `${LATER} offered`,
       )
       await notice.locator('[data-update-download]').click()
       const failed = dialog.locator('[data-update-state="failed"]')
@@ -338,9 +353,7 @@ async function updates(
       const text = await failed.innerText()
       if (!text.includes('SHA-256') || !text.includes('删除下载的文件'))
         throw new Error(`failed notice: ${text}`)
-      const left = readdirSync(downloads).filter((name) =>
-        name.includes('0.2.2'),
-      )
+      const left = readdirSync(downloads).filter((name) => name.includes(LATER))
       if (left.length) throw new Error(`left in Downloads: ${left.join(', ')}`)
       await page.screenshot({ path: join(shots, 'refused.png') })
       return { refused: true }
@@ -428,7 +441,7 @@ async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const feed = (await startTestUpdateFeed({
     dmg: DMG,
-    version: '0.2.1',
+    version: NEXT,
     electron: '99.0.0',
   })) as TestFeed
   const model = await startFakeModel({ agentTool: 'read' })

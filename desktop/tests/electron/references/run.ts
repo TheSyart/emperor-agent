@@ -208,9 +208,15 @@ function git(cwd: string, ...args: string[]): string {
   return result.stdout.trim()
 }
 
+/**
+ * The user's staging area: each entry's mode, blob, stage and path. Not the
+ * raw .git/index, whose cached file stamps a read-only `git diff` refreshes
+ * on files touched but unchanged (git 2.49 even with GIT_OPTIONAL_LOCKS=0),
+ * as Emperor's own change counts do right after 撤销 restores files.
+ */
 function indexHash(project: string): string {
   return createHash('sha256')
-    .update(readFileSync(join(project, '.git', 'index')))
+    .update(git(project, 'ls-files', '--stage', '-z'))
     .digest('hex')
 }
 
@@ -1147,7 +1153,6 @@ async function turnFileRecord(
         10_000,
         'the card to say it was undone',
       )
-      // Before `git status`, which may refresh the index's file stamps.
       if (indexHash(project) !== index)
         throw new Error('the user index changed')
       const status = git(
