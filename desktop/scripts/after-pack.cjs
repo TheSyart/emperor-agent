@@ -146,7 +146,8 @@ function runtimeImportProblems(asarPath, entries) {
         /^(?:import|export)\b[^\n;]*?\bfrom\s*["']([^"'\n]+)["'];?[ \t]*$/gm,
       ),
       ...source.matchAll(/^import\s*["']([^"'\n]+)["'];?[ \t]*$/gm),
-      ...source.matchAll(/\bimport\(\s*["']([^"'\n]+)["']\s*\)/g),
+      // A dynamic import, not a method named import (JXA's ObjC.import).
+      ...source.matchAll(/(?<![.\w$])import\(\s*["']([^"'\n]+)["']\s*\)/g),
     ].map((match) => match[1])
     for (const specifier of specifiers) {
       const name = bareImportPackage(specifier)
