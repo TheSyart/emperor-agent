@@ -1011,9 +1011,10 @@ function storageBytes(text: string): number {
  * signed in; the page finds 2.1.308 — the notice, 「本机 2.1.300 · 可升级到
  * 2.1.308」 and 升级 on the row, the dot on 子智能体 — and 升级 asks first,
  * then runs that prefix's npm; the row shows 2.1.308 and a toast says so.
- * Then, for 2.1.309: a node_modules folder it cannot write fails before npm
- * runs, with the folder and the command; and 取消 stops npm and the child
- * it started.
+ * Then, for 2.1.310 (升级 installs only verified releases since VER-04, so
+ * the next one is 2.1.310, not 2.1.309): a node_modules folder it cannot
+ * write fails before npm runs, with the folder and the command; and 取消
+ * stops npm and the child it started.
  */
 async function executorUpgrade(
   page: Page,
@@ -1100,8 +1101,8 @@ async function executorUpgrade(
         ),
       ).version
 
-      // 2.1.309: no write permission, before npm runs.
-      registry.claude.latest = '2.1.309'
+      // 2.1.310: no write permission, before npm runs.
+      registry.claude.latest = '2.1.310'
       await claude.locator('[data-executor-details]').click()
       const versions = dialog.locator(
         '[data-executor-detail="claude-code"] [data-executor-versions]',
@@ -1109,16 +1110,16 @@ async function executorUpgrade(
       await versions.locator('[data-version-check]').click()
       const upgrade = versions.locator('[data-version-upgrade]')
       await until(
-        async () => (await upgrade.innerText()).includes('升级到 2.1.309'),
+        async () => (await upgrade.innerText()).includes('升级到 2.1.310'),
         30_000,
-        '升级到 2.1.309',
+        '升级到 2.1.310',
       )
       chmodSync(modules, 0o555)
       let failure: string
       try {
         await upgrade.click()
         await page
-          .getByRole('dialog', { name: '升级 Claude Code 到 2.1.309？' })
+          .getByRole('dialog', { name: '升级 Claude Code 到 2.1.310？' })
           .locator('[data-upgrade-confirm]')
           .click()
         const failed = dialog.locator('[data-upgrade-failed]')
@@ -1129,9 +1130,9 @@ async function executorUpgrade(
       }
       if (!failure.includes(`没有写入 ${modules} 的权限`))
         throw new Error(`failure: ${failure}`)
-      if (!failure.includes('npm install -g @anthropic-ai/claude-code@2.1.309'))
+      if (!failure.includes('npm install -g @anthropic-ai/claude-code@2.1.310'))
         throw new Error(`failure: ${failure}`)
-      if (readFileSync(join(bin, 'npm-calls'), 'utf8').includes('2.1.309'))
+      if (readFileSync(join(bin, 'npm-calls'), 'utf8').includes('2.1.310'))
         throw new Error('npm ran without write permission')
       await page.screenshot({ path: join(shots, 'upgrade-failed.png') })
 
@@ -1139,7 +1140,7 @@ async function executorUpgrade(
       writeFileSync(join(bin, 'npm-mode'), 'hang')
       await upgrade.click()
       await page
-        .getByRole('dialog', { name: '升级 Claude Code 到 2.1.309？' })
+        .getByRole('dialog', { name: '升级 Claude Code 到 2.1.310？' })
         .locator('[data-upgrade-confirm]')
         .click()
       await until(

@@ -265,11 +265,16 @@ test.afterEach(async ({ page }, info) => {
 /**
  * Compare `target` with tests/visual/__baselines__/<area>/<screen>.png.
  * `screen` ends in -dark or -light; the test must carry the @baseline tag.
+ * `mask` covers what no two machines draw alike: Chromium's own media
+ * controls use the system font and show their loading ring on their own
+ * schedule, so a <video> or <audio> is masked and its playback asserted
+ * by the test instead.
  */
 export async function expectBaseline(
   target: Page | Locator,
   area: string,
   screen: string,
+  { mask }: { mask?: Locator[] } = {},
 ): Promise<void> {
   const info = test.info()
   if (!isBaseline(info))
@@ -293,7 +298,7 @@ export async function expectBaseline(
     )
     await document.fonts.ready
   })
-  await expect(target).toHaveScreenshot([area, `${screen}.png`])
+  await expect(target).toHaveScreenshot([area, `${screen}.png`], { mask })
 }
 
 /**

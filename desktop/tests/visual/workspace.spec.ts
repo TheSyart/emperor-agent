@@ -269,7 +269,7 @@ for (const theme of ['dark', 'light'] as const) {
       .toBeGreaterThanOrEqual(2)
     await expect(pane.locator('.file-preview-meta')).toContainText('video/webm')
     await shot(page, `video-${theme}`)
-    await expectBaseline(pane, 'workspace', `video-${theme}`)
+    await expectBaseline(pane, 'workspace', `video-${theme}`, { mask: [video] })
 
     await requestWorkspace(page, {
       pane: 'files',
@@ -312,7 +312,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(meta).toContainText('audio/mpeg')
     await page.mouse.move(400, 450)
     await shot(page, `audio-${theme}`)
-    await expectBaseline(pane, 'workspace', `audio-${theme}`)
+    await expectBaseline(pane, 'workspace', `audio-${theme}`, { mask: [audio] })
 
     await requestWorkspace(page, {
       pane: 'files',

@@ -29,7 +29,7 @@ export const VISUAL_DIR = join(desktop, 'tests/visual')
 export const BASELINE_DIR = join(VISUAL_DIR, '__baselines__')
 
 const CALL =
-  /expectBaseline\(\s*[^,()]+,\s*'([a-z0-9-]+)',\s*`([a-z0-9-]+)-\$\{theme\}`,?\s*\)/g
+  /expectBaseline\(\s*[^,()]+,\s*'([a-z0-9-]+)',\s*`([a-z0-9-]+)-\$\{theme\}`(?:,\s*\{[^()]*\})?,?\s*\)/g
 
 /**
  * The images the visual specs compare against: every
