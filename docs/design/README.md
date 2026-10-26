@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-26（对照 `aa8aa69c`）<br>
+> 最后核验：2026-10-27（对照 `d5625438`）<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/components/ui/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`desktop/tests/visual/__baselines__/`、`scripts/lib/design-docs.mjs`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
@@ -21,6 +21,8 @@
 | [浮层规范](overlays.md)                      | 模态弹窗的焦点与 Esc、确认框、轻提示队列、锚定面板                   |
 | [组件规范](components.md)                    | `components/ui/` 每个组件的用途、变体、键盘行为与反例                |
 | [外壳布局](layout.md)                        | 平铺的几栏、侧栏的结构与节奏、内容宽度、顶栏对齐、窄轨、列宽与断点   |
+| [三种模式](modes.md)                         | Chat / Build / Group 的切换、会话归属、侧栏分区、首页、跨模式提示    |
+| [联系人与群聊](agent-contacts.md)            | 岗位说明书、四种建法、头像、单聊；群设置、五种发法、停下来的规则     |
 | [动效](motion.md)                            | 时长与缓动、进场、展开收起、运行中的持续动效、弹簧、减少动态效果     |
 | [会话流](conversation.md)                    | 过程组折叠、工具行与准备中的调用、气泡与正文、轮末操作、展开动效     |
 | [输入框](composer.md)                        | 卡片的样式、控件行与 dock、截图、空会话的访谈提示                    |
