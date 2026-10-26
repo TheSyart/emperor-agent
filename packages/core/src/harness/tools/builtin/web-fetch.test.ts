@@ -18,6 +18,7 @@ import {
   createWebFetchTool,
   installWebFetchPromptSection,
   WEB_FETCH_MAX_BYTES,
+  WEB_FETCH_TIMEOUT_MS,
 } from './web-fetch'
 
 // web_fetch against a real local HTTP server. The test client resolves
@@ -76,7 +77,9 @@ const RESOLVER: Record<string, PublicHttpResolvedAddress[]> = {
 }
 
 function testClient(): PublicHttpClient {
-  const direct = new NodePublicHttpTransport(5_000)
+  // The product's socket timeout, not a shorter one: on a loaded Intel
+  // runner a 12 MiB read stalled past 5 s (release run 40310227723).
+  const direct = new NodePublicHttpTransport(WEB_FETCH_TIMEOUT_MS)
   return new PublicHttpClient({
     resolve: async (hostname) => {
       const addresses = RESOLVER[hostname]
@@ -246,7 +249,7 @@ describe('web_fetch', () => {
 
     for (const path of ['/chunked', '/declared']) {
       const result = await fetchPage({ url: site.url('docs.example', path) })
-      expect(result.isError, path).toBe(false)
+      expect(result.isError, `${path}: ${result.text}`).toBe(false)
       expect(result.meta.truncated, path).toBe(true)
       expect(result.meta.bytes, path).toBe(WEB_FETCH_MAX_BYTES)
       expect(result.text, path).toContain('larger than 10 MiB')
