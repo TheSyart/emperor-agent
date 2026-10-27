@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
+> 最后核验：2026-10-27（对照 `8bf71b86`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/contacts/runtime.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
@@ -45,6 +45,8 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 - **权限**：会话从联系人权限与「设置 › 常规 › 会话 › 新会话的权限」中较低的一个开始，之后也不超过它：在会话里调高报 `contact_permission`，联系人或全局预设调低后下一步自动降下来。
 - **知识**：工作区外的知识文件和文件夹是这个任务的只读根（沙箱策略的 `readOnlyRoots`），可以读，`write` / `edit` 在任何模式下都拒绝（`FS_READ_ONLY_PATH`，不提供提权），受限 Shell 也写不了。
 - **已删除的联系人**：会话可以查看，发消息报 `contact_deleted`。
+
+试用台的会话（`surface: 'trial'`，GRP-04）按编辑器里还没保存的草稿运行：`ContactRuntime` 先查这个会话的草稿（`ContactTrials.draft`），没有才查保存的联系人，所以保存的联系人和它自己的会话不受影响。试用是一个后台回合（`interactionPolicy: 'auto-reject'`，10 分钟超时），宿主不把这类会话的事件发给窗口（`unseenSessions`）。
 
 内置的 Emperor 联系人（`ct-emperor`）的会话保留 persona 和全部工具，只多出它的个人记忆；Claude Code、Codex 两个外部联系人在这里不收窄，由各自执行器的设置决定。没有 `contact_id` 的会话，提示词和工具与原来逐字节相同（`contacts/__golden__/plain-session.*` 金样）。
 

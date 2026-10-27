@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-27（对照 `3a55b24f`）<br>
+> 最后核验：2026-10-27（对照 `8bf71b86`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`
 
 ## 两个根的区分
@@ -301,6 +301,7 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 - 损坏：读不出或不合规则的文件改名为 `contacts.json.corrupt-<时间>-<随机>` 保留，本次运行只读：`contacts.list` 返回 `readOnly`（「联系人文件损坏，已备份到 …」），三个内置联系人照常可用，任何修改报 `contacts_read_only`。
 - 并发：Core 内单写者队列，改动一个接一个执行。每次保存后发 host 事件 `contacts_changed`。
 - 个人记忆（GRP-03）：`contacts/<id>/memory/MEMORY.local.md`，经 `MemoryStore` 写（改动前的内容留在同目录 `versions/`）。只记用户的明确反馈：`contacts.feedback` 把 👍 / 👎 和用户的一句话（最多 200 字）写成一行，带日期和来源（哪个会话、哪条回答的开头），不从对话里自动提炼；`contacts.memory.list | update | delete` 逐条查看、修改、删除。第一条反馈之前不建目录；提示词只放最新的 4 KB，超出时 `contacts.memory.list` 返回 `truncated` 和整理提示。每次改动发 `contacts_changed`（`reason: 'memory'`）。
+- 试用台（GRP-04）：每次试用在会话索引里建一个 `surface: 'trial'` 的会话（`contact_id` 是正在编辑的联系人，没保存过的是 `ct-draft`），按编辑器里还没保存的设置运行，联系人文件不变。这些会话不出现在 `sessions.list` 和搜索里，事件也不发给窗口；建好 24 小时后在启动时和下一次试用前删掉（日志、改动记录一起删，不进最近删除）。会话索引里只剩它一个会话时暂不删。
 - 岗位模板：`templates/contacts/<id>.md`，18 个，frontmatter 加「职责、交付、工作方法、边界、样例任务」五节；随应用打包到 `runtime-defaults/templates/contacts/`，`contacts.templates` 读取，`contacts.fromTemplate` 照模板新建（模板要的权限高于全局预设时从只读开始）。
 
 ## 迁移策略
