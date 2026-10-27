@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
  * GeneralSection — Settings › 常规 (UI-S07), one card per group:
- * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme) and 桌宠 (the desktop
- *   companion's switch, ctx.setDesktopPetEnabled; its last error under it);
+ * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme; a skin with one look holds
+ *   it and the row says so), 皮肤 (BRD-05: one row into the 皮肤 sub page,
+ *   `page=skins`, loaded with it) and 桌宠 (the desktop companion's switch,
+ *   ctx.setDesktopPetEnabled; its last error under it);
  * - 会话: 新会话的权限 (Core `sessions.defaults`; choosing 完全访问 asks
  *   first), 处理过程 (how a finished turn's steps show), 网页链接 (where a
  *   clicked web link opens, the browser preference `linkTarget`) and
@@ -20,7 +22,7 @@
  * The runtime facts this page used to open with (service state, current
  * model, bound projects) are in 高级 › 诊断 › 运行时.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import { useBrowserPreferences } from '../../composables/useBrowserPreferences'
@@ -30,6 +32,7 @@ import {
   useUiPreferences,
   type ProcessDisplay,
 } from '../../composables/useUiPreferences'
+import { useSkin } from '../../skin/skinState'
 import type { DeletedSessionInfo, SessionInfo } from '../../types'
 import { composerModeOptions } from '../chat/composerControls'
 import Button from '../ui/Button.vue'
@@ -60,7 +63,21 @@ const sessions = useSession()
 const theme = useTheme()
 const { preferences: uiPrefs, setUiPreference } = useUiPreferences()
 const browser = useBrowserPreferences()
-const { page, open: openPage } = useSettingsPages({ archived: '已归档对话' })
+const { page, open: openPage } = useSettingsPages({
+  archived: '已归档对话',
+  skins: '皮肤',
+})
+const SkinsPage = defineAsyncComponent(
+  () => import('./appearance/SkinsPage.vue'),
+)
+const { skin } = useSkin()
+const skinName = computed(() => skin.value?.name ?? '御书房')
+const themeDescription = computed(() => {
+  const held = theme.lock.value
+  if (held)
+    return `当前皮肤只有${held.theme === 'light' ? '浅色' : '深色'}，换个皮肤后按这里的选择显示`
+  return '跟随系统时随 macOS 自动切换'
+})
 
 const THEMES: SegmentedOption<ThemePreference>[] = [
   { value: 'system', label: '跟随系统' },
@@ -277,7 +294,9 @@ onMounted(() => void loadPermission())
 
 <template>
   <SettingsSection>
-    <template v-if="page === 'archived'">
+    <SkinsPage v-if="page === 'skins'" />
+
+    <template v-else-if="page === 'archived'">
       <SettingsGroup
         title="已归档对话"
         description="恢复后会重新出现在主侧边栏"
@@ -388,7 +407,7 @@ onMounted(() => void loadPermission())
     <template v-else>
       <UpdateNotice />
       <SettingsGroup title="外观" data-group="appearance">
-        <SettingsRow title="主题" description="跟随系统时随 macOS 自动切换">
+        <SettingsRow title="主题" :description="themeDescription">
           <Segmented
             :model-value="theme.preference.value"
             :options="THEMES"
@@ -398,6 +417,13 @@ onMounted(() => void loadPermission())
             "
           />
         </SettingsRow>
+        <SettingsLinkRow
+          title="皮肤"
+          description="换颜色、标题字体和装饰图"
+          :value="skinName"
+          data-testid="open-skins"
+          @click="openPage('skins')"
+        />
         <SettingsRow title="桌宠" label-for="general-pet">
           <template #description>
             <span>{{ petDescription }}</span>

@@ -14,11 +14,15 @@
  * A single chat with a contact (GRP-05) greets as the contact instead: its
  * avatar and name, and its intro under them.
  *
+ * A skin may put a picture above the greeting (BRD-05 `hero` slot; not in
+ * a single chat) and pick the headline's font (`--font-heading`).
+ *
  * Props: mode? (default chat), addressName? (the profile's 称呼, null:
  * none), speaker? (a single chat's contact), speakerIntro?.
  */
 import { computed } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
+import SkinSlot from '../../skin/SkinSlot.vue'
 import BrandMark from '../brand/BrandMark.vue'
 import Avatar from '../ui/Avatar.vue'
 import type { ContactSpeaker } from './contactChat'
@@ -44,6 +48,7 @@ const note = computed(() =>
 
 <template>
   <div class="empty-hero">
+    <SkinSlot v-if="!speaker" name="hero" class="skin-hero" />
     <div class="glow" aria-hidden="true" />
     <h1 class="headline" :data-contact-hero="speaker ? '' : undefined">
       <Avatar
@@ -77,6 +82,7 @@ const note = computed(() =>
   gap: var(--space-2-5);
   margin: 0;
   color: rgb(var(--text-1));
+  font-family: var(--font-heading);
   font-size: 26px;
   line-height: var(--space-8);
   font-weight: var(--weight-medium);
@@ -85,6 +91,13 @@ const note = computed(() =>
 
 .mark {
   flex: none;
+}
+
+.skin-hero {
+  position: relative;
+  max-width: 100%;
+  height: calc(var(--space-8) * 4);
+  margin-bottom: var(--space-1);
 }
 
 .note {

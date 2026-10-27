@@ -18,6 +18,10 @@ import SearchField from '../../ui/SearchField.vue'
 import Segmented from '../../ui/Segmented.vue'
 import TextField from '../../ui/TextField.vue'
 import { useAddModel } from './addModelController'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const add = useAddModel()
 const advanced = ref(false)
@@ -55,7 +59,7 @@ function protocolLabel(value: string): string {
 </script>
 
 <template>
-  <section class="connect" data-step="connect">
+  <section class="connect" data-step="connect" :style="exempt">
     <SearchField
       :model-value="add.query"
       placeholder="搜索供应商或粘贴 API 地址"

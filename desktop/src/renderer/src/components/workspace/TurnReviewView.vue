@@ -25,6 +25,10 @@ import { splitPullRequestDiff } from '../pages/pulls/pullDiff'
 import DiffBlock from '../ui/DiffBlock.vue'
 import IconButton from '../ui/IconButton.vue'
 import type { TurnReviewRequest } from './workspaceState'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = defineProps<{ request: TurnReviewRequest }>()
 const emit = defineEmits<{ close: [] }>()
@@ -105,6 +109,7 @@ function noteOf(entry: TurnFileEntry): string {
     :aria-label="title"
     :data-turn-review="request.turn"
     :data-task-first-turn="request.task?.firstTurn"
+    :style="exempt"
   >
     <header class="head">
       <IconButton label="返回审查" @click="emit('close')">

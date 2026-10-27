@@ -27,6 +27,7 @@ function answer(confirmed: boolean): void {
 
 <template>
   <Modal
+    exempt
     v-if="request"
     :key="request.id"
     v-model:open="open"

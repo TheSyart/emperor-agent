@@ -57,7 +57,13 @@ async function save() {
 </script>
 
 <template>
-  <Modal :open="true" title="使用 API Key" :width="440" @update:open="close">
+  <Modal
+    :open="true"
+    title="使用 API Key"
+    :width="440"
+    exempt
+    @update:open="close"
+  >
     <form
       id="claude-api-key-form"
       class="claude-api-key"

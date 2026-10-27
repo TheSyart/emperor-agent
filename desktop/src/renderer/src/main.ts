@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { router } from './router'
 import { initTheme } from './composables/useTheme'
+import { initSkin } from './skin/skinState'
 // Feature CSS responsibilities and effective cascade order are guarded by
 // feature-style-owners.json + featureStyleOwnership.test.ts.
 import './styles.css'
@@ -22,6 +23,9 @@ import './styles/dsh/animations.css'
 // Stored preference (light / dark / system) → resolved data-theme; storage
 // failures fall back to the default and `system` follows the OS live.
 initTheme()
+// BRD-05: the chosen skin's tokens on the root (cached, so no flash), then
+// checked by main; outside the desktop window there is no skin.
+initSkin()
 
 // Dev-only primitives gallery (`?ui-gallery`): visual testing for the dsh
 // design system; tree-shaken out of production builds.

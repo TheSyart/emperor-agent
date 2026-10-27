@@ -18,6 +18,10 @@ import Segmented from '../../ui/Segmented.vue'
 import Button from '../../ui/Button.vue'
 import Dot from '../../ui/Dot.vue'
 import { GRANT_DENY, grantAnswer, grantPresentation } from './grantModel'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = defineProps<{ interaction: ControlInteraction }>()
 const ctx = useAppContext()
@@ -51,7 +55,7 @@ function send(optionId: string) {
 </script>
 
 <template>
-  <div class="frame" data-takeover="grant">
+  <div class="frame" data-takeover="grant" :style="exempt">
     <section
       ref="root"
       class="card"

@@ -38,6 +38,10 @@ import {
   fitAllowed,
   terminalFontFamily,
 } from './terminalFit'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = withDefaults(
   defineProps<{
@@ -208,7 +212,8 @@ async function activate(
       initializing = false
     return
   }
-  const style = getComputedStyle(document.documentElement)
+  // Inside the pane, a skin's colours are back at the base theme (BRD-05).
+  const style = getComputedStyle(container.value)
   terminal = new Terminal({
     cursorBlink: true,
     convertEol: false,
@@ -444,7 +449,7 @@ function message(value: unknown): string {
 </script>
 
 <template>
-  <div class="terminal-pane">
+  <div class="terminal-pane" :style="exempt">
     <!-- The strip's keydown runs between these two: arrowing keeps focus. -->
     <div
       class="terminal-tabs"

@@ -32,6 +32,10 @@ import {
   turnEndedAt,
 } from './groupModel'
 import { useGroupRoom } from './useGroupRoom'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const route = useRoute()
 const router = useRouter()
@@ -151,9 +155,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             collaborationLabel(group.settings)
           }}</span>
           <span class="right">
-            <span class="spend" data-spend title="只显示，不设上限">{{
-              spendLabel(room.turn.value)
-            }}</span>
+            <span
+              class="spend"
+              data-spend
+              title="只显示，不设上限"
+              :style="exempt"
+              >{{ spendLabel(room.turn.value) }}</span
+            >
             <Button
               size="sm"
               class="stop"

@@ -8,11 +8,15 @@
  * stays reachable. One-shot: buttons latch after a click until the
  * interaction resolves (re-armed if the send is rejected). Esc folds the
  * card to one line (takeoverModel); it never cancels.
+ *
+ * A skin may not reach the card (BRD-05, D8: base theme colours); an allow
+ * that went out lets the skin stamp it beside the composer (SkinStamp).
  */
 import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
+import { markApproved, useSkinExempt } from '../../../skin/skinState'
 import Button from '../../ui/Button.vue'
 import Dot from '../../ui/Dot.vue'
 import {
@@ -27,6 +31,7 @@ const props = defineProps<{ interaction: ControlInteraction }>()
 const ctx = useAppContext()
 const answered = ref(false)
 const root = ref<HTMLElement | null>(null)
+const exempt = useSkinExempt()
 
 const presentation = computed(() => approvalPresentation(props.interaction))
 const actions = computed(() => approvalActions(props.interaction))
@@ -51,11 +56,12 @@ function decide(action: ApprovalAction) {
     approvalAnswer(props.interaction, action),
   )
   if (!ok) answered.value = false
+  else if (!action.deny) markApproved()
 }
 </script>
 
 <template>
-  <div class="frame" data-takeover="approval">
+  <div class="frame" data-takeover="approval" :style="exempt">
     <section
       ref="root"
       class="card"

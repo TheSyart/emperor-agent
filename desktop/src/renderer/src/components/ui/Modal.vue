@@ -9,6 +9,8 @@
  * - width (default 380): dialog width in px (settings uses 800).
  * - closable (default true): show close button + Esc to close.
  * - closeOnMask (default true).
+ * - exempt: a skin may not reach this dialog (BRD-05: confirmations,
+ *   sign-in and keys); it keeps the base theme's colours.
  * Slots: default (body), `footer` (right-aligned actions), `header`
  * (replaces the title row).
  *
@@ -22,6 +24,7 @@
  * returns focus to the element that opened it.
  */
 import { ref } from 'vue'
+import { useSkinExempt } from '../../skin/skinState'
 import { DsClose } from '../icons/ds'
 import IconButton from './IconButton.vue'
 import { useModalLayer } from './modalStack'
@@ -35,6 +38,7 @@ const props = withDefaults(
     width?: number
     closable?: boolean
     closeOnMask?: boolean
+    exempt?: boolean
   }>(),
   {
     title: undefined,
@@ -42,8 +46,10 @@ const props = withDefaults(
     width: 380,
     closable: true,
     closeOnMask: true,
+    exempt: false,
   },
 )
+const skinExempt = useSkinExempt()
 
 const open = defineModel<boolean>('open', { default: false })
 const overlay = ref<HTMLElement | null>(null)
@@ -64,7 +70,12 @@ provideSurface(() => 'panel')
 
 <template>
   <Teleport to="body">
-    <div v-if="open" ref="overlay" class="ds-modal">
+    <div
+      v-if="open"
+      ref="overlay"
+      class="ds-modal"
+      :style="exempt ? skinExempt : undefined"
+    >
       <div class="mask" @click="closeOnMask ? close() : undefined" />
       <div
         ref="dialog"

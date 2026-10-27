@@ -44,3 +44,51 @@ it('1 · Build asks for a project and says where sessions run', async () => {
     note: '构建会话都在某个项目文件夹里运行，可以读写文件、跑命令。',
   })
 })
+
+it('BRD-05 · shows the skin’s hero picture above the greeting, not for a contact', async () => {
+  const state = await import('../../skin/skinState')
+  ;(window as unknown as { emperor?: unknown }).emperor = {
+    skinGet: async () => ({
+      ok: true,
+      skin: {
+        id: 'richang',
+        name: '日常',
+        base: 'auto',
+        tokens: {},
+        reset: { light: {}, dark: {} },
+        fonts: { heading: 'system' },
+        slots: { hero: 'app://skin/richang/hoodie.webp?v=1' },
+      },
+    }),
+  }
+  try {
+    state.initSkin()
+    await state.selectSkin('richang')
+    await mount('chat', null)
+    const hero = root!.querySelector<HTMLImageElement>(
+      'img[data-skin-slot="hero"]',
+    )
+    expect(hero?.getAttribute('src')).toBe('app://skin/richang/hoodie.webp?v=1')
+    expect(root!.querySelector('.empty-hero')?.firstElementChild).toBe(hero)
+    app?.unmount()
+    root?.remove()
+    root = document.createElement('div')
+    document.body.append(root)
+    app = createApp({
+      render: () =>
+        h(EmptyHero, {
+          speaker: {
+            id: 'c1',
+            name: '架构师',
+            avatar: { name: '架构师' },
+          } as never,
+        }),
+    })
+    app.mount(root)
+    await nextTick()
+    expect(root.querySelector('img[data-skin-slot]')).toBeNull()
+  } finally {
+    state.resetSkinForTests()
+    delete (window as unknown as { emperor?: unknown }).emperor
+  }
+})

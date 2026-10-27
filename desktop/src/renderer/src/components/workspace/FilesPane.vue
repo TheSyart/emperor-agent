@@ -113,6 +113,10 @@ import {
   clampFilesTreeWidth,
   filePathCrumbs,
 } from './workspaceModel'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 interface FileTab {
   path: string
@@ -1042,6 +1046,7 @@ function message(value: unknown): string {
     class="files-pane"
     tabindex="-1"
     :data-tree="treeVisible ? 'shown' : 'hidden'"
+    :style="exempt"
     @keydown="onPaneKeydown"
     @scroll.capture.passive="rememberScroll"
   >

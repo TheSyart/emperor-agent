@@ -24,6 +24,10 @@ import {
   SettingsSection,
   TextField,
 } from '../ui'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const profiles = ref<BrowserProfileView[]>([])
 const busy = ref(false)
@@ -138,6 +142,7 @@ onMounted(() => {
 <template>
   <SettingsSection
     intro="Emperor 操作网页时用这些登录档案，持久的会保留网站登录。"
+    :style="exempt"
   >
     <Notice v-if="error && !dialog" tone="error" :title="error" />
     <SettingsGroup title="持久登录档案">

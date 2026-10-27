@@ -15,6 +15,10 @@ import Button from '../../ui/Button.vue'
 import { writeClipboard } from '../../ui/useCopyFeedback'
 import { Notice } from '../ui'
 import { signInFailureText } from './executorText'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = defineProps<{ signIn: ClaudeSignInView; busy?: boolean }>()
 const emit = defineEmits<{ cancel: []; recheck: [] }>()
@@ -29,6 +33,7 @@ async function copyCommand() {
 <template>
   <Notice
     v-if="signIn.state === 'running'"
+    :style="exempt"
     tone="info"
     title="正在浏览器中登录 Claude Code…"
     data-claude-sign-in-pending
@@ -46,6 +51,7 @@ async function copyCommand() {
   </Notice>
   <Notice
     v-else-if="signIn.state === 'failed'"
+    :style="exempt"
     tone="warn"
     :title="signInFailureText(signIn)"
     data-claude-sign-in-failed

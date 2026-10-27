@@ -64,6 +64,7 @@ import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
 import SidebarBrandRow from './SidebarBrandRow.vue'
 import SidebarFooter from './SidebarFooter.vue'
+import SkinSlot from '../../skin/SkinSlot.vue'
 import SidebarNav from './SidebarNav.vue'
 import SidebarProjectRow from './SidebarProjectRow.vue'
 import SidebarRail from './SidebarRail.vue'
@@ -772,6 +773,7 @@ defineExpose({ focusSearch })
       </div>
     </div>
 
+    <SkinSlot name="sidebarFooter" class="sidebar-skin" />
     <SidebarFooter data-sidebar-block="footer" />
 
     <Menu
@@ -842,6 +844,20 @@ defineExpose({ focusSearch })
 </template>
 
 <style scoped>
+/* A skin's picture at the foot (BRD-05), left out on short windows. */
+.sidebar-skin {
+  flex: none;
+  align-self: flex-start;
+  height: calc(var(--space-8) * 2 + var(--space-2));
+  margin: var(--space-2) 0 0 var(--space-1);
+}
+
+@media (max-height: 640px) {
+  .sidebar-skin {
+    display: none;
+  }
+}
+
 .sidebar-root {
   display: flex;
   flex-direction: column;
