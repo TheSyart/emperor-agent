@@ -76,6 +76,8 @@ export interface TokenUsageRow {
   cost_complete?: boolean
   estimated_input_tokens?: number
   route_estimated_tokens?: number
+  /** The root session the call was spent for (SET-01); absent in older rows. */
+  session_id?: string
   [key: string]: string | number | boolean | undefined
 }
 
@@ -93,6 +95,8 @@ export interface RecordOptions {
   costComplete?: boolean | null
   usedFallback?: boolean
   fallbackReason?: string | null
+  /** The root session the call was spent for (SET-01, 用量与费用 by source). */
+  sessionId?: string | null
 }
 
 /** Rows kept for recentCalls / recentCacheCalls without reading the ledger. */
@@ -164,6 +168,7 @@ export class TokenTracker {
     const fallbackReason = String(
       o.fallbackReason ?? o.fallback_reason ?? '',
     ).trim()
+    const sessionId = String(o.sessionId ?? o.session_id ?? '').trim()
 
     const counts = tokenCounts(usage ?? {})
 
@@ -189,6 +194,7 @@ export class TokenTracker {
     if (typeof costComplete === 'boolean') row.cost_complete = costComplete
     if (usedFallback) row.used_fallback = true
     if (fallbackReason) row.fallback_reason = fallbackReason
+    if (sessionId) row.session_id = sessionId
 
     this.lastInputTokens =
       (row.input as number) +
@@ -257,6 +263,17 @@ export class TokenTracker {
 
   totals(): TokenStatsRow {
     return { ...this.aggregate.totals }
+  }
+
+  /**
+   * Per day, per root session (SET-01); rows recorded before sessions were
+   * tracked sit under the empty id.
+   */
+  statsByDateSession(): Record<string, Record<string, TokenStatsRow>> {
+    const out: Record<string, Record<string, TokenStatsRow>> = {}
+    for (const [date, sessions] of Object.entries(this.aggregate.byDateSession))
+      out[date] = cloneBuckets(sessions)
+    return out
   }
 
   statsByDateModel(): Record<string, Record<string, TokenStatsRow>> {
@@ -418,6 +435,7 @@ class LedgerAggregate {
   readonly byProviderModel: Record<string, TokenStatsRow> = {}
   readonly byUsageType: Record<string, TokenStatsRow> = {}
   readonly byDateModel: Record<string, Record<string, TokenStatsRow>> = {}
+  readonly byDateSession: Record<string, Record<string, TokenStatsRow>> = {}
   readonly byHour: Record<string, TokenStatsRow> = {}
   readonly dates = new Set<string>()
   readonly recent: Row[] = []
@@ -454,6 +472,8 @@ class LedgerAggregate {
       dateModel.provider = provider
       dateModel.model = model
       addRow(dateModel, r)
+      const session = String(r.session_id ?? '')
+      addRow(((this.byDateSession[date] ??= {})[session] ??= emptyStats()), r)
       this.dates.add(date)
     }
     const hour = this.byHour[ts.slice(11, 13)]
@@ -552,6 +572,7 @@ function normalizeRow(row: Row): TokenUsageRow {
     total: TOKEN_KEYS.reduce((sum, key) => sum + counts[key], 0),
   }
   if (row.model_role) normalized.model_role = String(row.model_role)
+  if (row.session_id) normalized.session_id = String(row.session_id)
   for (const key of ['route_reason', 'fallback_reason']) {
     if (row[key]) normalized[key] = String(row[key])
   }

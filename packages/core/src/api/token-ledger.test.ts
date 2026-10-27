@@ -90,6 +90,8 @@ describe('token ledger (KRN-05 #10)', () => {
         PRICING,
       ).costUsdNanos,
       cost_complete: true,
+      // SET-01: the call is filed under the session it was spent for.
+      session_id: sessionId,
     })
     // The usage page: cache_read / (cache_read + input + cache_create).
     const totals = stats.totals

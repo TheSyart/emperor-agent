@@ -2106,6 +2106,9 @@ export class HarnessHost {
         type: 'compaction',
       }
     if (call === undefined) return
+    // A subagent's spend counts toward the session that started it (SET-01).
+    let root = agent
+    while (root.owner) root = root.owner
     try {
       const entry = findEntry(this.kept.modelConfig, call.routeId)
       const counts = ledgerUsage(call.usage)
@@ -2116,6 +2119,7 @@ export class HarnessHost {
           provider: entry?.provider ?? null,
           usageType: call.type,
           modelEntryId: call.routeId,
+          sessionId: root.session.id,
           costUsd:
             entry === undefined
               ? null
