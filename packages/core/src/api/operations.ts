@@ -1136,6 +1136,22 @@ const contactUpdateSchema = z
   })
   .strict()
 
+// Groups (GRP-06): shapes and generous bounds; the store checks the rules
+// (members known, moderator in the group) and answers in Chinese.
+// Any session id: a session that is not a group answers group_not_found.
+const groupIdSchema = z.string().min(1).max(128)
+const groupSettingsSchema = z
+  .object({
+    collaboration: z.enum(['autonomous', 'moderated']).optional(),
+    quiet: z.boolean().optional(),
+    summarizeAtEnd: z.boolean().optional(),
+    loopGuard: z.boolean().optional(),
+  })
+  .strict()
+const groupMemberRefSchema = z
+  .object({ id: groupIdSchema, contactId: contactIdSchema })
+  .strict()
+
 const sessionPatchSchema = z.union([
   z.string(),
   z
@@ -2239,6 +2255,97 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([pluginTargetSchema]),
     (api, [input], ctx) =>
       api.plugins.uninstall(input, viewOf(ctx, 'plugins.uninstall')),
+  ),
+  // Groups (GRP-06): global like contacts; changes emit `groups_changed`.
+  'groups.list': operation(z.tuple([]), (api) => api.groups.list()),
+  'groups.get': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.get(input),
+  ),
+  'groups.create': operation(
+    z.tuple([
+      z
+        .object({
+          title: z.string().max(200),
+          members: z.array(contactIdSchema).max(64),
+          moderator: contactIdSchema.nullable().optional(),
+          charter: z.string().max(20_000).optional(),
+          settings: groupSettingsSchema.optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.create(input),
+  ),
+  'groups.update': operation(
+    z.tuple([
+      z
+        .object({
+          id: groupIdSchema,
+          patch: z
+            .object({
+              title: z.string().max(200).optional(),
+              charter: z.string().max(20_000).optional(),
+              moderator: contactIdSchema.nullable().optional(),
+              settings: groupSettingsSchema.optional(),
+            })
+            .strict(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.update(input),
+  ),
+  'groups.addMember': operation(
+    z.tuple([groupMemberRefSchema]),
+    (api, [input]) => api.groups.addMember(input),
+  ),
+  'groups.removeMember': operation(
+    z.tuple([groupMemberRefSchema]),
+    (api, [input]) => api.groups.removeMember(input),
+  ),
+  'groups.send': operation(
+    z.tuple([
+      z
+        .object({
+          id: groupIdSchema,
+          way: z.enum([
+            'broadcast',
+            'mention',
+            'independent',
+            'private',
+            'task',
+          ]),
+          text: z.string().max(40_000),
+          ask: z.array(contactIdSchema).max(64).optional(),
+          to: contactIdSchema.optional(),
+          task: z
+            .object({
+              title: z.string().max(200),
+              deliverable: z.string().max(4000),
+              basis: z.string().max(4000).optional(),
+              access: z.enum(['group_files', 'readonly', 'isolated_worktree']),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.send(input),
+  ),
+  'groups.history': operation(
+    z.tuple([
+      z
+        .object({
+          id: groupIdSchema,
+          before: z.string().max(128).optional(),
+          limit: z.number().int().positive().max(500).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.history(input),
+  ),
+  'groups.files.list': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.files.list(input),
   ),
   // 用量与费用 (SET-01): global, like the token statistics.
   'usage.summary': operation(

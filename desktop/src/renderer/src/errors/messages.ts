@@ -52,6 +52,9 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   contact_deleted: '这个联系人已删除，这个会话只能查看。',
   contact_permission: '这个联系人的权限有上限，不能在会话里调高。',
   contact_model_unavailable: '这个联系人的模型不可用。',
+  // Groups (GRP-06).
+  group_invalid: '群聊的设置不符合要求，请检查后重试。',
+  group_not_found: '没有找到这个群，可能已被删除。',
   interaction_not_pending: '这个问题已经回答过或已失效。',
   turn_paused: '这一轮已暂停。',
   turn_busy: '已有一轮正在运行，请等它结束。',

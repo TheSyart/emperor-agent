@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
+import { readdir, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
@@ -126,6 +127,13 @@ import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { ContactStore } from '../contacts/store'
+import type { GroupEventMap } from '../groups/events'
+import {
+  GroupService,
+  type GroupCreateInput,
+  type GroupSendInput,
+  type GroupUpdateInput,
+} from '../groups/service'
 import { ContactMemoryStore } from '../contacts/memory'
 import { ContactRuntime } from '../contacts/runtime'
 import { readPersonaText } from '../harness/prompt/persona'
@@ -461,6 +469,7 @@ export class CoreApi {
   readonly memoryService: CoreMemoryService
   /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
   readonly contactStore: ContactStore
+  readonly groupService: GroupService
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
   readonly contactMemoryService: CoreContactMemoryService
   readonly modelService: CoreModelService
@@ -654,6 +663,48 @@ export class CoreApi {
         persona: () => persona,
       }),
     )
+    // A group is a session whose log holds the group events (GRP-06).
+    this.groupService = new GroupService({
+      sessions: {
+        create: (title, opts) =>
+          kept.sessionStore.create(title, { mode: 'chat', ...opts }),
+        get: (id) => kept.sessionStore.get(id),
+        list: () => kept.sessionStore.list({ includeArchived: true }),
+        rename: (id, title) => kept.sessionStore.rename(id, title),
+      },
+      log: (id) => {
+        const session =
+          host.sessionLog(id) ??
+          host.sessions.create({ id, cwd: host.chatWorkspace() })
+        return {
+          get events() {
+            return session.events
+          },
+          // GroupEventMap is merged into SessionEventMap (groups/events.ts).
+          append: (type, data) =>
+            void session.append(type as keyof GroupEventMap, data as never),
+        }
+      },
+      contact: (id) => {
+        const contact = this.contactStore.peek(id)
+        return contact === null
+          ? null
+          : {
+              id: contact.id,
+              name: contact.name,
+              intro: contact.intro,
+              kind: contact.kind,
+              speak: contact.groupHabit.speak,
+              version: contact.version,
+            }
+      },
+      onChange: (change) =>
+        host.emitHost({
+          event: 'groups_changed',
+          reason: change.reason,
+          group_id: change.groupId,
+        }),
+    })
     this.contactMemoryService = new CoreContactMemoryService({
       contacts: this.contactStore,
       memory: contactMemory,
@@ -3497,6 +3548,57 @@ export class CoreApi {
    * Contacts (GRP-02): global, like settings — no session in view involved.
    * Every saved change is announced as `contacts_changed`.
    */
+  /**
+   * Groups (GRP-06): global like contacts. A group's members are looked up
+   * in the contact store, so every call waits for it to load first.
+   */
+  readonly groups = {
+    list: async () => {
+      await this.contactStore.ready()
+      return this.groupService.list()
+    },
+    get: async (input: { id: string }) => {
+      await this.contactStore.ready()
+      return this.groupService.get(input.id)
+    },
+    create: async (input: GroupCreateInput) => {
+      await this.contactStore.ready()
+      return this.groupService.create(input)
+    },
+    update: async (input: { id: string; patch: GroupUpdateInput }) => {
+      await this.contactStore.ready()
+      return this.groupService.update(input.id, input.patch)
+    },
+    addMember: async (input: { id: string; contactId: string }) => {
+      await this.contactStore.ready()
+      return this.groupService.addMember(input.id, input.contactId)
+    },
+    removeMember: async (input: { id: string; contactId: string }) => {
+      await this.contactStore.ready()
+      return this.groupService.removeMember(input.id, input.contactId)
+    },
+    send: async (input: { id: string } & GroupSendInput) => {
+      await this.contactStore.ready()
+      const { id, ...send } = input
+      return this.groupService.send(id, send)
+    },
+    history: async (input: { id: string; before?: string; limit?: number }) => {
+      await this.contactStore.ready()
+      return this.groupService.history(input.id, input)
+    },
+    files: {
+      /** 群文件 (`<stateRoot>/groups/<id>/files`), the top level only. */
+      list: async (input: { id: string }) => {
+        this.groupService.state(input.id)
+        return {
+          files: await listGroupFiles(
+            join(this.paths.stateRoot, 'groups', input.id, 'files'),
+          ),
+        }
+      },
+    },
+  }
+
   readonly contacts = {
     list: () => this.contactStore.list(),
     get: (input: { id: string }) => this.contactStore.get(input.id),
@@ -5337,4 +5439,30 @@ function githubConnectionState(
       reason: '在终端运行 gh auth login 登录 GitHub',
     }
   return { state: 'failed', reason: status.message ?? 'GitHub CLI 操作失败' }
+}
+
+/** A group's files, the top level only, by name; none when it has none. */
+async function listGroupFiles(
+  dir: string,
+): Promise<{ name: string; size: number; modifiedAt: number; dir: boolean }[]> {
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return []
+  }
+  const files = await Promise.all(
+    names.sort().map(async (name) => {
+      const info = await stat(join(dir, name)).catch(() => null)
+      return info === null
+        ? null
+        : {
+            name,
+            size: info.isDirectory() ? 0 : info.size,
+            modifiedAt: info.mtimeMs,
+            dir: info.isDirectory(),
+          }
+    }),
+  )
+  return files.filter((file) => file !== null)
 }

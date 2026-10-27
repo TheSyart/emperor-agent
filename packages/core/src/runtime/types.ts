@@ -392,6 +392,12 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         version: number | null
       }
     | {
+        /** A group was created or changed, or the user sent to it (GRP-06). */
+        event: 'groups_changed'
+        reason: 'created' | 'updated' | 'member' | 'message'
+        group_id: string
+      }
+    | {
         /** Installed plugins, their toggles, the active project, or a plugin hook's failure changed. */
         event: 'plugins_changed'
         reason: 'plugins' | 'project' | 'hooks'
