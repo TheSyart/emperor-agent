@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 // MOD-02 (docs/design/modes.md § 切换): the brand row's 「Emperor Chat ▾」
 // switcher — its menu, keyboard, label per mode and width, the badges, and
-// the dot that only a waiting mode elsewhere lights.
+// the dot that only a waiting mode elsewhere lights. MOD-05: the menu is
+// its own chunk, fetched on the first open.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import ModeSwitcher from './ModeSwitcher.vue'
@@ -23,6 +26,8 @@ const props = reactive<{
 const selected: AppMode[] = []
 
 async function settle() {
+  // The menu's chunk (MOD-05) arrives through a dynamic import.
+  await vi.dynamicImportSettled()
   for (let i = 0; i < 10; i++) await Promise.resolve()
   await nextTick()
 }
@@ -214,4 +219,23 @@ it('6 · only 「等你回答」 in another mode lights the dot on the mark', as
   props.mode = 'group'
   await settle()
   expect(dot()).toBeNull()
+})
+
+it('MOD-05 · keeps the menu out of the start-up bundle, fetched on the first open', async () => {
+  const source = readFileSync(join(__dirname, 'ModeSwitcher.vue'), 'utf8')
+  expect(source).toMatch(/import\(\s*'\.\/ModeMenu\.vue'\s*\)/)
+  expect(source).not.toMatch(/from '\.\/ModeMenu\.vue'/)
+  // What only the open menu draws goes with it.
+  for (const part of ['Menu.vue', 'MenuItem.vue', 'Badge.vue', 'Kbd.vue'])
+    expect(source).not.toContain(`'../ui/${part}'`)
+
+  // The first open still lands on the current mode once the chunk is in.
+  await mount({ mode: 'group' })
+  expect(menu()).toBeNull()
+  trigger().click()
+  await settle()
+  expect(menu()).not.toBeNull()
+  expect(document.activeElement).toBe(item('Group'))
+  key(document.activeElement as HTMLElement, 'ArrowDown')
+  expect(document.activeElement).toBe(item('Chat'))
 })

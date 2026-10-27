@@ -5,33 +5,32 @@
  * (D3). `compact` (a sidebar narrower than 248px) shows the mode name only;
  * the full name is always the accessible name and, compact, the tooltip.
  *
- * The menu (ui/Menu) lists the three modes as `menuitemradio` rows: glyph,
- * name, one Chinese line, ⌘1–⌘3, a check on the current one, and the
- * badges 「N 个在运行」 / 「等你回答」. Enter / Space (or ↓) open it on the
- * current mode, ↑ ↓ Home End move, Enter picks, Esc closes and gives the
- * focus back. Only 「等你回答」 in another mode lights the dot on the mark;
- * running never does.
+ * The menu (ModeMenu, its own chunk fetched on the first open — MOD-05)
+ * lists the three modes as `menuitemradio` rows: glyph, name, one Chinese
+ * line, ⌘1–⌘3, a check on the current one, and the badges 「N 个在运行」 /
+ * 「等你回答」. Enter / Space (or ↓) open it on the current mode, ↑ ↓ Home
+ * End move, Enter picks, Esc closes and gives the focus back. Only
+ * 「等你回答」 in another mode lights the dot on the mark; running never
+ * does.
  *
  * Props: mode, activity (per mode, runtime/appMode `modeActivity`), compact.
  * Emits: select (the mode picked; the caller switches).
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import {
   waitingElsewhere,
   type AppMode,
   type ModeActivity,
 } from '../../runtime/appMode'
-import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
 import BrandMark from '../brand/BrandMark.vue'
 import { DsChevronDown } from '../icons/ds'
-import Badge from '../ui/Badge.vue'
 import Dot from '../ui/Dot.vue'
-import Kbd from '../ui/Kbd.vue'
-import Menu from '../ui/Menu.vue'
-import MenuItem from '../ui/MenuItem.vue'
 import TooltipBubble from '../ui/TooltipBubble.vue'
 import { useTooltip } from '../ui/useTooltip'
-import { MODE_ENTRIES, modeEntry, modeFullName } from './modeEntries'
+import { modeEntry, modeFullName } from './modeEntries'
+
+// Mounted only while open; it focuses the current mode once it is in.
+const ModeMenu = defineAsyncComponent(() => import('./ModeMenu.vue'))
 
 const props = withDefaults(
   defineProps<{
@@ -52,8 +51,6 @@ const emit = defineEmits<{ select: [mode: AppMode] }>()
 
 const open = ref(false)
 const button = ref<HTMLButtonElement | null>(null)
-const list = ref<HTMLElement | null>(null)
-const platform = detectShortcutPlatform()
 
 const fullName = computed(() => modeFullName(props.mode))
 const shownName = computed(() =>
@@ -71,51 +68,20 @@ const tooltip = useTooltip({
   enabled: () => props.compact && !open.value,
 })
 
-function items(): HTMLElement[] {
-  return [
-    ...(list.value?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ??
-      []),
-  ]
-}
-
-async function openMenu(): Promise<void> {
+function openMenu(): void {
   tooltip.hide()
   open.value = true
-  await nextTick()
-  const all = items()
-  ;(
-    all.find((el) => el.getAttribute('aria-checked') === 'true') ?? all[0]
-  )?.focus()
 }
 
 function toggle(): void {
   if (open.value) open.value = false
-  else void openMenu()
+  else openMenu()
 }
 
 /** MenuItem closes the menu; the focus goes back to the button. */
 function select(mode: AppMode): void {
   emit('select', mode)
   button.value?.focus()
-}
-
-function onMenuKeydown(event: KeyboardEvent): void {
-  const all = items()
-  if (!all.length) return
-  const at = all.indexOf(document.activeElement as HTMLElement)
-  const last = all.length - 1
-  let next: number
-  if (event.key === 'ArrowDown') next = at < 0 || at === last ? 0 : at + 1
-  else if (event.key === 'ArrowUp') next = at <= 0 ? last : at - 1
-  else if (event.key === 'Home') next = 0
-  else if (event.key === 'End') next = last
-  else return
-  event.preventDefault()
-  all[next]!.focus()
-}
-
-function shortcut(action: (typeof MODE_ENTRIES)[number]['shortcut']): string {
-  return shortcutLabel(action, platform)
 }
 </script>
 
@@ -149,44 +115,14 @@ function shortcut(action: (typeof MODE_ENTRIES)[number]['shortcut']): string {
       :position="tooltip.position.value"
     />
   </button>
-  <Menu
+  <ModeMenu
+    v-if="open"
     v-model:open="open"
     :anchor="button"
-    :width="340"
-    placement="bottom"
-    align="start"
-    label="切换模式"
-  >
-    <div ref="list" class="mode-items" @keydown="onMenuKeydown">
-      <MenuItem
-        v-for="entry in MODE_ENTRIES"
-        :key="entry.mode"
-        radio
-        :selected="entry.mode === mode"
-        :description="entry.description"
-        :data-mode="entry.mode"
-        @select="select(entry.mode)"
-      >
-        <template #icon><component :is="entry.icon" :size="16" /></template>
-        <span class="mode-label">
-          <span class="mode-name">{{ entry.name }}</span>
-          <Badge
-            v-if="activity[entry.mode].running"
-            tone="info"
-            :label="`${activity[entry.mode].running} 个在运行`"
-          />
-          <Badge
-            v-if="activity[entry.mode].waiting"
-            tone="attention"
-            label="等你回答"
-          />
-        </span>
-        <template #trailing>
-          <Kbd class="mode-key">{{ shortcut(entry.shortcut) }}</Kbd>
-        </template>
-      </MenuItem>
-    </div>
-  </Menu>
+    :mode="mode"
+    :activity="activity"
+    @select="select"
+  />
 </template>
 
 <style scoped>
@@ -252,30 +188,5 @@ function shortcut(action: (typeof MODE_ENTRIES)[number]['shortcut']): string {
 
 .switcher-chevron[data-open] {
   transform: rotate(180deg);
-}
-
-.mode-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mode-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  max-width: 100%;
-}
-
-.mode-name {
-  font-weight: var(--weight-medium);
-}
-
-.mode-key {
-  flex: none;
-  align-self: flex-start;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-s);
-  color: rgb(var(--text-3));
 }
 </style>
