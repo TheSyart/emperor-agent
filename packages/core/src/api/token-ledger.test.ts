@@ -103,4 +103,60 @@ describe('token ledger (KRN-05 #10)', () => {
     expect(pageHitRate).toBeCloseTo(providerHitRate, 10)
     expect(pageHitRate).toBeCloseTo(0.8, 10)
   })
+
+  it('files a scheduled turn’s calls under the scheduler (SET-01)', async () => {
+    const root = tmp('emperor-token-ledger-')
+    const stateRoot = join(root, 'home')
+    modelConfig(stateRoot)
+    const usage = { inputTokens: 100, outputTokens: 10 }
+    const { api } = await makeApi({
+      root,
+      stateRoot,
+      replies: [
+        () => replyChunks({ text: 'by hand', usage }),
+        () => replyChunks({ text: 'on schedule', usage }),
+      ],
+    })
+    apis.push(api)
+    const sessionId = String(api.sessions.create({ title: 'Chat' }).id)
+    await api.chat.submit({ content: 'hi', sessionId })
+    await api.host.runBackgroundTurn(api.host.scopeFor(sessionId), 'tick', {
+      source: 'scheduler',
+      interactionPolicy: 'auto-reject',
+    })
+
+    const calls = (
+      api.memory.tokens({ sessionId }) as {
+        recentCalls: Array<Record<string, unknown>>
+      }
+    ).recentCalls.filter((call) => call.usage_type === 'main_agent')
+    expect(calls.map((call) => call.source ?? null)).toEqual([
+      'scheduler',
+      null,
+    ])
+    expect(calls.every((call) => call.session_id === sessionId)).toBe(true)
+  })
+
+  it('usage.summary files today’s spend by the session’s mode (SET-01)', async () => {
+    const root = tmp('emperor-token-ledger-')
+    const stateRoot = join(root, 'home')
+    modelConfig(stateRoot)
+    const usage = { inputTokens: 1000, outputTokens: 100 }
+    const { api } = await makeApi({
+      root,
+      stateRoot,
+      replies: [() => replyChunks({ text: 'hi', usage })],
+    })
+    apis.push(api)
+    const sessionId = String(api.sessions.create({ title: 'Chat' }).id)
+    await api.chat.submit({ content: 'hi', sessionId })
+
+    const summary = api.usage.summary({ range: 'today' })
+    expect(summary.bySource.chat).toMatchObject({ tokens: 1100, calls: 1 })
+    expect(summary.bySource.chat.usd).toBeGreaterThan(0)
+    expect(summary.totalUsd).toBe(summary.bySource.chat.usd)
+    expect(summary.topSessions).toEqual([
+      expect.objectContaining({ sessionId, source: 'chat', tokens: 1100 }),
+    ])
+  })
 })

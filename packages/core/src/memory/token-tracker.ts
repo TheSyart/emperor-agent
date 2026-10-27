@@ -50,6 +50,8 @@ export interface TokenStatsRow {
   cost_complete_calls?: number
   cost_incomplete_calls?: number
   cost_is_partial?: boolean
+  /** Tokens of subscription runs, already in `total` (SET-01). */
+  subscription_tokens?: number
   [key: string]: number | string | boolean | undefined
 }
 
@@ -78,8 +80,28 @@ export interface TokenUsageRow {
   route_estimated_tokens?: number
   /** The root session the call was spent for (SET-01); absent in older rows. */
   session_id?: string
+  /** Where the spend came from when it was not a model call in a turn. */
+  source?: LedgerSource
+  /** A subscription run: its tokens count, its cost is never charged. */
+  subscription?: boolean
   [key: string]: string | number | boolean | undefined
 }
+
+/**
+ * Where a ledger row's spend came from (SET-01): a scheduled turn's model
+ * calls, or a Claude Code / Codex run when it finished. Absent: a model call
+ * in a turn the user started.
+ */
+export type LedgerSource = 'scheduler' | 'claude-code' | 'codex'
+const LEDGER_SOURCES: readonly LedgerSource[] = [
+  'scheduler',
+  'claude-code',
+  'codex',
+]
+/** The totals of one session on one day, by where the spend came from. */
+export type LedgerSessionBuckets = Partial<
+  Record<'model' | LedgerSource, TokenStatsRow>
+>
 
 export interface RecordOptions {
   provider?: string | null
@@ -97,6 +119,9 @@ export interface RecordOptions {
   fallbackReason?: string | null
   /** The root session the call was spent for (SET-01, 用量与费用 by source). */
   sessionId?: string | null
+  source?: LedgerSource | null
+  /** A subscription run: recorded at no cost, its tokens counted apart. */
+  subscription?: boolean
 }
 
 /** Rows kept for recentCalls / recentCacheCalls without reading the ledger. */
@@ -128,7 +153,7 @@ export class TokenTracker {
     for (const row of hot) this.aggregate.add(row)
     this.hotRows = hot.length
     if (this.hotRows > this.maxHotRows) this.rotate(hot)
-    this.lastInputTokens = inputTotal(this.aggregate.last ?? {})
+    this.lastInputTokens = inputTotal(this.aggregate.lastInTurn ?? {})
   }
 
   /** 兼容 runner 的 `record(model, usage, opts)`（snake/camel 选项均接受）。 */
@@ -169,6 +194,8 @@ export class TokenTracker {
       o.fallbackReason ?? o.fallback_reason ?? '',
     ).trim()
     const sessionId = String(o.sessionId ?? o.session_id ?? '').trim()
+    const source = ledgerSource(o.source)
+    const subscription = o.subscription === true
 
     const counts = tokenCounts(usage ?? {})
 
@@ -189,17 +216,26 @@ export class TokenTracker {
       row.estimated_input_tokens = estimatedInputTokens
     if (routeEstimatedTokens !== null && routeEstimatedTokens !== undefined)
       row.route_estimated_tokens = routeEstimatedTokens
-    if (costUsdNanos !== null) row.cost_usd_nanos = costUsdNanos
+    if (subscription) {
+      row.subscription = true
+      row.cost_usd_nanos = 0
+      row.cost_complete = true
+    } else {
+      if (costUsdNanos !== null) row.cost_usd_nanos = costUsdNanos
+      if (typeof costComplete === 'boolean') row.cost_complete = costComplete
+    }
     if (costCapUsdNanos !== null) row.cost_cap_usd_nanos = costCapUsdNanos
-    if (typeof costComplete === 'boolean') row.cost_complete = costComplete
     if (usedFallback) row.used_fallback = true
     if (fallbackReason) row.fallback_reason = fallbackReason
     if (sessionId) row.session_id = sessionId
+    if (source) row.source = source
 
-    this.lastInputTokens =
-      (row.input as number) +
-      (row.cache_read as number) +
-      (row.cache_create as number)
+    // An external run's tokens never were in this conversation's context.
+    if (!isExternalRow(row))
+      this.lastInputTokens =
+        (row.input as number) +
+        (row.cache_read as number) +
+        (row.cache_create as number)
     appendFileSync(this.logFile, JSON.stringify(row) + '\n', 'utf8')
     this.aggregate.add(row)
     this.hotRows += 1
@@ -269,10 +305,15 @@ export class TokenTracker {
    * Per day, per root session (SET-01); rows recorded before sessions were
    * tracked sit under the empty id.
    */
-  statsByDateSession(): Record<string, Record<string, TokenStatsRow>> {
-    const out: Record<string, Record<string, TokenStatsRow>> = {}
-    for (const [date, sessions] of Object.entries(this.aggregate.byDateSession))
-      out[date] = cloneBuckets(sessions)
+  statsByDateSession(): Record<string, Record<string, LedgerSessionBuckets>> {
+    const out: Record<string, Record<string, LedgerSessionBuckets>> = {}
+    for (const [date, sessions] of Object.entries(
+      this.aggregate.byDateSession,
+    )) {
+      const day: Record<string, LedgerSessionBuckets> = (out[date] = {})
+      for (const [session, buckets] of Object.entries(sessions))
+        day[session] = cloneBuckets(buckets as Record<string, TokenStatsRow>)
+    }
     return out
   }
 
@@ -428,14 +469,16 @@ function readRowsFromText(text: string): Row[] {
 class LedgerAggregate {
   rows = 0
   cacheRows = 0
-  last: Row | null = null
+  /** The last row of a model call in a conversation (not an external run). */
+  lastInTurn: Row | null = null
   readonly totals = emptyStats()
   readonly byDate: Record<string, TokenStatsRow> = {}
   readonly byModel: Record<string, TokenStatsRow> = {}
   readonly byProviderModel: Record<string, TokenStatsRow> = {}
   readonly byUsageType: Record<string, TokenStatsRow> = {}
   readonly byDateModel: Record<string, Record<string, TokenStatsRow>> = {}
-  readonly byDateSession: Record<string, Record<string, TokenStatsRow>> = {}
+  readonly byDateSession: Record<string, Record<string, LedgerSessionBuckets>> =
+    {}
   readonly byHour: Record<string, TokenStatsRow> = {}
   readonly dates = new Set<string>()
   readonly recent: Row[] = []
@@ -450,7 +493,7 @@ class LedgerAggregate {
 
   add(r: Row): void {
     this.rows += 1
-    this.last = r
+    if (!isExternalRow(r)) this.lastInTurn = r
     addRow(this.totals, r)
     const ts = String(r.ts ?? '')
     const date = ts.slice(0, 10)
@@ -473,7 +516,8 @@ class LedgerAggregate {
       dateModel.model = model
       addRow(dateModel, r)
       const session = String(r.session_id ?? '')
-      addRow(((this.byDateSession[date] ??= {})[session] ??= emptyStats()), r)
+      const buckets = ((this.byDateSession[date] ??= {})[session] ??= {})
+      addRow((buckets[ledgerSource(r.source) ?? 'model'] ??= emptyStats()), r)
       this.dates.add(date)
     }
     const hour = this.byHour[ts.slice(11, 13)]
@@ -504,6 +548,16 @@ class LedgerAggregate {
 function keepLast(rows: Row[], row: Row): void {
   rows.push(row)
   if (rows.length > RECENT_KEEP) rows.splice(0, rows.length - RECENT_KEEP)
+}
+
+function ledgerSource(value: unknown): LedgerSource | null {
+  return LEDGER_SOURCES.includes(value as LedgerSource)
+    ? (value as LedgerSource)
+    : null
+}
+
+function isExternalRow(row: Row): boolean {
+  return row.source === 'claude-code' || row.source === 'codex'
 }
 
 function isCacheRow(row: Row): boolean {
@@ -554,6 +608,9 @@ function addRow(bucket: TokenStatsRow, row: Row): void {
     bucket.cost_incomplete_calls =
       (Number(bucket.cost_incomplete_calls) || 0) + 1
   bucket.cost_is_partial = (Number(bucket.cost_incomplete_calls) || 0) > 0
+  if (row.subscription === true)
+    bucket.subscription_tokens =
+      (Number(bucket.subscription_tokens) || 0) + total
 }
 
 function normalizeRow(row: Row): TokenUsageRow {
@@ -573,6 +630,9 @@ function normalizeRow(row: Row): TokenUsageRow {
   }
   if (row.model_role) normalized.model_role = String(row.model_role)
   if (row.session_id) normalized.session_id = String(row.session_id)
+  const source = ledgerSource(row.source)
+  if (source) normalized.source = source
+  if (row.subscription === true) normalized.subscription = true
   for (const key of ['route_reason', 'fallback_reason']) {
     if (row[key]) normalized[key] = String(row[key])
   }

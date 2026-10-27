@@ -301,6 +301,14 @@ import type { WorkspaceSnapshot } from '../workspace/snapshot'
 import { CommandPlatform, type CommandOwner } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
 import { startSkillFork } from '../harness/subagent/skill-fork'
+import { recordExecutorSpend } from '../usage/executor-ledger'
+import {
+  localDay,
+  sessionUsageSource,
+  summarizeUsage,
+  type UsageRange,
+  type UsageSummary,
+} from '../usage/summary'
 import type {
   CommandCompletion,
   CommandInvocationResult,
@@ -1144,6 +1152,9 @@ export class CoreApi {
         exhausted: (owner) => host.delegationTaskSpent(owner),
         charge: (owner, usd) => host.chargeDelegation(owner, usd),
       },
+      // SET-01: external runs in the token ledger, under their root session.
+      usageLedger: (spend) =>
+        recordExecutorSpend(host.kept.tokenTracker, spend),
       notices: {
         parent: (owner) => host.delegationNoticeParent(owner),
         canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
@@ -3416,6 +3427,22 @@ export class CoreApi {
       sessionId: string | null
       turnId?: string | null
     }) => this.memoryService.explainContext(opts),
+  }
+
+  /**
+   * 用量与费用 (SET-01): one range's spend by source, from the token ledger;
+   * a session's model calls go under the mode it is listed in now.
+   */
+  readonly usage = {
+    summary: (input: { range: UsageRange }): UsageSummary => {
+      const sessions = this.host.kept.sessionStore
+      return summarizeUsage({
+        byDateSession: this.host.kept.tokenTracker.statsByDateSession(),
+        sourceOf: (id) => sessionUsageSource(sessions.get(id)),
+        range: input.range,
+        today: localDay(),
+      })
+    },
   }
 
   readonly projects = {

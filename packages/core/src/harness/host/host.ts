@@ -2126,6 +2126,9 @@ export class HarnessHost {
           usageType: call.type,
           modelEntryId: call.routeId,
           sessionId: root.session.id,
+          ...(currentTurnSource(root.session.events) === 'scheduler'
+            ? { source: 'scheduler' as const }
+            : {}),
           costUsd:
             entry === undefined
               ? null

@@ -1,37 +1,38 @@
 /**
- * 用量与费用 (SET-01): one range's spend, by where it went. Model calls come
- * from the token ledger's per-day, per-session totals and are filed by the
- * root session's mode; Claude Code and Codex runs come from delegation and
- * are filed by backend. A subscription run's tokens count, its nominal cost
- * never does. Pure: callers pass the ledger totals, the runs and today.
+ * 用量与费用 (SET-01): one range's spend, by where it went. Everything comes
+ * from the token ledger's per-day, per-session, per-source totals: a model
+ * call is filed by its root session's mode (Chat, Build, Group), a scheduled
+ * turn's calls under 定时任务, a Claude Code or Codex run by backend. A
+ * subscription run's tokens count, its cost never does. Pure: callers pass
+ * the ledger totals, the session → mode lookup and today.
  */
-import type { TokenStatsRow } from '../memory/token-tracker'
 import type {
-  ExecutorRunUsage,
-  ExternalBackend,
-} from '../harness/delegation/types'
+  LedgerSessionBuckets,
+  TokenStatsRow,
+} from '../memory/token-tracker'
+import {
+  isKnownSessionSurface,
+  sessionAppMode,
+  type AppModeSessionFacts,
+} from '../sessions/app-mode'
 
 export type UsageRange = 'today' | '7d' | '30d' | 'all'
-export type UsageSource = 'chat' | 'build' | 'group' | ExternalBackend | 'other'
+export type UsageSource =
+  'chat' | 'build' | 'group' | 'scheduler' | 'claude-code' | 'codex' | 'other'
 export const USAGE_SOURCES: readonly UsageSource[] = [
   'chat',
   'build',
   'group',
+  'scheduler',
   'claude-code',
   'codex',
   'other',
 ]
+export const USAGE_RANGES: readonly UsageRange[] = ['today', '7d', '30d', 'all']
 const RANGE_DAYS: Record<Exclude<UsageRange, 'all'>, number> = {
   today: 1,
   '7d': 7,
   '30d': 30,
-}
-
-export interface UsageRun {
-  backend: ExternalBackend
-  /** Epoch ms; a run that has not finished is left out. */
-  finishedAt?: number
-  usage?: ExecutorRunUsage
 }
 
 export interface UsageBucket {
@@ -44,7 +45,9 @@ export interface UsageBucket {
 
 export interface UsageSessionSpend {
   sessionId: string
+  /** The mode its own model calls are filed under. */
   source: UsageSource
+  /** Everything it spent: its calls, scheduled turns and external runs. */
   usd: number
   tokens: number
 }
@@ -53,7 +56,7 @@ export interface UsageSummary {
   range: UsageRange
   totalUsd: number
   tokens: number
-  /** Tokens from subscription runs: counted above, never priced. */
+  /** Tokens of subscription runs: counted above, never priced. */
   subscriptionTokens: number
   partial: boolean
   bySource: Record<UsageSource, UsageBucket>
@@ -62,23 +65,18 @@ export interface UsageSummary {
 }
 
 export interface SummarizeUsageInput {
-  /** TokenTracker.statsByDateSession(): date → session id → totals. */
-  byDateSession: Record<string, Record<string, TokenStatsRow>>
-  /** The source a session's model calls belong to ('' is an older row). */
+  /** TokenTracker.statsByDateSession(). */
+  byDateSession: Record<string, Record<string, LedgerSessionBuckets>>
+  /** The mode a session's model calls belong to. */
   sourceOf: (sessionId: string) => UsageSource
-  runs: readonly UsageRun[]
   range: UsageRange
   /** YYYY-MM-DD in the ledger's clock (local time). */
   today: string
-  /** A run's day in the same clock; local time by default. */
-  dayOf?: (epochMs: number) => string
   topLimit?: number
 }
 
 export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
   const from = rangeStart(input.range, input.today)
-  const inRange = (day: string) =>
-    (from === null || day >= from) && day <= input.today
   const bySource = Object.fromEntries(
     USAGE_SOURCES.map((s) => [
       s,
@@ -90,50 +88,35 @@ export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
   let subscriptionTokens = 0
 
   for (const [day, rows] of Object.entries(input.byDateSession)) {
-    if (!inRange(day)) continue
-    for (const [sessionId, row] of Object.entries(rows)) {
-      const source = sessionId ? input.sourceOf(sessionId) : 'other'
-      const bucket = bySource[source]
-      const rowNanos = row.cost_usd_nanos ?? 0
-      const tokens = row.total ?? 0
-      nanos += rowNanos
-      bucket.usd += rowNanos / 1e9
-      bucket.tokens += tokens
-      bucket.calls += row.calls ?? 0
-      if ((row.cost_incomplete_calls ?? 0) > 0 || row.cost_is_partial)
-        bucket.partial = true
-      if (!sessionId) continue
-      const spend = sessions.get(sessionId) ?? {
-        sessionId,
-        source,
-        usd: 0,
-        tokens: 0,
+    if ((from !== null && day < from) || day > input.today) continue
+    for (const [sessionId, buckets] of Object.entries(rows)) {
+      const own = sessionId ? input.sourceOf(sessionId) : 'other'
+      for (const [channel, row] of Object.entries(buckets) as [
+        keyof LedgerSessionBuckets,
+        TokenStatsRow,
+      ][]) {
+        const source = channel === 'model' ? own : channel
+        const bucket = bySource[source]
+        const rowNanos = Number(row.cost_usd_nanos) || 0
+        const tokens = Number(row.total) || 0
+        nanos += rowNanos
+        bucket.usd += rowNanos / 1e9
+        bucket.tokens += tokens
+        bucket.calls += Number(row.calls) || 0
+        if ((Number(row.cost_incomplete_calls) || 0) > 0) bucket.partial = true
+        subscriptionTokens += Number(row.subscription_tokens) || 0
+        if (!sessionId) continue
+        const spend = sessions.get(sessionId) ?? {
+          sessionId,
+          source: own,
+          usd: 0,
+          tokens: 0,
+        }
+        spend.usd += rowNanos / 1e9
+        spend.tokens += tokens
+        sessions.set(sessionId, spend)
       }
-      spend.usd += rowNanos / 1e9
-      spend.tokens += tokens
-      sessions.set(sessionId, spend)
     }
-  }
-
-  const dayOf = input.dayOf ?? localDay
-  for (const run of input.runs) {
-    if (run.finishedAt === undefined || !inRange(dayOf(run.finishedAt)))
-      continue
-    const bucket = bySource[run.backend]
-    const usage = run.usage ?? {}
-    const tokens = usage.totalTokens ?? 0
-    bucket.tokens += tokens
-    bucket.calls += 1
-    if (usage.billing === 'subscription') {
-      subscriptionTokens += tokens
-      continue
-    }
-    if (usage.estimatedUsd === undefined) {
-      if (tokens > 0) bucket.partial = true
-      continue
-    }
-    nanos += Math.round(usage.estimatedUsd * 1e9)
-    bucket.usd += usage.estimatedUsd
   }
 
   for (const bucket of Object.values(bySource)) bucket.usd = round(bucket.usd)
@@ -152,18 +135,33 @@ export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
   }
 }
 
+/**
+ * The source a session's own model calls go under: the mode it is listed
+ * in (MOD-01), so a Chat bound to a project later counts as Build. A group
+ * member's own session and a trial are Group; a deleted session or a
+ * surface this version does not know is 其他.
+ */
+export function sessionUsageSource(
+  session: AppModeSessionFacts | null | undefined,
+): UsageSource {
+  if (!session) return 'other'
+  if (session.surface && !isKnownSessionSurface(session.surface)) return 'other'
+  return sessionAppMode(session) ?? (session.surface ? 'group' : 'other')
+}
+
+/** Today in the ledger's clock (local time), YYYY-MM-DD. */
+export function localDay(epochMs: number = Date.now()): string {
+  const d = new Date(epochMs)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 /** The first day in range, inclusive; null for all time. */
 function rangeStart(range: UsageRange, today: string): string | null {
   if (range === 'all') return null
   const at =
     Date.parse(`${today}T00:00:00Z`) - (RANGE_DAYS[range] - 1) * 86_400_000
   return new Date(at).toISOString().slice(0, 10)
-}
-
-function localDay(epochMs: number): string {
-  const d = new Date(epochMs)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 /** Six decimals: a dollar figure without float dust. */

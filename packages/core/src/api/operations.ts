@@ -2214,6 +2214,13 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.plugins.uninstall(input, viewOf(ctx, 'plugins.uninstall')),
   ),
+  // 用量与费用 (SET-01): global, like the token statistics.
+  'usage.summary': operation(
+    z.tuple([
+      z.object({ range: z.enum(['today', '7d', '30d', 'all']) }).strict(),
+    ]),
+    (api, [input]) => api.usage.summary(input),
+  ),
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
   // Contacts (GRP-02): global like settings; changes emit `contacts_changed`.
   'contacts.list': operation(z.tuple([]), (api) => api.contacts.list()),

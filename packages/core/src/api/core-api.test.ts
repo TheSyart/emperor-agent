@@ -282,6 +282,7 @@ const EXPECTED_OPERATIONS = [
   'updates.reveal',
   'updates.setEnabled',
   'updates.status',
+  'usage.summary',
   'workspace.revertTurn',
   'workspace.snapshot',
   'workspace.turnDiff',
