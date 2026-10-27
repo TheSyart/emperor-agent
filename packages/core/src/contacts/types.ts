@@ -9,6 +9,9 @@
 /** `ct-` + 12 base32 characters, or one of {@link BUILTIN_CONTACT_IDS}. */
 export type ContactId = string
 
+/** The contact id of an editor draft that was never saved (GRP-04). */
+export const DRAFT_CONTACT_ID = 'ct-draft'
+
 export const BUILTIN_CONTACT_IDS = [
   'ct-emperor',
   'ct-claude-code',
@@ -317,4 +320,56 @@ export interface ContactsChange {
   contactId: ContactId
   /** The version after the change; null once deleted. */
   version: number | null
+}
+
+// ── the editor (GRP-04) ───────────────────────────────────────────────
+
+/**
+ * An unsaved contact as an import fills it: what the editor shows before
+ * anything is saved (`contacts.create` takes it as it is).
+ */
+export interface ContactDraft {
+  name: string
+  intro: string
+  domains: Domain[]
+  role: RoleCard
+  capabilities: Capabilities
+  groupHabit: GroupHabit
+}
+
+/**
+ * The editor's contact as the trial bench and the prompt preview take it:
+ * create's fields, all optional, plus the id of the saved contact being
+ * edited (its memory comes along; it is never changed).
+ */
+export interface ContactDraftInput extends Partial<Omit<ContactInput, 'name'>> {
+  id?: ContactId
+  name?: string
+}
+
+/** The compiled prompt of a draft, exactly as a session would get it. */
+export interface ContactPreview {
+  /** The persona section the draft's sessions run with. */
+  prompt: string
+  /** Characters of {@link prompt}, as the user counts them. */
+  chars: number
+  /** The tools the draft sees; null: not narrowed (Emperor, external contacts). */
+  tools: string[] | null
+  /** Each preset's tools as this install has them. */
+  presets: Record<ToolPreset, string[]>
+}
+
+/** One trial bench run (`contacts.trial`). */
+export interface ContactTrialResult {
+  trialId: string
+  /** `stopped`: the user stopped it or closed the editor. */
+  status: 'completed' | 'stopped' | 'failed'
+  /** The contact's answer; what went wrong when it failed. */
+  text: string
+  /** In USD; null when a call's price is unknown. */
+  costUsd: number | null
+  usage: { inputTokens: number; outputTokens: number }
+  durationMs: number
+  /** When it finished (epoch ms). */
+  at: number
 }
