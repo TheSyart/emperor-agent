@@ -421,6 +421,12 @@ describe('pinned sessions', () => {
       normalizeSidebarState({ collapsed_sections: 'projects' } as never)
         .collapsed_sections,
     ).toEqual([])
+    // MOD-03: the Chat day sections fold one by one.
+    expect(
+      normalizeSidebarState({
+        collapsed_sections: ['chats.yesterday', 'chats.older', 'chats.later'],
+      } as never).collapsed_sections,
+    ).toEqual(['chats.yesterday', 'chats.older'])
   })
 
   it('keeps the pins through a partial patch merged onto the full state', async () => {

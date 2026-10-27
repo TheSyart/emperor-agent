@@ -447,6 +447,11 @@ const SECTION_KEYS: readonly SidebarSectionKey[] = [
   'pinned',
   'projects',
   'chats',
+  'chats.today',
+  'chats.yesterday',
+  'chats.week',
+  'chats.month',
+  'chats.older',
 ]
 
 /** Folded sections like Core: known keys only, each once (BUG-06). */
@@ -497,7 +502,7 @@ export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
   return next
 }
 
-// ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早） ──
+// ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早；MOD-03 起是 Chat 的分区标题） ──
 
 /**
  * Move `id` one step among `visible` (the rows on screen, a subset of `ids`
@@ -559,21 +564,33 @@ export function sidebarDayKey(
 }
 
 /**
- * Split an already-sorted session list into consecutive day groups by
- * `updated_at`. Order inside and across groups follows the input (the
- * sidebar sort), so a manual order stays intact — groups only break where
- * the bucket changes.
+ * Split an already-sorted session list into day groups by `by` (the field
+ * the list is sorted by; `updated_at` by default). Order inside and across
+ * groups follows the input. Each bucket is one Chat section heading
+ * (MOD-03), so it appears once: a stray session of an earlier bucket (an
+ * odd timestamp) joins that group.
  */
 export function groupSessionsByDay(
   sessions: SessionInfo[],
   now: number = Date.now(),
+  by: 'updated_at' | 'created_at' = 'updated_at',
 ): SidebarDayGroup[] {
   const groups: SidebarDayGroup[] = []
+  const byKey = new Map<SidebarDayGroup['key'], SidebarDayGroup>()
   for (const session of sessions) {
-    const key = sidebarDayKey(session.updated_at || session.created_at, now)
-    const last = groups.at(-1)
-    if (last && last.key === key) last.sessions.push(session)
-    else groups.push({ key, label: DAY_GROUP_LABELS[key], sessions: [session] })
+    const stamp =
+      by === 'created_at'
+        ? session.created_at || session.updated_at
+        : session.updated_at || session.created_at
+    const key = sidebarDayKey(stamp, now)
+    const group = byKey.get(key)
+    if (group) {
+      group.sessions.push(session)
+      continue
+    }
+    const created = { key, label: DAY_GROUP_LABELS[key], sessions: [session] }
+    byKey.set(key, created)
+    groups.push(created)
   }
   return groups
 }

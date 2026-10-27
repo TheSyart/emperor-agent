@@ -73,7 +73,7 @@ describe('every session list goes through the mode filter (MOD-01 11)', () => {
     const root = read('components/sidebar/SidebarRoot.vue')
     // Day groups only ever split the already filtered 对话 list.
     for (const match of root.matchAll(/groupSessionsByDay\(([^)]*)\)/g))
-      expect(match[1]).toMatch(/^grouped\.value\./)
+      expect(match[1]!.trim()).toMatch(/^grouped\.value\./)
   })
 
   it('content search hits drop sessions nobody lists', () => {

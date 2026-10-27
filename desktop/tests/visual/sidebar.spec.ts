@@ -522,7 +522,10 @@ test('MOD-02 1–2, 6 · the mode switcher by keyboard and pointer', async ({
   await expect(switcher).toHaveText('Emperor Chat')
   await expect(switcher).toBeFocused()
   await expect(switcher.locator('.switcher-dot')).toHaveCount(0)
-  await expect(root.locator('[data-sidebar-section="chats"]')).toBeVisible()
+  // Chat's sessions under their day headings (MOD-03).
+  await expect(
+    root.locator('[data-sidebar-section^="chats"]').first(),
+  ).toBeVisible()
   await expect(root.locator('[data-sidebar-section="projects"]')).toHaveCount(0)
 })
 
