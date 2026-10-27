@@ -9,6 +9,7 @@ import type {
   WireSessionEvent,
 } from '@emperor/core/runtime-contract'
 import type { AssistantBlock } from './types'
+import { modelFailureText } from './failureText'
 
 /** Narrow a raw event to one type. */
 export function isEvent<Type extends SessionEventType>(
@@ -180,6 +181,18 @@ export function contentText(content: readonly ContentBlock[]): string {
 export function failureMessage(failure: LlmFailure): string {
   const status = failure.status === undefined ? '' : ` (${failure.status})`
   return `${failure.message || failure.code}${status}`
+}
+
+/**
+ * A failure as the conversation says it (SET-02): what went wrong and where
+ * to fix it, in Chinese, for the codes Core knows; otherwise the provider's
+ * words with the status, as failureMessage says them. Developer views
+ * (trajectory, request inspection) keep failureMessage.
+ */
+export function userFailureMessage(failure: LlmFailure): string {
+  const said = failure.message || failure.code
+  const text = modelFailureText(failure)
+  return text === said ? failureMessage(failure) : text
 }
 
 /** Safe non-negative integer read. */

@@ -84,7 +84,7 @@ describe('chat assembly over the recorded kernel log', () => {
       maxRetries: 2,
       state: 'started',
       code: 'SERVER',
-      message: 'upstream exploded',
+      message: '模型服务暂时出错了：稍后再试；一直这样可以换一个模型。',
     })
     const compaction = nodeOf(snapshot, 'compaction')
     expect(compaction.data).toMatchObject({

@@ -1,7 +1,7 @@
 // Retry, fallback, turn-level notices (error, max-tokens, task budget, cost
 // cap), hooks and goal mutations.
 import type { ConversationDefinition, ConversationMatch } from '../assembler'
-import { failureMessage, isEvent } from '../events'
+import { isEvent, userFailureMessage } from '../events'
 import type {
   CostCapChatData,
   FallbackChatData,
@@ -32,7 +32,7 @@ function attemptOf(match: ConversationMatch): RetryAttemptView | undefined {
     retry: data.retry,
     delayMs: data.delayMs,
     provider: data.provider,
-    message: failureMessage(data.failure),
+    message: userFailureMessage(data.failure),
     code: data.failure.code,
     state: 'scheduled',
     ...(data.maxRetries === undefined ? {} : { maxRetries: data.maxRetries }),
@@ -136,7 +136,7 @@ export const fallbackDefinition: ConversationDefinition<FallbackChatData> = {
       from: data.from,
       to: data.to,
       trigger: data.trigger,
-      message: failureMessage(data.failure),
+      message: userFailureMessage(data.failure),
       code: data.failure.code,
       time: match.event.time,
     }
@@ -165,7 +165,7 @@ export const turnErrorDefinition: ConversationDefinition<TurnErrorChatData> = {
       turn: event.data.turn,
       seq: event.seq,
       time: event.time,
-      message: failureMessage(failure),
+      message: userFailureMessage(failure),
       code: failure.code,
       ...(failure.status === undefined ? {} : { status: failure.status }),
     }
