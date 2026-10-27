@@ -43,7 +43,8 @@ let container: HTMLDivElement | null = null
 const showToast = vi.fn()
 const showError = vi.fn()
 const setDesktopPetEnabled = vi.fn(async () => {})
-const pet = ref({ enabled: false, running: false })
+const setDesktopPetOutfit = vi.fn(async () => {})
+const pet = ref({ enabled: false, running: false, outfit: 'daily' })
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve()
@@ -60,6 +61,7 @@ async function mount(): Promise<HTMLDivElement> {
     showToast,
     showError,
     setDesktopPetEnabled,
+    setDesktopPetOutfit,
     runSafely: async (task: () => Promise<void>) => await task(),
   } as never)
   app.mount(container)
@@ -142,6 +144,21 @@ describe('GeneralSection main page (UI-S07)', () => {
     petSwitch?.click()
     await settle()
     expect(setDesktopPetEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it('dresses the pet in one of three outfits, everyday first (BRD-04)', async () => {
+    const root = await mount()
+    const outfits = root.querySelector('[aria-label="桌宠的衣服"]')!
+    const options = [...outfits.querySelectorAll<HTMLElement>('[role="radio"]')]
+    expect(options.map((option) => option.textContent?.trim())).toEqual([
+      '日常版',
+      '龙袍混搭',
+      '原版',
+    ])
+    expect(options[0]!.getAttribute('aria-checked')).toBe('true')
+    options[1]!.click()
+    await settle()
+    expect(setDesktopPetOutfit).toHaveBeenCalledWith('robe')
   })
 
   it('has 显示轨迹 and 显示系统步骤 under 开发者, both off by default', async () => {

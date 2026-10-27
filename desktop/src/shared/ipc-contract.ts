@@ -802,6 +802,8 @@ export type ScreenshotCaptureResult =
 export const PET_OPEN_CHANNEL = 'emperor:pet:open'
 export const PET_CLOSE_CHANNEL = 'emperor:pet:close'
 export const PET_STATUS_REQUEST_CHANNEL = 'emperor:pet:status'
+/** Main window → main: dress the pet (BRD-04), open or not. */
+export const PET_OUTFIT_CHANNEL = 'emperor:pet:outfit'
 /**
  * Pet window → main (src/pet/preload.js keeps these strings literally: it is
  * plain sandboxed JS; pet-sandbox.test.ts checks they match).

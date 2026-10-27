@@ -1,6 +1,10 @@
 import type { ViewScope } from '../../harness/host/scope'
 import { resolve } from 'node:path'
-import { loadLocalConfig, saveLocalConfig } from '../../config/local-config'
+import {
+  loadLocalConfig,
+  saveLocalConfig,
+  type PetOutfit,
+} from '../../config/local-config'
 
 export interface CoreDesktopPetServiceDeps {
   stateRoot?: string | null
@@ -10,6 +14,8 @@ export interface CoreDesktopPetServiceDeps {
 export interface CoreDesktopPetPayload {
   enabled: boolean
   autoStartWithWebui: boolean
+  /** What the pet wears (BRD-04). */
+  outfit: PetOutfit
   running: boolean
   pid: number | null
   lastError: string | null
@@ -35,6 +41,7 @@ export class CoreDesktopPetService {
     return {
       enabled: config.desktopPet.enabled,
       autoStartWithWebui: config.desktopPet.autoStartWithWebui,
+      outfit: config.desktopPet.outfit,
       // Compatibility fields only. Electron main is the sole runtime window
       // authority and overlays its live status for renderer consumers.
       running: false,
@@ -51,6 +58,19 @@ export class CoreDesktopPetService {
     _view: ViewScope,
   ): Promise<CoreDesktopPetPayload> {
     return this.setEnabledInner(enabled)
+  }
+
+  /** Dress the pet (BRD-04); main tells an open pet window itself. */
+  async setOutfit(
+    outfit: PetOutfit,
+    _view: ViewScope,
+  ): Promise<CoreDesktopPetPayload> {
+    const config = await loadLocalConfig(this.stateRoot)
+    await saveLocalConfig(this.stateRoot, {
+      ...config,
+      desktopPet: { ...config.desktopPet, outfit },
+    })
+    return this.get()
   }
 
   private async setEnabledInner(

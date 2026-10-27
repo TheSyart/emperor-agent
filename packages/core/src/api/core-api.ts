@@ -131,7 +131,7 @@ import type { GroupEventMap } from '../groups/events'
 import type { GroupScheduler } from '../groups/scheduler'
 import { installGroupRuntime } from './services/group-runtime'
 import { CoreGroupDefaultsService } from './services/group-defaults-service'
-import type { GroupPreferences } from '../config/local-config'
+import type { GroupPreferences, PetOutfit } from '../config/local-config'
 import {
   GroupError,
   GroupService,
@@ -4287,6 +4287,8 @@ export class CoreApi {
     get: async () => this.desktopPetService.get(),
     setEnabled: (enabled: boolean, view: ViewScope) =>
       this.desktopPetService.setEnabled(enabled, view),
+    setOutfit: (outfit: PetOutfit, view: ViewScope) =>
+      this.desktopPetService.setOutfit(outfit, view),
   }
 
   /** The user's own built-in browser (not the Agent's). */

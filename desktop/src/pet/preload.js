@@ -6,6 +6,7 @@ function argValue(prefix) {
 }
 
 const assetBaseUrl = argValue('--emperor-asset-base-url=')
+const outfit = argValue('--emperor-pet-outfit=')
 const PET_EVENT_CHANNEL = 'emperor:pet:event'
 const IPC_QUEUE_MAX = 500
 const ipcEventQueue = []
@@ -16,6 +17,7 @@ ipcRenderer.on(PET_EVENT_CHANNEL, (_event, payload) => {
 
 contextBridge.exposeInMainWorld('emperorPet', {
   assetBaseUrl,
+  outfit,
   readBootstrap: () => ipcRenderer.invoke('emperor:pet:renderer-bootstrap'),
   readPetEvents: async () => {
     if (!ipcEventQueue.length) return []

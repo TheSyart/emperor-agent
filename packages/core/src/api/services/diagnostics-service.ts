@@ -381,6 +381,7 @@ function desktopPetPayload(
   return {
     enabled: Boolean(value?.enabled),
     autoStartWithWebui: Boolean(value?.autoStartWithWebui),
+    outfit: value?.outfit ?? 'daily',
     running: Boolean(value?.running),
     pid: typeof value?.pid === 'number' ? value.pid : null,
     lastError: typeof value?.lastError === 'string' ? value.lastError : null,

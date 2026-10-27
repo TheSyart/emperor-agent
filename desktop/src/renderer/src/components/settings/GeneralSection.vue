@@ -30,7 +30,11 @@ import {
   useUiPreferences,
   type ProcessDisplay,
 } from '../../composables/useUiPreferences'
-import type { DeletedSessionInfo, SessionInfo } from '../../types'
+import type {
+  DeletedSessionInfo,
+  DesktopPetOutfit,
+  SessionInfo,
+} from '../../types'
 import { composerModeOptions } from '../chat/composerControls'
 import Button from '../ui/Button.vue'
 import { confirm } from '../ui/confirm'
@@ -114,6 +118,27 @@ function setPet(next: boolean): void {
     })
     .finally(() => {
       petBusy.value = false
+    })
+}
+
+/** The pet's outfits (BRD-04): everyday by default. */
+const PET_OUTFITS: SegmentedOption<DesktopPetOutfit>[] = [
+  { value: 'daily', label: '日常版' },
+  { value: 'robe', label: '龙袍混搭' },
+  { value: 'original', label: '原版' },
+]
+const petOutfit = computed<DesktopPetOutfit>(() => pet.value?.outfit ?? 'daily')
+const outfitBusy = ref(false)
+
+function dressPet(next: DesktopPetOutfit): void {
+  if (outfitBusy.value || next === petOutfit.value) return
+  outfitBusy.value = true
+  void ctx
+    .runSafely(async () => {
+      await ctx.setDesktopPetOutfit(next)
+    })
+    .finally(() => {
+      outfitBusy.value = false
     })
 }
 
@@ -395,6 +420,16 @@ onMounted(() => void loadPermission())
             aria-label="主题"
             @update:model-value="
               (value?: ThemePreference) => value && theme.set(value)
+            "
+          />
+        </SettingsRow>
+        <SettingsRow title="桌宠的衣服">
+          <Segmented
+            :model-value="petOutfit"
+            :options="PET_OUTFITS"
+            aria-label="桌宠的衣服"
+            @update:model-value="
+              (value?: DesktopPetOutfit) => value && dressPet(value)
             "
           />
         </SettingsRow>

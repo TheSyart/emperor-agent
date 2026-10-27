@@ -47,4 +47,35 @@ describe('CoreDesktopPetService', () => {
       '"enabled": false',
     )
   })
+
+  it('keeps the outfit the pet wears: everyday by default, then the one picked (BRD-04)', async () => {
+    const root = tmp('emperor-pet-outfit-')
+    const stateRoot = tmp('emperor-pet-outfit-state-')
+    const service = new CoreDesktopPetService(root, { stateRoot })
+
+    expect((await service.get()).outfit).toBe('daily')
+    expect((await service.setOutfit('robe', VIEW)).outfit).toBe('robe')
+    expect((await service.get()).outfit).toBe('robe')
+    // Turning the pet on or off keeps its outfit.
+    await service.setEnabled(true, VIEW)
+    expect((await service.get()).outfit).toBe('robe')
+    expect((await service.setOutfit('original', VIEW)).outfit).toBe('original')
+    expect(readFileSync(join(stateRoot, 'settings.json'), 'utf8')).toContain(
+      '"outfit": "original"',
+    )
+  })
+
+  it('reads an outfit it does not know as everyday', async () => {
+    const stateRoot = tmp('emperor-pet-outfit-bad-')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(
+      join(stateRoot, 'settings.json'),
+      JSON.stringify({ desktopPet: { enabled: true, outfit: 'penguin' } }),
+    )
+    const service = new CoreDesktopPetService(stateRoot, { stateRoot })
+    expect(await service.get()).toMatchObject({
+      enabled: true,
+      outfit: 'daily',
+    })
+  })
 })

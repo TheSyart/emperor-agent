@@ -11,6 +11,7 @@ import type {
   ControlInteraction,
   CompactResult,
   MemoryVersionDetail,
+  DesktopPetOutfit,
   DesktopPetPayload,
   PendingState,
   QueuedPromptItem,
@@ -79,6 +80,8 @@ export interface AppContext {
   saveWatchlist: (content: string) => Promise<void>
   checkWatchlist: () => Promise<WatchlistDecision>
   setDesktopPetEnabled: (enabled: boolean) => Promise<DesktopPetPayload>
+  /** Dress the pet (BRD-04): saved in Core, an open pet changes at once. */
+  setDesktopPetOutfit: (outfit: DesktopPetOutfit) => Promise<void>
 
   setPermissionMode: (
     preset: PermissionPreset,

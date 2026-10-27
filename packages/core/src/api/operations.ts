@@ -3,7 +3,7 @@ import {
   EXTERNAL_HISTORY_ACCESS,
   EXTERNAL_SITE_DECISIONS,
 } from '../harness/computer-use/external-site-rules'
-import { validDownloadDirectory } from '../config/local-config'
+import { PET_OUTFITS, validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
 import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
@@ -1863,6 +1863,12 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([z.boolean()]),
     (api, [enabled], ctx) =>
       api.desktopPet.setEnabled(enabled, viewOf(ctx, 'desktopPet.setEnabled')),
+  ),
+  // BRD-04: what the pet wears (everyday, robe or the original).
+  'desktopPet.setOutfit': operation(
+    z.tuple([z.enum(PET_OUTFITS)]),
+    (api, [outfit], ctx) =>
+      api.desktopPet.setOutfit(outfit, viewOf(ctx, 'desktopPet.setOutfit')),
   ),
   'diagnostics.get': operation(z.tuple([]), (api, _args, ctx) =>
     api.diagnostics.get(viewOf(ctx, 'diagnostics.get')),

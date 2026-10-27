@@ -117,10 +117,35 @@
     return null
   }
 
+  /**
+   * The pet's outfits (BRD-04): each a folder of the same strips under
+   * assets/desktop-pet, its files named `<prefix>-<action>.webp`.
+   */
+  const PET_OUTFITS = ['daily', 'robe', 'original']
+  const OUTFIT_FOLDERS = {
+    daily: { folder: 'xiaodan-daily', prefix: 'daily' },
+    robe: { folder: 'xiaodan-robe', prefix: 'robe' },
+    original: { folder: 'xiaodan', prefix: 'xiaodan' },
+  }
+
+  /** Where a strip of an outfit lives; an unknown outfit wears everyday. */
+  function stripPath(outfit, sprite) {
+    const { folder, prefix } = OUTFIT_FOLDERS[outfit] || OUTFIT_FOLDERS.daily
+    return `${folder}/${sprite.file.replace(/^xiaodan-/, `${prefix}-`)}`
+  }
+
   /** The strip an animation key plays; unknown keys fall back to idle. */
   function spriteFor(animation) {
     return SPRITES[ASSETS[animation]] || SPRITES[ASSETS.idle]
   }
 
-  return { ASSETS, SPRITES, SPRITE_FRAME, spriteFor, mapPetEvent }
+  return {
+    ASSETS,
+    SPRITES,
+    SPRITE_FRAME,
+    PET_OUTFITS,
+    spriteFor,
+    stripPath,
+    mapPetEvent,
+  }
 })

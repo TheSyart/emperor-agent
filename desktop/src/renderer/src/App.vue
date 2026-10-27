@@ -160,6 +160,7 @@ const {
   saveWatchlist,
   checkWatchlist,
   setDesktopPetEnabled,
+  setDesktopPetOutfit,
 } = bootstrap
 
 const runtime = useRuntime({
@@ -849,6 +850,7 @@ provideAppContext({
   saveWatchlist,
   checkWatchlist,
   setDesktopPetEnabled,
+  setDesktopPetOutfit,
   setPermissionMode,
   activatePlan,
   activateGoalCapture,
