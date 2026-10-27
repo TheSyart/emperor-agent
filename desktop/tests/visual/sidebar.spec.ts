@@ -348,8 +348,6 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await expect(chevron('pinned')).toHaveCSS('opacity', '0')
     await shot(page, `sections-open-${theme}`)
-    await section('projects').locator('.section-header').hover()
-    await expectBaseline(root, 'shell', `sidebar-sections-open-${theme}`)
 
     // Folded: 置顶's row goes, its chevron stays, pointing right.
     await label('pinned').click()
@@ -361,7 +359,51 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(chevron('pinned')).toHaveCSS('transform', 'none')
     await expect(chevron('projects')).toHaveCSS('opacity', '0')
     await shot(page, `sections-folded-${theme}`)
-    await expectBaseline(root, 'shell', `sidebar-sections-folded-${theme}`)
+
+    // One baseline holds both chevrons (MOD-05 merged the open and the
+    // folded images): 置顶 folded, pointing right; 项目 hovered, pointing
+    // down.
+    await section('projects').locator('.section-header').hover()
+    await expect(chevron('projects')).toHaveCSS('opacity', '1')
+    await expect(chevron('projects')).toHaveCSS(
+      'transform',
+      'matrix(0, 1, -1, 0, 0, 0)',
+    )
+    await expect(chevron('pinned')).toHaveCSS('opacity', '1')
+    await expectBaseline(root, 'shell', `sidebar-sections-${theme}`)
+  })
+
+  // MOD-05: the Group sidebar (⌘3) — 「Emperor Group ▾」, 新建群聊 still to
+  // come beside 新建联系人, the section's placeholder until GRP-05, and the
+  // footer without Pull Request. The sidebar alone: Group has no page of its
+  // own yet, so the centre still shows the Build session.
+  test(`MOD-05 · the Group sidebar (${theme}) @baseline`, async ({ page }) => {
+    await open(page, '/chat/build-ui', { theme })
+    const root = sidebar(page)
+    await page.keyboard.press('ControlOrMeta+3')
+    await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
+    await expect(root.locator('.session-row')).toHaveCount(0)
+    expect(
+      await root
+        .locator('[data-sidebar-section]')
+        .evaluateAll((els) =>
+          els.map((el) => (el as HTMLElement).dataset.sidebarSection),
+        ),
+    ).toEqual(['group'])
+    const nav = root.getByRole('navigation', { name: '侧栏导航' })
+    await expect(nav.getByRole('button', { name: '新建群聊' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await expect(nav.getByRole('button', { name: '新建联系人' })).toBeVisible()
+    const footer = root.locator('[data-sidebar-block="footer"]')
+    await expect(
+      footer.getByRole('button', { name: 'Pull Request' }),
+    ).toHaveCount(0)
+    for (const label of ['定时任务', '能力'])
+      await expect(footer.getByRole('button', { name: label })).toBeVisible()
+    await shot(page, `group-${theme}`)
+    await expectBaseline(root, 'shell', `sidebar-group-${theme}`)
   })
 
   test(`pinned section, per mode (${theme})`, async ({ page }) => {

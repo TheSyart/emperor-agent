@@ -383,7 +383,9 @@ async function openBuildSession(
           filePaths: [dir],
         })) as typeof dialog.showOpenDialog
       }, project)
-      // UI-S01: projects are opened from the 项目 header's 「+」 menu.
+      // UI-S01: projects are opened from the 项目 header's 「+」 menu, a
+      // Build section (MOD-02); a fresh home starts in Chat.
+      await page.keyboard.press('ControlOrMeta+2')
       await page.getByRole('button', { name: '项目操作' }).click()
       await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
       await page.getByLabel('消息输入框').first().waitFor({ timeout: 10_000 })
@@ -2638,6 +2640,8 @@ async function startPageWithoutSessions(model: FakeModel): Promise<void> {
             filePaths: [dir],
           })) as typeof dialog.showOpenDialog
         }, project)
+        // 项目 is a Build section (MOD-02): the start page is Chat's.
+        await page.keyboard.press('ControlOrMeta+2')
         await page.getByRole('button', { name: '项目操作' }).click()
         await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
         await until(

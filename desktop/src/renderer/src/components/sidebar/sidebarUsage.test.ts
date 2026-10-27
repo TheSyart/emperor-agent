@@ -108,12 +108,15 @@ describe('sidebar nav', () => {
   it('makes the brand row the mode switcher and keeps the footer theme toggle (MOD-02)', () => {
     const brand = source('SidebarBrandRow.vue')
     const switcher = source('ModeSwitcher.vue')
+    const menu = source('ModeMenu.vue')
     const footer = source('SidebarFooter.vue')
     expect(brand).toContain('<ModeSwitcher')
-    // The switcher's menu is the shared primitive, its rows radio items.
-    expect(switcher).toContain('<Menu')
+    // The switcher's menu (its own chunk since MOD-05) is the shared
+    // primitive, its rows radio items.
+    expect(switcher).toContain('<ModeMenu')
     expect(switcher).toContain('aria-haspopup="menu"')
-    expect(switcher).toContain('radio')
+    expect(menu).toContain('<Menu')
+    expect(menu).toContain('radio')
     expect(footer).toContain('useTheme()')
     expect(footer).toContain('@click="toggle()"')
     expect(footer).not.toContain('openExternal')

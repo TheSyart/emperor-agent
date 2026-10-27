@@ -561,6 +561,8 @@ it('MOD-02 · the brand row switches modes through the controller', async () => 
   )!
   expect(switcher.getAttribute('aria-label')).toBe('Emperor Chat')
   switcher.click()
+  // The menu is its own chunk (MOD-05), fetched on the first open.
+  await vi.dynamicImportSettled()
   await settle()
   ;[...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
     .find((el) => el.textContent?.includes('Build'))!

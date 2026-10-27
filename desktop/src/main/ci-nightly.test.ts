@@ -56,6 +56,7 @@ describe('the nightly plan (REL-04 test 3)', () => {
       'e2e:renderer-security',
       'e2e:diagnostics',
       'e2e:updates',
+      'e2e:modes',
       'e2e:real',
       'e2e:references-real',
       'external-agents',
