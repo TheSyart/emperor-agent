@@ -110,7 +110,10 @@ function tokenTable(value: unknown): Record<string, string> | null {
   return out
 }
 
-/** A view that passes main's shapes, or null (fall back to no skin). */
+/**
+ * A cached view that passes main's shapes (tokens, exempt values, font,
+ * slot addresses), or null: no skin until main answers.
+ */
 export function sanitizeSkinView(raw: unknown): SkinView | null {
   if (!raw || typeof raw !== 'object') return null
   const v = raw as Record<string, unknown>
@@ -139,39 +142,19 @@ export function sanitizeSkinView(raw: unknown): SkinView | null {
     if (typeof url !== 'string' || !SLOT_URL.test(url)) return null
     slots[slot] = url
   }
+  // What SkinHost paints; the 皮肤 page reads the rest from main.
   return {
     id,
     name: text(v.name, 40) || id,
-    author: text(v.author, 60) ?? '',
-    license: text(v.license, 60) ?? '',
-    description: text(v.description, 120) ?? '',
+    author: '',
+    license: '',
+    description: '',
     official: v.official === true,
     base,
     tokens,
     reset,
     fonts: { heading },
     slots,
-    preview: previewOf(v.preview),
+    preview: {},
   }
-}
-
-const TRIPLET = /^\d{1,3} \d{1,3} \d{1,3}$/
-const SWATCH_KEYS = ['canvas', 'base', 'raised', 'text1', 'text2', 'brand']
-
-function previewOf(value: unknown): SkinView['preview'] {
-  const out: SkinView['preview'] = {}
-  const raw = (value ?? {}) as Record<string, unknown>
-  for (const theme of ['light', 'dark'] as const) {
-    const swatch = raw[theme] as Record<string, unknown> | undefined
-    if (
-      swatch &&
-      SWATCH_KEYS.every(
-        (key) => typeof swatch[key] === 'string' && TRIPLET.test(swatch[key]),
-      )
-    )
-      out[theme] = Object.fromEntries(
-        SWATCH_KEYS.map((key) => [key, swatch[key]]),
-      ) as unknown as SkinSwatch
-  }
-  return out
 }

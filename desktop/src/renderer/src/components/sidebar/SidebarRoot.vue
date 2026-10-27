@@ -773,6 +773,7 @@ defineExpose({ focusSearch })
       </div>
     </div>
 
+    <!-- A skin's picture at the foot (BRD-05), left out on short windows. -->
     <SkinSlot name="sidebarFooter" class="sidebar-skin" />
     <SidebarFooter data-sidebar-block="footer" />
 
@@ -844,7 +845,6 @@ defineExpose({ focusSearch })
 </template>
 
 <style scoped>
-/* A skin's picture at the foot (BRD-05), left out on short windows. */
 .sidebar-skin {
   flex: none;
   align-self: flex-start;
