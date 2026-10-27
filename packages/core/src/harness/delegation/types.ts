@@ -417,7 +417,11 @@ export interface DelegationOwner {
   requiredForGoal: boolean
   parentCallId?: string
   depth: number
-  source: 'human' | 'model' | 'workflow' | 'scheduler'
+  /**
+   * group: a Claude Code or Codex member speaking in a group (GRP-09); the
+   * group scheduler waits for the run, so it never wakes the member session.
+   */
+  source: 'human' | 'model' | 'workflow' | 'scheduler' | 'group'
 }
 export interface DelegationStart {
   backend: ExternalBackend

@@ -413,7 +413,11 @@ export class ContactStore {
           intro: template.intro,
           domains: template.domains,
           role: structuredClone(template.role),
-          groupHabit: { speak: template.speak, length: 'brief' },
+          // An external member speaks when @-mentioned (GRP-09): slower, dearer runs.
+          groupHabit: {
+            speak: backend ? 'mentioned' : template.speak,
+            length: 'brief',
+          },
           templateId: template.id,
         },
         state,
@@ -447,7 +451,11 @@ export class ContactStore {
         kind === 'external'
           ? { ...structuredClone(EXTERNAL_CAPABILITIES), ...input.capabilities }
           : { ...DEFAULT_CAPABILITIES, ...input.capabilities },
-      groupHabit: { ...DEFAULT_GROUP_HABIT, ...input.groupHabit },
+      groupHabit: {
+        ...DEFAULT_GROUP_HABIT,
+        ...(input.kind === 'external' ? { speak: 'mentioned' as const } : {}),
+        ...input.groupHabit,
+      },
       memory: input.memory ?? { enabled: true },
       version: 1,
       ...(input.templateId !== undefined

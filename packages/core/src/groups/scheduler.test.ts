@@ -561,3 +561,123 @@ describe('the end of a turn', () => {
     expect(r.speeches).toHaveLength(1)
   })
 })
+
+describe('external members and code changes (GRP-09)', () => {
+  const members = ['ct-emperor', 'ct-arch', 'ct-codex']
+
+  it('a member’s worktree task for Claude Code or Codex waits for the user', async () => {
+    const r = room({
+      members,
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.member === 'ct-arch') {
+          s.assign(r.view.id, 'ct-arch', {
+            to: 'ct-codex',
+            title: '修溢出',
+            deliverable: '改好的代码',
+            access: 'isolated_worktree',
+          })
+          return { text: '' }
+        }
+        return { text: 'Codex 改好了' }
+      },
+    })
+    await r.send({ way: 'mention', text: '@架构师 安排一下' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-arch'])
+    const task = [...r.groups.service.state(r.view.id).tasks.values()][0]!
+    expect(task.state).toBe('waiting_user')
+    expect(r.said().at(-1)).toMatch(/system:system:.*Codex.*独立的工作树.*确认/)
+
+    await r.scheduler.confirmTask(r.view.id, task.taskId, true)
+    const confirmed = r.speeches.at(-1)!
+    expect([confirmed.member, confirmed.reason]).toEqual(['ct-codex', 'task'])
+    expect(confirmed.task).toMatchObject({ confirmed: true })
+    expect(
+      [...r.groups.service.state(r.view.id).tasks.values()][0]!.state,
+    ).toBe('done')
+  })
+
+  it('a declined task is cancelled and nobody runs it', async () => {
+    const r = room({
+      members,
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.member === 'ct-arch')
+          s.assign(r.view.id, 'ct-arch', {
+            to: 'ct-codex',
+            title: '修溢出',
+            deliverable: '代码',
+            access: 'isolated_worktree',
+          })
+        return { text: '' }
+      },
+    })
+    await r.send({ way: 'mention', text: '@架构师 安排一下' })
+    const task = [...r.groups.service.state(r.view.id).tasks.values()][0]!
+    await r.scheduler.confirmTask(r.view.id, task.taskId, false)
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-arch'])
+    expect(
+      [...r.groups.service.state(r.view.id).tasks.values()][0]!.state,
+    ).toBe('cancelled')
+    await expect(
+      r.scheduler.confirmTask(r.view.id, task.taskId, true),
+    ).rejects.toThrow(/不在等你确认/)
+  })
+
+  it('the user’s own worktree task runs at once, confirmed', async () => {
+    const r = room({ members, settings: { summarizeAtEnd: false } })
+    await r.send({
+      way: 'task',
+      to: 'ct-codex',
+      text: '修一下',
+      task: {
+        title: '修溢出',
+        deliverable: '代码',
+        access: 'isolated_worktree',
+      },
+    })
+    expect(r.speeches.at(-1)!.task).toMatchObject({ confirmed: true })
+  })
+
+  it('a read-only task for an external member needs no confirmation', async () => {
+    const r = room({
+      members,
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.member === 'ct-arch')
+          s.assign(r.view.id, 'ct-arch', {
+            to: 'ct-codex',
+            title: '审一下',
+            deliverable: '意见',
+            access: 'readonly',
+          })
+        return { text: '' }
+      },
+    })
+    await r.send({ way: 'mention', text: '@架构师 安排一下' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-arch', 'ct-codex'])
+  })
+
+  it('an external member’s task result carries its result card', async () => {
+    const r = room({
+      members,
+      settings: { summarizeAtEnd: false },
+      script: (req) =>
+        req.reason === 'task'
+          ? { text: '改好了', delegation: { id: 'dlg-1', runId: 'dgr-1' } }
+          : {},
+    })
+    await r.send({
+      way: 'task',
+      to: 'ct-codex',
+      text: '修一下',
+      task: {
+        title: '修溢出',
+        deliverable: '代码',
+        access: 'isolated_worktree',
+      },
+    })
+    const result = r.messages().find((m) => m.kind === 'result')!
+    expect(result.delegation).toEqual({ id: 'dlg-1', runId: 'dgr-1' })
+  })
+})

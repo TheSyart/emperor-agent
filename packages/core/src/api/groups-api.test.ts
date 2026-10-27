@@ -11,6 +11,7 @@ import { makeApi, tmp, type ApiFixture } from './test-helpers'
 
 const GROUP_OPERATIONS = [
   'groups.addMember',
+  'groups.confirmTask',
   'groups.create',
   'groups.files.list',
   'groups.get',
@@ -175,5 +176,18 @@ describe('groups operations', () => {
     await expect(
       invokeCoreOperation(fixture.api, 'groups.get', [{ id: String(chat.id) }]),
     ).rejects.toMatchObject({ code: 'group_not_found' })
+  })
+
+  it('refuses to confirm a task that is not waiting for the user (GRP-09)', async () => {
+    const fixture = await open()
+    const rev = await reviewer(fixture)
+    const group = await invokeCoreOperation(fixture.api, 'groups.create', [
+      { title: '评审', members: [rev] },
+    ])
+    await expect(
+      invokeCoreOperation(fixture.api, 'groups.confirmTask', [
+        { id: group.id, taskId: 'gt_nope', approve: true },
+      ]),
+    ).rejects.toMatchObject({ code: 'group_invalid' })
   })
 })

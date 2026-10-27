@@ -34,7 +34,8 @@ export function settlementNotice(
   return {
     id: 'dgn-' + run.id,
     recipient:
-      run.generation === 1 && record.startSpec?.runInBackground === false
+      record.owner.source === 'group' ||
+      (run.generation === 1 && record.startSpec?.runInBackground === false)
         ? 'collector'
         : 'parent',
     runId: run.id,

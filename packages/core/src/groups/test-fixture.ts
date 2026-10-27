@@ -31,6 +31,14 @@ export const TEST_CONTACTS: GroupContact[] = [
     version: 1,
   },
   {
+    id: 'ct-codex',
+    name: 'Codex',
+    intro: '外部',
+    kind: 'external',
+    speak: 'mentioned',
+    version: 1,
+  },
+  {
     id: 'ct-res',
     name: '研究员',
     intro: '调研',

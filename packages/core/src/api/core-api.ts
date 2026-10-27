@@ -131,6 +131,7 @@ import type { GroupEventMap } from '../groups/events'
 import type { GroupScheduler } from '../groups/scheduler'
 import { installGroupRuntime } from './services/group-runtime'
 import {
+  GroupError,
   GroupService,
   type GroupCreateInput,
   type GroupSendInput,
@@ -714,6 +715,7 @@ export class CoreApi {
       sessions: kept.sessionStore,
       groups: this.groupService,
       tokenTracker: kept.tokenTracker,
+      contact: (id) => this.contactStore.peek(id),
     })
     this.contactMemoryService = new CoreContactMemoryService({
       contacts: this.contactStore,
@@ -3603,6 +3605,26 @@ export class CoreApi {
           }),
         )
       return sent
+    },
+    /** The user's yes or no to a member's code-changing task for Claude Code or Codex (GRP-09). */
+    confirmTask: async (input: {
+      id: string
+      taskId: string
+      approve: boolean
+    }) => {
+      await this.contactStore.ready()
+      const waiting = this.groupService.state(input.id).tasks.get(input.taskId)
+      if (waiting?.state !== 'waiting_user')
+        throw new GroupError('这个任务不在等你确认', 'group_invalid')
+      void this.groupScheduler
+        .confirmTask(input.id, input.taskId, input.approve)
+        .catch((error: unknown) =>
+          logger.warn('group task failed', {
+            groupId: input.id,
+            error: String(error),
+          }),
+        )
+      return this.groupService.state(input.id).tasks.get(input.taskId)!
     },
     /** Stop the group's turn: speeches aborted, tasks cancelled. */
     stop: async (input: { id: string }) => {

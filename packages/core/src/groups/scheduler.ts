@@ -45,6 +45,8 @@ export type SpeakReason =
 
 export interface SpeakRequest {
   groupId: string
+  /** The turn it speaks in (an external member's runs are scoped by it). */
+  turnId: string
   member: ContactId
   memberSessionId: string
   /** What was delivered to it, and why it is asked now. */
@@ -52,6 +54,8 @@ export interface SpeakRequest {
   reason: SpeakReason
   /** The moderator deciding who answers: group_next and group_close apply. */
   planning: boolean
+  /** reason 'task': the task it works on. */
+  task?: GroupTask
   signal: AbortSignal
 }
 
@@ -62,6 +66,8 @@ export interface SpeakResult {
   outcome: 'completed' | 'step-limit' | 'cost-cap' | 'error' | 'aborted'
   detail?: string
   spend: { usd: number; tokens: number }
+  /** An external member's task run: its result card (apply / discard). */
+  delegation?: { id: string; runId: string }
 }
 
 export interface HandRaise {
@@ -241,6 +247,59 @@ export class GroupScheduler {
           state: 'cancelled',
         })
     this.turn(run, 'stopped', reason)
+  }
+
+  /**
+   * The user's answer to a task waiting for them (a member asked Claude
+   * Code or Codex to change code): yes runs it now, confirmed; no cancels it.
+   */
+  async confirmTask(
+    groupId: string,
+    taskId: string,
+    approve: boolean,
+  ): Promise<void> {
+    const state = this.deps.groups.state(groupId)
+    const task = state.tasks.get(taskId)
+    if (!task || task.state !== 'waiting_user')
+      throw new Error('这个任务不在等你确认')
+    const source =
+      state.messages.find((m) => m.task?.taskId === taskId)?.id ?? taskId
+    const note = (text: string, turnId: string): GroupMessage => {
+      const message: GroupMessage = {
+        id: this.newId('gm_'),
+        turnId,
+        from: 'system',
+        audience: { kind: 'all' },
+        ask: [],
+        answerMode: 'relay',
+        kind: 'system',
+        text,
+        at: this.now(),
+      }
+      this.deps.groups.append(groupId, 'group/message', message)
+      return message
+    }
+    const running = this.runs.get(groupId)
+    if (!approve) {
+      this.deps.groups.append(groupId, 'group/task', {
+        ...task,
+        state: 'cancelled',
+      })
+      note(
+        `你没有同意「${task.title}」，任务已取消。`,
+        running?.turnId ?? state.turn?.turnId ?? this.newId('gt_'),
+      )
+      return
+    }
+    const confirmed: GroupTask = { ...task, confirmed: true, state: 'queued' }
+    this.deps.groups.append(groupId, 'group/task', confirmed)
+    const item: QueueItem = { kind: 'task', task: confirmed, source }
+    if (running && !running.stopped) {
+      running.queue.push(item)
+      return running.done
+    }
+    const start = note(`你同意了「${task.title}」。`, this.newId('gt_'))
+    return this.start(groupId, start, [item])
   }
 
   /** Turns a restart left open are marked stopped (`app_restart`). */
@@ -627,14 +686,40 @@ export class GroupScheduler {
     )
   }
 
-  private async task(run: Run, task: GroupTask, source: string): Promise<void> {
+  private async task(
+    run: Run,
+    planned: GroupTask,
+    source: string,
+  ): Promise<void> {
     const state = this.deps.groups.state(run.groupId)
+    let task = planned
     if (!state.members.includes(task.to)) {
       this.system(
         run,
         `「${this.name(state, task.to)}」已不在群里，任务「${task.title}」没有交出去。`,
       )
       return
+    }
+    // Claude Code or Codex changing code: only with the user's yes (GRP-09).
+    const target = this.deps.groups.roster(state).find((m) => m.id === task.to)
+    if (
+      target?.external &&
+      task.access === 'isolated_worktree' &&
+      !task.confirmed
+    ) {
+      const assigner = task.chain?.at(-1)
+      if (assigner === undefined) task = { ...task, confirmed: true }
+      else {
+        this.deps.groups.append(run.groupId, 'group/task', {
+          ...task,
+          state: 'waiting_user',
+        })
+        this.system(
+          run,
+          `「${this.name(state, assigner)}」想让「${target.name}」在独立的工作树里改代码：${task.title}。需要你确认：同意后它才开始，改动先给你看再合进项目。`,
+        )
+        return
+      }
     }
     this.deps.groups.append(run.groupId, 'group/task', {
       ...task,
@@ -694,11 +779,13 @@ export class GroupScheduler {
     try {
       result = await this.deps.speak({
         groupId: run.groupId,
+        turnId: run.turnId,
         member,
         memberSessionId: sessionId,
         prompt,
         reason,
         planning: context.planning,
+        ...(opts.task ? { task: opts.task } : {}),
         signal: run.controller.signal,
       })
     } catch (error) {
@@ -744,6 +831,7 @@ export class GroupScheduler {
           kind: opts.task ? 'result' : reason === 'summary' ? 'summary' : 'say',
           text: reply,
           ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+          ...(result.delegation ? { delegation: result.delegation } : {}),
         }),
       )
       if (reason !== 'summary') this.outsiders(run, member, reply, roster)
@@ -901,7 +989,10 @@ export class GroupScheduler {
     run: Run,
     input: Pick<GroupMessage, 'from' | 'audience' | 'ask' | 'kind' | 'text'> &
       Partial<
-        Pick<GroupMessage, 'batchId' | 'replyTo' | 'task' | 'answerMode'>
+        Pick<
+          GroupMessage,
+          'batchId' | 'replyTo' | 'task' | 'answerMode' | 'delegation'
+        >
       >,
   ): GroupMessage {
     const message: GroupMessage = {

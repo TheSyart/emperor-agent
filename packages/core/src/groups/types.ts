@@ -39,6 +39,12 @@ export interface GroupTask {
   state: GroupTaskState
   /** The chain of assigners, oldest first; a task never goes back up it. */
   chain?: ContactId[]
+  /**
+   * The user agreed to it (GRP-09): their own task, or one a member handed
+   * out that they confirmed. Only a confirmed task may change code in an
+   * isolated worktree; any other external run is read-only.
+   */
+  confirmed?: boolean
 }
 
 export interface GroupMessage {
@@ -54,6 +60,8 @@ export interface GroupMessage {
   text: string
   replyTo?: string
   task?: GroupTask
+  /** An external member's task result: the run whose card applies or discards it (GRP-09). */
+  delegation?: { id: string; runId: string }
   /** Epoch milliseconds. */
   at: number
 }
