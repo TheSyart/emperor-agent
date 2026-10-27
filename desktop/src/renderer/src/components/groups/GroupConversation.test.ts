@@ -386,7 +386,6 @@ describe('what members ask of the user, as chat (D29)', () => {
       contactId: 'ct-rev',
       interaction: question,
       answers: { scope: { choice: '登录', freeform: '' } },
-      reply: '登录',
     })
   })
 
@@ -403,19 +402,56 @@ describe('what members ask of the user, as chat (D29)', () => {
     expect(emitted.answer).toHaveBeenCalledWith(
       expect.objectContaining({
         answers: { scope: { choice: '', freeform: '两个都看' } },
-        reply: '两个都看',
       }),
     )
   })
 
-  it('shows what the user answered under the question', async () => {
-    props.asks = [{ contactId: 'ct-rev', interaction: question, reply: '登录' }]
+  it('shows what the user answered as a line the group log keeps (GRP-12)', async () => {
+    const note = (
+      id: string,
+      text: string,
+      over: Partial<NonNullable<GroupHistoryMessage['note']>>,
+    ) =>
+      message(id, 'system', text, {
+        kind: 'system',
+        audience: { kind: 'private', to: 'user' },
+        private: true,
+        note: {
+          id,
+          turnId: 't1',
+          contactId: 'ct-rev',
+          outcome: 'answered',
+          subject: 'question',
+          asked: '先看哪一部分？',
+          reply: '登录',
+          at: 1_750_000_000_100,
+          ...over,
+        },
+      })
+    props.messages = [
+      message('m1', 'user', '@审稿人 看看'),
+      note('ga_1', '你回答了 审稿人 的提问：登录', {}),
+      note('ga_2', '你拒绝了 审稿人 的请求：rm -rf 失败的构建', {
+        outcome: 'denied',
+        subject: 'approval',
+        asked: 'rm -rf 失败的构建',
+        reply: '拒绝',
+      }),
+    ]
     await mount()
-    const ask = document.querySelector<HTMLElement>('[data-group-ask]')!
-    expect(ask.querySelectorAll('[data-reply]')).toHaveLength(0)
-    expect(ask.querySelector('[data-your-reply]')?.textContent).toContain(
-      '登录',
-    )
+    const notes = [
+      ...document.querySelectorAll<HTMLElement>('[data-kind="note"]'),
+    ]
+    expect(notes.map((row) => row.textContent?.trim())).toEqual([
+      '你回答了 审稿人 的提问：登录',
+      '你拒绝了 审稿人 的请求：rm -rf 失败的构建',
+    ])
+    // The question it answered, on hover; never a warning or a button.
+    expect(notes[0]!.getAttribute('title')).toBe('先看哪一部分？')
+    expect(notes[1]!.getAttribute('title')).toBeNull()
+    expect(notes[1]!.dataset.tone).toBeUndefined()
+    expect(notes[1]!.querySelector('button')).toBeNull()
+    expect(document.querySelector('[data-group-ask]')).toBeNull()
   })
 
   it('shows an approval as the member’s message with its decisions', async () => {
@@ -470,7 +506,6 @@ describe('what members ask of the user, as chat (D29)', () => {
           freeform: '',
         },
       },
-      reply: '允许本次',
     })
   })
 

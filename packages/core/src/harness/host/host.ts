@@ -2939,6 +2939,14 @@ export class HarnessHost {
     this.pending.answer(interactionId, answers)
   }
 
+  /** The card a session shows for an interaction (null when it has none). */
+  interactionCard(
+    sessionId: string,
+    interactionId: string,
+  ): Record<string, unknown> | null {
+    return this.projectors.get(sessionId)?.interaction(interactionId) ?? null
+  }
+
   approvePlan(interactionId: string): void {
     this.pending.approvePlan(interactionId)
   }

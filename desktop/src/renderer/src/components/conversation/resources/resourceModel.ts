@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import { restrictAutoLinks } from '../../../composables/linkifyRules'
 import type Token from 'markdown-it/lib/token.mjs'
 import { documentGlyph } from '../../../documentKind'
 
@@ -51,6 +52,8 @@ export interface DisplayResource {
 }
 
 const markdown = new MarkdownIt({ html: false, linkify: true })
+// The same bare names link here as in the chat (GRP-14).
+restrictAutoLinks(markdown)
 const validateLink = markdown.validateLink.bind(markdown)
 markdown.validateLink = (url) => validateLink(url) || url.startsWith('file://')
 const TYPE_LABEL: Record<GitHubResource['type'], string> = {

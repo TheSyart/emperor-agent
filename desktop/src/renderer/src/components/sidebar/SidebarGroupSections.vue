@@ -2,7 +2,9 @@
 /**
  * Group's sections of the sidebar (GRP-05, 预览 A): 群聊, then 联系人. A row
  * is an avatar, a name and one line under it — a group's member count and
- * when it last spoke; a contact's intro (「外部」 for Claude Code and Codex
+ * when it last spoke, or who speaks there now (「架构师 发言中…」, 「架构师
+ * 等 2 人发言中…」) or waits (「排队：研究员」) while a turn runs (GRP-13,
+ * groupLive.ts); a contact's intro (「外部」 for Claude Code and Codex
  * without one). A contact opens its profile, a group its page. The row on
  * screen is marked: the contact of the profile, editor or single chat
  * open, or the group open (its settings and a member's work too). The +
@@ -25,12 +27,18 @@ import { contactAvatarProps } from '../contacts/contactAvatar'
 import { DsPlus } from '../icons/ds'
 import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
+import {
+  groupLiveLine,
+  useGroupLive,
+  type GroupLiveLine,
+} from '../groups/groupLive'
 import { openNewGroupDialog } from '../groups/newGroupDialog'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
 const directory = useContactDirectory()
+const live = useGroupLive()
 const { sessions } = useSession()
 
 const groupsFolded = ref(false)
@@ -69,12 +77,29 @@ function contactLine(contact: Contact): string {
   return contact.kind === 'external' ? '外部' : '还没有简介'
 }
 
-function groupLine(group: GroupSummary): string {
+function memberName(id: string): string {
+  return directory.find(id)?.name ?? '已删除的联系人'
+}
+
+/** Who speaks or waits now; else the member count and the last message. */
+function groupLine(group: GroupSummary): {
+  text: string
+  tone?: GroupLiveLine['tone']
+} {
+  const now = groupLiveLine(live.value[group.id], memberName)
+  if (now) return now
   const when = group.lastMessageAt
     ? sidebarRelativeTime(new Date(group.lastMessageAt).toISOString())
     : '还没有消息'
-  return `${group.memberCount} 人 · ${when}`
+  return { text: `${group.memberCount} 人 · ${when}` }
 }
+
+const groupLines = computed(
+  () =>
+    new Map(
+      directory.groups.value.map((group) => [group.id, groupLine(group)]),
+    ),
+)
 
 function openContact(id: string) {
   void router.push({ name: 'contact', params: { id } }).catch(() => undefined)
@@ -123,7 +148,12 @@ function newContact() {
         </span>
         <span class="two">
           <span class="name">{{ group.title }}</span>
-          <span class="line">{{ groupLine(group) }}</span>
+          <span
+            class="line"
+            :data-tone="groupLines.get(group.id)?.tone"
+            data-group-line
+            >{{ groupLines.get(group.id)?.text }}</span
+          >
         </span>
       </div>
       <div
@@ -255,6 +285,10 @@ function newContact() {
   color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
+}
+
+.line[data-tone='busy'] {
+  color: rgb(var(--info));
 }
 
 .empty {

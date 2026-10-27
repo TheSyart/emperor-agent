@@ -8,12 +8,16 @@ import {
   displayResource,
   trimAutoUrl,
 } from '../components/conversation/resources/resourceModel'
+import { restrictAutoLinks } from './linkifyRules'
 
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
 })
+// A bare name links only when it can only be a web address: 「笔记.md」,
+// notes.md and main.py stay text (GRP-14, linkifyRules.ts).
+restrictAutoLinks(md)
 
 // DOMPurify 默认 URI 白名单；chip 在此基础上额外放行 file:。
 const DEFAULT_URI_REGEXP =

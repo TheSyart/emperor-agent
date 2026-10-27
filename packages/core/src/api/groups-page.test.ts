@@ -3,6 +3,8 @@
 // group starts from while an old one keeps its own; the turn on screen
 // while a member speaks; and a member's question waiting in its own
 // session, answered through control like any other, the speech going on.
+// GRP-13: groups.list says who speaks and who waits in each group, so a
+// window opened mid-turn starts the sidebar from it.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -191,9 +193,71 @@ describe('the group page’s live view (GRP-08)', () => {
     const history = await invokeCoreOperation(fixture.api, 'groups.history', [
       { id: group.id },
     ])
+    // GRP-12: the answer stays in the group log, for the user only.
     expect(history.messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看'],
+      ['system', '你回答了 审稿人 的提问：登录'],
       [rev, '好，先看登录。'],
     ])
+  })
+})
+
+describe('the sidebar’s live line (GRP-13)', () => {
+  it('groups.list says who speaks while a member speaks, and nothing once the turn ends', async () => {
+    const fixture = await open({ replies: [{ hang: true }] })
+    const rev = await reviewer(fixture)
+    const group = await invokeCoreOperation(fixture.api, 'groups.create', [
+      { title: '登录页', members: [rev] },
+    ])
+    const idle = await invokeCoreOperation(fixture.api, 'groups.create', [
+      { title: '周报', members: [rev] },
+    ])
+    expect(
+      (await invokeCoreOperation(fixture.api, 'groups.list', [])).map(
+        (g) => g.live,
+      ),
+    ).toEqual([null, null])
+    const sent = await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'mention', text: '@审稿人 看看' },
+    ])
+    await until(() => fixture.adapter.requests.length > 0)
+    const listed = await invokeCoreOperation(fixture.api, 'groups.list', [])
+    expect(listed.find((g) => g.id === group.id)!.live).toEqual({
+      turnId: sent.message.turnId,
+      state: 'speaking',
+      speakers: [rev],
+      queued: [],
+    })
+    expect(listed.find((g) => g.id === idle.id)!.live).toBeNull()
+    await invokeCoreOperation(fixture.api, 'groups.stop', [{ id: group.id }])
+    await fixture.api.groups.settled(group.id)
+    expect(
+      (await invokeCoreOperation(fixture.api, 'groups.list', [])).find(
+        (g) => g.id === group.id,
+      )!.live,
+    ).toBeNull()
+  })
+
+  it('a restart leaves no one speaking', async () => {
+    const root = tmp('emperor-groups-live-')
+    const stateRoot = join(root, 'home')
+    const first = await open({ stateRoot })
+    const rev = await reviewer(first)
+    const group = await invokeCoreOperation(first.api, 'groups.create', [
+      { title: '登录页', members: [rev] },
+    ])
+    first.api.groupService.append(group.id, 'group/turn', {
+      turnId: 't-open',
+      state: 'speaking',
+      spend: { usd: 0, tokens: 0 },
+    })
+    await first.api.close()
+    fixtures.splice(fixtures.indexOf(first), 1)
+    const again = await open({ stateRoot })
+    expect(
+      (await invokeCoreOperation(again.api, 'groups.list', [])).map(
+        (g) => g.live,
+      ),
+    ).toEqual([null])
   })
 })

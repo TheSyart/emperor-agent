@@ -3,7 +3,13 @@
  * Delivery cursors are derived from `group/delivery` events only, so a
  * restart recovers exactly what each member has already been given.
  */
-import type { ContactId, GroupMessage, GroupSettings, GroupTask } from './types'
+import type {
+  ContactId,
+  GroupAnswerNote,
+  GroupMessage,
+  GroupSettings,
+  GroupTask,
+} from './types'
 
 export interface GroupEventMap {
   'group/created': {
@@ -42,6 +48,11 @@ export interface GroupEventMap {
     reason?: string
     spend: { usd: number; tokens: number }
   }
+  /**
+   * The user answered a member who asked during its speech (GRP-12). For
+   * the user's eyes only: it is not a message, so no member is delivered it.
+   */
+  'group/answer': GroupAnswerNote
 }
 
 export type GroupTurnState =
@@ -78,6 +89,11 @@ export interface GroupState {
   digest: { upTo: string; text: string } | null
   /** The latest turn and its state (null before the first). */
   turn: GroupEventMap['group/turn'] | null
+  /**
+   * The user's answers to members (GRP-12), each with how many messages
+   * came before it, so the user's history shows it where it was given.
+   */
+  answers: { note: GroupAnswerNote; after: number }[]
 }
 
 const DEFAULT_SETTINGS: GroupSettings = {
@@ -101,6 +117,7 @@ export function emptyGroupState(): GroupState {
     tasks: new Map(),
     digest: null,
     turn: null,
+    answers: [],
   }
 }
 
@@ -167,6 +184,12 @@ export function foldGroupEvents(
         break
       case 'group/turn':
         state.turn = { ...event.data }
+        break
+      case 'group/answer':
+        state.answers.push({
+          note: { ...event.data },
+          after: state.messages.length,
+        })
         break
       default:
         break

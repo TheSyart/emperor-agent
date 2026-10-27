@@ -14,8 +14,9 @@
  *   / `plan_draft` (waiting for the user) and the events that settle them.
  *
  * The actions go to Core: send, stop, confirm a task, answer or skip a
- * question, invite a member. An answer given here stays under the
- * question for this window (the group log does not hold it).
+ * question, invite a member. An answered question leaves the room; Core
+ * keeps what the user answered in the group log (GRP-12), so the room
+ * shows it from `groups.history`, after a reopen too.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onCoreEvent } from '../../api/backend'
@@ -71,7 +72,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   const statuses = ref<Record<string, MemberLiveStatus>>({})
   const tools = ref<Record<string, boolean>>({})
   const pending = ref<Record<string, ControlInteraction | null>>({})
-  const answered = ref<GroupAsk[]>([])
   const finished = ref<string[]>([])
   let generation = 0
 
@@ -153,7 +153,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     statuses.value = {}
     tools.value = {}
     pending.value = {}
-    answered.value = []
     finished.value = []
     turn.value = null
     if (!(await readGroup(id, run))) return
@@ -295,16 +294,13 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
         .map((message) => message.task!.to),
     ),
   ])
-  const asks = computed<GroupAsk[]>(() => {
-    const seen = new Set(answered.value.map((ask) => ask.interaction.id))
-    const waiting = Object.entries(pending.value)
-      .filter(
-        (entry): entry is [string, ControlInteraction] =>
-          Boolean(entry[1]) && !seen.has(entry[1]!.id),
+  const asks = computed<GroupAsk[]>(() =>
+    Object.entries(pending.value)
+      .filter((entry): entry is [string, ControlInteraction] =>
+        Boolean(entry[1]),
       )
-      .map(([contactId, interaction]) => ({ contactId, interaction }))
-    return [...answered.value, ...waiting]
-  })
+      .map(([contactId, interaction]) => ({ contactId, interaction })),
+  )
 
   // ── actions ───────────────────────────────────────────────────────────
   async function send(input: GroupSendInput): Promise<boolean> {
@@ -335,12 +331,16 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     }
   }
 
-  async function answer(input: {
-    contactId: string
-    interaction: ControlInteraction
-    answers: Record<string, unknown>
-    reply: string
-  }): Promise<void> {
+  /** A settled question leaves the room; the log's line comes on reload. */
+  function settled(ask: GroupAsk): void {
+    if (pending.value[ask.contactId]?.id === ask.interaction.id)
+      pending.value = { ...pending.value, [ask.contactId]: null }
+    schedule()
+  }
+
+  async function answer(
+    input: GroupAsk & { answers: Record<string, unknown> },
+  ): Promise<void> {
     try {
       await core(
         'control.answerInteraction',
@@ -348,29 +348,16 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
         input.answers,
         {},
       )
-      answered.value = [
-        ...answered.value,
-        {
-          contactId: input.contactId,
-          interaction: input.interaction,
-          reply: input.reply,
-        },
-      ]
-      if (pending.value[input.contactId]?.id === input.interaction.id)
-        pending.value = { ...pending.value, [input.contactId]: null }
+      settled(input)
     } catch (error) {
       options.showError(error, '没有回答成功')
     }
   }
 
-  async function cancelAsk(input: {
-    contactId: string
-    interaction: ControlInteraction
-  }): Promise<void> {
+  async function cancelAsk(input: GroupAsk): Promise<void> {
     try {
       await core('control.cancelInteraction', input.interaction.id)
-      if (pending.value[input.contactId]?.id === input.interaction.id)
-        pending.value = { ...pending.value, [input.contactId]: null }
+      settled(input)
     } catch (error) {
       options.showError(error, '没有取消成功')
     }

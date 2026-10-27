@@ -99,6 +99,30 @@ function message(id: string, from: string, text: string, extra = {}) {
 
 let history: ReturnType<typeof message>[] = []
 
+/** The user's answer as Core keeps it in the group log (GRP-12). */
+function answerNote(
+  id: string,
+  text: string,
+  over: Record<string, unknown> = {},
+) {
+  return message(id, 'system', text, {
+    kind: 'system',
+    audience: { kind: 'private', to: 'user' },
+    private: true,
+    note: {
+      id,
+      turnId: 't1',
+      contactId: 'ct-rev',
+      outcome: 'answered',
+      subject: 'question',
+      asked: '先看哪一部分？',
+      reply: '登录',
+      at: 1_750_000_000_100,
+      ...over,
+    },
+  })
+}
+
 beforeEach(() => {
   events.listeners = []
   resetContactDirectoryForTest()
@@ -148,6 +172,7 @@ beforeEach(() => {
       case 'groups.confirmTask':
         return {}
       case 'control.answerInteraction':
+      case 'control.cancelInteraction':
         return { control: null }
       default:
         throw new Error(`unexpected ${op}`)
@@ -314,16 +339,52 @@ describe('the group page', () => {
       { scope: { choice: '登录', freeform: '' } },
       {},
     )
-    emit({
-      event: 'ask_answered',
-      session_id: 'member-ct-rev',
-      interaction: { id: 'ask_q1' },
-    })
+    // GRP-12: Core keeps the answer in the group log; the page reads it
+    // from there, not from what this window remembers.
+    expect(page().querySelector('[data-group-ask]')).toBeNull()
+    pendingFor = {}
+    history = [...history, answerNote('ga_1', '你回答了 审稿人 的提问：登录')]
+    emit({ event: 'groups_changed', reason: 'message', group_id: 'grp-1' })
+    await new Promise((resolve) => setTimeout(resolve, 120))
     await flush()
-    const answered = page().querySelector<HTMLElement>('[data-group-ask]')!
-    expect(answered.querySelector('[data-your-reply]')?.textContent).toContain(
-      '登录',
-    )
+    expect(
+      page().querySelector('[data-kind="note"]')?.textContent?.trim(),
+    ).toBe('你回答了 审稿人 的提问：登录')
+  })
+
+  it('shows the answers the group log keeps when the page opens again (GRP-12)', async () => {
+    history = [
+      ...history,
+      answerNote('ga_1', '你回答了 审稿人 的提问：登录'),
+      answerNote('ga_2', '你没有回答 架构师 的提问：要不要拆？', {
+        contactId: 'ct-arch',
+        outcome: 'skipped',
+        asked: '要不要拆？',
+        reply: '',
+      }),
+    ]
+    await mount()
+    expect(
+      [...page().querySelectorAll('[data-kind="note"]')].map((row) =>
+        row.textContent?.trim(),
+      ),
+    ).toEqual([
+      '你回答了 审稿人 的提问：登录',
+      '你没有回答 架构师 的提问：要不要拆？',
+    ])
+    expect(page().querySelector('[data-group-ask]')).toBeNull()
+  })
+
+  it('skips a question with 不回答 and drops it from the room', async () => {
+    pendingFor = { 'member-ct-rev': QUESTION }
+    await mount()
+    const ask = page().querySelector<HTMLElement>('[data-group-ask]')!
+    ;[...ask.querySelectorAll<HTMLElement>('button')]
+      .find((button) => button.textContent?.trim() === '不回答')!
+      .click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('control.cancelInteraction', 'ask_q1')
+    expect(page().querySelector('[data-group-ask]')).toBeNull()
   })
 
   it('shows a question that arrives while the page is open, and drops one answered elsewhere', async () => {
