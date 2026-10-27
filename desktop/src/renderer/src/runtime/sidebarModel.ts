@@ -10,6 +10,7 @@ import {
   isListedSession,
   normalizeModeRoutes,
   sessionAppMode,
+  shownSessionTarget,
   type AppMode,
 } from './appMode'
 
@@ -33,10 +34,32 @@ export interface SidebarSearchResult {
   id: string
   title: string
   subtitle: string
-  mode: 'chat' | 'build'
+  /** The mode it opens in, shown as its tag (MOD-04); null: not known. */
+  mode: AppMode | null
   projectName?: string | null
   /** A title match, or a session found by what was said in it (UI-S11). */
   group?: 'title' | 'content'
+  /** The shown session's last change, for the order. */
+  updatedAt?: string
+}
+
+/** One answer of Core's content search (`sessions.search`). */
+export interface ContentSearchHit {
+  sessionId: string
+  title: string
+  role: 'user' | 'assistant'
+  snippet: string
+}
+
+/**
+ * The search results by mode (MOD-04): the current mode's, then the rest
+ * (「其他模式」). Empty sections are left out.
+ */
+export interface SearchSection {
+  key: 'current' | 'other'
+  /** The current mode for `current`; null for `other`. */
+  mode: AppMode | null
+  results: SidebarSearchResult[]
 }
 
 export interface SessionControlPendingTag {
@@ -321,29 +344,124 @@ function projectGroupFromProject(
   }
 }
 
+/** Most search results by title. */
+const SEARCH_TITLE_LIMIT = 12
+
+/**
+ * Sessions whose title, project name or path match, in every mode, each
+ * tagged with the mode it opens in (MOD-04). A hit shows the listed
+ * session it belongs to (shownSessionTarget): a group member's session
+ * shows its group, once; a trial session, a draft or one nobody lists
+ * never shows (MOD-01).
+ */
 export function searchSidebarSessions(
   sessions: SessionInfo[],
   query: string,
 ): SidebarSearchResult[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
-  // Every mode (MOD-04 tags them), never a session nobody lists (MOD-01).
-  return sessions
-    .filter(isListedSession)
-    .filter((session) => searchableText(session).includes(needle))
-    .slice(0, 12)
-    .map((session) => ({
-      id: session.id,
-      title: session.title || '新会话',
-      subtitle: [
-        session.mode === 'build' ? session.project_name : '',
-        sidebarRelativeTime(session.updated_at),
-      ]
-        .filter(Boolean)
-        .join(' · '),
-      mode: session.mode === 'build' ? 'build' : 'chat',
-      projectName: session.project_name,
-    }))
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const seen = new Set<string>()
+  const out: SidebarSearchResult[] = []
+  for (const session of sessions) {
+    if (!searchableText(session).includes(needle)) continue
+    const target = shownSessionTarget(session.id, sessions)
+    const shown = target ? byId.get(target.id) : undefined
+    if (!target?.mode || !shown || seen.has(shown.id)) continue
+    seen.add(shown.id)
+    out.push(titleResult(shown, target.mode))
+    if (out.length >= SEARCH_TITLE_LIMIT) break
+  }
+  return out
+}
+
+function titleResult(session: SessionInfo, mode: AppMode): SidebarSearchResult {
+  const project = session.project_path?.trim() ? session.project_name : ''
+  return {
+    id: session.id,
+    title: session.title || '新会话',
+    subtitle: [project, sidebarRelativeTime(session.updated_at)]
+      .filter(Boolean)
+      .join(' · '),
+    mode,
+    projectName: session.project_name,
+    group: 'title',
+    updatedAt: session.updated_at,
+  }
+}
+
+/**
+ * Content search hits as results (MOD-04): each shows the session it
+ * belongs to like a title hit (a member's hit shows its group, a trial's
+ * none), once; a session the list does not know stays, untagged.
+ */
+export function searchContentResults(
+  hits: ContentSearchHit[],
+  sessions: SessionInfo[],
+): SidebarSearchResult[] {
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const seen = new Set<string>()
+  const out: SidebarSearchResult[] = []
+  for (const hit of hits) {
+    const target = shownSessionTarget(hit.sessionId, sessions)
+    if (!target || seen.has(target.id)) continue
+    seen.add(target.id)
+    const shown = byId.get(target.id)
+    out.push({
+      id: target.id,
+      title: shown?.title || hit.title || '新会话',
+      subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
+      mode: target.mode,
+      group: 'content',
+      updatedAt: shown?.updated_at ?? '',
+    })
+  }
+  return out
+}
+
+function searchTime(result: SidebarSearchResult): number {
+  const time = Date.parse(result.updatedAt ?? '')
+  return Number.isFinite(time) ? time : 0
+}
+
+/** Title hits first, then content hits; each most recent first. */
+function searchOrder(results: SidebarSearchResult[]): SidebarSearchResult[] {
+  const byTime = (a: SidebarSearchResult, b: SidebarSearchResult) =>
+    searchTime(b) - searchTime(a)
+  return [
+    ...results.filter((item) => item.group !== 'content').sort(byTime),
+    ...results.filter((item) => item.group === 'content').sort(byTime),
+  ]
+}
+
+/**
+ * The results by mode (MOD-04): the current mode's first, then every other
+ * mode's together by time (「其他模式」). A content hit already found by
+ * its title is dropped.
+ */
+export function arrangeSearchResults(
+  results: SidebarSearchResult[],
+  current: AppMode,
+): SearchSection[] {
+  const titled = new Set(
+    results.filter((item) => item.group !== 'content').map((item) => item.id),
+  )
+  const kept = results.filter(
+    (item) => item.group !== 'content' || !titled.has(item.id),
+  )
+  const sections: SearchSection[] = [
+    {
+      key: 'current',
+      mode: current,
+      results: searchOrder(kept.filter((item) => item.mode === current)),
+    },
+    {
+      key: 'other',
+      mode: null,
+      results: searchOrder(kept.filter((item) => item.mode !== current)),
+    },
+  ]
+  return sections.filter((section) => section.results.length)
 }
 
 export function sessionControlPendingTag(
@@ -412,10 +530,12 @@ function minIso(a = '', b = ''): string {
 }
 
 function searchableText(session: SessionInfo): string {
+  // The project counts while the session is bound to it (D2), not by `mode`.
+  const bound = Boolean(session.project_path?.trim())
   return [
     session.title,
-    session.mode === 'build' ? session.project_name : '',
-    session.mode === 'build' ? session.project_path : '',
+    bound ? session.project_name : '',
+    bound ? session.project_path : '',
   ]
     .filter(Boolean)
     .join('\n')

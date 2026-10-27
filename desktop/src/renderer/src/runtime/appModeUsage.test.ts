@@ -10,6 +10,7 @@ const SRC = join(__dirname, '..')
 const LIST_BUILDERS = [
   'buildSidebarGroups',
   'searchSidebarSessions',
+  'searchContentResults',
   'groupSessionsByDay',
 ] as const
 
@@ -45,11 +46,20 @@ describe('every session list goes through the mode filter (MOD-01 11)', () => {
     expect(model).toMatch(
       /import \{[^}]*isListedSession[^}]*\} from '\.\/appMode'/,
     )
-    for (const builder of ['buildSidebarGroups', 'searchSidebarSessions'])
-      expect(functionBody(model, builder)).toMatch(/\bisListedSession\b/)
-    expect(
-      functionBody(read('runtime/appMode.ts'), 'isListedSession'),
-    ).toContain('sessionAppMode(')
+    expect(functionBody(model, 'buildSidebarGroups')).toMatch(
+      /\bisListedSession\b/,
+    )
+    // MOD-04: a search hit shows the listed session it belongs to (a group
+    // member's session shows its group), through shownSessionTarget.
+    for (const builder of ['searchSidebarSessions', 'searchContentResults'])
+      expect(functionBody(model, builder)).toMatch(/\bshownSessionTarget\(/)
+    const appMode = read('runtime/appMode.ts')
+    expect(functionBody(appMode, 'isListedSession')).toContain(
+      'sessionAppMode(',
+    )
+    expect(functionBody(appMode, 'shownSessionTarget')).toMatch(
+      /\bisListedSession\(/,
+    )
   })
 
   it('only known places call the list builders, each on filtered sessions', () => {
@@ -68,6 +78,7 @@ describe('every session list goes through the mode filter (MOD-01 11)', () => {
     expect(Object.fromEntries(callers)).toEqual({
       buildSidebarGroups: ['components/sidebar/useSidebarState.ts'],
       searchSidebarSessions: ['components/sidebar/SidebarRoot.vue'],
+      searchContentResults: ['components/sidebar/SidebarRoot.vue'],
       groupSessionsByDay: ['components/sidebar/SidebarRoot.vue'],
     })
     const root = read('components/sidebar/SidebarRoot.vue')
@@ -76,14 +87,19 @@ describe('every session list goes through the mode filter (MOD-01 11)', () => {
       expect(match[1]!.trim()).toMatch(/^grouped\.value\./)
   })
 
-  it('content search hits drop sessions nobody lists', () => {
+  it('content search hits show the session they belong to (MOD-04)', () => {
     const root = read('components/sidebar/SidebarRoot.vue')
     const block = root.slice(
-      root.indexOf('const searchResults = computed('),
+      root.indexOf('const searchSections = computed('),
       root.indexOf('const layoutLoaded'),
     )
-    expect(block).toContain('content.hits.value')
-    expect(block).toContain('isListedSession(')
+    expect(block).toContain('searchContentResults(content.hits.value')
+    expect(block).toContain('arrangeSearchResults(')
+  })
+
+  it('notifications open the session they belong to (MOD-04 7)', () => {
+    const popover = read('components/sidebar/NotificationsPopover.vue')
+    expect(popover).toContain('shownSessionTarget(')
   })
 })
 

@@ -6,7 +6,8 @@ import type { AgentView } from '@emperor/core/api'
 import SidebarRoot from './SidebarRoot.vue'
 import { useAgentTree } from './agentTree'
 import { defaultSidebarState } from '../../runtime/sidebarModel'
-import type { AppMode } from '../../runtime/appMode'
+import { routeModeTarget, type AppMode } from '../../runtime/appMode'
+import { createAppModeStore } from '../../composables/useAppMode'
 
 const mock = vi.hoisted(() => ({
   core: vi.fn(),
@@ -1005,4 +1006,132 @@ it('MOD-03 · no Chat session at all says so without a heading', async () => {
   expect(
     root.querySelector('[data-sidebar-section="chats"]')!.textContent,
   ).toContain('暂无对话')
+})
+
+// ── MOD-04: one search over every mode ──
+
+async function search(query: string) {
+  root.querySelector<HTMLButtonElement>('[aria-label="搜索"]')!.click()
+  await settle()
+  const field = root.querySelector<HTMLInputElement>('.search input')!
+  field.value = query
+  field.dispatchEvent(new Event('input'))
+  await settle()
+}
+
+const searchRows = () =>
+  [...root.querySelectorAll<HTMLElement>('[data-search-result]')].map((el) => [
+    el.dataset.searchResult,
+    el.querySelector('[data-mode-tag]')?.textContent?.trim() ?? null,
+  ])
+
+it('MOD-04 1–4 · finds every mode, current first, and opening one switches to its mode', async () => {
+  // The mode as App.vue keeps it: a store that follows the route.
+  const store = createAppModeStore()
+  await store.load(mock.session.sessions.value)
+  store.setMode('build')
+  mock.context.appMode = {
+    mode: store.mode,
+    switchTo: vi.fn(),
+    newSession: vi.fn(async () => undefined),
+  }
+  const router = await mount('/chat/project-root')
+  const stop = store.followRoute(() =>
+    routeModeTarget(router.currentRoute.value, (id) =>
+      mock.session.getSession(id),
+    ),
+  )
+  await settle()
+  expect(store.mode.value).toBe('build')
+
+  await search('root')
+  expect(
+    [...root.querySelectorAll<HTMLElement>('.group-label')].map((el) =>
+      el.textContent?.trim(),
+    ),
+  ).toEqual(['Build', '其他模式'])
+  expect(searchRows()).toEqual([
+    ['project-root', 'Build'],
+    ['chat-root', 'Chat'],
+  ])
+
+  root
+    .querySelector<HTMLButtonElement>('[data-search-result="chat-root"]')!
+    .click()
+  await settle()
+  expect(router.currentRoute.value.params.sessionId).toBe('chat-root')
+  expect(store.mode.value).toBe('chat')
+  expect(sections()).toContain('chats.today')
+  stop()
+})
+
+it('MOD-04 5–6 · a member’s content hit shows its group; a trial’s never shows', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    mock.session.sessions.value = [
+      ...mock.session.sessions.value,
+      {
+        id: 'group-1',
+        mode: 'chat',
+        surface: 'group',
+        group_id: 'g1',
+        title: '设置页评审',
+        created_at: today,
+        updated_at: today,
+      },
+      {
+        id: 'member-1',
+        mode: 'chat',
+        surface: 'group_member',
+        group_id: 'g1',
+        title: '审稿人',
+        created_at: today,
+        updated_at: today,
+      },
+      {
+        id: 'trial-1',
+        mode: 'chat',
+        surface: 'trial',
+        title: '试用',
+        created_at: today,
+        updated_at: today,
+      },
+    ]
+    const original = mock.core.getMockImplementation()!
+    mock.core.mockImplementation(async (key: string, input: any) =>
+      key === 'sessions.search'
+        ? {
+            hits: [
+              {
+                sessionId: 'member-1',
+                title: '审稿人',
+                role: 'assistant',
+                snippet: '…这个方案还要再看…',
+              },
+              {
+                sessionId: 'trial-1',
+                title: '试用',
+                role: 'user',
+                snippet: '…方案…',
+              },
+            ],
+          }
+        : original(key, input),
+    )
+    const router = await mount('/chat/chat-root')
+    await search('方案')
+    vi.advanceTimersByTime(250)
+    await settle()
+    expect(searchRows()).toEqual([['group-1', 'Group']])
+    expect(
+      root.querySelector('[data-search-result="group-1"]')?.textContent,
+    ).toContain('这个方案还要再看')
+    root
+      .querySelector<HTMLButtonElement>('[data-search-result="group-1"]')!
+      .click()
+    await settle()
+    expect(router.currentRoute.value.params.sessionId).toBe('group-1')
+  } finally {
+    vi.useRealTimers()
+  }
 })

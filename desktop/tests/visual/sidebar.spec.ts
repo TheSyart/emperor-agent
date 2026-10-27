@@ -586,12 +586,38 @@ test('search icon toggles the capsule and Esc closes it', async ({ page }) => {
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByLabel('搜索对话')).toBeFocused()
 
-  // UI-S11: what was said in a session is found after a short pause.
+  // UI-S11: what was said in a session is found after a short pause. From
+  // a Build session the Chat hit is under 「其他模式」, tagged Chat (MOD-04).
   await page.getByLabel('搜索对话').fill('设计稿')
   const hit = page.locator('[data-search-result="chat-main"]')
   await expect(hit).toContainText('侧栏的间距')
-  await expect(sidebar(page).getByText('内容', { exact: true })).toBeVisible()
+  await expect(hit.locator('[data-mode-tag]')).toHaveText('Chat')
+  await expect(
+    sidebar(page).getByText('其他模式', { exact: true }),
+  ).toBeVisible()
   await shot(page, 'search-contents')
+})
+
+test('MOD-04 · the search spans the modes and opening a hit switches to its mode', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByLabel('搜索对话').fill('对话')
+  // In Build the Chat session is under 「其他模式」, tagged Chat.
+  const hit = page.locator('[data-search-result="chat-main"]')
+  await expect(hit.locator('[data-mode-tag]')).toHaveText('Chat')
+  await hit.click()
+  await expect(page).toHaveURL(/\/chat\/chat-main$/)
+  await expect(sidebar(page).getByTestId('sidebar-brand')).toHaveText(
+    'Emperor Chat',
+  )
+  // Back returns to the Build session, and to Build.
+  await page.getByRole('button', { name: '后退' }).click()
+  await expect(page).toHaveURL(/\/chat\/build-ui(?:\?|$)/)
+  await expect(sidebar(page).getByTestId('sidebar-brand')).toHaveText(
+    'Emperor Build',
+  )
 })
 
 test('↑ and ↓ move between sidebar sessions (UI-S11)', async ({ page }) => {

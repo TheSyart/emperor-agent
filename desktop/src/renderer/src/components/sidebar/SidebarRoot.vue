@@ -13,7 +13,8 @@
  * SidebarFooter (设置, the page icons, 明暗切换). The mode and its
  * controller come from the app context, so the switcher, the rail and the
  * primary row run what ⌘1–⌘3 and ⌘N run. Search finds titles at once and
- * contents after a pause (useContentSearch), in every mode; ↑ / ↓ on a
+ * contents after a pause (useContentSearch), in every mode, the current
+ * mode's results first and each tagged with its mode (MOD-04); ↑ / ↓ on a
  * focused row move to the next one and open it. Collapsed, the column
  * renders the 56px SidebarRail instead. Geometry is owned by AppFrame; this
  * fills the column it is given. The persisted layout (sorts, orders, pins,
@@ -34,15 +35,16 @@ import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
+  arrangeSearchResults,
   groupSessionsByDay,
   pinnedInMode,
+  searchContentResults,
   searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import {
-  isListedSession,
   modeActivity,
   nextListedSession,
   type AppMode,
@@ -154,29 +156,24 @@ const chatSections = computed<ChatSection[]>(() => {
 const searching = computed(() => searchQuery.value.trim().length > 0)
 const searchVisible = computed(() => searchOpen.value || searching.value)
 const content = useContentSearch(searchQuery)
-const searchResults = computed(() => {
-  const titles = searchSidebarSessions(sessions.value, searchQuery.value)
-  const seen = new Set(titles.map((result) => result.id))
-  const known = new Map(sessions.value.map((session) => [session.id, session]))
-  // A hit in a session nobody lists (a group member's, a trial) is dropped
-  // (MOD-01); MOD-04 shows the group instead.
-  const listable = (id: string) => {
-    const session = known.get(id)
-    return !session || isListedSession(session)
-  }
-  return [
-    ...titles.map((result) => ({ ...result, group: 'title' as const })),
-    ...content.hits.value
-      .filter((hit) => !seen.has(hit.sessionId) && listable(hit.sessionId))
-      .map((hit) => ({
-        id: hit.sessionId,
-        title: hit.title || '新会话',
-        subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
-        mode: 'chat' as const,
-        group: 'content' as const,
-      })),
-  ]
-})
+/**
+ * The search over every mode (MOD-04): titles at once, contents after a
+ * pause, each showing the session it belongs to (a group member's hit
+ * shows its group, a trial's none), the current mode's results first.
+ */
+const searchSections = computed(() =>
+  arrangeSearchResults(
+    [
+      ...searchSidebarSessions(sessions.value, searchQuery.value),
+      ...searchContentResults(content.hits.value, sessions.value),
+    ],
+    mode.value,
+  ),
+)
+/** The rows in screen order, for ↑ / ↓ / Enter. */
+const searchResults = computed(() =>
+  searchSections.value.flatMap((section) => section.results),
+)
 const layoutLoaded = ref(false)
 const visibleRootIds = computed(() =>
   sessions.value
@@ -587,7 +584,7 @@ defineExpose({ focusSearch })
 
       <SidebarSearchResults
         v-else-if="searching"
-        :results="searchResults"
+        :sections="searchSections"
         :pending="content.pending.value"
         :selected-index="searchIndex"
         @hover="searchIndex = $event"
