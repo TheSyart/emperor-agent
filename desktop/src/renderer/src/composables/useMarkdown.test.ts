@@ -228,6 +228,59 @@ describe('classifyMdLink', () => {
   })
 })
 
+// GRP-14: a bare name only links when it can only be a web address. The
+// TLD list of linkify-it holds every two-letter country code, so before
+// this 「多agent对话失败模式.md」 became http://xn--…md and notes.md,
+// main.py, lib.rs, run.sh became web links.
+describe('bare names that are files, not web addresses (GRP-14)', () => {
+  it('leaves a Chinese file name alone', () => {
+    const html = render('资料在群文件 多agent对话失败模式.md，写说明时引用。')
+    expect(html).not.toContain('<a')
+    expect(html).not.toContain('xn--')
+    expect(html).toContain('多agent对话失败模式.md，写说明时引用。')
+  })
+
+  it('leaves an English file name alone, whichever extension', () => {
+    for (const name of [
+      'notes.md',
+      'README.md',
+      'a.ts',
+      'main.py',
+      'lib.rs',
+      'run.sh',
+      'main.tf',
+    ])
+      expect(render(`看一下 ${name} 的改动`), name).not.toContain('<a')
+  })
+
+  it('links an address with a scheme, whatever its ending', () => {
+    expect(render('https://a.com')).toContain('href="https://a.com"')
+    expect(render('http://notes.md/x')).toContain('href="http://notes.md/x"')
+    expect(render('见 https://多agent.cn/路径')).toContain('<a')
+  })
+
+  it('links www. addresses', () => {
+    const html = render('官网 www.a.com 有说明')
+    expect(html).toContain('href="http://www.a.com"')
+    expect(html).toContain('>www.a.com</a>')
+    expect(render('www.notes.md')).toContain('href="http://www.notes.md"')
+  })
+
+  it('still links a bare ASCII domain like example.com, as before', () => {
+    const html = render('打开 example.com 看看')
+    expect(html).toContain('href="http://example.com"')
+    expect(render('example.com/docs')).toContain(
+      'href="http://example.com/docs"',
+    )
+    // A domain in other letters needs its scheme or www.
+    expect(render('中文.com')).not.toContain('<a')
+    // An e-mail address is unchanged.
+    expect(render('写信到 a@example.com')).toContain(
+      'href="mailto:a@example.com"',
+    )
+  })
+})
+
 it('keeps CJK punctuation outside automatically linked URLs', () => {
   const html = render('参考 https://example.com/guide，再看说明。')
   expect(html).toContain('href="https://example.com/guide"')

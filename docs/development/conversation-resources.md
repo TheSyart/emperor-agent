@@ -2,14 +2,16 @@
 
 > 文档状态：Active<br>
 > 面向读者：Renderer、工具与 Core 开发者<br>
-> 最后核验：2026-10-26（对照 `cb1e999b`）<br>
-> 事实源：`components/conversation/resources/`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
+> 最后核验：2026-10-27（对照 `eb1ed34b`）<br>
+> 事实源：`components/conversation/resources/`、`composables/linkifyRules.ts`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
 
 ## 身份与渲染
 
 `DisplayResource` 只用于展示，保留原始 `href`、名称、真实 `sourceMessageId`、类型、可用状态、角色和出处；不进入模型提示词，不重写旧会话正文。原有 Skill／Plugin `MessageReference` 的偏移、手势与注入协议保持独立。
 
 正文行内链接只保留图标与完整名称，详情入口放在卡片与侧栏，不为每个链接追加省略号按钮。 网站链接常态为无色底的图标加名称，正文图标 16px、图文间距 6px、两侧各 4px 留白，悬停时才显示轻背景。来源栏图标 20px、图文间距 12px、行高至少 56px；长名称继续完整换行。长资源标题、描述和来源名称换行显示，不做 CSS 省略；裸网址保留参数和锚点。
+
+没写协议的名字只在它只能是网址时自动成链接（GRP-14，`composables/linkifyRules.ts`，对话正文和资源提取用同一条规则）：以 `www.` 开头的照常；其余要求主机名全是 ASCII，并且结尾不是同时也是国家顶级域的常见文件扩展名（`.md`、`.py`、`.rs`、`.sh`、`.ts` 等）。所以「多agent对话失败模式.md」、`notes.md`、`main.py` 保持文字，不再变成 `http://xn--…` 之类的网址；`example.com`、`example.com/docs` 这样的裸域名和以前一样成链接，带协议的网址和邮箱地址不受影响。
 
 Markdown token 决定哪些链接可显示，跳过代码；独立段落的单个链接只在流式回复结束后升级卡片。输入框使用 ProseMirror decoration，按完整文本识别代码区并映射回文档位置，composition 期间暂停装饰；不插入原子网址节点。
 

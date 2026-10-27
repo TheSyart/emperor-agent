@@ -130,6 +130,15 @@ describe('resource extraction', () => {
     )
   })
 
+  it('finds no web page in a bare file name (GRP-14)', () => {
+    expect(
+      markdownResources('资料在 多agent对话失败模式.md 和 notes.md', 'a1'),
+    ).toEqual([])
+    expect(
+      markdownResources('官网 www.example.com', 'a1').map((r) => r.label),
+    ).toEqual(['www.example.com'])
+  })
+
   it('only makes a lone paragraph link a card', () => {
     expect(
       standaloneResource('[项目](https://github.com/a/b)', 'a1')?.label,
