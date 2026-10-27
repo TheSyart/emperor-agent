@@ -16,6 +16,8 @@ import {
   isDraftSessionId,
   promoteDraftSession,
 } from '../runtime/sessionDrafts'
+import { nextListedSession } from '../runtime/appMode'
+import { useAppMode } from './useAppMode'
 
 const sessions = ref<SessionInfo[]>([])
 const projects = ref<ProjectInfo[]>([])
@@ -28,6 +30,20 @@ export interface CreateSessionDraftOptions {
   title?: string
   mode?: SessionMode
   project?: ProjectInfo
+}
+
+/**
+ * The session to make active when none is (or the active one went away):
+ * a listed one of the current mode, else of any mode (MOD-02). '' when the
+ * list shows nothing.
+ */
+function fallbackActiveId(): string {
+  return (
+    nextListedSession(sessions.value, {
+      mode: useAppMode().mode.value,
+      anyMode: true,
+    })?.id ?? ''
+  )
 }
 
 export function useSession() {
@@ -55,13 +71,15 @@ export function useSession() {
           : undefined
       sessions.value = keptDraft ? [keptDraft, ...sessionItems] : sessionItems
       projects.value = normalizeProjects(projectItems)
-      if (!sessions.value.length) {
-        await create({ mode: 'chat', title: '新会话' })
-      } else if (
+      if (
         !activeId.value ||
         !sessions.value.some((session) => session.id === activeId.value)
       ) {
-        activeId.value = sessions.value[0].id
+        // A listed session, the current mode's first; nothing to show (an
+        // empty list, or only sessions nobody lists): a new Chat draft.
+        const next = fallbackActiveId()
+        if (next) activeId.value = next
+        else await create({ mode: 'chat', title: '新会话' })
       }
     } finally {
       loading.value = false
@@ -106,14 +124,14 @@ export function useSession() {
     sessionActionError.value = ''
     if (isDraftSessionId(id)) {
       sessions.value = sessions.value.filter((s) => s.id !== id)
-      if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
+      if (activeId.value === id) activeId.value = fallbackActiveId()
       if (!sessions.value.length) await create()
       return true
     }
     try {
       await core('sessions.delete', id)
       sessions.value = sessions.value.filter((s) => s.id !== id)
-      if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
+      if (activeId.value === id) activeId.value = fallbackActiveId()
       if (!sessions.value.length) await create()
       return true
     } catch (error) {
@@ -144,7 +162,7 @@ export function useSession() {
     if (isDraftSessionId(id)) {
       if (archived) {
         sessions.value = sessions.value.filter((s) => s.id !== id)
-        if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
+        if (activeId.value === id) activeId.value = fallbackActiveId()
       }
       return true
     }
@@ -155,7 +173,7 @@ export function useSession() {
       })
       if (archived) {
         sessions.value = sessions.value.filter((s) => s.id !== id)
-        if (activeId.value === id) activeId.value = sessions.value[0]?.id || ''
+        if (activeId.value === id) activeId.value = fallbackActiveId()
         if (!sessions.value.length) await create()
       } else {
         const index = sessions.value.findIndex((s) => s.id === id)

@@ -209,3 +209,64 @@ export function currentBuildProject(input: {
     )[0]
   return recent ?? null
 }
+
+/** What the switcher shows beside a mode (MOD-02). */
+export interface ModeActivity {
+  /** Listed sessions of the mode with a turn running. */
+  running: number
+  /** Some listed session of the mode waits for an approval or an answer. */
+  waiting: boolean
+}
+
+/**
+ * Running and waiting per mode, over the listed sessions only: a draft, an
+ * archived session, a group member's or a trial session counts nowhere.
+ */
+export function modeActivity(
+  sessions: SessionInfo[],
+  probe: {
+    running: (id: string) => boolean
+    waiting: (session: SessionInfo) => boolean
+  },
+): Record<AppMode, ModeActivity> {
+  const out = Object.fromEntries(
+    APP_MODES.map((mode) => [mode, { running: 0, waiting: false }]),
+  ) as Record<AppMode, ModeActivity>
+  for (const session of sessions) {
+    if (!isListedSession(session)) continue
+    const entry = out[sessionAppMode(session)!]
+    if (probe.running(session.id)) entry.running += 1
+    if (!entry.waiting && probe.waiting(session)) entry.waiting = true
+  }
+  return out
+}
+
+/**
+ * The dot on the mark: some mode other than `current` waits for the user.
+ * Running never lights it (docs/design/modes.md § 侧栏).
+ */
+export function waitingElsewhere(
+  activity: Record<AppMode, ModeActivity>,
+  current: AppMode,
+): boolean {
+  return APP_MODES.some((mode) => mode !== current && activity[mode].waiting)
+}
+
+/**
+ * The session to show when `exclude` goes away (deleted, archived, gone) or
+ * none is open: the first listed session of `mode`, else — with `anyMode` —
+ * the first listed one of any mode. Never a draft, an archived session or
+ * one nobody lists. Undefined: nothing fits (the caller goes to a home).
+ */
+export function nextListedSession(
+  sessions: SessionInfo[],
+  options: { mode: AppMode | null; exclude?: string; anyMode?: boolean },
+): SessionInfo | undefined {
+  const candidates = sessions.filter(
+    (session) => session.id !== options.exclude && isListedSession(session),
+  )
+  const inMode = options.mode
+    ? candidates.find((session) => sessionAppMode(session) === options.mode)
+    : undefined
+  return inMode ?? (options.anyMode ? candidates[0] : undefined)
+}

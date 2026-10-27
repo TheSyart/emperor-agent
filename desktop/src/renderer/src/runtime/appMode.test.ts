@@ -3,12 +3,15 @@ import type { ProjectInfo, SessionInfo } from '../types'
 import {
   APP_MODES,
   currentBuildProject,
+  modeActivity,
   modeLandingSessionId,
   modeSwitchTarget,
+  nextListedSession,
   rememberModeRoute,
   routeModeTarget,
   sessionAppMode,
   sessionsInMode,
+  waitingElsewhere,
 } from './appMode'
 
 // MOD-01 (0.3, docs/design/modes.md): the mode a session is listed under,
@@ -264,5 +267,89 @@ describe('currentBuildProject (⌘N in Build)', () => {
       'p-new',
     )
     expect(currentBuildProject({ current: chat, projects: [] })).toBeNull()
+  })
+})
+
+// MOD-02 (docs/design/modes.md § 侧栏): what the switcher shows for each
+// mode, and where the window goes when the open session goes away.
+
+describe('mode activity for the switcher (MOD-02 5–6)', () => {
+  const chat2 = session({ id: 'chat-2' })
+  const build2 = session({
+    id: 'build-2',
+    mode: 'build',
+    project_path: '/tmp/alpha',
+  })
+  const sessions = [chat, chat2, build, build2, group, contact, member, trial]
+
+  it('counts running sessions and notes a waiting one per mode', () => {
+    const running = new Set(['build-1', 'build-2', 'member-1', 'chat-2'])
+    const waiting = new Set(['contact-1', 'trial-1'])
+    expect(
+      modeActivity(sessions, {
+        running: (id) => running.has(id),
+        waiting: (item) => waiting.has(item.id),
+      }),
+    ).toEqual({
+      chat: { running: 1, waiting: false },
+      build: { running: 2, waiting: false },
+      // A member's or a trial session is listed nowhere and counts nowhere.
+      group: { running: 0, waiting: true },
+    })
+  })
+
+  it('never counts drafts or archived sessions', () => {
+    const draft = session({ id: 'draft:1', draft: true })
+    const archived = session({ id: 'old', archived_at: '2026-10-01' })
+    expect(
+      modeActivity([draft, archived], {
+        running: () => true,
+        waiting: () => true,
+      }).chat,
+    ).toEqual({ running: 0, waiting: false })
+  })
+
+  it('lights the mark only for a waiting mode other than the current one', () => {
+    const idle = { running: 0, waiting: false }
+    const busy = { running: 3, waiting: false }
+    const asks = { running: 0, waiting: true }
+    expect(
+      waitingElsewhere({ chat: idle, build: busy, group: idle }, 'chat'),
+    ).toBe(false)
+    expect(
+      waitingElsewhere({ chat: idle, build: idle, group: asks }, 'chat'),
+    ).toBe(true)
+    expect(
+      waitingElsewhere({ chat: idle, build: idle, group: asks }, 'group'),
+    ).toBe(false)
+  })
+})
+
+describe('the next session when one goes away (MOD-02)', () => {
+  const older = session({ id: 'chat-old' })
+  const list = [member, build, chat, older, trial]
+
+  it('prefers a listed session of the mode and skips unlisted ones', () => {
+    expect(nextListedSession(list, { mode: 'chat' })?.id).toBe('chat-1')
+    expect(
+      nextListedSession(list, { mode: 'chat', exclude: 'chat-1' })?.id,
+    ).toBe('chat-old')
+    expect(nextListedSession(list, { mode: 'build' })?.id).toBe('build-1')
+  })
+
+  it('stays in the mode unless any mode is allowed', () => {
+    expect(
+      nextListedSession(list, { mode: 'build', exclude: 'build-1' }),
+    ).toBeUndefined()
+    expect(
+      nextListedSession(list, {
+        mode: 'build',
+        exclude: 'build-1',
+        anyMode: true,
+      })?.id,
+    ).toBe('chat-1')
+    expect(
+      nextListedSession([member, trial], { mode: 'chat', anyMode: true }),
+    ).toBeUndefined()
   })
 })

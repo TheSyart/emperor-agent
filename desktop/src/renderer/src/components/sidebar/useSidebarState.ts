@@ -17,11 +17,14 @@ import {
   defaultSidebarState,
   MAX_PINNED_SESSIONS,
   moveId,
+  moveIdAmong,
   normalizeSidebarState,
+  pinnedInMode,
   pinSessionId,
   unpinSessionId,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
+import { sessionAppMode } from '../../runtime/appMode'
 import type {
   ProjectInfo,
   SessionInfo,
@@ -89,10 +92,19 @@ export function useSidebarState(input: {
     void patch({ pinned_session_ids: next })
   }
 
+  /**
+   * Move a pin one step among the pins of its own mode, the ones on screen
+   * (MOD-02); the pins of other modes keep their places.
+   */
   function movePinned(id: string, delta: -1 | 1): void {
+    const pinned = grouped.value.pinned
+    const session = pinned.find((item) => item.id === id)
+    const mode = session ? sessionAppMode(session) : null
+    const visible = mode ? pinnedInMode(pinned, mode) : pinned
     void patch({
-      pinned_session_ids: moveId(
-        grouped.value.pinned.map((session) => session.id),
+      pinned_session_ids: moveIdAmong(
+        pinned.map((item) => item.id),
+        visible.map((item) => item.id),
         id,
         delta,
       ),
