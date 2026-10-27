@@ -73,4 +73,9 @@ export interface GroupMember {
   intro: string
   /** Claude Code or Codex: can @ others in text but has no group tools. */
   external?: boolean
+  /**
+   * The job card's 群聊习惯: speak only when @-mentioned, raise a hand when
+   * the topic is theirs (the default), or always answer a broadcast.
+   */
+  speak?: 'mentioned' | 'relevant' | 'always'
 }
