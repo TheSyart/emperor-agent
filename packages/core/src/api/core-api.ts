@@ -119,6 +119,12 @@ import { ghProcessEnvironment } from '../workspace/git-pull-requests'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
+import { ContactStore } from '../contacts/store'
+import type {
+  ContactInput,
+  ContactPatch,
+  FromTemplateInput,
+} from '../contacts/types'
 import {
   CoreModelService,
   type ModelConnectionInput,
@@ -432,6 +438,8 @@ export class CoreApi {
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
   readonly memoryService: CoreMemoryService
+  /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
+  readonly contactStore: ContactStore
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
@@ -594,6 +602,19 @@ export class CoreApi {
           ? []
           : (host.sessionLog(sessionId)?.events ?? [])
       },
+    })
+    this.contactStore = new ContactStore({
+      stateRoot: this.paths.stateRoot,
+      templatesDir: kept.templatesDir,
+      toolNames: () => host.registeredToolNames(),
+      globalPermission: () => host.defaultPreset,
+      onChange: (change) =>
+        host.emitHost({
+          event: 'contacts_changed',
+          reason: change.reason,
+          contact_id: change.contactId,
+          version: change.version,
+        }),
     })
     this.memoryService = new CoreMemoryService({
       stateRoot: this.paths.stateRoot,
@@ -3394,6 +3415,30 @@ export class CoreApi {
   readonly projects = {
     list: () => this.host.kept.projectStore.list(),
     resolve: (path: string) => this.host.kept.projectStore.resolve(path),
+  }
+
+  /**
+   * Contacts (GRP-02): global, like settings — no session in view involved.
+   * Every saved change is announced as `contacts_changed`.
+   */
+  readonly contacts = {
+    list: () => this.contactStore.list(),
+    get: (input: { id: string }) => this.contactStore.get(input.id),
+    create: (input: ContactInput) => this.contactStore.create(input),
+    update: (input: { id: string; patch: ContactPatch }) =>
+      this.contactStore.update(input.id, input.patch),
+    delete: (input: { id: string }) => this.contactStore.delete(input.id),
+    duplicate: (input: { id: string; name?: string }) =>
+      this.contactStore.duplicate(
+        input.id,
+        input.name === undefined ? {} : { name: input.name },
+      ),
+    versions: (input: { id: string }) => this.contactStore.versions(input.id),
+    restoreVersion: (input: { id: string; version: number }) =>
+      this.contactStore.restoreVersion(input.id, input.version),
+    templates: () => this.contactStore.templates(),
+    fromTemplate: (input: FromTemplateInput) =>
+      this.contactStore.fromTemplate(input),
   }
 
   /**

@@ -7,6 +7,7 @@ import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
 import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
+import type { ContactInput, ContactPatch } from '../contacts/types'
 import { SessionRequiredError, type ViewScope } from '../harness/host/scope'
 import {
   MAX_MESSAGE_REFERENCES,
@@ -1000,6 +1001,114 @@ const mcpServerEnabledSchema = z
   .object({ name: mcpServerNameSchema, enabled: z.boolean() })
   .strict()
 const mcpServerRefSchema = z.object({ name: mcpServerNameSchema }).strict()
+
+// Contacts (GRP-02): shapes and generous bounds only; the store applies the
+// role card's real limits and answers in words (field names, Chinese).
+const contactIdSchema = z.string().regex(/^ct-[a-z0-9-]{1,48}$/)
+const contactRefSchema = z.object({ id: contactIdSchema }).strict()
+const contactTextSchema = z.string().max(20_000)
+const contactBackendSchema = z.enum(['claude-code', 'codex'])
+const contactAvatarSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('portrait'), index: z.number().int() }).strict(),
+  z.object({ kind: z.literal('logo'), backend: contactBackendSchema }).strict(),
+  z.object({ kind: z.literal('library'), id: z.string().max(32) }).strict(),
+  z.object({ kind: z.literal('mascot'), pose: z.string().max(64) }).strict(),
+])
+const contactKnowledgeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.enum(['file', 'folder']),
+      path: z.string().max(4096),
+      pinned: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('url'), url: z.string().max(4096) }).strict(),
+  z.object({ kind: z.literal('skill'), name: z.string().max(128) }).strict(),
+])
+const contactRoleSchema = z
+  .object({
+    mission: contactTextSchema.optional(),
+    deliverable: contactTextSchema.optional(),
+    playbook: contactTextSchema.optional(),
+    boundaries: contactTextSchema.optional(),
+    knowledge: z.array(contactKnowledgeSchema).max(64).optional(),
+    examples: z
+      .array(
+        z
+          .object({ input: contactTextSchema, output: contactTextSchema })
+          .strict(),
+      )
+      .max(10)
+      .optional(),
+    trialTask: contactTextSchema.optional(),
+  })
+  .strict()
+const contactToolNamesSchema = z.array(z.string().max(256)).max(256)
+const contactCapabilitiesSchema = z
+  .object({
+    model: z
+      .union([
+        z.literal('inherit'),
+        z
+          .object({
+            profileId: z.string().max(256),
+            model: z.string().max(512).optional(),
+            reasoning: z.enum(['low', 'medium', 'high']).optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    tools: z
+      .object({
+        preset: z.enum([
+          'read_only',
+          'research',
+          'writer',
+          'engineer',
+          'custom',
+        ]),
+        allow: contactToolNamesSchema.optional(),
+        deny: contactToolNamesSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    permission: z.enum(['inherit', 'read_only', 'workspace_write']).optional(),
+  })
+  .strict()
+const contactFieldsSchema = {
+  avatar: contactAvatarSchema.optional(),
+  intro: z.string().max(1000).optional(),
+  domains: z.array(z.string().max(32)).max(16).optional(),
+  role: contactRoleSchema.optional(),
+  capabilities: contactCapabilitiesSchema.optional(),
+  groupHabit: z
+    .object({
+      speak: z.enum(['mentioned', 'relevant', 'always']).optional(),
+      length: z.enum(['brief', 'detailed']).optional(),
+    })
+    .strict()
+    .optional(),
+  memory: z.object({ enabled: z.boolean() }).strict().optional(),
+}
+const contactNameSchema = z.string().max(200)
+const contactTemplateIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)
+const contactCreateSchema = z
+  .object({
+    name: contactNameSchema,
+    kind: z.enum(['local', 'external']).optional(),
+    backend: contactBackendSchema.optional(),
+    templateId: contactTemplateIdSchema.optional(),
+    ...contactFieldsSchema,
+  })
+  .strict()
+const contactUpdateSchema = z
+  .object({
+    id: contactIdSchema,
+    patch: z
+      .object({ name: contactNameSchema.optional(), ...contactFieldsSchema })
+      .strict(),
+  })
+  .strict()
 
 const sessionPatchSchema = z.union([
   z.string(),
@@ -2106,6 +2215,55 @@ export const CORE_OPERATION_REGISTRY = {
       api.plugins.uninstall(input, viewOf(ctx, 'plugins.uninstall')),
   ),
   'projects.list': operation(z.tuple([]), (api) => api.projects.list()),
+  // Contacts (GRP-02): global like settings; changes emit `contacts_changed`.
+  'contacts.list': operation(z.tuple([]), (api) => api.contacts.list()),
+  'contacts.get': operation(z.tuple([contactRefSchema]), (api, [input]) =>
+    api.contacts.get(input),
+  ),
+  'contacts.create': operation(z.tuple([contactCreateSchema]), (api, [input]) =>
+    api.contacts.create(input as ContactInput),
+  ),
+  'contacts.update': operation(z.tuple([contactUpdateSchema]), (api, [input]) =>
+    api.contacts.update(input as { id: string; patch: ContactPatch }),
+  ),
+  'contacts.delete': operation(z.tuple([contactRefSchema]), (api, [input]) =>
+    api.contacts.delete(input),
+  ),
+  'contacts.duplicate': operation(
+    z.tuple([
+      z
+        .object({ id: contactIdSchema, name: contactNameSchema.optional() })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.duplicate(input),
+  ),
+  'contacts.versions': operation(z.tuple([contactRefSchema]), (api, [input]) =>
+    api.contacts.versions(input),
+  ),
+  'contacts.restoreVersion': operation(
+    z.tuple([
+      z
+        .object({ id: contactIdSchema, version: z.number().int().positive() })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.restoreVersion(input),
+  ),
+  'contacts.templates': operation(z.tuple([]), (api) =>
+    api.contacts.templates(),
+  ),
+  'contacts.fromTemplate': operation(
+    z.tuple([
+      z
+        .object({
+          templateId: contactTemplateIdSchema,
+          name: contactNameSchema.optional(),
+          avatar: contactAvatarSchema.optional(),
+          backend: contactBackendSchema.optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.fromTemplate(input),
+  ),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
   ),
