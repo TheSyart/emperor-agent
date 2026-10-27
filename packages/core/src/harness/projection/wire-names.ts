@@ -51,6 +51,7 @@ export const RUNTIME_EVENT_NAMES = [
   'agent_tree_changed',
   'computer_use_changed',
   'contacts_changed',
+  'groups_changed',
   'environment_changed',
   'environment_install_completed',
   'environment_install_failed',

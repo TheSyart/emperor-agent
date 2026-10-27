@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-27（对照 `3a55b24f`）<br>
-> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`
+> 最后核验：2026-10-27（对照 `347afb5f`）<br>
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`、`packages/core/src/groups/`
 
 ## 两个根的区分
 
@@ -102,6 +102,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     contacts.json          # schemaVersion 2；内置的 Emperor、Claude Code、Codex 只读回头像、简介和版本号
     <contact-id>/versions/<n>.json  # 每次改动前的旧版本，只留最近 20 个；删除联系人时整个目录一起删
     <contact-id>/memory/   # 个人记忆（GRP-03）：MEMORY.local.md 一行一条反馈，versions/ 是改动前的快照
+  groups/<group-id>/files/ # 群文件（GRP-06）；群本身是一个会话，见下文「群聊」
   projects/
     index.json
     <project-id>/
@@ -302,6 +303,16 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 - 并发：Core 内单写者队列，改动一个接一个执行。每次保存后发 host 事件 `contacts_changed`。
 - 个人记忆（GRP-03）：`contacts/<id>/memory/MEMORY.local.md`，经 `MemoryStore` 写（改动前的内容留在同目录 `versions/`）。只记用户的明确反馈：`contacts.feedback` 把 👍 / 👎 和用户的一句话（最多 200 字）写成一行，带日期和来源（哪个会话、哪条回答的开头），不从对话里自动提炼；`contacts.memory.list | update | delete` 逐条查看、修改、删除。第一条反馈之前不建目录；提示词只放最新的 4 KB，超出时 `contacts.memory.list` 返回 `truncated` 和整理提示。每次改动发 `contacts_changed`（`reason: 'memory'`）。
 - 岗位模板：`templates/contacts/<id>.md`，18 个，frontmatter 加「职责、交付、工作方法、边界、样例任务」五节；随应用打包到 `runtime-defaults/templates/contacts/`，`contacts.templates` 读取，`contacts.fromTemplate` 照模板新建（模板要的权限高于全局预设时从只读开始）。
+
+## 群聊
+
+群聊的数据层见[联系人与群聊](../design/agent-contacts.md)，实现在 `packages/core/src/groups/`。
+
+- 一个群是一个会话：`sessions/index.json` 里 `surface: "group"`、`group_id` 等于它自己的 id，它的 `log.jsonl` 记群事件（`group/created`、`group/settings`、`group/member`、`group/message`、`group/reveal`、`group/delivery`、`group/task`、`group/digest`）。群的状态（成员、主持人、群公告、设置、消息、每位成员的投递游标）都从这份日志折叠出来，重启后原样恢复；不认识的事件跳过。
+- 每位成员在群里有自己的会话：`surface: "group_member"`、`contact_id`、`group_id`。成员的上下文是它的岗位说明书、群章程和投递给它的消息，不是整个群的日志。成员被移出后会话和历史都保留，只是不再请它发言。
+- `GroupService` 校验：成员必须是存在的联系人、不重复、1–12 位；主持人必须是成员（Emperor 在群里时默认是它）；群名 1–40 字，群公告最多 4000 字；私信和交办只能发给成员。违反时报 `group_invalid`，不是群的会话报 `group_not_found`。每次改动后发 host 事件 `groups_changed`。
+- 群纪要只用公开消息写（不含私信和还没揭晓的独立作答），因为同一份纪要交给每位成员。
+- 群文件放在 `groups/<group-id>/files/`，`groups.files.list` 列出第一层。
 
 ## 迁移策略
 
