@@ -72,6 +72,23 @@ export type {
   ContactFeedbackInput,
   ContactFeedbackResult,
 } from '../api/services/contact-memory-service'
+// GRP-04: the contact editor (draft, import, preview, trial).
+export type {
+  AvatarTheme as ContactAvatarTheme,
+  ContactDraft,
+  ContactDraftInput,
+  ContactPreview,
+  ContactTrialResult,
+  GroupHabit as ContactGroupHabit,
+  SpeakMode as ContactSpeakMode,
+} from '../contacts/types'
+export type {
+  BriefAnswer,
+  BriefDraft,
+  DraftFromBriefResult,
+  DraftSection,
+} from '../contacts/draft'
+export type { AgentFileImport } from '../contacts/import'
 export type {
   ModelEntryDetected,
   ModelEntryLimits,
