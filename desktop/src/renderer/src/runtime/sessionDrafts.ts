@@ -135,6 +135,24 @@ function normalizeBackendSession(value: unknown): SessionInfo | null {
     title_status: String(raw.title_status || 'manual'),
     control_pending: normalizeControlPending(raw.control_pending),
     version: Number(raw.version || 1),
+    ...groupChatFields(raw),
+  }
+}
+
+/** Core's group-chat fields as it sent them; none on Chat / Build (MOD-01). */
+function groupChatFields(
+  raw: Partial<SessionInfo>,
+): Pick<SessionInfo, 'surface' | 'contact_id' | 'group_id'> {
+  return {
+    ...(typeof raw.surface === 'string' && raw.surface
+      ? { surface: raw.surface }
+      : {}),
+    ...(typeof raw.contact_id === 'string' && raw.contact_id
+      ? { contact_id: raw.contact_id }
+      : {}),
+    ...(typeof raw.group_id === 'string' && raw.group_id
+      ? { group_id: raw.group_id }
+      : {}),
   }
 }
 

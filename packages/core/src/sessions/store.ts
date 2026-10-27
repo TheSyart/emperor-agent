@@ -19,6 +19,7 @@ import {
   DataFileNewerError,
 } from '../store/persistence'
 import { SESSION_TRASH_DIR } from '../session-log/store'
+import type { SessionSurface } from './app-mode'
 
 const VERSION = 1
 /** A session's meta.jsonl is compacted to its latest snapshot past this. */
@@ -65,6 +66,15 @@ export interface SessionEntry {
   transitioned_to_session_id: string | null
   transitioned_at: string | null
   version: number
+  /**
+   * Group chat (0.3, GRP-05 sets them; absent on Chat and Build sessions, so
+   * today's files are unchanged): where the session lives and the contact
+   * or group it belongs to. An unknown surface (a newer Emperor's) is kept
+   * as it is: `sessionAppMode` then lists the session nowhere.
+   */
+  surface?: SessionSurface
+  contact_id?: string
+  group_id?: string
 }
 
 export interface SessionCreateOptions {
@@ -932,7 +942,27 @@ function normalizeSession(raw: Record<string, unknown>): SessionEntry {
     ),
     transitioned_at: nullableText(raw.transitioned_at ?? raw.transitionedAt),
     version: toInt(raw.version, VERSION),
+    ...groupChatFields(raw),
   }
+}
+
+/** The optional group-chat fields, only those that are set (MOD-01). */
+function groupChatFields(
+  raw: Record<string, unknown>,
+): Pick<SessionEntry, 'surface' | 'contact_id' | 'group_id'> {
+  const surface = optionalText(raw.surface)
+  const contactId = optionalText(raw.contact_id ?? raw.contactId)
+  const groupId = optionalText(raw.group_id ?? raw.groupId)
+  return {
+    ...(surface ? { surface: surface as SessionSurface } : {}),
+    ...(contactId ? { contact_id: contactId } : {}),
+    ...(groupId ? { group_id: groupId } : {}),
+  }
+}
+
+/** A trimmed string, or undefined for anything else or blanks. */
+function optionalText(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() || undefined : undefined
 }
 
 function cloneSession(item: SessionEntry): SessionEntry {

@@ -24,6 +24,11 @@ export interface InitialStartupDeps {
   /** Rebuild the non-chat runtime state from the bootstrap replay. */
   restoreRuntimeState: () => void
   connectSocket: () => void
+  /**
+   * Load the app mode and make a session of the saved mode the active one
+   * (MOD-01), before it opens. Never throws.
+   */
+  landInAppMode?: () => Promise<void>
 }
 
 export async function runInitialStartup({
@@ -32,6 +37,7 @@ export async function runInitialStartup({
   switchSession,
   restoreRuntimeState,
   connectSocket,
+  landInAppMode,
 }: InitialStartupDeps): Promise<void> {
   try {
     await sessionStore.load()
@@ -40,6 +46,7 @@ export async function runInitialStartup({
     return
   }
 
+  await landInAppMode?.()
   if (sessionStore.activeId.value) switchSession(sessionStore.activeId.value)
   await bootstrap.loadBootstrap(true, sessionStore.backendSessionId())
   if (bootstrap.error.value) return

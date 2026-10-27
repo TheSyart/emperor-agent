@@ -1658,6 +1658,8 @@ describe('CoreApi sessions and kept services', () => {
         filesTreeWidth: 280,
         pane: 'launcher',
       },
+      app_mode: 'chat',
+      mode_routes: {},
     }
     expect(api.sidebar.get()).toEqual(defaults)
     mkdirSync(join(root, 'memory'), { recursive: true })
@@ -1716,6 +1718,95 @@ describe('CoreApi sessions and kept services', () => {
     expect(
       api.sidebar.patch({ collapsed_sections: 'projects' }).collapsed_sections,
     ).toEqual([])
+  })
+
+  it('MOD-01 3 · fills app_mode from the most recent session while the file has none', async () => {
+    const { api, stateRoot } = await setup()
+    const project = tmp('emperor-mod01-project-')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-10-27T01:00:00Z'))
+      const chat = session(api, 'Chat')
+      expect(api.sidebar.get()).toMatchObject({
+        app_mode: 'chat',
+        mode_routes: {},
+      })
+      vi.setSystemTime(new Date('2026-10-27T02:00:00Z'))
+      api.sessions.create({
+        title: 'Build',
+        mode: 'build',
+        project_path: project,
+      })
+      expect(api.sidebar.get().app_mode).toBe('build')
+      // A legacy file (written before 0.3) has no app_mode either.
+      mkdirSync(join(stateRoot, 'memory'), { recursive: true })
+      writeFileSync(
+        join(stateRoot, 'memory', 'sidebar_state.json'),
+        JSON.stringify({ project_sort: 'manual', pinned_session_ids: [chat] }),
+      )
+      expect(api.sidebar.get()).toMatchObject({
+        project_sort: 'manual',
+        pinned_session_ids: [chat],
+        app_mode: 'build',
+        mode_routes: {},
+      })
+      vi.setSystemTime(new Date('2026-10-27T03:00:00Z'))
+      await api.sessions.rename(chat, 'Chat again')
+      expect(api.sidebar.get().app_mode).toBe('chat')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('MOD-01 4–5 · drops a bad app_mode and bad or draft mode_routes', async () => {
+    const { api, stateRoot } = await setup()
+    mkdirSync(join(stateRoot, 'memory'), { recursive: true })
+    writeFileSync(
+      join(stateRoot, 'memory', 'sidebar_state.json'),
+      JSON.stringify({
+        app_mode: 'team',
+        mode_routes: {
+          chat: 7,
+          build: 'x'.repeat(129),
+          group: 'g-1',
+          team: 't',
+        },
+      }),
+    )
+    expect(api.sidebar.get()).toMatchObject({
+      app_mode: 'chat',
+      mode_routes: { group: 'g-1' },
+    })
+    expect(
+      api.sidebar.patch({
+        app_mode: 'group',
+        mode_routes: { chat: 'draft:abc', build: ' s-build ', group: ['g'] },
+      }),
+    ).toMatchObject({ app_mode: 'group', mode_routes: { build: 's-build' } })
+    expect(api.sidebar.patch({ mode_routes: 'chat' }).mode_routes).toEqual({})
+  })
+
+  it('MOD-01 10 · keeps app_mode and mode_routes on disk across a restart', async () => {
+    const { api, stateRoot } = await setup()
+    session(api, 'Newest chat')
+    api.sidebar.patch({ app_mode: 'build', mode_routes: { build: 's-build' } })
+    const saved = JSON.parse(
+      readFileSync(join(stateRoot, 'memory', 'sidebar_state.json'), 'utf8'),
+    )
+    expect(saved).toMatchObject({
+      app_mode: 'build',
+      mode_routes: { build: 's-build' },
+    })
+    // The most recent session is a Chat: a saved mode is never replaced.
+    expect(api.sidebar.get()).toMatchObject({
+      app_mode: 'build',
+      mode_routes: { build: 's-build' },
+    })
+    // Other patches leave both alone.
+    expect(api.sidebar.patch({ chat_sort: 'manual' })).toMatchObject({
+      app_mode: 'build',
+      mode_routes: { build: 's-build' },
+    })
   })
 
   it('normalizes pinned sessions and unpins deleted or archived sessions', async () => {

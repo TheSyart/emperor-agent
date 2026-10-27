@@ -5,6 +5,13 @@ import type {
   SidebarSectionKey,
   SidebarState,
 } from '../types'
+import {
+  isAppMode,
+  isListedSession,
+  normalizeModeRoutes,
+  sessionAppMode,
+  type AppMode,
+} from './appMode'
 
 export interface SidebarProjectGroup {
   id: string
@@ -72,6 +79,8 @@ export const defaultSidebarState: SidebarState = {
     filesTreeWidth: 280,
     pane: 'launcher',
   },
+  app_mode: 'chat',
+  mode_routes: {},
 }
 
 export function normalizeSidebarState(
@@ -90,6 +99,9 @@ export function normalizeSidebarState(
     collapsed_sections: normalizeCollapsedSections(value?.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(value?.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(value?.right_workspace),
+    // Core fills a missing mode from the sessions; Chat is the last resort.
+    app_mode: normalizeAppMode(value?.app_mode),
+    mode_routes: normalizeModeRoutes(value?.mode_routes),
   }
 }
 
@@ -219,10 +231,14 @@ export function buildSidebarGroups(
   projectsInput: ProjectInfo[] = [],
 ): SidebarGroups {
   const state = normalizeSidebarState(stateInput)
-  // P1-6：draft 会话未发首条消息前不出现在侧边栏
-  const listed = sessions.filter(
-    (session) => !session.archived_at && !session.draft,
-  )
+  // P1-6：draft 会话未发首条消息前不出现在侧边栏. MOD-01: only Chat and
+  // Build sessions (by `sessionAppMode`) — a group member's or a trial
+  // session is listed nowhere, and Group sessions get their own sections
+  // (MOD-02). The 项目 / 对话 split below still follows `mode` until then.
+  const listed = sessions.filter((session) => {
+    if (!isListedSession(session)) return false
+    return sessionAppMode(session) !== 'group'
+  })
   // Pinned sessions only show in the 置顶 section (pin order); ids that no
   // longer match a listed session are stale and ignored.
   const byId = new Map(listed.map((session) => [session.id, session]))
@@ -301,8 +317,9 @@ export function searchSidebarSessions(
 ): SidebarSearchResult[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
+  // Every mode (MOD-04 tags them), never a session nobody lists (MOD-01).
   return sessions
-    .filter((session) => !session.archived_at && !session.draft)
+    .filter(isListedSession)
     .filter((session) => searchableText(session).includes(needle))
     .slice(0, 12)
     .map((session) => ({
@@ -393,6 +410,10 @@ function searchableText(session: SessionInfo): string {
     .filter(Boolean)
     .join('\n')
     .toLowerCase()
+}
+
+function normalizeAppMode(value: unknown): AppMode {
+  return isAppMode(value) ? value : 'chat'
 }
 
 function normalizeSort(value: unknown): SidebarSortMode {
