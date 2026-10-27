@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-26<br>
+> 最后核验：2026-10-27（对照 `fcd21f6c`）<br>
 > 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`weekly-executor-upstream.yml`、`release-preview.yml`、`release.yml`、`scripts/check.sh`、`packages/core/vitest.config.ts`、`packages/core/vitest.serial.config.ts`、`packages/core/package.json`、`package.json`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`config/executor-upstream-baseline.json`、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
 
 CI 只跑 macOS（项目不支持 Windows 和 Linux）。各项检查都由仓库内脚本执行，本机可以用相同命令重跑；GitHub 只负责按时间或事件把它们排上 runner。
@@ -47,7 +47,7 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 
 ## Nightly
 
-`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过；它只跑带 `@baseline` 的测试并与 `desktop/tests/visual/__baselines__/` 逐像素比对，用 `playwright.config.ts`，换端口用 `EMPEROR_VISUAL_PORT`，见[开发指南](README.md#质量门禁)）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics、updates（检查更新，对本机的假发布源）；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
+`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过；它只跑带 `@baseline` 的测试并与 `desktop/tests/visual/__baselines__/` 逐像素比对，用 `playwright.config.ts`，换端口用 `EMPEROR_VISUAL_PORT`，见[开发指南](README.md#质量门禁)）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics、updates（检查更新，对本机的假发布源）、modes（三种模式：菜单选的模式重启后保持、⌘1 / ⌘2 / ⌘3、新会话落在本模式的分区、别的模式的通知打开后切过去）；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
 
 像素基线固定使用 macOS 26，临时 runner 的首选语言为 `zh-Hans`。只有带 `@baseline` 的测试使用固定的 Noto Sans SC 5.3.1 字体夹具（`desktop/tests/visual/fonts/noto-sans-sc`，OFL-1.1，完整许可与逐文件 SHA-256 一并保存）；Playwright 从本机路由提供这些字体，验收不请求外部字库。产品字体配置、未打标的视觉测试与真实 Electron 验收沿用系统字体。原生字体的可选文档字库与保留 UI 字库可能有相同 PostScript 名称、不同文件与版本，不能用机器各自的字库作跨机器像素基准。像素容差保持不变，字体夹具变更须显式更新并复核基线。
 
