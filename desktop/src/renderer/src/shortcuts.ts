@@ -25,6 +25,9 @@ export type ShortcutAction =
   | 'search'
   | 'nav.back'
   | 'nav.forward'
+  | 'mode.chat'
+  | 'mode.build'
+  | 'mode.group'
 
 export type ShortcutPlatform = 'mac' | 'other'
 
@@ -72,6 +75,10 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { action: 'search', key: 'k', mod: true, label: '搜索' },
   { action: 'nav.back', key: '[', mod: true, label: '后退' },
   { action: 'nav.forward', key: ']', mod: true, label: '前进' },
+  // The three modes (MOD-01, docs/design/modes.md); names stay English (D3).
+  { action: 'mode.chat', key: '1', mod: true, label: '切换到 Chat' },
+  { action: 'mode.build', key: '2', mod: true, label: '切换到 Build' },
+  { action: 'mode.group', key: '3', mod: true, label: '切换到 Group' },
 ]
 
 /** Physical-key fallback when `key` is not the plain character (⌥ chords). */

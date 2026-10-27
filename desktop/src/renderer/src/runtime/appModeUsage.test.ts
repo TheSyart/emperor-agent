@@ -86,3 +86,22 @@ describe('every session list goes through the mode filter (MOD-01 11)', () => {
     expect(block).toContain('isListedSession(')
   })
 })
+
+describe('App wiring (MOD-01 6–10)', () => {
+  it('binds ⌘1–⌘3 and ⌘N to the mode controller and keeps the route invariant', () => {
+    const app = read('App.vue')
+    for (const mode of ['chat', 'build', 'group'])
+      expect(app).toContain(
+        `'mode.${mode}': () => runSafely(() => appModeController.switchTo('${mode}'))`,
+      )
+    expect(app).toContain(
+      "'session.new': () => runSafely(appModeController.newSession)",
+    )
+    // The route leads; the mode follows it once start-up has landed.
+    expect(app).toContain('appMode.followRoute(')
+    expect(app).toContain('routeModeTarget(route, sessionStore.getSession)')
+    // Start-up opens a session of the saved mode, not just the most recent.
+    expect(app).toContain('landInAppMode')
+    expect(read('appStartup.ts')).toContain('await landInAppMode?.()')
+  })
+})
