@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
  * SkinStamp — the skin's `approved` picture (朱批: the 「单」 seal) for a
- * moment after the user allows an action (BRD-05). It sits beside the
- * composer, never on the permission card, and only decorates: the card's
- * words and buttons are its own.
+ * moment after the user allows an action (BRD-05). It lands on the
+ * composer's top-right corner once the permission card has gone, never on
+ * the card, and only decorates: the card's words and buttons are its own.
  */
 import { onBeforeUnmount, ref, watch } from 'vue'
 import SkinSlot from './SkinSlot.vue'
@@ -35,9 +35,16 @@ onBeforeUnmount(() => {
 <style scoped>
 .skin-stamp {
   position: absolute;
-  right: var(--space-6);
-  bottom: calc(100% - var(--space-4));
-  width: calc(var(--space-8) * 2);
+  top: var(--space-1);
+  /* On the composer card's top-right corner, inside the window. */
+  left: min(
+    calc(
+      50% - var(--chat-shift, 0px) + var(--composer-card-max) / 2 -
+        var(--space-8) * 1.5 - var(--space-2)
+    ),
+    calc(100% - var(--space-8) * 1.5 - var(--space-4))
+  );
+  width: calc(var(--space-8) * 1.5);
   rotate: -8deg;
   animation: skin-stamp var(--motion-slow) var(--ease-spring) both;
 }
