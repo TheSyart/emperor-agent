@@ -274,6 +274,24 @@ export function useSession() {
     if (activeId.value === draftId) activeId.value = session.id
   }
 
+  /**
+   * A session Core made outside a draft — a contact's single chat
+   * (`contacts.openChat`, GRP-05) — taken into the list once: replaced in
+   * place when it is there, else first after the drafts.
+   */
+  function adopt(session: SessionInfo) {
+    const index = sessions.value.findIndex((item) => item.id === session.id)
+    if (index >= 0) {
+      const next = sessions.value.slice()
+      next[index] = { ...next[index], ...session }
+      sessions.value = next
+      return
+    }
+    const drafts = sessions.value.filter((item) => item.draft)
+    const saved = sessions.value.filter((item) => !item.draft)
+    sessions.value = [...drafts, session, ...saved]
+  }
+
   function applySessionTitleUpdatedEvent(
     event: Extract<WsEvent, { event: 'session_title_updated' }>,
   ) {
@@ -328,6 +346,7 @@ export function useSession() {
     updateDraft,
     setDraftProject,
     promoteDraft,
+    adopt,
     applySessionTitleUpdatedEvent,
     applySessionControlPending,
     backendSessionId,

@@ -91,14 +91,22 @@ afterEach(() => {
 })
 
 describe('AvatarRecommend', () => {
-  it('shows the recommendation and why', async () => {
+  it('shows the recommendation by name, and why (GRP-05: the names load with the editor)', async () => {
     mount()
     await flush()
     expect(shownId()).toBe('AV-01-4')
+    expect(loadManifest).toHaveBeenCalledTimes(1)
     const text = document.querySelector('[data-avatar-recommend]')!.textContent!
-    expect(text).toContain('推荐')
-    expect(text).toContain('工程')
+    expect(text).toContain('推荐：安全审计')
     expect(text).toContain('跳过别的联系人已在用的')
+  })
+
+  it('names the theme while the names cannot be read', async () => {
+    loadManifest.mockRejectedValue(new Error('offline'))
+    mount()
+    await flush()
+    const text = document.querySelector('[data-avatar-recommend]')!.textContent!
+    expect(text).toContain('推荐：工程主题')
   })
 
   it('换一个 draws from the theme and never offers one again', async () => {
@@ -134,10 +142,8 @@ describe('AvatarRecommend', () => {
   it('picks from the library, an avatar in use too, and says who uses it', async () => {
     mount()
     await flush()
-    expect(loadManifest).not.toHaveBeenCalled()
     button('从头像库选…').click()
     await flush()
-    expect(loadManifest).toHaveBeenCalledTimes(1)
     document.querySelector<HTMLElement>('[data-avatar-cell="AV-01-2"]')!.click()
     await flush()
     expect(avatar.value).toEqual({ kind: 'library', id: 'AV-01-2' })

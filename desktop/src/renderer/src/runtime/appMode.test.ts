@@ -192,6 +192,18 @@ describe('routeModeTarget (MOD-01 8–9)', () => {
       ),
     ).toEqual({ mode: 'group', sessionId: '' })
   })
+
+  it('puts a contact’s profile and a group’s page in Group, remembering the group (GRP-05)', () => {
+    expect(
+      routeModeTarget(
+        { name: 'contact', params: { id: 'ct-reviewer00001' } },
+        find,
+      ),
+    ).toEqual({ mode: 'group', sessionId: '' })
+    expect(
+      routeModeTarget({ name: 'group', params: { groupId: 'grp-1' } }, find),
+    ).toEqual({ mode: 'group', sessionId: 'grp-1' })
+  })
 })
 
 describe('mode_routes (MOD-01 5)', () => {

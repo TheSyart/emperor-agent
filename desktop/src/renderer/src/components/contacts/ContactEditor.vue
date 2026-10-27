@@ -100,8 +100,6 @@ const avatarEpoch = ref(0)
 const avatarPicked = ref(false)
 const method = ref<ContactMethod>('template')
 const trialRan = ref(false)
-/** A new contact just saved keeps the trial it ran (the same editor shows it). */
-let carryTrial = false
 const saving = ref(false)
 const saveError = ref('')
 
@@ -141,8 +139,7 @@ async function load() {
   saveError.value = ''
   drafted.value = new Set()
   dirty.value = false
-  trialRan.value = carryTrial
-  carryTrial = false
+  trialRan.value = false
   method.value = 'template'
   avatarPicked.value = false
   avatarEpoch.value += 1
@@ -725,9 +722,9 @@ async function save() {
         JSON.parse(JSON.stringify(createInput(draft.value))),
       )
       dirty.value = false
-      carryTrial = trialRan.value
       ctx.showToast(`已保存「${saved.name}」`)
-      await router.replace({ name: 'contact-edit', params: { id: saved.id } })
+      // A new contact lands on its profile (GRP-05); 编辑 comes back here.
+      await router.replace({ name: 'contact', params: { id: saved.id } })
     }
   } catch (error) {
     saveError.value = failureText(error)
@@ -749,7 +746,7 @@ async function cancel() {
     return
   dirty.value = false
   if (window.history.state?.back) router.back()
-  else await router.push({ name: 'chat' }).catch(() => undefined)
+  else await router.push({ name: 'contacts' }).catch(() => undefined)
 }
 
 const title = computed(() =>
