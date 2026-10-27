@@ -4,7 +4,9 @@
  * messages, and flags the pair once they have alternated at least
  * LOOP_MIN_EXCHANGES times and each of their last two messages adds almost
  * nothing to the two before it. Similarity is Jaccard over character
- * 3-grams, which works for Chinese without word segmentation.
+ * 3-grams, which works for Chinese without word segmentation. An @-mention
+ * is who is addressed, not content: it is left out (two members @-ing each
+ * other otherwise read as fresh text every time).
  */
 import type { ContactId, GroupMessage } from './types'
 
@@ -13,8 +15,14 @@ export const LOOP_MIN_EXCHANGES = 4
 /** Below this novelty (less than half new) a message adds nothing new. */
 export const LOOP_NOVELTY = 0.5
 
+/** An @ and the name after it, up to a space or punctuation. */
+const MENTION = /@[^\s\p{P}\p{S}]+/gu
+
 function shingles(text: string): Set<string> {
-  const plain = text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+  const plain = text
+    .toLowerCase()
+    .replace(MENTION, '')
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
   const chars = Array.from(plain)
   const out = new Set<string>()
   if (chars.length < 3) {

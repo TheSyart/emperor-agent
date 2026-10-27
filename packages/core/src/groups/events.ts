@@ -31,7 +31,27 @@ export interface GroupEventMap {
   'group/delivery': { contactId: ContactId; upTo: string }
   'group/task': GroupTask
   'group/digest': { upTo: string; text: string }
+  /**
+   * A turn's life (GRP-07): it starts with the user's message and ends
+   * finished, stopped (the user, or `app_restart`) or paused (the loop
+   * guard with no moderator); `spend` is what it cost so far.
+   */
+  'group/turn': {
+    turnId: string
+    state: GroupTurnState
+    reason?: string
+    spend: { usd: number; tokens: number }
+  }
 }
+
+export type GroupTurnState =
+  'started' | 'planning' | 'speaking' | 'paused' | 'finished' | 'stopped'
+/** A turn in one of these states is over. */
+export const GROUP_TURN_ENDED: ReadonlySet<GroupTurnState> = new Set([
+  'paused',
+  'finished',
+  'stopped',
+])
 
 declare module '../session-log/types' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -56,6 +76,8 @@ export interface GroupState {
   cursors: Map<ContactId, string>
   tasks: Map<string, GroupTask>
   digest: { upTo: string; text: string } | null
+  /** The latest turn and its state (null before the first). */
+  turn: GroupEventMap['group/turn'] | null
 }
 
 const DEFAULT_SETTINGS: GroupSettings = {
@@ -78,6 +100,7 @@ export function emptyGroupState(): GroupState {
     cursors: new Map(),
     tasks: new Map(),
     digest: null,
+    turn: null,
   }
 }
 
@@ -141,6 +164,9 @@ export function foldGroupEvents(
         break
       case 'group/digest':
         state.digest = { ...event.data }
+        break
+      case 'group/turn':
+        state.turn = { ...event.data }
         break
       default:
         break

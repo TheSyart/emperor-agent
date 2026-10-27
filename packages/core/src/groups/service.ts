@@ -342,6 +342,17 @@ export class GroupService {
     }
   }
 
+  /** Write one event to a group's log (the scheduler's messages, turns, deliveries). */
+  append<K extends keyof GroupEventMap>(
+    groupId: string,
+    type: K,
+    data: GroupEventMap[K],
+  ): void {
+    this.state(groupId)
+    this.deps.log(groupId).append(type, data)
+    if (type === 'group/message') this.changed('message', groupId)
+  }
+
   /** The folded log of a group (GRP-07 plans and delivers from it). */
   state(groupId: string): GroupState {
     const entry = this.deps.sessions.get(groupId)

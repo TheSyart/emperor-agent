@@ -21,8 +21,22 @@ export type QueueItem =
   | {
       kind: 'speak'
       member: ContactId
-      reason: 'asked' | 'mention' | 'moderator-plan' | 'always'
+      /**
+       * asked: by the user's @; mention: by a member's @; always: its habit;
+       * hand: it raised a hand; assigned: the moderator's group_next;
+       * intervene: the moderator, when the loop guard steps in (GRP-07).
+       */
+      reason:
+        | 'asked'
+        | 'mention'
+        | 'moderator-plan'
+        | 'always'
+        | 'hand'
+        | 'assigned'
+        | 'intervene'
       source: string
+      /** A line added to the reason (the hand's reason, the loop guard's note). */
+      note?: string
     }
   | { kind: 'batch'; members: ContactId[]; batchId: string; source: string }
   | { kind: 'poll'; members: ContactId[]; source: string }
