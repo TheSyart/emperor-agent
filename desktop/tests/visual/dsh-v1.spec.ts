@@ -2030,12 +2030,38 @@ for (const theme of ['dark', 'light'] as const) {
   test(`settings tokens dashboard views (${theme}) @baseline`, async ({
     page,
   }) => {
-    await open(page, '/chat/build-ui?settings=tokens', {
-      width: 1280,
-      height: 860,
-      theme,
-    })
+    // The executor config loads, so its limits can be changed.
+    await open(
+      page,
+      '/chat/build-ui?settings=tokens&visualExecutors=signed-in',
+      {
+        width: 1280,
+        height: 860,
+        theme,
+      },
+    )
     const dialog = page.getByRole('dialog', { name: '设置' })
+    await expect(dialog.locator('[data-external-cap]')).toBeEnabled()
+    // SET-01: 用量与费用 — the spend tiles and the spend by source first.
+    await expect(
+      dialog.getByTestId('usage-metrics').locator('[data-metric]'),
+    ).toHaveCount(4)
+    await expect(
+      dialog.getByTestId('usage-sources').locator('[data-source]'),
+    ).toHaveCount(6)
+    await expectOptionsFit(page)
+    await expectBaseline(page, 'settings', `usage-${theme}`)
+    await scrollOptions(page, 'bottom')
+    await shot(page, `settings-usage-limits-${theme}`)
+    await dialog.getByTestId('usage-sessions-link').click()
+    await expect(
+      dialog.getByTestId('usage-sessions').locator('li'),
+    ).toHaveCount(3)
+    await shot(page, `settings-usage-sessions-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
+
+    // Token 明细: the former 用量 page, metrics and the trend (UI-S07).
+    await dialog.getByTestId('usage-tokens-link').click()
     const metrics = dialog.getByTestId('token-metrics')
     await expect(metrics.locator('[data-metric]')).toHaveCount(4)
     // The main page: metrics and the trend (UI-S07).
@@ -2046,7 +2072,6 @@ for (const theme of ['dark', 'light'] as const) {
       .hover({ position: { x: 300, y: 120 } })
     await expectOptionsFit(page)
     await shot(page, `settings-tokens-trend-${theme}`)
-    await expectBaseline(page, 'settings', `usage-${theme}`)
 
     // 详细: the heatmap, the ranking and the cache view.
     await dialog.getByTestId('usage-details').click()
@@ -2100,6 +2125,7 @@ test('scheduler page / memory / tokens fit a narrow panel', async ({
     if (section === 'scheduler')
       await expect(dialog.locator('.job-row').first()).toBeVisible()
     if (section === 'tokens') {
+      await dialog.getByTestId('usage-tokens-link').click()
       await dialog.getByTestId('usage-details').click()
       await dialog
         .getByRole('radiogroup', { name: '用量视图' })

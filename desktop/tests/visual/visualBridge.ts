@@ -1166,6 +1166,66 @@ export async function installVisualCoreBridge(
       }
       // Deterministic ~5 months of token usage relative to the real clock
       // (the heatmap / 7 天 / 30 天 windows are computed from today).
+      /**
+       * 设置 › 用量与费用 (SET-01): spend by source for a range, the numbers
+       * of preview D scaled by range; the top sessions are the Build demo
+       * session, the plain chat and a deleted one.
+       */
+      const visualUsageSummary = (range: string) => {
+        const scale =
+          (
+            { today: 1, '7d': 4.2, '30d': 13.5, all: 31 } as Record<
+              string,
+              number
+            >
+          )[range] ?? 1
+        const b = (usd: number, tokens: number, calls: number) => ({
+          usd: Math.round(usd * scale * 100) / 100,
+          tokens: Math.round(tokens * scale),
+          calls: Math.round(calls * scale),
+          partial: false,
+        })
+        const bySource = {
+          chat: b(1.55, 1_120_000, 38),
+          build: b(6.92, 4_850_000, 164),
+          group: b(6.1, 3_900_000, 212),
+          scheduler: b(0.1, 64_000, 3),
+          'claude-code': b(2.48, 1_700_000, 6),
+          codex: b(1.27, 960_000, 4),
+          other: b(0, 0, 0),
+        }
+        const values = Object.values(bySource)
+        return {
+          range,
+          totalUsd:
+            Math.round(values.reduce((n, v) => n + v.usd, 0) * 100) / 100,
+          tokens: values.reduce((n, v) => n + v.tokens, 0),
+          subscriptionTokens: 0,
+          cacheHitRate: 0.71,
+          partial: false,
+          bySource,
+          topSessions: [
+            {
+              sessionId: 'build-ui',
+              source: 'build',
+              usd: 4.1 * scale,
+              tokens: 2_900_000 * scale,
+            },
+            {
+              sessionId: 'chat-main',
+              source: 'chat',
+              usd: 1.2 * scale,
+              tokens: 860_000 * scale,
+            },
+            {
+              sessionId: 'gone',
+              source: 'build',
+              usd: 0.4 * scale,
+              tokens: 210_000 * scale,
+            },
+          ],
+        }
+      }
       const visualTokens = () => {
         const fields = [
           'input',
@@ -6255,6 +6315,12 @@ export async function installVisualCoreBridge(
               return memory
             case 'memory.tokens':
               return visualTokens()
+            case 'usage.summary':
+              return visualUsageSummary(
+                String(
+                  (args[0] as { range?: string } | undefined)?.range ?? 'today',
+                ),
+              )
             case 'memory.getEpisode': {
               const date = String(args[0] || '2026-06-26')
               return {

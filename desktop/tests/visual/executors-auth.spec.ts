@@ -139,8 +139,10 @@ for (const theme of ['dark', 'light'] as const) {
     await dialog.locator('[data-testid="settings-crumb"]').click()
     await dialog.locator('[data-executor-advanced-link]').click()
     const advanced = dialog.locator('[data-executor-advanced]')
-    await expect(advanced.locator('[data-claude-max-turns]')).toContainText(
-      '200 轮（默认）',
+    // SET-01: turns and run time are set in 用量与费用; a row leads there.
+    await expect(advanced.locator('[data-claude-max-turns]')).toHaveCount(0)
+    await expect(advanced.locator('[data-usage-link]')).toContainText(
+      '用量与费用',
     )
     await expect(advanced).not.toContainText('使用本机安装的 claude')
     await shot(page, `advanced-${theme}`)
