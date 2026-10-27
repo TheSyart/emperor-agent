@@ -4,7 +4,9 @@
  *   - a new session lands in its mode's section: Chat's 新对话 under a day
  *     heading, Build's 打开文件夹 and 新建项目会话 under the project, and a
  *     group (Core's `groups.create`; 新建群聊 is still to come) in no Chat or
- *     Build list, found by search with its Group tag and opened in Group;
+ *     Build list but in Group's 群聊 at once (GRP-05 follows
+ *     `groups_changed`), found by search with its Group tag and opened on
+ *     its page in Group;
  *   - ⌘1 / ⌘2 / ⌘3 switch the mode and go back to each mode's last session;
  *   - a turn that ends in a Build session while Chat is on screen rings the
  *     bell; the notification, tagged Build, opens the session in Build;
@@ -288,6 +290,18 @@ async function urlSession(page: Page): Promise<string> {
   )
 }
 
+/** The group whose page is on screen ('' elsewhere; GRP-05). */
+async function urlGroup(page: Page): Promise<string> {
+  return await page.evaluate(() =>
+    decodeURIComponent(
+      /\/groups\/([^/?#]+)/.exec(location.pathname)?.[1] ?? '',
+    ),
+  )
+}
+
+/** Group's sections since GRP-05: 群聊, then 联系人. */
+const GROUP_SECTIONS = JSON.stringify(['groups', 'contacts'])
+
 /** Wait until the address shows a saved session (not a draft); its id. */
 async function savedSession(page: Page, what: string): Promise<string> {
   let id = ''
@@ -519,9 +533,11 @@ async function newSessionsPerMode(
       await page.screenshot({ path: join(shots, 'build-sessions.png') })
 
       // Group: 新建群聊 is still to come; a group made in Core is listed
-      // in neither Chat nor Build.
+      // in Group's 群聊 at once and in neither Chat nor Build.
       await page.keyboard.press('ControlOrMeta+3')
       await brandIs(page, 'Emperor Group')
+      // No group session yet: ⌘3 opens the Group home (GRP-05).
+      await page.locator('[data-group-home]').waitFor({ timeout: 10_000 })
       const create = primaryButton(page, '新建群聊')
       if ((await create.getAttribute('aria-disabled')) !== 'true')
         throw new Error('新建群聊 is available')
@@ -538,12 +554,10 @@ async function newSessionsPerMode(
         10_000,
         'the group’s session',
       )
-      // The renderer reads groups with the session list at start-up; it does
-      // not follow `groups_changed` yet (GRP-05), so reload the window. The
-      // address still names the Build session, so the mode follows it back.
-      await page.reload()
-      await page.locator('.app-frame').waitFor({ timeout: 60_000 })
-      await brandIs(page, 'Emperor Build')
+      // The renderer follows `groups_changed` (GRP-05): no reload.
+      await sidebar(page)
+        .locator(`[data-sidebar-section="groups"] [data-row="${ids.group}"]`)
+        .waitFor({ timeout: 10_000 })
       for (const [key, name] of [
         ['1', 'Emperor Chat'],
         ['2', 'Emperor Build'],
@@ -556,7 +570,7 @@ async function newSessionsPerMode(
       await page.keyboard.press('ControlOrMeta+3')
       await brandIs(page, 'Emperor Group')
       const groupSections = await sections(page)
-      if (JSON.stringify(groupSections) !== JSON.stringify(['group']))
+      if (JSON.stringify(groupSections) !== GROUP_SECTIONS)
         throw new Error(`Group shows ${JSON.stringify(groupSections)}`)
       if ((await sidebar(page).locator('.session-row').count()) !== 0)
         throw new Error('Group lists a session row')
@@ -576,8 +590,9 @@ async function newSessionsPerMode(
       if (tag !== 'Group') throw new Error(`the hit is tagged ${tag}`)
       await page.screenshot({ path: join(shots, 'group-search.png') })
       await hit.click()
+      // A group's session opens on the group's page (GRP-05).
       await until(
-        async () => (await urlSession(page)) === ids.group,
+        async () => (await urlGroup(page)) === ids.group,
         10_000,
         'the group open',
       )
@@ -610,7 +625,10 @@ async function shortcuts(page: Page, ids: Sessions): Promise<void> {
         await page.keyboard.press(`ControlOrMeta+${key}`)
         await brandIs(page, name)
         await until(
-          async () => (await urlSession(page)) === session,
+          async () =>
+            (name === 'Emperor Group'
+              ? await urlGroup(page)
+              : await urlSession(page)) === session,
           10_000,
           `⌘${key} to open ${session}`,
         )
@@ -621,7 +639,7 @@ async function shortcuts(page: Page, ids: Sessions): Promise<void> {
             : name === 'Emperor Build'
               ? shown.includes('projects') &&
                 !shown.some((key) => key.startsWith('chats'))
-              : JSON.stringify(shown) === JSON.stringify(['group'])
+              : JSON.stringify(shown) === GROUP_SECTIONS
         if (!expected || shown.length === 0)
           throw new Error(`${name} shows ${JSON.stringify(shown)}`)
         seen.push({ key: `⌘${key}`, brand: name, session })

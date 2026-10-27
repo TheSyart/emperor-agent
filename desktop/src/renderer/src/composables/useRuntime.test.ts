@@ -42,6 +42,34 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(onAgentTreeChanged).toHaveBeenCalledWith(changed)
   })
 
+  it('GRP-05 · reads the session list again when a group is created, and only then', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const refreshSessions = vi.fn(async () => undefined)
+    const runtime = useRuntime({ ...testOptions(), refreshSessions })
+    runtime.connectSocket()
+    emitCoreEvent(listener, {
+      event: 'groups_changed',
+      reason: 'created',
+      group_id: 'grp-1',
+    })
+    expect(refreshSessions).toHaveBeenCalledTimes(1)
+    // A message or a settings change makes no new session.
+    for (const reason of ['message', 'updated', 'member'])
+      emitCoreEvent(listener, {
+        event: 'groups_changed',
+        reason,
+        group_id: 'grp-1',
+      })
+    expect(refreshSessions).toHaveBeenCalledTimes(1)
+  })
+
   it('shows a toast for a session log health report of any session', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({
