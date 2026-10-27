@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { routeRecords } from '../../router'
-import { activeSidebarPage, SIDEBAR_PAGES } from './sidebarNav'
+import {
+  activeSidebarPage,
+  SIDEBAR_PAGES,
+  visibleSidebarPages,
+} from './sidebarNav'
 
 const source = (name: string) => readFileSync(join(__dirname, name), 'utf8')
 const root = source('SidebarRoot.vue')
@@ -61,6 +65,22 @@ describe('sidebar nav', () => {
     expect(SIDEBAR_PAGES.filter((entry) => entry.github)).toHaveLength(1)
   })
 
+  it('shows Pull Request in Build only, and only with the GitHub plugin on (D4)', () => {
+    const github = [
+      { pluginId: 'github', effective: true, activation: 'active' },
+    ] as Parameters<typeof visibleSidebarPages>[0]
+    const names = (...args: Parameters<typeof visibleSidebarPages>) =>
+      visibleSidebarPages(...args).map((entry) => entry.name)
+    expect(names(github, 'build')).toEqual([
+      'pulls',
+      'scheduler',
+      'capabilities',
+    ])
+    expect(names([], 'build')).toEqual(['scheduler', 'capabilities'])
+    expect(names(github, 'chat')).toEqual(['scheduler', 'capabilities'])
+    expect(names(github, 'group')).toEqual(['scheduler', 'capabilities'])
+  })
+
   it('highlights a page entry only on its own route', () => {
     expect(activeSidebarPage('scheduler')).toBe('scheduler')
     expect(activeSidebarPage('capabilities')).toBe('capabilities')
@@ -85,11 +105,15 @@ describe('sidebar nav', () => {
     expect(bell).not.toMatch(/^import NotificationsPopover/m)
   })
 
-  it('keeps the brand row display-only and the footer theme toggle', () => {
+  it('makes the brand row the mode switcher and keeps the footer theme toggle (MOD-02)', () => {
     const brand = source('SidebarBrandRow.vue')
+    const switcher = source('ModeSwitcher.vue')
     const footer = source('SidebarFooter.vue')
-    expect(brand).not.toContain('<Menu')
-    expect(brand).not.toContain('aria-haspopup')
+    expect(brand).toContain('<ModeSwitcher')
+    // The switcher's menu is the shared primitive, its rows radio items.
+    expect(switcher).toContain('<Menu')
+    expect(switcher).toContain('aria-haspopup="menu"')
+    expect(switcher).toContain('radio')
     expect(footer).toContain('useTheme()')
     expect(footer).toContain('@click="toggle()"')
     expect(footer).not.toContain('openExternal')

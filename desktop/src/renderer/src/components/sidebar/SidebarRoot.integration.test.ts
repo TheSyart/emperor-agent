@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { createApp, nextTick, ref, type App } from 'vue'
+import { createApp, nextTick, reactive, ref, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentView } from '@emperor/core/api'
 import SidebarRoot from './SidebarRoot.vue'
 import { useAgentTree } from './agentTree'
 import { defaultSidebarState } from '../../runtime/sidebarModel'
+import type { AppMode } from '../../runtime/appMode'
 
 const mock = vi.hoisted(() => ({
   core: vi.fn(),
@@ -45,12 +46,32 @@ const agent = (
 })
 let agents: AgentView[]
 
+/** The window's mode as App.vue provides it (MOD-02): a ref and the controller. */
+function fakeAppMode(initial: AppMode = 'chat') {
+  const mode = ref<AppMode>(initial)
+  return {
+    mode,
+    switchTo: vi.fn(async (next: AppMode) => {
+      mode.value = next
+    }),
+    newSession: vi.fn(async () => undefined),
+  }
+}
+let appMode: ReturnType<typeof fakeAppMode>
+
 beforeEach(() => {
+  appMode = fakeAppMode()
   mock.context = {
     showToast: vi.fn(),
     showError: vi.fn(),
-    sessionRuntimeStates: {},
+    runSafely: async (task: () => Promise<void>) => {
+      await task()
+    },
+    // Reactive like useRuntime's maps.
+    sessionRuntimeStates: reactive({}),
+    pendingInteractionsBySession: reactive({}),
     boot: ref({ plugins: [] }),
+    appMode,
   }
   store.sync([])
   for (const id of Object.keys(store.expanded)) delete store.expanded[id]
@@ -128,7 +149,12 @@ async function settle() {
   for (let i = 0; i < 30; i++) await Promise.resolve()
   await nextTick()
 }
-async function mount(path: string, props = { collapsed: false, width: 280 }) {
+async function mount(
+  path: string,
+  props = { collapsed: false, width: 280 },
+  mode: AppMode = 'chat',
+) {
+  appMode.mode.value = mode
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -159,7 +185,7 @@ it('keeps main rows only and selects the external owning root before child hydra
         })
       : original(key, input),
   )
-  await mount('/chat/project-root/agents/dlg-deep')
+  await mount('/chat/project-root/agents/dlg-deep', undefined, 'build')
   expect(
     root.querySelector('.session-row[data-active]')?.getAttribute('title'),
   ).toBe('project-root')
@@ -179,11 +205,12 @@ it('resolves a direct native child from lineage while the child index is delayed
       }
     return original(key, input)
   })
-  const router = await mount('/chat/sub-parent')
+  const router = await mount('/chat/sub-parent', undefined, 'build')
   expect(
     root.querySelector('.session-row[data-active]')?.getAttribute('title'),
   ).toBe('project-root')
-  expect(root.querySelectorAll('.session-row')).toHaveLength(3)
+  // Build shows its own rows only: the pinned chat is not one of them.
+  expect(root.querySelectorAll('.session-row')).toHaveLength(1)
   expect(root.querySelector('[data-agent-id]')).toBeNull()
   expect(
     mock.core.mock.calls.every(([key]) =>
@@ -195,7 +222,9 @@ it('resolves a direct native child from lineage while the child index is delayed
       ].includes(key),
     ),
   ).toBe(true)
+  // Opening a Chat session switches the mode with it (App.vue, MOD-01).
   await router.push('/chat/pinned')
+  appMode.mode.value = 'chat'
   await settle()
   expect(
     root.querySelector('.session-row[data-active]')?.getAttribute('title'),
@@ -213,18 +242,14 @@ it('preserves main session actions and search without child rows', async () => {
 })
 
 async function chooseNewProjectFolder() {
-  root.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
-  await settle()
-  const item = [
-    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ].find((el) => el.textContent?.includes('选择项目文件夹'))!
-  item.click()
+  // Build's primary row: the + beside 新建项目会话 opens a folder (MOD-02).
+  root.querySelector<HTMLButtonElement>('[aria-label="打开文件夹"]')!.click()
   await settle()
 }
 
 it('does nothing when the folder picker is cancelled (FIX-06 1)', async () => {
   mock.selectDirectory.mockResolvedValue(null)
-  await mount('/chat/pinned')
+  await mount('/chat/project-root', undefined, 'build')
   await chooseNewProjectFolder()
   expect(mock.selectDirectory).toHaveBeenCalledOnce()
   expect(mock.context.showError).not.toHaveBeenCalled()
@@ -350,39 +375,227 @@ it('reports a failed rename and keeps the old title (FIX-01 7)', async () => {
 
 // ── UI-S11: Emperor's own sidebar, redesigned on the original structure ──
 
-it('lays the sidebar out top to bottom: top row, brand, new chat, pages, sections, footer (UI-S11 2)', async () => {
+it('lays the sidebar out top to bottom: top row, switcher, primary row, sections, footer (UI-S11 2, MOD-02)', async () => {
   await mount('/chat/pinned')
   expect(
     [...root.querySelectorAll<HTMLElement>('[data-sidebar-block]')].map(
       (el) => el.dataset.sidebarBlock,
     ),
-  ).toEqual(['top', 'brand', 'new', 'pages', 'sections', 'footer'])
-  expect(
-    [...root.querySelectorAll<HTMLElement>('[data-sidebar-section]')].map(
-      (el) => el.dataset.sidebarSection,
-    ),
-  ).toEqual(['pinned', 'projects', 'chats'])
-  for (const label of ['收起侧栏', '后退', '前进', '搜索', '设置'])
-    expect(root.querySelector(`[aria-label="${label}"]`)).not.toBeNull()
+  ).toEqual(['top', 'brand', 'new', 'sections', 'footer'])
+  for (const label of [
+    '收起侧栏',
+    '后退',
+    '前进',
+    '搜索',
+    '设置',
+    '定时任务',
+    '能力',
+  ])
+    expect(root.querySelector(`[aria-label="${label}"]`), label).not.toBeNull()
+  // The pages moved to the footer (D4): none left above the sessions.
+  expect(root.querySelector('.sidebar-nav .nav-item')).toBeNull()
 })
 
-it('shows Pull Request only while the GitHub plugin is on (UI-S11 3)', async () => {
+const sections = () =>
+  [...root.querySelectorAll<HTMLElement>('[data-sidebar-section]')].map(
+    (el) => el.dataset.sidebarSection,
+  )
+const rowTitles = () =>
+  [...root.querySelectorAll<HTMLElement>('.session-row')].map((el) =>
+    el.getAttribute('title'),
+  )
+
+it('MOD-02 3 · each mode shows only its own sections', async () => {
+  await mount('/chat/pinned')
+  expect(sections()).toEqual(['pinned', 'chats'])
+  expect(rowTitles()).toEqual(['pinned', 'chat-root'])
+
+  appMode.mode.value = 'build'
+  await settle()
+  expect(sections()).toEqual(['projects'])
+  root
+    .querySelector<HTMLButtonElement>(
+      '[data-sidebar-section="projects"] .project-row',
+    )
+    ?.click()
+  await settle()
+  expect(rowTitles()).toEqual(['project-root'])
+
+  // Group: contacts and groups arrive with GRP-05; a plain placeholder,
+  // no rows and no fake data.
+  appMode.mode.value = 'group'
+  await settle()
+  expect(sections()).toEqual(['group'])
+  expect(rowTitles()).toEqual([])
+  expect(
+    root.querySelector('[data-sidebar-section="group"]')?.textContent,
+  ).toContain('联系人和群聊')
+})
+
+it('MOD-02 3 · an old Build session with no project shows under Chat (D2)', async () => {
+  mock.session.sessions.value = [
+    ...mock.session.sessions.value,
+    {
+      id: 'old-build',
+      mode: 'build',
+      title: 'old-build',
+      created_at: '2026-10-17T00:00:00Z',
+      updated_at: '2026-10-17T00:00:00Z',
+    },
+  ]
+  await mount('/chat/pinned')
+  expect(rowTitles()).toEqual(['pinned', 'chat-root', 'old-build'])
+})
+
+it('MOD-02 4 · 置顶 lists the pins of the mode on screen only', async () => {
+  const base = mock.core.getMockImplementation()!
+  mock.core.mockImplementation(async (key: string, input: any) =>
+    key === 'sidebar.get'
+      ? {
+          ...defaultSidebarState,
+          pinned_session_ids: ['project-root', 'pinned'],
+        }
+      : base(key, input),
+  )
+  await mount('/chat/pinned')
+  const pinned = () =>
+    [
+      ...root.querySelectorAll<HTMLElement>(
+        '[data-sidebar-section="pinned"] .session-row',
+      ),
+    ].map((el) => el.getAttribute('title'))
+  expect(pinned()).toEqual(['pinned'])
+  appMode.mode.value = 'build'
+  await settle()
+  expect(pinned()).toEqual(['project-root'])
+  // A pinned row leaves the project tree as before.
+  expect(
+    root.querySelectorAll('[data-sidebar-section="projects"] .session-row'),
+  ).toHaveLength(0)
+  // A mode with no pins has no 置顶 header at all.
+  mock.session.sessions.value = mock.session.sessions.value.filter(
+    (s: { id: string }) => s.id !== 'project-root',
+  )
+  await settle()
+  expect(root.querySelector('[data-sidebar-section="pinned"]')).toBeNull()
+})
+
+it('MOD-02 7 · the primary row follows the mode and runs what ⌘N runs', async () => {
+  await mount('/chat/pinned')
+  const nav = () => root.querySelector<HTMLElement>('.sidebar-nav')!
+  const primary = () => nav().querySelector<HTMLButtonElement>('.new-chat')!
+  expect(primary().getAttribute('aria-label')).toBe('新对话')
+  expect(nav().querySelector('[aria-label="打开文件夹"]')).toBeNull()
+  primary().click()
+  await settle()
+  expect(appMode.newSession).toHaveBeenCalledTimes(1)
+
+  appMode.mode.value = 'build'
+  await settle()
+  expect(primary().getAttribute('aria-label')).toBe('新建项目会话')
+  expect(nav().querySelector('[aria-label="打开文件夹"]')).not.toBeNull()
+  primary().click()
+  await settle()
+  expect(appMode.newSession).toHaveBeenCalledTimes(2)
+
+  // Group: 新建群聊 and 新建联系人 wait for GRP-04 / GRP-05 — present,
+  // marked unavailable, and doing nothing yet.
+  appMode.mode.value = 'group'
+  await settle()
+  expect(primary().getAttribute('aria-label')).toBe('新建群聊')
+  expect(primary().getAttribute('aria-disabled')).toBe('true')
+  const contact = nav().querySelector<HTMLButtonElement>(
+    '[aria-label="新建联系人"]',
+  )!
+  expect(contact.getAttribute('aria-disabled')).toBe('true')
+  primary().click()
+  contact.click()
+  await settle()
+  expect(appMode.newSession).toHaveBeenCalledTimes(2)
+  expect(mock.selectDirectory).not.toHaveBeenCalled()
+})
+
+it('MOD-02 8 · Pull Request shows in the footer in Build only, with the GitHub plugin on', async () => {
   await mount('/chat/pinned')
   const pages = () =>
     [
       ...root.querySelectorAll<HTMLElement>(
-        '[data-sidebar-block="pages"] .nav-label',
+        '[data-sidebar-block="footer"] [data-sidebar-page]',
       ),
-    ].map((el) => el.textContent?.trim())
+    ].map((el) => el.getAttribute('aria-label'))
+  expect(pages()).toEqual(['定时任务', '能力'])
+  appMode.mode.value = 'build'
+  await settle()
   expect(pages()).toEqual(['定时任务', '能力'])
   ;(mock.context.boot as { value: unknown }).value = {
     plugins: [{ pluginId: 'github', effective: true, activation: 'active' }],
   }
   await settle()
   expect(pages()).toEqual(['Pull Request', '定时任务', '能力'])
+  appMode.mode.value = 'chat'
+  await settle()
+  expect(pages()).toEqual(['定时任务', '能力'])
+  appMode.mode.value = 'group'
+  await settle()
+  expect(pages()).toEqual(['定时任务', '能力'])
 })
 
-it('folds into the narrow rail with the same entries (UI-S11 4)', async () => {
+it('MOD-02 · the brand row switches modes through the controller', async () => {
+  await mount('/chat/pinned')
+  const switcher = root.querySelector<HTMLButtonElement>(
+    '[data-sidebar-block="brand"] [aria-haspopup="menu"]',
+  )!
+  expect(switcher.getAttribute('aria-label')).toBe('Emperor Chat')
+  switcher.click()
+  await settle()
+  ;[...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+    .find((el) => el.textContent?.includes('Build'))!
+    .click()
+  await settle()
+  expect(appMode.switchTo).toHaveBeenCalledWith('build')
+  expect(switcher.getAttribute('aria-label')).toBe('Emperor Build')
+  expect(sections()).toEqual(['projects'])
+})
+
+it('MOD-02 6 · a question waiting in another mode lights the mark; running does not', async () => {
+  await mount('/chat/pinned')
+  const dot = () =>
+    root.querySelector('[data-sidebar-block="brand"] .switcher-dot')
+  const states = mock.context.sessionRuntimeStates as Record<string, unknown>
+  states['project-root'] = { running: true, attention: false }
+  await settle()
+  expect(dot()).toBeNull()
+  ;(mock.context.pendingInteractionsBySession as Record<string, unknown>)[
+    'project-root'
+  ] = { id: 'approval_1', status: 'waiting', kind: 'ask' }
+  await settle()
+  expect(dot()).not.toBeNull()
+  appMode.mode.value = 'build'
+  await settle()
+  expect(dot()).toBeNull()
+})
+
+it('MOD-02 · deleting the open chat stays in Chat: the next chat, else the Chat home', async () => {
+  mock.session.activeId.value = 'chat-root'
+  const router = await mount('/chat/chat-root')
+  await rowAction('chat-root', '删除')
+  // 'pinned' is the other chat; the Build session is never the next one.
+  expect(router.currentRoute.value.params.sessionId).toBe('pinned')
+  expect(appMode.newSession).not.toHaveBeenCalled()
+})
+
+it('MOD-02 · deleting the last open chat goes to the Chat home, not to Build', async () => {
+  mock.session.sessions.value = mock.session.sessions.value.filter(
+    (s: { id: string }) => s.id !== 'pinned',
+  )
+  mock.session.activeId.value = 'chat-root'
+  const router = await mount('/chat/chat-root')
+  await rowAction('chat-root', '删除')
+  expect(router.currentRoute.value.params.sessionId).toBe('chat-root')
+  expect(appMode.newSession).toHaveBeenCalledTimes(1)
+})
+
+it('folds into the narrow rail with the same entries and the three modes (UI-S11 4, MOD-02 9)', async () => {
   await mount('/chat/pinned', { collapsed: true, width: 0 })
   const rail = root.querySelector('.sidebar-rail')!
   expect(rail).not.toBeNull()
@@ -394,8 +607,42 @@ it('folds into the narrow rail with the same entries (UI-S11 4)', async () => {
     '能力',
     '设置',
   ])
-    expect(rail.querySelector(`[aria-label="${label}"]`)).not.toBeNull()
+    expect(rail.querySelector(`[aria-label="${label}"]`), label).not.toBeNull()
   expect(root.querySelector('[data-sidebar-block]')).toBeNull()
+  const modes = () =>
+    [...rail.querySelectorAll<HTMLElement>('[data-rail-mode]')].map((el) => [
+      el.getAttribute('aria-label'),
+      el.getAttribute('aria-pressed'),
+    ])
+  expect(modes()).toEqual([
+    ['Chat', 'true'],
+    ['Build', 'false'],
+    ['Group', 'false'],
+  ])
+  rail.querySelector<HTMLButtonElement>('[data-rail-mode="build"]')!.click()
+  await settle()
+  expect(appMode.switchTo).toHaveBeenCalledWith('build')
+  expect(modes()[1]).toEqual(['Build', 'true'])
+  // Build's primary entry, and Pull Request only here (GitHub on).
+  expect(rail.querySelector('[aria-label="新建项目会话"]')).not.toBeNull()
+  expect(rail.querySelector('[aria-label="Pull Request"]')).toBeNull()
+  ;(mock.context.boot as { value: unknown }).value = {
+    plugins: [{ pluginId: 'github', effective: true, activation: 'active' }],
+  }
+  await settle()
+  expect(rail.querySelector('[aria-label="Pull Request"]')).not.toBeNull()
+  rail.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
+  await settle()
+  expect(appMode.newSession).toHaveBeenCalledTimes(1)
+})
+
+it('MOD-02 2 · narrower than 248px the switcher shows the mode name only', async () => {
+  await mount('/chat/pinned', { collapsed: false, width: 240 })
+  const switcher = root.querySelector<HTMLElement>(
+    '[data-sidebar-block="brand"] [aria-haspopup="menu"]',
+  )!
+  expect(switcher.querySelector('.switcher-name')?.textContent).toBe('Chat')
+  expect(switcher.getAttribute('aria-label')).toBe('Emperor Chat')
 })
 
 it('searches titles at once and contents after a pause (UI-S11 8)', async () => {
@@ -500,9 +747,16 @@ function keepSidebarState(initial: Record<string, unknown> = {}) {
 }
 
 it('BUG-06 1–2 · each section header has a chevron that turns as the section folds', async () => {
-  keepSidebarState()
-  await mount('/chat/pinned')
-  for (const section of ['pinned', 'projects', 'chats'])
+  keepSidebarState({ pinned_session_ids: ['pinned', 'project-root'] })
+  await mount('/chat/pinned', undefined, 'build')
+  for (const section of ['pinned', 'projects'])
+    expect(
+      sectionLabel(section).querySelector('.section-chevron'),
+      section,
+    ).not.toBeNull()
+  appMode.mode.value = 'chat'
+  await settle()
+  for (const section of ['pinned', 'chats'])
     expect(
       sectionLabel(section).querySelector('.section-chevron'),
       section,
@@ -524,10 +778,12 @@ it('BUG-06 1–2 · each section header has a chevron that turns as the section 
 
 it('BUG-06 3 · a folded section is written to Core and stays folded after a restart', async () => {
   const saved = keepSidebarState()
-  await mount('/chat/chat-root')
+  await mount('/chat/chat-root', undefined, 'build')
   sectionLabel('projects').click()
   await settle()
   // The section of the open chat folds as well.
+  appMode.mode.value = 'chat'
+  await settle()
   sectionLabel('chats').click()
   await settle()
   expect(mock.core).toHaveBeenCalledWith(
@@ -539,9 +795,11 @@ it('BUG-06 3 · a folded section is written to Core and stays folded after a res
   root.remove()
   app = undefined
   await mount('/chat/chat-root')
-  expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('false')
   expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
   expect(rowsIn('chats')).toEqual([])
+  appMode.mode.value = 'build'
+  await settle()
+  expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('false')
 })
 
 it('BUG-06 4 · a state saved before the field existed shows every section', async () => {
@@ -554,10 +812,13 @@ it('BUG-06 4 · a state saved before the field existed shows every section', asy
       : base(key, input),
   )
   await mount('/chat/pinned')
-  for (const section of ['pinned', 'projects', 'chats'])
+  for (const section of ['pinned', 'chats'])
     expect(sectionLabel(section).getAttribute('aria-expanded'), section).toBe(
       'true',
     )
+  appMode.mode.value = 'build'
+  await settle()
+  expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('true')
 })
 
 it('BUG-06 6 · opening a chat of the folded 对话 unfolds it', async () => {
@@ -604,7 +865,8 @@ it('BUG-06 · ↑ and ↓ still reach the chats of a folded section, which unfol
   const router = await mount('/chat/pinned')
   const row = (id: string) =>
     root.querySelector<HTMLElement>(`.session-row[data-session-id="${id}"]`)
-  const last = row('project-root')!
+  // Chat: 置顶 (pinned), then the folded 对话.
+  const last = row('pinned')!
   last.focus()
   last.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),

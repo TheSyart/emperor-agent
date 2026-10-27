@@ -1,16 +1,20 @@
 <script setup lang="ts">
 /**
- * Sidebar column (UI-S11: Emperor's own layout, redesigned). Top to bottom:
- * SidebarTopRow (collapse, ← →), SidebarBrandRow (BrandMark + Emperor,
- * search toggle, bell), SidebarNav (the 新对话 primary row + the full
- * pages), the search box while searching, then the session list — 置顶
- * (pinned, pin order), 项目 (projects → sessions), 对话 (chats grouped by
- * day) — and SidebarFooter (设置 / 明暗切换). Search finds titles at once and
- * contents after a pause (useContentSearch); ↑ / ↓ on a focused row move to
- * the next one and open it. Collapsed, the column renders the 56px
- * SidebarRail instead. Geometry is owned by AppFrame; this fills the column
- * it is given. The persisted layout (sorts, orders, pins, folded projects
- * and sections) lives in useSidebarState.
+ * Sidebar column (UI-S11: Emperor's own layout, redesigned; per mode since
+ * 0.3 MOD-02, docs/design/modes.md). Top to bottom: SidebarTopRow
+ * (collapse, ← →), SidebarBrandRow (the mode switcher 「Emperor Chat ▾」,
+ * search toggle, bell), SidebarNav (the mode's ⌘N primary row), the search
+ * box while searching, then the current mode's sessions only — Chat: 置顶
+ * (its pins) + 对话 by day; Build: 置顶 (its pins) + 项目 → sessions;
+ * Group: a placeholder until contacts and groups arrive (GRP-05) — and
+ * SidebarFooter (设置, the page icons, 明暗切换). The mode and its
+ * controller come from the app context, so the switcher, the rail and the
+ * primary row run what ⌘1–⌘3 and ⌘N run. Search finds titles at once and
+ * contents after a pause (useContentSearch), in every mode; ↑ / ↓ on a
+ * focused row move to the next one and open it. Collapsed, the column
+ * renders the 56px SidebarRail instead. Geometry is owned by AppFrame; this
+ * fills the column it is given. The persisted layout (sorts, orders, pins,
+ * folded projects and sections) lives in useSidebarState.
  *
  * Folded sections (BUG-06) only hide rows: search and ↑ / ↓ still reach
  * them, and a section opens again when the open conversation changes into
@@ -28,14 +32,21 @@ import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
   groupSessionsByDay,
+  pinnedInMode,
   searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
-import { isListedSession } from '../../runtime/appMode'
+import {
+  isListedSession,
+  modeActivity,
+  nextListedSession,
+  type AppMode,
+} from '../../runtime/appMode'
 import type { ProjectInfo, SessionInfo, SidebarSectionKey } from '../../types'
-import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
+import { DsMore, DsPlus } from '../icons/ds'
+import EmptyState from '../ui/EmptyState.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
@@ -54,6 +65,9 @@ import { fetchSessionLineage } from '../../api/sessions'
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
+
+/** Below this width the switcher shows the mode name only (modes.md). */
+const COMPACT_WIDTH = 248
 
 const router = useRouter()
 const route = useRoute()
@@ -75,6 +89,7 @@ const {
   archive,
   isDraftSessionId,
 } = useSession()
+const mode = computed(() => ctx.appMode.mode.value)
 const layout = useSidebarState({
   sessions,
   projects,
@@ -89,11 +104,24 @@ const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
 const projectMenuAnchor = ref<HTMLElement | null>(null)
-const newProjectMenuOpen = ref(false)
-const newProjectMenuAnchor = ref<HTMLElement | null>(null)
 const chatMenuOpen = ref(false)
 const chatMenuAnchor = ref<HTMLElement | null>(null)
 
+/** 置顶 of the mode on screen; no header when the mode has no pins. */
+const pinnedHere = computed(() =>
+  pinnedInMode(grouped.value.pinned, mode.value),
+)
+/** Running / waiting per mode, for the switcher and the rail (MOD-02). */
+const activity = computed(() =>
+  modeActivity(sessions.value, {
+    running: (id) => Boolean(ctx.sessionRuntimeStates[id]?.running),
+    waiting: (session) =>
+      Boolean(
+        sessionControlPendingTag(session) ||
+        ctx.pendingInteractionsBySession[session.id],
+      ),
+  }),
+)
 const chatDayGroups = computed(() =>
   sidebarState.value.chat_sort === 'manual'
     ? [{ key: 'manual', label: '', sessions: grouped.value.chats }]
@@ -196,13 +224,19 @@ const selectedPlace = computed<{
 } | null>(() => {
   const root = layoutLoaded.value ? selectedRootId.value : ''
   if (!root) return null
-  if (grouped.value.pinned.some((session) => session.id === root))
+  // Only the sections on screen (the current mode's) are revealed.
+  if (pinnedHere.value.some((session) => session.id === root))
     return { root, section: 'pinned' }
-  const project = grouped.value.projects.find((item) =>
-    item.sessions.some((session) => session.id === root),
+  if (mode.value === 'build') {
+    const project = grouped.value.projects.find((item) =>
+      item.sessions.some((session) => session.id === root),
+    )
+    if (project) return { root, section: 'projects', projectId: project.id }
+  }
+  if (
+    mode.value === 'chat' &&
+    grouped.value.chats.some((session) => session.id === root)
   )
-  if (project) return { root, section: 'projects', projectId: project.id }
-  if (grouped.value.chats.some((session) => session.id === root))
     return { root, section: 'chats' }
   return null
 })
@@ -226,17 +260,17 @@ watch(
       layout.toggleSection(place.section)
   },
 )
-/** Main rows in list order, folded sections included (↑ / ↓). */
+/** The mode's main rows in list order, folded sections included (↑ / ↓). */
 const keyboardOrder = computed(() => [
-  ...grouped.value.pinned.map((session) => session.id),
-  ...(sidebarState.value.section_order.includes('projects')
+  ...pinnedHere.value.map((session) => session.id),
+  ...(mode.value === 'build'
     ? grouped.value.projects.flatMap((project) =>
         layout.isProjectCollapsed(project.id)
           ? []
           : project.sessions.map((session) => session.id),
       )
     : []),
-  ...(sidebarState.value.section_order.includes('chats')
+  ...(mode.value === 'chat'
     ? chatDayGroups.value.flatMap((group) =>
         group.sessions.map((session) => session.id),
       )
@@ -262,9 +296,18 @@ function openSession(id: string) {
   void router.push(sessionLocation(id)).catch(() => undefined)
 }
 
-async function newChat() {
-  const session = await create({ mode: 'chat', title: '新会话' })
-  openSession(session.id)
+/** The primary row and the rail: exactly what ⌘N runs (App.vue). */
+function newSession(): Promise<void> {
+  return ctx.runSafely(ctx.appMode.newSession)
+}
+
+function switchMode(next: AppMode): Promise<void> {
+  return ctx.runSafely(() => ctx.appMode.switchTo(next))
+}
+
+/** The + of the primary row: Build opens a folder; Group's waits (GRP-04). */
+function runSecondary(): void {
+  if (mode.value === 'build') void pickBuildProject()
 }
 
 async function newProjectSession(project: SidebarProjectGroup) {
@@ -302,15 +345,19 @@ async function pickBuildProject() {
   }
 }
 
-function openNewProjectMenu(anchor: HTMLElement) {
-  newProjectMenuAnchor.value = anchor
-  newProjectMenuOpen.value = !newProjectMenuOpen.value
+/**
+ * Where to go when the open session `id` goes away: another listed session
+ * of the mode on screen; undefined means the mode's home (MOD-02), never a
+ * jump into another mode.
+ */
+function firstOtherSession(id: string): SessionInfo | undefined {
+  return nextListedSession(sessions.value, { mode: mode.value, exclude: id })
 }
 
-function firstOtherSession(id: string): SessionInfo | undefined {
-  return sessions.value.find(
-    (session) => session.id !== id && !session.archived_at,
-  )
+/** After a delete or an archive of the open session. */
+async function leaveRemoved(next: SessionInfo | undefined): Promise<void> {
+  if (next) openSession(next.id)
+  else await newSession()
 }
 
 /** How long 「撤销」 stays offered after a delete (FIX-01). */
@@ -332,7 +379,7 @@ async function doDelete(id: string) {
     return
   }
   layout.forgetPinned(id)
-  if (wasActive && next) openSession(next.id)
+  if (wasActive) await leaveRemoved(next)
   if (draft) return
   // Deleted sessions wait in 最近删除 (30 days); undo puts this one back.
   ctx.showToast(`已删除「${title}」`, {
@@ -361,7 +408,7 @@ async function doArchive(id: string) {
     return
   }
   layout.forgetPinned(id)
-  if (wasActive && next) openSession(next.id)
+  if (wasActive) await leaveRemoved(next)
 }
 
 async function doRename(id: string, title: string) {
@@ -466,9 +513,12 @@ defineExpose({ focusSearch })
 <template>
   <SidebarRail
     v-if="collapsed"
+    :mode="mode"
+    :activity="activity"
     @toggle="emit('toggle')"
-    @new-chat="newChat"
+    @new-session="newSession"
     @search="focusSearch"
+    @select-mode="switchMode"
   />
   <aside
     v-else
@@ -480,12 +530,16 @@ defineExpose({ focusSearch })
     <SidebarBrandRow
       data-sidebar-block="brand"
       :search-active="searchVisible"
+      :mode="mode"
+      :activity="activity"
+      :compact="width < COMPACT_WIDTH"
       @search="toggleSearch"
+      @select-mode="switchMode"
     />
     <SidebarNav
-      :project-menu-open="newProjectMenuOpen"
-      @new-chat="newChat"
-      @new-project="openNewProjectMenu"
+      :mode="mode"
+      @new-session="newSession"
+      @secondary="runSecondary"
     />
 
     <SearchField
@@ -522,7 +576,7 @@ defineExpose({ focusSearch })
         @keydown.up="moveRow($event, -1)"
       >
         <section
-          v-if="grouped.pinned.length"
+          v-if="pinnedHere.length"
           class="section"
           aria-label="置顶"
           data-sidebar-section="pinned"
@@ -533,7 +587,7 @@ defineExpose({ focusSearch })
             @update:collapsed="layout.toggleSection('pinned')"
           />
           <template v-if="!layout.isSectionCollapsed('pinned')">
-            <template v-for="session in grouped.pinned" :key="session.id">
+            <template v-for="session in pinnedHere" :key="session.id">
               <SessionRow
                 pinned
                 manual
@@ -555,7 +609,7 @@ defineExpose({ focusSearch })
         </section>
 
         <section
-          v-if="sidebarState.section_order.includes('projects')"
+          v-if="mode === 'build'"
           class="section"
           data-sidebar-section="projects"
         >
@@ -617,7 +671,7 @@ defineExpose({ focusSearch })
         </section>
 
         <section
-          v-if="sidebarState.section_order.includes('chats')"
+          v-if="mode === 'chat'"
           class="section"
           data-sidebar-section="chats"
         >
@@ -662,34 +716,23 @@ defineExpose({ focusSearch })
             <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
           </template>
         </section>
+
+        <!-- Group: contacts and groups arrive with GRP-05. -->
+        <section
+          v-if="mode === 'group'"
+          class="section"
+          aria-label="群聊"
+          data-sidebar-section="group"
+        >
+          <EmptyState
+            title="联系人和群聊在这里"
+            description="建联系人、拉群聊即将推出"
+          />
+        </section>
       </div>
     </div>
 
     <SidebarFooter data-sidebar-block="footer" />
-
-    <Menu
-      v-model:open="newProjectMenuOpen"
-      :anchor="newProjectMenuAnchor"
-      :width="220"
-      placement="bottom"
-      label="新建项目会话"
-    >
-      <template v-if="grouped.projects.length">
-        <MenuItem variant="label">在项目中新建会话</MenuItem>
-        <MenuItem
-          v-for="project in grouped.projects.slice(0, 6)"
-          :key="project.id"
-          @select="newProjectSession(project)"
-        >
-          <template #icon><DsFolderClose :size="16" /></template>
-          {{ project.name }}
-        </MenuItem>
-        <MenuItem variant="separator" />
-      </template>
-      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
-        选择项目文件夹…
-      </MenuItem>
-    </Menu>
 
     <Menu
       v-model:open="projectMenuOpen"

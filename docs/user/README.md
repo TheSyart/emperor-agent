@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
 > 最后核验：2026-10-27（对照 `966ce225`）<br>
-> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
+> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/modeEntries.ts`、`desktop/src/renderer/src/components/sidebar/SidebarFooter.vue`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
 
@@ -25,16 +25,18 @@
 左侧侧栏从上到下依次是：
 
 - 收起按钮与后退 / 前进；
-- Emperor 标志与名称、搜索和通知铃铛；
-- 「新对话」（⌘N；右侧的 `+` 在项目中新建会话），以及整页入口：
+- 模式切换「Emperor Chat ▾」（Chat、Build、Group 三种模式，⌘1 / ⌘2 / ⌘3），旁边是搜索和通知铃铛；
+- 当前模式的新建按钮（⌘N）：「新对话」「新建项目会话」（右侧的 `+` 打开项目文件夹）或「新建群聊」（暂时不可用）；
+- 当前模式的会话：Chat 是「置顶」「对话」，Build 是「置顶」「项目」；
+- 底部的「设置」、整页入口图标和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。整页入口：
 
 | 入口         | 用途                                                                                                                    | 详细说明                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Pull Request | 只在 GitHub 插件启用时显示：通过本机 GitHub CLI 只读浏览 PR，并可查看议题（Issue）和 CI                                 | [Chat 与 Build](chat-build.md#pull-request)      |
+| Pull Request | 只在 Build 模式、且 GitHub 插件启用时显示：通过本机 GitHub CLI 只读浏览 PR，并可查看议题（Issue）和 CI                  | [Chat 与 Build](chat-build.md#pull-request)      |
 | 定时任务     | 创建、编辑、暂停、恢复、立即运行和删除定时任务                                                                          | [定时任务](automation-collaboration.md#定时任务) |
 | 能力         | 插件 / Skills / MCP / 工具四个标签：安装、导入、启停、删除和查看工具；顶部「推荐」是应用内置的精选 Skills 与 MCP server | [Tools、Skills 与 MCP](tools-skills-mcp.md)      |
 
-再往下是「置顶」「项目」「对话」三组会话，底部是「设置」和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。侧栏收起后是一列窄图标，入口不变。侧栏和会话操作见 [Chat 与 Build](chat-build.md#侧栏与会话操作)。
+侧栏收起后是一列窄图标，多了三个模式图标，其余入口不变。侧栏和会话操作见 [Chat 与 Build](chat-build.md#侧栏与会话操作)。
 
 ## 设置弹窗
 

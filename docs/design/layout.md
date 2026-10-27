@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `d5625438`）<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
+> 最后核验：2026-10-27（对照 `b28fc6e6`）<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`ModeSwitcher.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
@@ -11,11 +11,11 @@
 
 从左到右：
 
-| 区域   | 宽度                                     | 底色               | 说明                                                     |
-| ------ | ---------------------------------------- | ------------------ | -------------------------------------------------------- |
-| 侧栏   | 默认 280，可拖 264–420；收起为 56 的窄轨 | `--surface-canvas` | 顶行、品牌行、新对话与页面入口、置顶 / 项目 / 对话、底部 |
-| 中栏   | 余下宽度；下限对话 480、轨迹 640         | `--surface-base`   | 对话、轨迹或整页                                         |
-| 工作台 | 默认 560，可拖 360–960；关闭为 0         | `--surface-base`   | 审查 / 终端 / 文件 / 浏览器                              |
+| 区域   | 宽度                                     | 底色               | 说明                                                             |
+| ------ | ---------------------------------------- | ------------------ | ---------------------------------------------------------------- |
+| 侧栏   | 默认 280，可拖 264–420；收起为 56 的窄轨 | `--surface-canvas` | 顶行、模式切换器、主按钮、当前模式的会话、底部（设置、页面图标） |
+| 中栏   | 余下宽度；下限对话 480、轨迹 640         | `--surface-base`   | 对话、轨迹或整页                                                 |
+| 工作台 | 默认 560，可拖 360–960；关闭为 0         | `--surface-base`   | 审查 / 终端 / 文件 / 浏览器                                      |
 
 - 没有圆角面板和外围留边；层级靠底色明度与发丝线区分。卡片、代码块等在 `--surface-base` 上再抬一级。
 - 会话头第一行高 46（`--shell-bar-h`），工作台 `PaneHeader` 高 48、上移 2px，两者底边对齐。工作台顶栏左侧是四个面板的 segmented 切换，右侧是关闭；打开时回到上次用的面板，还没选过面板时显示四个面板的入口，没有「首页」（UI-S06）。环境信息卡的「查看全部」打开的「来源」是盖在面板上的临时视图（UI-S13）：没有自己的页签，打开时切换器不选中任何一项，也不记为上次用的面板；返回、选一个面板、在工作台打开别的内容、关闭工作台或换会话都会关掉它，原来的面板（审查与文件的状态）原样留在下面。
@@ -23,14 +23,13 @@
 
 ## 侧栏
 
-从上到下（`data-sidebar-block`：`top` → `brand` → `new` → `pages` → `sections` → `footer`）：
+侧栏只放当前模式（Chat / Build / Group）的东西，见[三种模式](modes.md)。从上到下（`data-sidebar-block`：`top` → `brand` → `new` → `sections` → `footer`）：
 
 1. **顶行**（`SidebarTopRow`）：收起、后退、前进（`shell/navHistory`，各自在历史尽头禁用）。
-2. **品牌行**（`SidebarBrandRow`）：Emperor 标与名称；右侧搜索、通知铃铛。0.3 起品牌行是模式切换器，侧栏的分区随模式变化，见[三种模式](modes.md)。
-3. **新对话**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。旁边的 `+` 在项目中新建会话。
-4. **页面入口**：Pull Request（只在 GitHub 插件启用时出现，`visibleSidebarPages`）、定时任务、能力。比会话低一级：文字二级色、图标三级色；当前页 `--surface-selected` + 主文字 + 500。原「探索」是能力页顶部的「推荐」。
-5. **会话**：置顶（总在最上方）、项目、对话（`data-sidebar-section`）。
-6. **底部**（`SidebarFooter`）：「设置」在左，明暗切换在右。
+2. **品牌行**（`SidebarBrandRow`）：模式切换器（`ModeSwitcher`）——标 +「Emperor Chat ▾」，高 32、圆角 `--radius-row`，悬停和菜单打开时 `--surface-hover`；名字 16/600，▾ 14、三级色，打开时翻转。别的模式有人等你回答时，标的右上角有一个 `attention` 小圆点（Dot sm，描一圈侧栏底色）。右侧搜索、通知铃铛。
+3. **主按钮**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。文字随模式：新对话 / 新建项目会话 / 新建群聊。Build 旁边的 `+` 打开文件夹，Group 旁边的 `+` 是新建联系人；Group 的两个入口还没做好，图标和文字降到 45% 不透明度，悬停提示「即将推出」。
+4. **会话**（`data-sidebar-section`）：Chat 是置顶（只含 Chat 会话）+ 对话；Build 是置顶（只含 Build 会话）+ 项目；Group 现在是一段占位（EmptyState：「联系人和群聊在这里」）。总在最上方的「置顶」只在这个模式有置顶时出现。
+5. **底部**（`SidebarFooter`）：「设置」在左；右边是页面图标——Pull Request（只在 Build 模式、且 GitHub 插件启用时出现，`visibleSidebarPages`）、定时任务、能力——和明暗切换，都是 36 的圆形图标按钮，当前页 `--surface-selected` + 主文字。原「探索」是能力页顶部的「推荐」。
 
 节奏：
 
@@ -43,7 +42,7 @@
 
 搜索：
 
-- 品牌行的放大镜（或 ⌘K）在页面入口下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。
+- 品牌行的放大镜（或 ⌘K）在主按钮下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。搜索不分模式，查全部会话。
 - 先列「会话」：标题、项目名、路径即时匹配（`searchSidebarSessions`，不含已归档）；停顿 250ms 后列「内容」：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch`，旧查询的结果丢弃）。
 - ↑ / ↓ 选择、回车打开；Esc 先清空，再关闭。
 
@@ -77,7 +76,7 @@
 
 ## 收起与断点
 
-- 收起后侧栏列宽 56，渲染窄轨（`SidebarRail`）：品牌标（悬停换成展开图标）、后退 / 前进、新对话、搜索、通知、页面入口，底部设置与明暗切换；按钮 36、图标 20、提示在右侧。点品牌标或 ⌘B 展开。
+- 收起后侧栏列宽 56，渲染窄轨（`SidebarRail`）：品牌标（悬停换成展开图标）、三个模式图标（当前模式 `--surface-selected`，点了直接切，别的模式有人等你时图标上有小圆点）、后退 / 前进、当前模式的新建按钮、搜索、通知、页面入口（Pull Request 只在 Build），底部设置与明暗切换；按钮 36、提示在右侧。点品牌标或 ⌘B 展开。
 - 视口宽度小于 1024px 时侧栏自动收起为窄轨。
 - 断点主要是容器查询，按所在栏或卡片的宽度变化，不按窗口宽度：设置面板与整页窄于 640 时导航折成顶部一行、边距收紧；轨迹窄于 640 时检查器盖在列表上；PR 详情窄于 560 时标题行堆叠；对话栏窄于 560 时隐藏轮次刻度条；对话栏从 1152 起消息列给环境信息卡和电脑操作预览让位，更窄时卡片盖在对话上（见[环境信息卡](#环境信息卡)）；设置行、表单与用量卡片在 520 / 480 / 440 处减列。按窗口宽度的媒体查询只有几处：输入框面板（820）、首启引导（760）、提问与计划卡（720）、看图器（600）。Pull Request 页窄于 720 时只显示列表或详情之一。
 - 空间不够时，工作台先缩到 360，再自动关闭；只改渲染宽度，不改用户保存的宽度（`columns.ts` 的让位链）。

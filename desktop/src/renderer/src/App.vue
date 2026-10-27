@@ -85,7 +85,11 @@ import {
   isStaleDraftRoute,
   shouldFollowActiveSession,
 } from './runtime/routeFollow'
-import { NO_ROUTE_MODE, routeModeTarget } from './runtime/appMode'
+import {
+  nextListedSession,
+  NO_ROUTE_MODE,
+  routeModeTarget,
+} from './runtime/appMode'
 import { draftSessionOf } from './runtime/sessionDrafts'
 import {
   notificationFromNotice,
@@ -272,14 +276,17 @@ async function onSessionActivate(id: string) {
 
 /**
  * The session was archived or deleted elsewhere (its bootstrap failed and a
- * plain one worked): go to the most recent session and say so (FIX-03).
+ * plain one worked): go to the most recent session and say so (FIX-03) —
+ * one of the current mode when there is one, never one nobody lists.
  */
 async function leaveUnavailableSession(sessionId: string): Promise<void> {
   showToast('这个会话已归档或不存在，已回到最近的会话')
   await sessionStore.load().catch(() => undefined)
-  const next = sessionStore.sessions.value.find(
-    (item) => !item.draft && item.id !== sessionId,
-  )
+  const next = nextListedSession(sessionStore.sessions.value, {
+    mode: appMode.mode.value,
+    exclude: sessionId,
+    anyMode: true,
+  })
   await router
     .push(next ? sessionLocation(next.id) : { name: 'chat' })
     .catch(() => undefined)
@@ -862,6 +869,11 @@ provideAppContext({
   tokens: tokensData,
   tokensLoading,
   loadTokens,
+  appMode: {
+    mode: appMode.mode,
+    switchTo: appModeController.switchTo,
+    newSession: appModeController.newSession,
+  },
 })
 </script>
 

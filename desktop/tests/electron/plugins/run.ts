@@ -341,11 +341,19 @@ async function answerOpenDialog(
   }, path)
 }
 
-async function sidebar(page: Page, name: string): Promise<void> {
-  await page
-    .getByRole('navigation', { name: '侧栏导航' })
+/** A page icon in the sidebar footer (MOD-02, D4). */
+function pageEntry(page: Page, name: string) {
+  return page
+    .locator('[data-sidebar-block="footer"]')
     .getByRole('button', { name, exact: true })
-    .click()
+}
+
+async function sidebar(page: Page, name: string): Promise<void> {
+  const entry = pageEntry(page, name)
+  // Pull Request shows in Build only (D4): ⌘2 first.
+  if (name === 'Pull Request' && !(await entry.isVisible().catch(() => false)))
+    await page.keyboard.press('ControlOrMeta+2')
+  await entry.click()
 }
 
 async function openPlugins(page: Page): Promise<void> {
@@ -406,11 +414,14 @@ async function send(page: Page, text: string): Promise<void> {
 }
 
 async function newChat(page: Page): Promise<void> {
-  await page
+  const button = page
     .getByRole('navigation', { name: '侧栏导航' })
     .getByRole('button', { name: '新对话' })
     .first()
-    .click()
+  // The primary row is the current mode's (MOD-02): Chat (⌘1) first.
+  if (!(await button.isVisible().catch(() => false)))
+    await page.keyboard.press('ControlOrMeta+1')
+  await button.click()
   await page.getByLabel('消息输入框').first().waitFor()
 }
 
@@ -719,6 +730,8 @@ async function managed(page: Page, model: FakeModel): Promise<void> {
     page,
     'GitHub shows the logged-in gh, and its tabs follow its switch',
     async () => {
+      // Pull Request shows in Build only (MOD-02): ⌘2 before the pages.
+      await page.keyboard.press('ControlOrMeta+2')
       const detail = await openDetail(page, 'github')
       const app = detail.locator('[data-member="github"]').last()
       await until(
@@ -736,9 +749,7 @@ async function managed(page: Page, model: FakeModel): Promise<void> {
       // only while GitHub is on). FIX-08: this used to open the page right
       // after the click and pass only while the sidebar lagged behind.
       await detail.locator('[data-plugin-toggle] [role="switch"]').click()
-      const entry = page
-        .getByRole('navigation', { name: '侧栏导航' })
-        .getByRole('button', { name: 'Pull Request', exact: true })
+      const entry = pageEntry(page, 'Pull Request')
       await until(
         async () =>
           (
