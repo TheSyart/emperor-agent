@@ -149,7 +149,18 @@ interface Run {
   spend: { usd: number; tokens: number }
   spoke: Set<ContactId>
   speaking: Map<ContactId, SpeechContext>
+  /** The state last announced (the group page reads it, GRP-08). */
+  state: GroupTurnState
   done: Promise<void>
+}
+
+/** A running turn as the group page shows it (GRP-08). */
+export interface GroupLiveTurn {
+  turnId: string
+  state: GroupTurnState
+  speakers: ContactId[]
+  queued: ContactId[]
+  spend: { usd: number; tokens: number }
 }
 
 const MENTION_TOKEN = /@([^\s@，。！？、；：,.!?;:（）()「」"'“”]+)/gu
@@ -173,6 +184,30 @@ export class GroupScheduler {
 
   isRunning(groupId: string): boolean {
     return this.runs.has(groupId)
+  }
+
+  /**
+   * The running turn of a group, or null: who speaks now and who waits in
+   * the queue, in order, each once (GRP-08 reads it on opening the page).
+   */
+  live(groupId: string): GroupLiveTurn | null {
+    const run = this.runs.get(groupId)
+    if (!run || run.stopped) return null
+    const queued: ContactId[] = []
+    const add = (id: ContactId) => {
+      if (!run.speaking.has(id) && !queued.includes(id)) queued.push(id)
+    }
+    for (const item of run.queue)
+      if (item.kind === 'speak') add(item.member)
+      else if (item.kind === 'task') add(item.task.to)
+      else if (item.kind === 'batch') item.members.forEach(add)
+    return {
+      turnId: run.turnId,
+      state: run.state,
+      speakers: [...run.speaking.keys()],
+      queued,
+      spend: { ...run.spend },
+    }
   }
 
   /** Resolves once the group's current run (if any) has settled. */
@@ -215,6 +250,7 @@ export class GroupScheduler {
       spend: { usd: 0, tokens: 0 },
       spoke: new Set(),
       speaking: new Map(),
+      state: 'started',
       done: Promise.resolve(),
     }
     this.runs.set(groupId, run)
@@ -774,7 +810,8 @@ export class GroupScheduler {
     const before = state.messages.length
     run.speaking.set(member, context)
     this.status(run, member, 'thinking')
-    this.turn(run, 'speaking', undefined, [member])
+    // Everyone speaking now: an independent ask runs several at once.
+    this.turn(run, 'speaking', undefined, [...run.speaking.keys()])
     let result: SpeakResult
     try {
       result = await this.deps.speak({
@@ -1051,6 +1088,7 @@ export class GroupScheduler {
     reason?: string,
     speakers?: ContactId[],
   ): void {
+    run.state = state
     // Only the turn's start and end go to the log; every change is announced.
     if (state === 'started' || GROUP_TURN_ENDED.has(state))
       this.deps.groups.append(run.groupId, 'group/turn', {

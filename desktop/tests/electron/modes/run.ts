@@ -3,8 +3,8 @@
  * Emperor Home, its own Chromium profile, a scripted model on 127.0.0.1):
  *   - a new session lands in its mode's section: Chat's 新对话 under a day
  *     heading, Build's 打开文件夹 and 新建项目会话 under the project, and a
- *     group (Core's `groups.create`; 新建群聊 is still to come) in no Chat or
- *     Build list but in Group's 群聊 at once (GRP-05 follows
+ *     group (Core's `groups.create`; 新建群聊 opens its dialog, GRP-08) in no
+ *     Chat or Build list but in Group's 群聊 at once (GRP-05 follows
  *     `groups_changed`), found by search with its Group tag and opened on
  *     its page in Group;
  *   - ⌘1 / ⌘2 / ⌘3 switch the mode and go back to each mode's last session;
@@ -520,15 +520,20 @@ async function newSessionsPerMode(
         throw new Error('Build lists the Chat session')
       await page.screenshot({ path: join(shots, 'build-sessions.png') })
 
-      // Group: 新建群聊 is still to come; a group made in Core is listed
-      // in Group's 群聊 at once and in neither Chat nor Build.
+      // Group: 新建群聊 opens its dialog (GRP-08); a group made in Core is
+      // listed in Group's 群聊 at once and in neither Chat nor Build.
       await page.keyboard.press('ControlOrMeta+3')
       await brandIs(page, 'Emperor Group')
       // No group session yet: ⌘3 opens the Group home (GRP-05).
       await page.locator('[data-group-home]').waitFor({ timeout: 10_000 })
       const create = primaryButton(page, '新建群聊')
-      if ((await create.getAttribute('aria-disabled')) !== 'true')
-        throw new Error('新建群聊 is available')
+      if ((await create.getAttribute('aria-disabled')) === 'true')
+        throw new Error('新建群聊 is not available')
+      await create.click()
+      const dialog = page.getByRole('dialog', { name: '新建群聊' })
+      await dialog.waitFor({ timeout: 10_000 })
+      await dialog.getByRole('button', { name: '取消' }).click()
+      await dialog.waitFor({ state: 'detached', timeout: 10_000 })
       const group = await core<{ id: string }>(page, 'groups.create', {
         title: GROUP_TITLE,
         members: ['ct-emperor'],

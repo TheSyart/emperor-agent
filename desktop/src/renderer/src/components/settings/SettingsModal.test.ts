@@ -219,7 +219,7 @@ describe('SettingsModal', () => {
     resetExecutorUpgrades()
   })
 
-  it('groups nine sections under 常规, 智能, 操控 and 系统 (UI-S07)', async () => {
+  it('groups ten sections under 常规, 智能, 操控 and 系统 (UI-S07, GRP-08)', async () => {
     await mount('/chat/s1?settings=general')
     const dialog = modal()
     const groups = [...(dialog?.querySelectorAll('.nav-group') ?? [])]
@@ -233,11 +233,11 @@ describe('SettingsModal', () => {
       ]),
     ).toEqual([
       [null, ['general']],
-      ['智能', ['model', 'executors', 'memory']],
+      ['智能', ['model', 'executors', 'groups', 'memory']],
       ['操控', ['computer', 'browser', 'voice']],
       ['系统', ['tokens', 'advanced']],
     ])
-    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(9)
+    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(10)
     for (const gone of ['hooks', 'pet', 'diagnostics', 'scheduler', 'mcp'])
       expect(
         dialog?.querySelector(`.nav-cell[data-section="${gone}"]`),

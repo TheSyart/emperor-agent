@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-10-27（对照 `5301bdd3`）<br>
+> 最后核验：2026-10-27（对照 `76a61ad1`）<br>
 > 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/modeEntries.ts`、`desktop/src/renderer/src/components/sidebar/SidebarFooter.vue`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -26,7 +26,7 @@
 
 - 收起按钮与后退 / 前进；
 - 模式切换「Emperor Chat ▾」（Chat、Build、Group 三种模式，⌘1 / ⌘2 / ⌘3），旁边是搜索和通知铃铛；
-- 当前模式的新建按钮（⌘N）：「新对话」「新建项目会话」（右侧的 `+` 打开项目文件夹）或「新建群聊」（暂时不可用，右侧的 `+` 新建联系人）；
+- 当前模式的新建按钮（⌘N）：「新对话」「新建项目会话」（右侧的 `+` 打开项目文件夹）或「新建群聊」（右侧的 `+` 新建联系人）；
 - 当前模式的会话：Chat 是「置顶」和按日期的分组（今天、昨天……），Build 是「置顶」「项目」，Group 是「群聊」「联系人」（联系人档案、单聊和群聊首页见 [Group：联系人与单聊](chat-build.md#group联系人与单聊)）；
 - 底部的「设置」、整页入口图标和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。整页入口：
 
@@ -40,7 +40,7 @@
 
 ## 设置弹窗
 
-点击侧栏底部的「设置」打开设置弹窗。左侧导航分四组：「常规」，「智能」（模型、子智能体、记忆），「操控」（电脑操作、浏览器、语音），「系统」（用量与费用、高级）。右上角是当前分区的操作，例如「添加模型」或「保存」；会自己刷新的分区（记忆、电脑操作）没有刷新按钮。分区里带「›」的行点开是二级页，标题变成「分区 › 页面」，点分区名回到上一级。
+点击侧栏底部的「设置」打开设置弹窗。左侧导航分四组：「常规」，「智能」（模型、子智能体、群聊、记忆），「操控」（电脑操作、浏览器、语音），「系统」（用量与费用、高级）。右上角是当前分区的操作，例如「添加模型」或「保存」；会自己刷新的分区（记忆、电脑操作）没有刷新按钮。分区里带「›」的行点开是二级页，标题变成「分区 › 页面」，点分区名回到上一级。
 
 编辑中的内容（长期记忆、用户档案、Hooks 的 `hooks.json`、模型编辑、能力 › MCP 的 JSON）没有保存时，关闭弹窗、按 Esc、点遮罩、切换分区或二级页都会先问「放弃未保存的修改？」：选「放弃」才离开，「继续编辑」留在原处。后台刷新（例如一轮对话结束后记忆重新读取）只更新没有改过的草稿。
 

@@ -516,15 +516,15 @@ it('MOD-02 7 · the primary row follows the mode and runs what ⌘N runs', async
   await settle()
   expect(appMode.newSession).toHaveBeenCalledTimes(2)
 
-  // Group: 新建群聊 waits for GRP-08 — present, marked unavailable, doing
-  // nothing yet; 新建联系人 opens the contact editor (GRP-04).
+  // Group: 新建群聊 runs ⌘N too (the Group home and the dialog, GRP-08);
+  // 新建联系人 opens the contact editor (GRP-04).
   appMode.mode.value = 'group'
   await settle()
   expect(primary().getAttribute('aria-label')).toBe('新建群聊')
-  expect(primary().getAttribute('aria-disabled')).toBe('true')
+  expect(primary().getAttribute('aria-disabled')).toBeNull()
   primary().click()
   await settle()
-  expect(appMode.newSession).toHaveBeenCalledTimes(2)
+  expect(appMode.newSession).toHaveBeenCalledTimes(3)
   const contact = nav().querySelector<HTMLButtonElement>(
     '[aria-label="新建联系人"]',
   )!
@@ -532,7 +532,7 @@ it('MOD-02 7 · the primary row follows the mode and runs what ⌘N runs', async
   contact.click()
   await settle()
   expect(router.currentRoute.value.name).toBe('contact-new')
-  expect(appMode.newSession).toHaveBeenCalledTimes(2)
+  expect(appMode.newSession).toHaveBeenCalledTimes(3)
   expect(mock.selectDirectory).not.toHaveBeenCalled()
 })
 

@@ -59,11 +59,12 @@ describe('settings paths in the docs (test 2)', () => {
     navigation = lib.settingsNavigation(REPO)
   })
 
-  it('reads the nine sections and the names in their components', () => {
+  it('reads the ten sections and the names in their components', () => {
     expect([...navigation.sections.keys()]).toEqual([
       '常规',
       '模型',
       '子智能体',
+      '群聊',
       '记忆',
       '电脑操作',
       '浏览器',
@@ -81,6 +82,10 @@ describe('settings paths in the docs (test 2)', () => {
     expect(navigation.sections.get('子智能体')!.names.has('开发环境')).toBe(
       true,
     )
+    // GRP-08: what a new group starts with.
+    const groups = navigation.sections.get('群聊')!
+    for (const name of ['新群的默认设置', '协作方式', '防打转'])
+      expect(groups.names.has(name), name).toBe(true)
   })
 
   it('accepts paths that exist and skips macOS 系统设置', () => {

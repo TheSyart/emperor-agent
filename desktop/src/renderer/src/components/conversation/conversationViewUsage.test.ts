@@ -249,9 +249,8 @@ describe('the home by mode (MOD-03)', () => {
 describe('a single chat with a contact (GRP-05)', () => {
   it('reads the contact of the session on screen and shows its speaker line', () => {
     expect(source).toContain('contactChatOf(knownSession.value')
-    expect(source).toMatch(
-      /<ChatTimeline[\s\S]*?:speaker="contactChat\?\.speaker/,
-    )
+    expect(source).toContain('contactChat.value?.speaker')
+    expect(source).toMatch(/<ChatTimeline[\s\S]*?:speaker="replySpeaker"/)
   })
 
   it('takes 👍 / 👎 to contacts.feedback', () => {
@@ -271,5 +270,11 @@ describe('a single chat with a contact (GRP-05)', () => {
 
   it('moves a group’s session to its page', () => {
     expect(source).toContain('groupPageOf(knownSession.value)')
+  })
+
+  it('shows a group member’s work read-only, with its speaker line (GRP-08 「过程 ›」)', () => {
+    expect(source).toContain('groupMemberOf(')
+    expect(source).toContain('groupMember.value?.readOnlyReason')
+    expect(source).toMatch(/<ChatTimeline[\s\S]*?:speaker="replySpeaker"/)
   })
 })

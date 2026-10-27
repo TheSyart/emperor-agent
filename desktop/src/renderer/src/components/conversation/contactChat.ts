@@ -100,3 +100,53 @@ export function groupPageOf(
   const groupId = session.group_id || session.id
   return { name: 'group', params: { groupId } }
 }
+
+/**
+ * A group member's own session, opened from 「过程 ›」 (GRP-08): what it
+ * read and ran for its speeches. It is read, not talked in — the group is
+ * where the user speaks to it — though a pending approval there can still
+ * be answered. Null for any other session.
+ */
+export interface GroupMemberPage {
+  groupId: string
+  groupTitle: string
+  contactId: string
+  /** The avatar and name beside its replies; null once deleted. */
+  speaker: ContactSpeaker | null
+  readOnlyReason: string
+}
+
+export function groupMemberOf(
+  session: SessionInfo | undefined,
+  directory: { contacts: readonly Contact[]; loaded: boolean },
+  titleOf: (sessionId: string) => string | undefined,
+): GroupMemberPage | null {
+  if (
+    !session ||
+    session.surface !== 'group_member' ||
+    !session.group_id ||
+    !session.contact_id
+  )
+    return null
+  const contact =
+    directory.contacts.find((item) => item.id === session.contact_id) ?? null
+  const groupTitle = titleOf(session.group_id) || '群聊'
+  const name = contact?.name ?? memberName(session.title)
+  return {
+    groupId: session.group_id,
+    groupTitle,
+    contactId: session.contact_id,
+    speaker: contact
+      ? {
+          name: contact.name,
+          avatar: contactAvatarProps(contact.avatar, contact.name),
+        }
+      : null,
+    readOnlyReason: `这是「${name}」在群「${groupTitle}」里的工作过程，只能查看；回到群里和它说话`,
+  }
+}
+
+/** 「审稿人 · 0.3 方案评审」 → 「审稿人」 (a member session's title). */
+export function memberName(title: string | undefined): string {
+  return (title ?? '').split(' · ')[0]?.trim() || '成员'
+}

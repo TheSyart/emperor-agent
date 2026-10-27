@@ -36,8 +36,10 @@ const SESSION_ROUTE_NAMES: readonly string[] = [
 /** The Group home: the contacts, the recent groups, @ to start (GRP-05). */
 export const GROUP_HOME_ROUTE = 'contacts'
 
-/** A group's page (GRP-05; GRP-08 fills it in): `/groups/:groupId`. */
+/** A group's page (GRP-05, GRP-08): `/groups/:groupId`. */
 export const GROUP_PAGE_ROUTE = 'group'
+/** A group's settings (GRP-08): the group's, like its page. */
+export const GROUP_SETTINGS_ROUTE = 'group-settings'
 
 /**
  * The contacts' own pages, Group like the Group home: the editor (GRP-04)
@@ -154,7 +156,7 @@ export function routeModeTarget(
   const name = typeof route.name === 'string' ? route.name : ''
   if (name === GROUP_HOME_ROUTE || CONTACT_EDITOR_ROUTES.includes(name))
     return { mode: 'group', sessionId: '' }
-  if (name === GROUP_PAGE_ROUTE) {
+  if (name === GROUP_PAGE_ROUTE || name === GROUP_SETTINGS_ROUTE) {
     const raw = route.params.groupId
     return { mode: 'group', sessionId: typeof raw === 'string' ? raw : '' }
   }

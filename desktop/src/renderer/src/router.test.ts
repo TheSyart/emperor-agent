@@ -81,8 +81,12 @@ describe('renderer routes', () => {
     const group = await resolve('/groups/grp-1')
     expect(group.name).toBe('group')
     expect(group.params.groupId).toBe('grp-1')
+    // 群设置 (GRP-08), not a group named 「settings」.
+    const settings = await resolve('/groups/grp-1/settings')
+    expect(settings.name).toBe('group-settings')
+    expect(settings.params.groupId).toBe('grp-1')
     const { routeRecords } = await import('./router')
-    for (const name of ['contacts', 'contact', 'group']) {
+    for (const name of ['contacts', 'contact', 'group', 'group-settings']) {
       const record = routeRecords.find((item) => item.name === name)
       // Each a chunk of its own, out of the entry bundle (D23).
       expect(typeof record?.component).toBe('function')

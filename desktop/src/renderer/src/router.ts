@@ -32,8 +32,8 @@ const GitHubRunsPage = () =>
 const ContactEditor = () => import('./components/contacts/ContactEditor.vue')
 const ContactProfile = () => import('./components/contacts/ContactProfile.vue')
 const GroupHome = () => import('./components/groups/GroupHome.vue')
-const GroupInterimPage = () =>
-  import('./components/groups/GroupInterimPage.vue')
+const GroupPage = () => import('./components/groups/GroupPage.vue')
+const GroupSettings = () => import('./components/groups/GroupSettings.vue')
 
 /** Routes that render inside the conversation shell (workspace available). */
 export const CONVERSATION_ROUTE_NAMES: readonly string[] = [
@@ -89,7 +89,8 @@ export const routeRecords: RouteRecordRaw[] = [
     meta: { label: '对话', tab: 'chat' },
   },
   // Group: the home (GRP-05), the contact editor (GRP-04) — a new contact,
-  // or a saved one — a contact's profile and a group's page (GRP-05).
+  // or a saved one — a contact's profile (GRP-05), a group's page and its
+  // settings (GRP-08).
   {
     path: '/contacts',
     name: 'contacts',
@@ -115,9 +116,15 @@ export const routeRecords: RouteRecordRaw[] = [
     meta: { label: '联系人', page: true },
   },
   {
+    path: '/groups/:groupId/settings',
+    name: 'group-settings',
+    component: GroupSettings,
+    meta: { label: '群设置', page: true },
+  },
+  {
     path: '/groups/:groupId',
     name: 'group',
-    component: GroupInterimPage,
+    component: GroupPage,
     meta: { label: '群聊', page: true },
   },
   // Full pages (no workspace column).

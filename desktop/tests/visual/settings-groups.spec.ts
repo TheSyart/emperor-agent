@@ -4,7 +4,8 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge } from './visualBridge'
 
-// UI-S07: the settings modal in four groups and nine sections, 880 ×
+// UI-S07: the settings modal in four groups and ten sections (群聊 joined
+// 智能 in GRP-08), 880 ×
 // min(720, 100vh − 80); every page one layer deep (group label, card,
 // rows), no card inside a card — the settings sections and the 能力 tabs
 // that used to be settings sections (插件, Skills, 工具). One screenshot per
@@ -15,6 +16,7 @@ const SECTIONS = [
   'general',
   'model',
   'executors',
+  'groups',
   'memory',
   'computer',
   'browser',
@@ -96,13 +98,13 @@ async function nestedFrames(page: Page, root: string): Promise<string[]> {
   }, root)
 }
 
-test('nine sections in four groups, 880 × min(720, 100vh − 80)', async ({
+test('ten sections in four groups, 880 × min(720, 100vh − 80)', async ({
   page,
 }) => {
   const dialog = await openSettings(page, 'general')
   const groups = dialog.locator('.nav-group')
   await expect(groups).toHaveCount(4)
-  await expect(dialog.locator('.nav-cell')).toHaveCount(9)
+  await expect(dialog.locator('.nav-cell')).toHaveCount(10)
   await expect(dialog.locator('.nav-group-label')).toHaveText([
     '智能',
     '操控',

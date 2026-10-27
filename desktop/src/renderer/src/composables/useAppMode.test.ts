@@ -372,14 +372,22 @@ describe('⌘N per mode', () => {
     })
   })
 
-  it('opens the Group home in Group, never a Chat draft', async () => {
+  it('opens the Group home with 新建群聊 in Group, never a Chat draft (GRP-08)', async () => {
     saved = { app_mode: 'group' }
     const win = windowFixture([chat])
     const store = createAppModeStore()
     await store.load(win.sessions.value)
+    const { newGroupDialog } =
+      await import('../components/groups/newGroupDialog')
+    newGroupDialog.open.value = false
     await createAppModeController(store, win.nav).newSession()
     expect(win.nav.openRoute).toHaveBeenCalledWith('contacts')
     expect(win.nav.createDraft).not.toHaveBeenCalled()
+    expect(newGroupDialog.open.value).toBe(true)
+    newGroupDialog.open.value = false
+    // ⌘3 alone opens the home, not the dialog.
+    await createAppModeController(store, win.nav).switchTo('group')
+    expect(newGroupDialog.open.value).toBe(false)
   })
 })
 

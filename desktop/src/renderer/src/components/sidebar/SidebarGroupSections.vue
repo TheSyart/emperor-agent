@@ -5,8 +5,9 @@
  * when it last spoke; a contact's intro (「外部」 for Claude Code and Codex
  * without one). A contact opens its profile, a group its page. The row on
  * screen is marked: the contact of the profile, editor or single chat
- * open, or the group open. The + of 联系人 opens the contact editor; the +
- * of 群聊 waits for GRP-08 (「即将推出」). Folding a section lasts while the
+ * open, or the group open (its settings and a member's work too). The +
+ * of 联系人 opens the contact editor; the + of 群聊 opens 新建群聊
+ * (GRP-08). Folding a section lasts while the
  * window is open. Loaded with the Group mode only (SidebarRoot), so the
  * entry bundle stays as it was.
  */
@@ -24,7 +25,7 @@ import { contactAvatarProps } from '../contacts/contactAvatar'
 import { DsPlus } from '../icons/ds'
 import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
-import { COMING_SOON } from './modeEntries'
+import { openNewGroupDialog } from '../groups/newGroupDialog'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 
 const route = useRoute()
@@ -55,9 +56,12 @@ const activeContactId = computed(() => {
 })
 
 const activeGroupId = computed(() => {
-  if (route.name === 'group') return param('groupId')
+  if (route.name === 'group' || route.name === 'group-settings')
+    return param('groupId')
   const session = routedSession.value
-  return session?.surface === 'group' ? session.group_id || session.id : ''
+  if (session?.surface === 'group') return session.group_id || session.id
+  // A member's work (「过程 ›」, GRP-08) is its group's.
+  return session?.surface === 'group_member' ? (session.group_id ?? '') : ''
 })
 
 function contactLine(contact: Contact): string {
@@ -93,9 +97,8 @@ function newContact() {
       <IconButton
         class="head-button"
         label="新建群聊"
-        :tooltip="COMING_SOON"
         size="xs"
-        aria-disabled="true"
+        @click="openNewGroupDialog"
       >
         <DsPlus :size="16" />
       </IconButton>
@@ -185,11 +188,6 @@ function newContact() {
 
 .head-button {
   color: rgb(var(--text-2));
-}
-
-.head-button[aria-disabled='true'] {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .row {

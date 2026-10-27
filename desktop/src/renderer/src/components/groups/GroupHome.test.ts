@@ -220,6 +220,19 @@ describe('the Group home', () => {
     expect(router.currentRoute.value.fullPath).toBe('/groups/grp-review')
   })
 
+  it('opens 新建群聊 from its card (GRP-08)', async () => {
+    const { newGroupDialog } = await import('./newGroupDialog')
+    newGroupDialog.open.value = false
+    await mount()
+    const card = q('[data-group-card="new"]')
+    expect(card.getAttribute('aria-disabled')).toBeNull()
+    expect(card.textContent).toContain('评审、正反方、调研写作')
+    card.click()
+    await flush()
+    expect(newGroupDialog.open.value).toBe(true)
+    newGroupDialog.open.value = false
+  })
+
   it('opens a contact’s profile, and the editor from 新建', async () => {
     await mount()
     q('[data-person="ct-reviewer00001"]').click()

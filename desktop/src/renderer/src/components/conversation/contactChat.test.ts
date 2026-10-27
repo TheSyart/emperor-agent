@@ -11,6 +11,7 @@ import type { SessionInfo } from '../../types'
 import { sessionAppMode, isListedSession } from '../../runtime/appMode'
 import {
   contactChatOf,
+  groupMemberOf,
   groupPageOf,
   speakerRowIds,
   CONTACT_DELETED_REASON,
@@ -178,5 +179,38 @@ describe('groupPageOf', () => {
     ).toEqual({ name: 'group', params: { groupId: 'grp-1' } })
     expect(groupPageOf(session())).toBeNull()
     expect(groupPageOf(undefined)).toBeNull()
+  })
+})
+
+// GRP-08: 「过程 ›」 opens a member's own session — what it read and ran for
+// its speeches — as a page to read, not to talk in: the group is where
+// the user speaks to it. A pending approval there can still be answered.
+describe('groupMemberOf', () => {
+  const directory = { contacts: [contact()], loaded: true }
+
+  it('is the member and its group for a group member’s session', () => {
+    const member = session({
+      id: 'member-ct-reviewer00001',
+      title: '审稿人 · 0.3 方案评审',
+      surface: 'group_member',
+      group_id: 'grp-1',
+    })
+    expect(
+      groupMemberOf(member, directory, (id) =>
+        id === 'grp-1' ? '0.3 方案评审' : undefined,
+      ),
+    ).toEqual({
+      groupId: 'grp-1',
+      groupTitle: '0.3 方案评审',
+      contactId: 'ct-reviewer00001',
+      speaker: {
+        name: '审稿人',
+        avatar: { kind: 'library', id: 'AV-01-2', label: '审稿人' },
+      },
+      readOnlyReason:
+        '这是「审稿人」在群「0.3 方案评审」里的工作过程，只能查看；回到群里和它说话',
+    })
+    expect(groupMemberOf(session(), directory, () => undefined)).toBeNull()
+    expect(groupMemberOf(undefined, directory, () => undefined)).toBeNull()
   })
 })

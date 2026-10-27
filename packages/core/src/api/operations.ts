@@ -2392,6 +2392,19 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.stop(input),
   ),
+  // 设置 › 群聊 (GRP-08, D14): what a new group starts with.
+  'groups.defaults': operation(z.tuple([]), (api) => api.groups.defaults()),
+  'groups.setDefaults': operation(
+    z.tuple([
+      z
+        .object({
+          collaboration: z.enum(['autonomous', 'moderated']).optional(),
+          loopGuard: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change]) => api.groups.setDefaults(change),
+  ),
   'groups.files.list': operation(
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.files.list(input),

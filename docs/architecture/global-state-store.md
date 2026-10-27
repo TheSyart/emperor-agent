@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-27（对照 `347afb5f`）<br>
+> 最后核验：2026-10-27（对照 `76a61ad1`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`、`packages/core/src/groups/`
 
 ## 两个根的区分
@@ -40,7 +40,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 ```text
 ~/.emperor/
   installation.json        # layout/app/runtime revision、首次启动与迁移状态；lastRunVersion / previousRunVersion（降级提示）与 dataVersion（数据迁移）
-  settings.json            # 用户通用配置（version 1）；updates.check 是「检查更新」开关（默认开）
+  settings.json            # 用户通用配置（version 1）；updates.check 是「检查更新」开关（默认开）；groups 是新群的默认设置（GRP-08）
   model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   model_tests.json         # 每条模型最近一次连接测试（「设置 › 模型」卡片的连接状态；运行状态，不是配置，没有版本号）
@@ -314,6 +314,7 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 - `GroupService` 校验：成员必须是存在的联系人、不重复、1–12 位；主持人必须是成员（Emperor 在群里时默认是它）；群名 1–40 字，群公告最多 4000 字；私信和交办只能发给成员。违反时报 `group_invalid`，不是群的会话报 `group_not_found`。每次改动后发 host 事件 `groups_changed`。
 - 群纪要只用公开消息写（不含私信和还没揭晓的独立作答），因为同一份纪要交给每位成员。
 - 群文件放在 `groups/<group-id>/files/`，`groups.files.list` 列出第一层。
+- 新群的默认设置在 `settings.json` 的 `groups`（`collaboration`：`autonomous` / `moderated`，默认 `autonomous`；`loopGuard` 默认 `true`），「设置 › 群聊」改它（`groups.defaults` / `groups.setDefaults`）。建群时写进 `group/created` 的设置是当时的默认值加上建群时指定的，之后改默认值不影响已有的群。
 
 ## 迁移策略
 
