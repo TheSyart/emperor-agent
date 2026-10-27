@@ -15,6 +15,7 @@
  *   最近删除 (FIX-01: deleted sessions kept 30 days, restore or delete for
  *   good after a confirmation). A list that failed to load says so with
  *   重试 instead of looking empty.
+ * - 关于 (BRD-04, AboutGroup): 小单, the name, one line and the 「单」 seal;
  * - 更新 (REL-02, updates/UpdateGroup): 检查更新 and 当前版本; while a newer
  *   release is offered or downloading, updates/UpdateNotice opens the page
  *   (「Emperor 0.2.1 可用 · 查看更新说明 · 下载」).
@@ -41,6 +42,7 @@ import Button from '../ui/Button.vue'
 import { confirm } from '../ui/confirm'
 import { useSettingsPages } from './settingsHeader'
 import UpdateGroup from './updates/UpdateGroup.vue'
+import AboutGroup from './AboutGroup.vue'
 import UpdateNotice from './updates/UpdateNotice.vue'
 import {
   EmptyState,
@@ -566,6 +568,7 @@ onMounted(() => void loadPermission())
       </SettingsGroup>
 
       <UpdateGroup />
+      <AboutGroup />
     </template>
   </SettingsSection>
 </template>
