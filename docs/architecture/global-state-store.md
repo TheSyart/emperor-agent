@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-25（对照 `e3fb36f2`）<br>
+> 最后核验：2026-10-27（对照 `86936039`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
@@ -87,7 +87,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     media/<month>/
     desktop/window.json
     desktop_pet/window.json
-    sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）和文件树宽度等工作台偏好
+    sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）、当前模式（Chat / Build / Group）与每种模式上次打开的会话、文件树宽度等工作台偏好
   sessions/
     .harness-kernel-v1     # 当前内核的会话目录标记
     index.json             # 会话索引（标题、模式、项目绑定、归档）；启动时建一次，之后常驻内存

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-26（对照 `aa8aa69c`）<br>
+> 最后核验：2026-10-27（对照 `0ca74447`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -241,6 +241,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 | 后退 / 前进      | ⌘[ / ⌘]  |
 | 听写（输入框内） | ⇧⌘D      |
 
+- 在 Build 会话里按 ⌘N，会在当前项目新建会话；其他时候新建普通对话。
 - 有弹窗打开时快捷键不生效。
 - 工作台相关的四个面板和开关只在对话页生效，整页中不响应。
 - 听写快捷键只在光标位于输入框时生效，可在「设置 › 语音」修改，见[语音听写](#语音听写)。
