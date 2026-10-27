@@ -61,9 +61,18 @@ import { ProjectMcpInstances } from '../../mcp/project-instances'
 import type { FileSkillsLoader } from '../../skills/file-loader'
 import { logger } from '../../util/log'
 import { WatchlistService } from '../../watchlist/service'
-import { Agent, type AgentDeps, type MessageOutcome } from '../agent/agent'
+import {
+  Agent,
+  type AgentDeps,
+  type AgentOptions,
+  type MessageOutcome,
+} from '../agent/agent'
 import { isUserTyped, type HoldReason, type QueueChange } from '../agent/inbox'
-import { createMiddleware, type AgentMiddleware } from '../agent/middleware'
+import {
+  createMiddleware,
+  type AgentMiddleware,
+  type PreStepDecision,
+} from '../agent/middleware'
 import { retryMiddleware } from '../agent/retry'
 import {
   currentModel,
@@ -99,6 +108,15 @@ import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
 import { readPersonaText } from '../prompt/persona'
+import {
+  presetRank,
+  type ContactBinding,
+  type ContactRuntime,
+} from '../../contacts/runtime'
+import {
+  ContactDeletedError,
+  ContactPermissionError,
+} from '../../contacts/errors'
 import { SessionProjector, type UiEvent } from '../projection/projector'
 import { createAskUserQuestionTool, UserQuestionService } from '../questions'
 import { UserQuestionDismissed } from '../questions/service'
@@ -352,6 +370,20 @@ export interface QueuedPrompt {
 }
 
 const DEFAULT_PRESET = 'workspace-write'
+/** The option that lets a contact's session use the default model (GRP-03). */
+const CONTACT_MODEL_FALLBACK = '用默认模型继续'
+
+/**
+ * Prompt sections named after a family of tools (`tool:jobs`, …): a
+ * contact's prompt keeps one while it has any of them (GRP-03).
+ */
+const SECTION_TOOL_FAMILIES: Readonly<
+  Record<string, (name: string) => boolean>
+> = {
+  jobs: (name) => name.startsWith('job_'),
+  goal: (name) => /^(create|get|update)_goal$/.test(name),
+  computer_use: (name) => /^(browser|desktop|ui|external)_/.test(name),
+}
 
 export class HarnessHost {
   readonly kept: KeptServices
@@ -415,6 +447,10 @@ export class HarnessHost {
   private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
     () => new Set()
   private readonly agents = new Map<string, Agent>()
+  /** Contacts at run time (GRP-03; CoreApi sets it): null runs no contact. */
+  private contactRuntime: ContactRuntime | null = null
+  /** The contact of each root session that has one (`contact_id`). */
+  private readonly contactBindings = new Map<string, ContactBinding>()
   /** Uninstalls of the extensions CoreApi registered (turn file records). */
   private readonly extensionTeardown: Array<() => void> = []
   private localSubagentModel: () => string | undefined = () => undefined
@@ -492,6 +528,8 @@ export class HarnessHost {
     this.sandbox = new SandboxPolicyService({
       defaultMode: 'workspace-write',
       workspaceRoot: this.chatWorkspace(),
+      // A contact's knowledge outside the workspace, for its whole task.
+      readOnlyRoots: (session) => this.contactReadOnlyRoots(session),
     })
     this.sandboxBackend =
       options.sandboxBackend ??
@@ -505,7 +543,11 @@ export class HarnessHost {
       sessions: this.sessions,
       createAgent: (session, agentOptions) => {
         const child = this.attachAgent(
-          new Agent(session, this.agentDeps(), agentOptions),
+          new Agent(
+            session,
+            this.agentDeps(),
+            this.withinContactTools(agentOptions),
+          ),
         )
         this.taskTreeOf(child).adopt({
           sessionId: child.id,
@@ -722,7 +764,21 @@ export class HarnessHost {
       'cwd',
       ({ agent }) => agent?.session.cwd ?? this.chatWorkspace(),
     )
-    prompt.section({ name: 'persona', order: 0, text: this.personaText() })
+    // A contact's session has its role card instead of the persona (GRP-03),
+    // through a variable: the card's text is never read for {{…}}.
+    const persona = this.personaText()
+    prompt.section({
+      name: 'persona',
+      order: 0,
+      text: ({ agent }) =>
+        this.contactPrompt(agent) === null ? persona : '{{role_card}}',
+    })
+    prompt.variable(
+      'role_card',
+      ({ agent }) => this.contactPrompt(agent) ?? undefined,
+    )
+    // ...and no guidance for tools it does not have.
+    prompt.sectionGate((name, { agent }) => this.contactSection(name, agent))
     // The model and working directory change per session and on a model
     // switch: they live in the runtime context, never in the system prompt
     // prefix (provider prefix cache, replayed reasoning signatures).
@@ -927,6 +983,14 @@ export class HarnessHost {
     this.goals.onChange(({ agent }) => {
       this.noteTaskSettled(this.rootOf(agent).id)
     })
+    // A contact's session reads its contact again before every step, and
+    // asks before the default model stands in for a deleted one (GRP-03).
+    middleware.preAssemble.push(async ({ agent }) => {
+      await this.refreshContact(agent)
+    })
+    middleware.preStep.unshift(({ agent, signal }) =>
+      this.contactGate(agent, signal),
+    )
     // A step of a project session holds the project's MCP instance (started
     // on first use) until its agent goes idle, before its tools are listed
     // (KRN-01). Then middleware (order matters): instructions, memory,
@@ -1092,6 +1156,163 @@ export class HarnessHost {
    */
   registeredToolNames(): string[] {
     return this.tools.names()
+  }
+
+  // ── contacts (GRP-03) ───────────────────────────────────────────────
+
+  /** Contacts at run time: CoreApi hands over its contacts at startup. */
+  setContactRuntime(runtime: ContactRuntime | null): void {
+    this.contactRuntime = runtime
+  }
+
+  /** The highest preset a session may have: its contact's (null: none). */
+  private contactCeiling(sessionId: string): string | null {
+    const runtime = this.contactRuntime
+    if (runtime === null) return null
+    const contactId =
+      this.contactBindings.get(sessionId)?.contactId ??
+      this.kept.sessionStore.get(sessionId)?.contact_id
+    return contactId === undefined ? null : runtime.ceiling(contactId)
+  }
+
+  /** `preset`, or the session's contact's ceiling when that is lower. */
+  private withinContactCeiling(sessionId: string, preset: string): string {
+    const ceiling = this.contactCeiling(sessionId)
+    return ceiling !== null &&
+      presetRank(this.presets.spec(preset).sandbox) > presetRank(ceiling)
+      ? ceiling
+      : preset
+  }
+
+  /** Raising a contact's session above its contact's ceiling is refused. */
+  private assertWithinContactCeiling(sessionId: string, mode: string): void {
+    const ceiling = this.contactCeiling(sessionId)
+    if (ceiling !== null && presetRank(mode) > presetRank(ceiling))
+      throw new ContactPermissionError(this.presets.spec(ceiling).name)
+  }
+
+  /** A contact's session above its ceiling (an edit, a lower global preset) comes down. */
+  private clampContactPermission(agent: Agent): void {
+    const ceiling = this.contactCeiling(agent.id)
+    if (ceiling === null) return
+    const mode = this.sandbox.resolve({ session: agent.session }).mode
+    if (presetRank(mode) > presetRank(ceiling)) this.presets.set(agent, ceiling)
+  }
+
+  /** Before each step: the contact, its memory and knowledge as they are now. */
+  private async refreshContact(agent: Agent): Promise<void> {
+    const binding = this.contactBindings.get(agent.id)
+    if (binding === undefined || this.contactRuntime === null) return
+    await this.contactRuntime.ready()
+    binding.refresh()
+    this.clampContactPermission(agent)
+  }
+
+  /** A deleted contact's session can be read, not written to (GRP-05 shows it read-only). */
+  private async refuseDeletedContact(agent: Agent): Promise<void> {
+    const binding = this.contactBindings.get(agent.id)
+    if (binding === undefined || this.contactRuntime === null) return
+    await this.contactRuntime.ready()
+    if (binding.refresh().contact === null)
+      throw new ContactDeletedError(binding.contactId)
+  }
+
+  /**
+   * A deleted contact's session is not continued; a contact whose model
+   * profile is gone asks before the default model answers for it.
+   */
+  private async contactGate(
+    agent: Agent,
+    signal: AbortSignal,
+  ): Promise<PreStepDecision | undefined> {
+    const binding = this.contactBindings.get(agent.id)
+    if (binding === undefined) return undefined
+    if (binding.snapshot.contact === null)
+      throw new ContactDeletedError(binding.contactId)
+    const missing = binding.missingModel()
+    if (missing === null) return undefined
+    const fallback = this.contactRuntime?.defaultModelName() ?? '默认模型'
+    const outcome = await this.questions.ask({
+      agent,
+      signal,
+      questions: [
+        {
+          id: 'contact-model',
+          header: '模型不可用',
+          question: `这个联系人的模型不可用：模型档案「${missing}」已经不在了。先用默认模型「${fallback}」继续这个会话吗？`,
+          options: [
+            {
+              label: CONTACT_MODEL_FALLBACK,
+              description: '这个会话以后都用默认模型，不再问',
+            },
+            {
+              label: '不用',
+              description: '这条消息先不发；在联系人的「能力」里换一个模型再发',
+            },
+          ],
+        },
+      ],
+    })
+    if (
+      outcome.outcome === 'answered' &&
+      outcome.answers['contact-model']?.selected[0] === CONTACT_MODEL_FALLBACK
+    ) {
+      binding.allowDefaultModel(missing)
+      return undefined
+    }
+    return { kind: 'reject' }
+  }
+
+  /** A contact's session: its role card in place of the persona (null: the persona). */
+  private contactPrompt(agent: Agent | undefined): string | null {
+    return agent === undefined
+      ? null
+      : (this.contactBindings.get(agent.id)?.snapshot.prompt ?? null)
+  }
+
+  /** Whether a prompt section is for this agent: a contact's lacks guidance for tools it lacks. */
+  private contactSection(name: string, agent: Agent | undefined): boolean {
+    const binding =
+      agent === undefined ? undefined : this.contactBindings.get(agent.id)
+    if (
+      binding === undefined ||
+      binding.snapshot.tools === null ||
+      !name.startsWith('tool:')
+    )
+      return true
+    const tool = name.slice('tool:'.length)
+    const family = SECTION_TOOL_FAMILIES[tool]
+    const registered = this.tools.names()
+    const covered = registered.filter((candidate) =>
+      family === undefined ? candidate === tool : family(candidate),
+    )
+    // Guidance that names no tool of the kernel stays as it is.
+    if (covered.length === 0) return true
+    return covered.some(
+      (candidate) => this.tools.get(candidate, agent) !== undefined,
+    )
+  }
+
+  /** A contact's subagents see no more than the contact. */
+  private withinContactTools(options: AgentOptions): AgentOptions {
+    const owner = options.owner
+    const binding =
+      owner === undefined
+        ? undefined
+        : this.contactBindings.get(this.rootOf(owner).id)
+    if (binding === undefined) return options
+    const toolFilter = binding.narrow(options.toolFilter)
+    return toolFilter === undefined ? options : { ...options, toolFilter }
+  }
+
+  /** The read-only knowledge of the contact a session's task belongs to. */
+  private contactReadOnlyRoots(session: Session): readonly string[] {
+    const agent = this.agents.get(session.id)
+    if (agent === undefined) return []
+    return (
+      this.contactBindings.get(this.rootOf(agent).id)?.snapshot.readOnlyRoots ??
+      []
+    )
   }
 
   /** How many tools the kernel registered (health check). */
@@ -1765,13 +1986,31 @@ export class HarnessHost {
     if (session === undefined)
       session = this.sessions.create({ id: sessionId, cwd })
     const tree = this.taskTree(sessionId)
+    const opened = session
+    const binding =
+      entry.contact_id !== undefined && this.contactRuntime !== null
+        ? this.contactRuntime.bind(
+            entry.contact_id,
+            opened,
+            () => opened.cwd ?? this.chatWorkspace(),
+          )
+        : undefined
+    if (binding !== undefined) this.contactBindings.set(sessionId, binding)
     const agent = this.attachAgent(
-      new Agent(session, this.agentDeps(), { admission: tree.gate }),
+      new Agent(session, this.agentDeps(), {
+        admission: tree.gate,
+        ...binding?.agentOptions(),
+      }),
     )
     tree.setRoot(agent)
     // Its worktree binding may have changed while the session was closed.
     if (!fresh) this.resyncWorkingDirectory(agent)
-    if (fresh) this.presets.pin(session, this.defaultPreset)
+    if (fresh)
+      this.presets.pin(
+        session,
+        this.withinContactCeiling(sessionId, this.defaultPreset),
+      )
+    else if (binding !== undefined) this.clampContactPermission(agent)
     this.goalInstall.driver.attach(agent)
     this.hooks.sessionStarted(agent, fresh ? 'startup' : 'resume')
     return agent
@@ -1858,6 +2097,7 @@ export class HarnessHost {
     this.unsubscribes.delete(sessionId)
     this.projectors.delete(sessionId)
     this.agents.delete(sessionId)
+    this.contactBindings.delete(sessionId)
     this.projectMcp.release(sessionId)
   }
 
@@ -2342,6 +2582,7 @@ export class HarnessHost {
     beforeSend?: (messageId: string, agent: Agent) => void,
   ): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
+    await this.refuseDeletedContact(agent)
     const message: UserMessage = createUserMessage({
       content: this.userContent(input),
       source: { kind: 'user' },
@@ -2579,13 +2820,15 @@ export class HarnessHost {
     }
     const session = this.sessionLog(sessionId)
     if (session === undefined) {
+      // Not opened yet: what it will start in (a contact's ceiling, GRP-03).
+      const start = this.withinContactCeiling(sessionId, this.defaultPreset)
       return {
         version: 3,
-        mode: this.defaultPreset,
-        preset: this.defaultPreset,
+        mode: start,
+        preset: start,
         plan: false,
-        approval: 'ask',
-        sandbox: this.presets.spec(this.defaultPreset).sandbox,
+        approval: this.presets.spec(start).approval,
+        sandbox: this.presets.spec(start).sandbox,
         presets: this.presets.options(),
         pending: null,
       }
@@ -2633,20 +2876,31 @@ export class HarnessHost {
     preset: string,
   ): Record<string, unknown> {
     const agent = this.agentFor(sessionId)
+    this.assertWithinContactCeiling(
+      sessionId,
+      this.presets.spec(preset).sandbox,
+    )
     this.presets.set(agent, preset)
     return this.controlPayload(sessionId)
   }
 
   /**
    * A new session starts in `preset` (a draft's choice, FIX-13): logged as a
-   * creation-time fact like the default, with no notice to the model.
+   * creation-time fact like the default, with no notice to the model. A
+   * contact's session starts no higher than the contact may go (GRP-03).
    */
   pinPermissionPreset(sessionId: string, preset: string): void {
-    this.presets.pin(this.agentFor(sessionId).session, preset)
+    this.presets.spec(preset)
+    this.presets.pin(
+      this.agentFor(sessionId).session,
+      this.withinContactCeiling(sessionId, preset),
+    )
   }
 
   setSandboxMode(sessionId: string, mode: SandboxMode): void {
-    this.sandbox.set(this.agentFor(sessionId).session, mode)
+    const session = this.agentFor(sessionId).session
+    this.assertWithinContactCeiling(sessionId, mode)
+    this.sandbox.set(session, mode)
   }
 
   setApprovalPolicy(sessionId: string, policy: ApprovalPolicy): void {

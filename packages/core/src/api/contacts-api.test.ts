@@ -15,9 +15,13 @@ const CONTACT_OPERATIONS = [
   'contacts.create',
   'contacts.delete',
   'contacts.duplicate',
+  'contacts.feedback',
   'contacts.fromTemplate',
   'contacts.get',
   'contacts.list',
+  'contacts.memory.delete',
+  'contacts.memory.list',
+  'contacts.memory.update',
   'contacts.restoreVersion',
   'contacts.templates',
   'contacts.update',
@@ -43,7 +47,7 @@ function contactEvents(events: Array<Record<string, unknown>>) {
 }
 
 describe('contacts operations', () => {
-  it('registers the ten operations and the contacts_changed event', () => {
+  it('registers the contacts operations and the contacts_changed event', () => {
     expect(
       coreOperationKeys().filter((key) => key.startsWith('contacts.')),
     ).toEqual(CONTACT_OPERATIONS)

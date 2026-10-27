@@ -181,6 +181,8 @@ export class ContactStore {
   private readonly adapter: PersistenceAdapter | undefined
   private readonly now: () => number
   private state: Promise<ContactsState> | null = null
+  /** The state once read (changes update it in place): {@link peek}. */
+  private loaded: ContactsState | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private templateCache: ContactTemplate[] | null = null
   private shipped: Contact[] | null = null
@@ -210,6 +212,23 @@ export class ContactStore {
 
   async get(id: string): Promise<Contact> {
     return structuredClone(this.find(await this.load(), id))
+  }
+
+  /** Resolves once the contacts are read; {@link peek} answers from then on. */
+  async ready(): Promise<void> {
+    await this.load()
+  }
+
+  /**
+   * A contact as last read, without waiting (null: unknown, deleted, or
+   * not read yet — {@link list} reads). Contact sessions look their
+   * contact up this way while they assemble a prompt (GRP-03).
+   */
+  peek(id: string): Contact | null {
+    const contact = this.loaded?.contacts.find(
+      (candidate) => candidate.id === id,
+    )
+    return contact === undefined ? null : structuredClone(contact)
   }
 
   /** Old versions, newest first (the current one is {@link get}). */
@@ -280,7 +299,7 @@ export class ContactStore {
         state,
         state.contacts.filter((contact) => contact.id !== id),
       )
-      // Its old versions (and, from GRP-03, its memory) go with it.
+      // Its old versions and its personal memory go with it.
       await rm(join(this.dir, id), { recursive: true, force: true }).catch(
         (error: unknown) =>
           logger.warn('contacts: could not remove a deleted contact folder', {
@@ -603,10 +622,16 @@ export class ContactStore {
   }
 
   private load(): Promise<ContactsState> {
-    this.state ??= this.read().catch((error: unknown) => {
-      this.state = null
-      throw error
-    })
+    this.state ??= this.read().then(
+      (state) => {
+        this.loaded = state
+        return state
+      },
+      (error: unknown) => {
+        this.state = null
+        throw error
+      },
+    )
     return this.state
   }
 

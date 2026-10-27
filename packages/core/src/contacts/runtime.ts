@@ -278,6 +278,8 @@ export function knowledgeReadOnlyRoots(
 export interface ContactRuntimeDeps {
   /** A contact as the store has it now; null when there is none (deleted). */
   contact(id: string): Contact | null
+  /** Resolves once the contacts are read ({@link contact} answers from then on). */
+  ready(): Promise<void>
   memory: ContactMemoryStore
   /** Every tool name the registry has. */
   toolNames(): Iterable<string>
@@ -324,8 +326,23 @@ export class ContactRuntime {
     return new ContactBinding(contactId, session, this, workspaceRoot)
   }
 
+  ready(): Promise<void> {
+    return this.deps.ready()
+  }
+
   defaultCallConfig(): LlmCallConfig {
     return this.deps.defaultCallConfig()
+  }
+
+  /** The highest preset a contact's session may have (null: no ceiling). */
+  ceiling(contactId: string): string | null {
+    const contact = this.deps.contact(contactId)
+    if (contact === null) return 'read-only'
+    if (contact.kind === 'external' || contact.builtin) return null
+    return contactPermissionPreset(
+      contact.capabilities.permission,
+      this.deps.globalPreset(),
+    )
   }
 
   /** The active route's display name, for the fallback question. */
