@@ -186,7 +186,9 @@ function onKeydown(event: KeyboardEvent) {
   box-shadow: var(--composer-edge);
 }
 
-.input {
+.input,
+.input:focus,
+.input:focus-visible {
   padding: 0;
   background: transparent;
   box-shadow: none;

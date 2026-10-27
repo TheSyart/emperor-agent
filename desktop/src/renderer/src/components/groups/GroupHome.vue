@@ -23,7 +23,9 @@ import { useSession } from '../../composables/useSession'
 import type { SessionInfo } from '../../types'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import { handDraftTo } from '../chat/draftHandoff'
+import type { Contact } from '@emperor/core/api'
 import { contactAvatarProps } from '../contacts/contactAvatar'
+import { DOMAIN_LABELS } from '../contacts/contactProfileModel'
 import { useContactDirectory } from '../contacts/contactDirectory'
 import EmptyHero from '../conversation/EmptyHero.vue'
 import { DsPlus } from '../icons/ds'
@@ -69,10 +71,12 @@ watch(text, () => {
   hint.value = ''
 })
 
-function shortRole(intro: string, external: boolean): string {
-  const line = intro.split(/[，。,.;；·]/)[0]?.trim() ?? ''
-  if (line) return Array.from(line).slice(0, 6).join('')
-  return external ? '外部' : '联系人'
+/** The short line under a contact: 主持人, 外部, or its first domain. */
+function shortRole(contact: Contact): string {
+  if (contact.kind === 'external') return '外部'
+  if (contact.builtin) return '主持人'
+  const domain = contact.domains[0]
+  return domain ? DOMAIN_LABELS[domain] : '联系人'
 }
 
 function groupLine(memberCount: number, lastMessageAt: number | null): string {
@@ -185,9 +189,7 @@ async function send() {
               :size="40"
             />
             <span class="person-name">{{ contact.name }}</span>
-            <span class="person-role">{{
-              shortRole(contact.intro, contact.kind === 'external')
-            }}</span>
+            <span class="person-role">{{ shortRole(contact) }}</span>
           </div>
           <div
             class="person"
