@@ -76,6 +76,14 @@ extraResources:
     to: runtime-defaults/.env.example
   - from: build/runtime-defaults-manifest.json
     to: runtime-defaults/runtime-manifest.json
+  # The official skins (BRD-05): skin.json and PNG / WebP pictures only;
+  # main checks them like an imported skin before using them.
+  - from: resources/skins
+    to: skins
+    filter:
+      - '*/skin.json'
+      - '*/*.png'
+      - '*/*.webp'
   - from: src/pet
     to: desktop-pet
     filter:

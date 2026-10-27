@@ -56,6 +56,10 @@ import {
   timeoutOptions,
 } from './usage/usageCostModel'
 import { createUsageCost, type TaskBudgetKey } from './usage/useUsageCost'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const TokensSection = defineAsyncComponent(() => import('./TokensSection.vue'))
 
@@ -247,13 +251,17 @@ onMounted(() => void u.load())
 </script>
 
 <template>
-  <TokensSection v-if="page === 'tokens' || page === 'details'" />
+  <TokensSection
+    v-if="page === 'tokens' || page === 'details'"
+    :style="exempt"
+  />
   <UsageSessionsPage
     v-else-if="page === 'sessions'"
+    :style="exempt"
     :usage="u"
     @range="u.range.value = $event"
   />
-  <SettingsSection v-else>
+  <SettingsSection v-else :style="exempt">
     <div class="usage-cost" data-testid="usage-cost">
       <div class="toolbar">
         <span class="updated">{{ updated }}</span>

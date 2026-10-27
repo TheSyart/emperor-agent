@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
+import { pushToast } from '../components/ui/toasts'
 import {
   applyTheme,
   DEFAULT_THEME,
@@ -80,8 +81,29 @@ const preference = ref<ThemePreference>(DEFAULT_THEME)
 const theme = ref<ThemeName>(DEFAULT_THEME)
 let systemListener: ((event: MediaQueryListEvent) => void) | null = null
 
+/**
+ * A skin with one look (BRD-05: `base: light` or `dark`) holds the theme:
+ * the user's choice is kept for when the skin changes, and choosing the
+ * other theme meanwhile says why nothing happens.
+ */
+export interface ThemeLock {
+  theme: ThemeName
+  message: string
+}
+const lock = shallowRef<ThemeLock | null>(null)
+
+export function lockTheme(next: ThemeLock | null): void {
+  lock.value = next
+  apply()
+}
+
+export function themeLock(): ThemeLock | null {
+  return lock.value
+}
+
 function apply() {
-  const resolved = resolveTheme(preference.value, systemPrefersDark())
+  const resolved =
+    lock.value?.theme ?? resolveTheme(preference.value, systemPrefersDark())
   theme.value =
     typeof document === 'undefined' ? resolved : applyTheme(document, resolved)
 }
@@ -119,6 +141,12 @@ export function useTheme() {
   function set(name: ThemePreference) {
     preference.value = isThemePreference(name) ? name : DEFAULT_THEME
     apply()
+    const held = lock.value
+    if (
+      held &&
+      resolveTheme(preference.value, systemPrefersDark()) !== held.theme
+    )
+      pushToast(held.message)
     watchSystem()
     try {
       browserStorage()?.setItem(THEME_STORAGE_KEY, preference.value)
@@ -136,5 +164,5 @@ export function useTheme() {
     initTheme()
   }
 
-  return { theme, preference, set, toggle, init }
+  return { theme, preference, lock, set, toggle, init }
 }

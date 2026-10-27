@@ -54,6 +54,11 @@ import {
   WORKSPACE_MEDIA_OPEN_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  SKIN_GET_CHANNEL,
+  SKIN_IMPORT_CHANNEL,
+  SKIN_IMPORT_PICK_CHANNEL,
+  SKIN_LIST_CHANNEL,
+  SKIN_REMOVE_CHANNEL,
   VAULT_EXPORT_CHANNEL,
   VAULT_IMPORT_CHANNEL,
   VAULT_IMPORT_PICK_CHANNEL,
@@ -271,6 +276,13 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       }),
     discardHomeBackup: (id: string) =>
       ipcRenderer.invoke(HOME_BACKUP_DISCARD_CHANNEL, { id }),
+    // BRD-05 皮肤: main checks every package; the renderer names skins by id.
+    skinList: () => ipcRenderer.invoke(SKIN_LIST_CHANNEL),
+    skinGet: (id: string) => ipcRenderer.invoke(SKIN_GET_CHANNEL, { id }),
+    skinImportPick: () => ipcRenderer.invoke(SKIN_IMPORT_PICK_CHANNEL),
+    skinImport: (stageId: string) =>
+      ipcRenderer.invoke(SKIN_IMPORT_CHANNEL, { stageId }),
+    skinRemove: (id: string) => ipcRenderer.invoke(SKIN_REMOVE_CHANNEL, { id }),
     macHelperStatus: () => ipcRenderer.invoke(MAC_HELPER_STATUS_CHANNEL),
     macHelperRequestPermission: (permission: MacHelperPermission) =>
       ipcRenderer.invoke(MAC_HELPER_PERMISSION_CHANNEL, { permission }),

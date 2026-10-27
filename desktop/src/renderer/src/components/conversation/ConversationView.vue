@@ -133,6 +133,7 @@ import type { SubagentRowView } from './subagentRows'
 import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
+import SkinStamp from '../../skin/SkinStamp.vue'
 import { contactHeroPlaceholder, heroPlaceholder } from './heroGreeting'
 import {
   fillSuggestion,
@@ -1487,6 +1488,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @action="runGoalStatusAction"
           @edit="editGoal"
         />
+        <SkinStamp />
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
           v-if="!takeoverOpen && !unknownSession"

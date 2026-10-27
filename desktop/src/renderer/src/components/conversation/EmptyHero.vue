@@ -16,6 +16,9 @@
  *
  * The first Build home (no project yet, BRD-04) shows 小单 on his throne
  * above the words instead of the mark (`scene`); it is decoration only.
+ * A skin may put a picture above the greeting (BRD-05 `hero` slot; not in
+ * a single chat) and pick the headline's font (`--font-heading`); a skin's
+ * picture wins over the throne, so the home never shows 小单 twice.
  *
  * Props: mode? (default chat), addressName? (the profile's 称呼, null:
  * none), speaker? (a single chat's contact), speakerIntro?, scene?.
@@ -23,6 +26,8 @@
 import { computed } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
 import throne from '../../assets/mascot/throne.webp'
+import SkinSlot from '../../skin/SkinSlot.vue'
+import { skinSlotUrl } from '../../skin/skinState'
 import BrandMark from '../brand/BrandMark.vue'
 import Avatar from '../ui/Avatar.vue'
 import type { ContactSpeaker } from './contactChat'
@@ -38,6 +43,10 @@ const props = defineProps<{
   scene?: boolean
 }>()
 const { preferences } = useUiPreferences()
+/** The throne, unless a skin already puts 小单 above the greeting. */
+const showScene = computed(
+  () => Boolean(props.scene) && !props.speaker && !skinSlotUrl('hero'),
+)
 const headline = computed(() =>
   props.speaker
     ? props.speaker.name
@@ -54,8 +63,9 @@ const note = computed(() =>
 
 <template>
   <div class="empty-hero">
+    <SkinSlot v-if="!speaker" name="hero" class="skin-hero" />
     <div class="glow" aria-hidden="true" />
-    <div v-if="scene && !speaker" class="scene" aria-hidden="true">
+    <div v-if="showScene" class="scene" aria-hidden="true">
       <img :src="throne" alt="" draggable="false" data-hero-scene />
     </div>
     <h1 class="headline" :data-contact-hero="speaker ? '' : undefined">
@@ -66,7 +76,7 @@ const note = computed(() =>
         labelled
         class="mark"
       />
-      <BrandMark v-else-if="!scene" :size="34" class="mark" />
+      <BrandMark v-else-if="!showScene" :size="34" class="mark" />
       <span>{{ headline }}</span>
     </h1>
     <p v-if="note" class="note">{{ note }}</p>
@@ -109,6 +119,7 @@ const note = computed(() =>
   gap: var(--space-2-5);
   margin: 0;
   color: rgb(var(--text-1));
+  font-family: var(--font-heading);
   font-size: 26px;
   line-height: var(--space-8);
   font-weight: var(--weight-medium);
@@ -117,6 +128,13 @@ const note = computed(() =>
 
 .mark {
   flex: none;
+}
+
+.skin-hero {
+  position: relative;
+  max-width: 100%;
+  height: calc(var(--space-8) * 4);
+  margin-bottom: var(--space-1);
 }
 
 .note {

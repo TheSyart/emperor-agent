@@ -62,6 +62,10 @@ import {
   vaultErrorText,
   vaultProblem,
 } from './credentialVaultModel'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const status = ref<VaultStatus | null>(null)
 const busy = ref(false)
@@ -443,6 +447,7 @@ onBeforeUnmount(hidePassword)
 <template>
   <SettingsSection
     intro="Emperor 操作网页和 App 时用来代填的账号密码，每次代填前都会请你确认。"
+    :style="exempt"
   >
     <Notice
       v-if="problem"

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-10-27（对照 `d5625438`）<br>
+> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、设计规范和发布流程。
@@ -83,6 +83,7 @@
 - [动效](design/motion.md)
 - [会话流](design/conversation.md)
 - [输入框](design/composer.md)
+- [皮肤](design/skins.md)
 - [界面文案规范](design/writing.md)
 
 ### 发布与安全

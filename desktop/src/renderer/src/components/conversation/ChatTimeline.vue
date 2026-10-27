@@ -84,6 +84,10 @@ import {
 import type { TimelineAgents } from './subagentRows'
 import type { ProvisionalPrompt } from '../../types'
 import { isAtBottom, turnStatusLabel } from './timelineModel'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = withDefaults(
   defineProps<{
@@ -555,7 +559,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
 </script>
 
 <template>
-  <div class="chat-timeline" :data-session-id="sessionId">
+  <div class="chat-timeline" :data-session-id="sessionId" :style="exempt">
     <div
       ref="scroller"
       class="scroller"

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "yushufang",
+  "name": "御书房",
+  "author": "Emperor",
+  "license": "仅限 Emperor 使用，不开放二次创作",
+  "description": "默认的样子：石墨与金，浅色深色都有；侧栏底部是穿龙袍的小单",
+  "base": "auto",
+  "slots": { "sidebarFooter": "robe.webp" }
+}

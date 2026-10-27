@@ -189,6 +189,34 @@ describe('GeneralSection main page (UI-S07)', () => {
     ).toBe(true)
   })
 
+  it('opens 皮肤 from 外观, naming the skin in use (BRD-05)', async () => {
+    const root = await mount()
+    const row = root.querySelector<HTMLElement>(
+      '[data-group="appearance"] [data-testid="open-skins"]',
+    )!
+    expect(row.textContent).toContain('皮肤')
+    expect(row.textContent).toContain('御书房')
+    row.click()
+    await settle()
+    expect(root.querySelector('[data-group="appearance"]')).toBeNull()
+  })
+
+  it('says when the skin holds the theme (BRD-05)', async () => {
+    const { lockTheme } = await import('../../composables/useTheme')
+    lockTheme({
+      theme: 'light',
+      message: '皮肤「朱批」只有浅色，换个皮肤才能用深色',
+    })
+    try {
+      const root = await mount()
+      expect(
+        root.querySelector('[data-group="appearance"]')?.textContent,
+      ).toContain('当前皮肤只有浅色')
+    } finally {
+      lockTheme(null)
+    }
+  })
+
   it('has 显示轨迹 and 显示系统步骤 under 开发者, both off by default', async () => {
     const root = await mount()
     const developer = root.querySelector('[data-group="developer"]')!

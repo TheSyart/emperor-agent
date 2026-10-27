@@ -1,7 +1,9 @@
-import { createApp } from 'vue'
+import { createApp, watch } from 'vue'
 import App from './App.vue'
 import { router } from './router'
 import { initTheme } from './composables/useTheme'
+import { initSkin, setSkinDecorationsShown } from './skin/skinState'
+import { uiPreferences } from './composables/useUiPreferences'
 // Feature CSS responsibilities and effective cascade order are guarded by
 // feature-style-owners.json + featureStyleOwnership.test.ts.
 import './styles.css'
@@ -22,6 +24,15 @@ import './styles/dsh/animations.css'
 // Stored preference (light / dark / system) → resolved data-theme; storage
 // failures fall back to the default and `system` follows the OS live.
 initTheme()
+// BRD-05: the chosen skin's tokens on the root (cached, so no flash), then
+// checked by main; outside the desktop window there is no skin.
+initSkin()
+// BRD-04: 「显示吉祥物」 off takes the skins' pictures away too.
+watch(
+  () => uiPreferences().showMascot,
+  (on) => setSkinDecorationsShown(on),
+  { immediate: true },
+)
 
 // Dev-only primitives gallery (`?ui-gallery`): visual testing for the dsh
 // design system; tree-shaken out of production builds.

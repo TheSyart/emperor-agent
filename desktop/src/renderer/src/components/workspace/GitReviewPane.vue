@@ -46,6 +46,10 @@ import GitCommitBox from './GitCommitBox.vue'
 import GitPullRequestLine from './GitPullRequestLine.vue'
 import { syncLabel } from './gitReviewModel'
 import { GIT_REVIEW, useGitReview } from './useGitReview'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = withDefaults(
   defineProps<{
@@ -140,7 +144,7 @@ async function revealCommitBox(): Promise<void> {
 </script>
 
 <template>
-  <div class="git-review-pane">
+  <div class="git-review-pane" :style="exempt">
     <div class="review-toolbar">
       <GitBranchMenu />
       <span v-if="sync" class="sync" title="与上游相差的提交">{{ sync }}</span>

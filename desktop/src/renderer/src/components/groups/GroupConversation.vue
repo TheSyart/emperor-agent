@@ -51,6 +51,10 @@ import {
   type IndependentBatch,
   type TimelineRow,
 } from './groupModel'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = defineProps<{
   messages: readonly GroupHistoryMessage[]
@@ -204,7 +208,7 @@ function progress(batch: IndependentBatch): string {
 </script>
 
 <template>
-  <ol class="flow" data-group-flow>
+  <ol class="flow" data-group-flow :style="exempt">
     <li v-for="item in items" :key="item.key" class="item">
       <!-- A member asks the user (D29). -->
       <GroupAskMessage

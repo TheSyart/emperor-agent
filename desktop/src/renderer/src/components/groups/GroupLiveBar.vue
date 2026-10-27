@@ -12,6 +12,10 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { liveBarParts, turnRunning, type GroupTurnView } from './groupModel'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = withDefaults(
   defineProps<{
@@ -69,6 +73,7 @@ const parts = computed(() =>
     class="live-bar"
     data-live-bar
     :data-running="parts.running || undefined"
+    :style="exempt"
   >
     <span class="speaking">{{ parts.speaking }}</span>
     <span v-if="parts.queued" class="queued">· {{ parts.queued }}</span>

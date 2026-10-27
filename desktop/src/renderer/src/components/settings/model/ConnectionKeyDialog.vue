@@ -68,7 +68,12 @@ async function save(): Promise<void> {
 </script>
 
 <template>
-  <Modal v-model:open="open" :title="`更换 ${label} 的 Key`" :width="440">
+  <Modal
+    v-model:open="open"
+    :title="`更换 ${label} 的 Key`"
+    :width="440"
+    exempt
+  >
     <form
       class="connection-dialog"
       data-testid="connection-key-dialog"

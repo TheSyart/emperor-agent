@@ -91,3 +91,89 @@ it('BRD-06 · asks in court words while 宫廷用语 is on, without the 称呼',
     reloadUiPreferences()
   }
 })
+
+it('BRD-05 · shows the skin’s hero picture above the greeting, not for a contact', async () => {
+  const state = await import('../../skin/skinState')
+  ;(window as unknown as { emperor?: unknown }).emperor = {
+    skinGet: async () => ({
+      ok: true,
+      skin: {
+        id: 'richang',
+        name: '日常',
+        base: 'auto',
+        tokens: {},
+        reset: { light: {}, dark: {} },
+        fonts: { heading: 'system' },
+        slots: { hero: 'app://skin/richang/hoodie.webp?v=1' },
+      },
+    }),
+  }
+  try {
+    state.initSkin()
+    await state.selectSkin('richang')
+    await mount('chat', null)
+    const hero = root!.querySelector<HTMLImageElement>(
+      'img[data-skin-slot="hero"]',
+    )
+    expect(hero?.getAttribute('src')).toBe('app://skin/richang/hoodie.webp?v=1')
+    expect(root!.querySelector('.empty-hero')?.firstElementChild).toBe(hero)
+    app?.unmount()
+    root?.remove()
+    root = document.createElement('div')
+    document.body.append(root)
+    app = createApp({
+      render: () =>
+        h(EmptyHero, {
+          speaker: {
+            id: 'c1',
+            name: '架构师',
+            avatar: { name: '架构师' },
+          } as never,
+        }),
+    })
+    app.mount(root)
+    await nextTick()
+    expect(root.querySelector('img[data-skin-slot]')).toBeNull()
+  } finally {
+    state.resetSkinForTests()
+    delete (window as unknown as { emperor?: unknown }).emperor
+  }
+})
+
+it('BRD-04 + BRD-05 · a skin’s picture stands in for the throne: never two 小单', async () => {
+  const state = await import('../../skin/skinState')
+  ;(window as unknown as { emperor?: unknown }).emperor = {
+    skinGet: async () => ({
+      ok: true,
+      skin: {
+        id: 'richang',
+        name: '日常',
+        base: 'auto',
+        tokens: {},
+        reset: { light: {}, dark: {} },
+        fonts: { heading: 'system' },
+        slots: { hero: 'app://skin/richang/hoodie.webp?v=1' },
+      },
+    }),
+  }
+  try {
+    state.initSkin()
+    await state.selectSkin('richang')
+    root = document.createElement('div')
+    document.body.append(root)
+    app = createApp({
+      render: () => h(EmptyHero, { mode: 'build', scene: true }),
+    })
+    app.mount(root)
+    await nextTick()
+    expect(root.querySelector('img[data-skin-slot="hero"]')).not.toBeNull()
+    expect(root.querySelector('[data-hero-scene]')).toBeNull()
+    // 显示吉祥物 off: neither picture.
+    state.setSkinDecorationsShown(false)
+    await nextTick()
+    expect(root.querySelector('img[data-skin-slot="hero"]')).toBeNull()
+  } finally {
+    state.resetSkinForTests()
+    delete (window as unknown as { emperor?: unknown }).emperor
+  }
+})

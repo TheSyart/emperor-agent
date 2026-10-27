@@ -1,4 +1,5 @@
 import type { CoreOperationKey } from '@emperor/core/api'
+import type { SkinListEntry, SkinView } from './skin-contract'
 
 export const CORE_IPC_PREFIX = 'emperor:core:'
 export const CORE_EVENT_CHANNEL = 'emperor:core:event'
@@ -844,3 +845,42 @@ export type RemoteImageResult =
 export const APP_MENU_COMMAND_CHANNEL = 'emperor:menu:command'
 
 export type AppMenuCommand = 'open-settings'
+
+/**
+ * 设置 › 常规 › 外观 › 皮肤 (BRD-05), trusted main window only. `list` (no
+ * argument): official skins, then imported ones ({@link SkinListResult});
+ * `get` `{ id }`: one skin checked again, `missing` when its folder is gone;
+ * `import-pick`: main's folder dialog, the package checked and kept under a
+ * `stageId` ({@link SkinImportPickResult}); `import` `{ stageId }`: copy
+ * it into the Emperor Home (checked once more); `remove` `{ id }`: delete
+ * an imported skin. No path crosses IPC.
+ */
+export const SKIN_LIST_CHANNEL = 'emperor:skin:list'
+export const SKIN_GET_CHANNEL = 'emperor:skin:get'
+export const SKIN_IMPORT_PICK_CHANNEL = 'emperor:skin:import-pick'
+export const SKIN_IMPORT_CHANNEL = 'emperor:skin:import'
+export const SKIN_REMOVE_CHANNEL = 'emperor:skin:remove'
+
+export type SkinListResult =
+  { ok: true; skins: SkinListEntry[] } | { ok: false; error: string }
+
+export type SkinGetResult =
+  | { ok: true; skin: SkinView }
+  | { ok: false; missing: true }
+  | { ok: false; error: string }
+
+export type SkinImportPickResult =
+  | {
+      ok: true
+      staged: { stageId: string; skin: SkinView; replaces: boolean }
+    }
+  | { ok: false; canceled: true }
+  | { ok: false; problems: string[] }
+  | { ok: false; error: string }
+
+export type SkinImportResult =
+  | { ok: true; skin: SkinView }
+  | { ok: false; problems: string[] }
+  | { ok: false; error: string }
+
+export type SkinRemoveResult = { ok: true } | { ok: false; error: string }

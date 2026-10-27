@@ -51,6 +51,10 @@ import {
 import ClaudeSignInNotice from './ClaudeSignInNotice.vue'
 import ExecutorVersionGroup from './ExecutorVersionGroup.vue'
 import { ADD_CUSTOM_MODEL, useExecutorSettings } from './useExecutorSettings'
+import { useSkinExempt } from '../../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 
 const props = defineProps<{ backend: 'claude-code' | 'codex' }>()
 const emit = defineEmits<{ 'recheck-upgrade': [profileId: string] }>()
@@ -259,7 +263,7 @@ const runFacts = computed(() => {
 </script>
 
 <template>
-  <SettingsSection :data-executor-detail="backend">
+  <SettingsSection :data-executor-detail="backend" :style="exempt">
     <p v-if="!profile" class="detail-note" role="status">
       没有 {{ name }} 的配置。
     </p>

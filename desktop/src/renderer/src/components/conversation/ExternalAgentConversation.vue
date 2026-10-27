@@ -65,6 +65,10 @@ import ExternalAgentDetails from './environment/ExternalAgentDetails.vue'
 import VersionFailureActions from './VersionFailureActions.vue'
 import Button from '../ui/Button.vue'
 import Avatar from '../ui/Avatar.vue'
+import { useSkinExempt } from '../../skin/skinState'
+
+/** BRD-05 (D8): a skin may not reach this zone. */
+const exempt = useSkinExempt()
 const route = useRoute(),
   router = useRouter()
 const rootId = computed(() => String(route.params.sessionId ?? ''))
@@ -545,6 +549,7 @@ async function stop() {
     class="conversation-root child-conversation"
     :data-env-card="(infoOpen && controlsAvailable) || undefined"
     data-external-conversation
+    :style="exempt"
     @click.capture="click"
   >
     <header class="child-header">

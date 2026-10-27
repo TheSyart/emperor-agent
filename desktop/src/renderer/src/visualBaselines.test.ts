@@ -9,7 +9,8 @@ import { pathToFileURL } from 'node:url'
 // visual:baselines` compares, `npm run visual:baselines:update` regenerates.
 
 const DESKTOP = join(new URL('.', import.meta.url).pathname, '../../..')
-const MAX_TOTAL_BYTES = 15 * 1024 * 1024
+// 18 MB: room for the 130 images D31 allows (0.3 plan, D39).
+const MAX_TOTAL_BYTES = 18 * 1024 * 1024
 
 interface BaselineScript {
   BASELINE_DIR: string
@@ -23,7 +24,7 @@ async function load(): Promise<BaselineScript> {
 }
 
 describe('pixel baselines (DS-06)', () => {
-  it('keeps every baseline image under 15 MB in total (test 7)', async () => {
+  it('keeps every baseline image under 18 MB in total (test 7)', async () => {
     const { BASELINE_DIR, committedBaselines } = await load()
     const files = committedBaselines()
     expect(files.length).toBeGreaterThan(0)

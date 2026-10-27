@@ -21,6 +21,7 @@
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial,
     sans-serif;
+  --font-heading: var(--font-sans);
   --font-mono:
     'SF Mono', 'JetBrains Mono', ui-monospace, 'Fira Code', Consolas,
     'Liberation Mono', Menlo, 'PingFang SC', 'Microsoft YaHei';
