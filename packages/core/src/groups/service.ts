@@ -12,7 +12,12 @@
 import { EmperorError } from '../errors'
 import type { SessionSurface } from '../sessions/app-mode'
 import { buildUserMessage, type SendWay } from './envelope'
-import { foldGroupEvents, type GroupEventMap, type GroupState } from './events'
+import {
+  foldGroupEvents,
+  type GroupEventMap,
+  type GroupState,
+  type GroupTurnState,
+} from './events'
 import { planFor, type QueueItem } from './plan'
 import type {
   ContactId,
@@ -106,6 +111,21 @@ export interface GroupMemberView {
   missing: boolean
 }
 
+/**
+ * The turn on the group page (GRP-08): its latest logged state and when it
+ * started; while it runs, Core overlays who speaks and who is queued.
+ */
+export interface GroupTurnView {
+  turnId: string
+  state: GroupTurnState
+  reason?: string
+  spend: { usd: number; tokens: number }
+  /** The time of its first message (epoch ms), null when there is none. */
+  startedAt: number | null
+  speakers: ContactId[]
+  queued: ContactId[]
+}
+
 export interface GroupView {
   id: string
   title: string
@@ -115,6 +135,7 @@ export interface GroupView {
   settings: GroupSettings
   messageCount: number
   lastMessageAt: number | null
+  turn: GroupTurnView | null
 }
 
 export interface GroupSummary {
@@ -217,6 +238,7 @@ export class GroupService {
       settings: { ...state.settings },
       messageCount: state.messages.length,
       lastMessageAt: last ? last.at : null,
+      turn: turnView(state),
     }
   }
 
@@ -360,6 +382,8 @@ export class GroupService {
     return {
       messages: state.messages.slice(start, end).map((m) => ({
         ...m,
+        // A task message shows where its task is now (GRP-08).
+        ...(m.task ? { task: state.tasks.get(m.task.taskId) ?? m.task } : {}),
         private: m.audience.kind === 'private',
         hidden: m.batchId !== undefined && !state.revealed.has(m.batchId),
       })),
@@ -375,7 +399,8 @@ export class GroupService {
   ): void {
     this.state(groupId)
     this.deps.log(groupId).append(type, data)
-    if (type === 'group/message') this.changed('message', groupId)
+    // A reveal shows hidden answers and a task's state shows on its card.
+    if (CHANGES_VIEW.has(type)) this.changed('message', groupId)
   }
 
   /** The folded log of a group (GRP-07 plans and delivers from it). */
@@ -467,6 +492,28 @@ export class GroupService {
 
   private changed(reason: GroupChange['reason'], groupId: string): void {
     this.deps.onChange?.({ reason, groupId })
+  }
+}
+
+/** Log events that change how the messages show (GRP-08). */
+const CHANGES_VIEW: ReadonlySet<string> = new Set([
+  'group/message',
+  'group/reveal',
+  'group/task',
+])
+
+function turnView(state: GroupState): GroupTurnView | null {
+  const turn = state.turn
+  if (!turn) return null
+  const first = state.messages.find((m) => m.turnId === turn.turnId)
+  return {
+    turnId: turn.turnId,
+    state: turn.state,
+    ...(turn.reason ? { reason: turn.reason } : {}),
+    spend: { ...turn.spend },
+    startedAt: first ? first.at : null,
+    speakers: [],
+    queued: [],
   }
 }
 

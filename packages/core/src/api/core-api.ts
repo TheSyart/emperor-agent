@@ -130,6 +130,8 @@ import { ContactStore } from '../contacts/store'
 import type { GroupEventMap } from '../groups/events'
 import type { GroupScheduler } from '../groups/scheduler'
 import { installGroupRuntime } from './services/group-runtime'
+import { CoreGroupDefaultsService } from './services/group-defaults-service'
+import type { GroupPreferences } from '../config/local-config'
 import {
   GroupError,
   GroupService,
@@ -481,6 +483,8 @@ export class CoreApi {
   readonly contactStore: ContactStore
   readonly groupService: GroupService
   readonly groupScheduler: GroupScheduler
+  /** 设置 › 群聊: what a new group starts with (GRP-08). */
+  readonly groupDefaults: CoreGroupDefaultsService
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
   readonly contactMemoryService: CoreContactMemoryService
   /** Contacts at run time; trial sessions run as their draft (GRP-04). */
@@ -681,6 +685,9 @@ export class CoreApi {
       persona: () => persona,
     })
     host.setContactRuntime(this.contactRuntime)
+    this.groupDefaults = new CoreGroupDefaultsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+    })
     // A group is a session whose log holds the group events (GRP-06).
     this.groupService = new GroupService({
       sessions: {
@@ -716,6 +723,8 @@ export class CoreApi {
               version: contact.version,
             }
       },
+      // groups.create reads 设置 › 群聊 first, so this is current (GRP-08).
+      defaults: () => this.groupDefaults.current(),
       onChange: (change) =>
         host.emitHost({
           event: 'groups_changed',
@@ -3659,14 +3668,28 @@ export class CoreApi {
       await this.contactStore.ready()
       return this.groupService.list()
     },
+    /** The group, with the running turn's speakers and queue when one runs (GRP-08). */
     get: async (input: { id: string }) => {
       await this.contactStore.ready()
-      return this.groupService.get(input.id)
+      const view = this.groupService.get(input.id)
+      const live = this.groupScheduler.live(input.id)
+      if (!live) return view
+      const logged = view.turn?.turnId === live.turnId ? view.turn : null
+      return {
+        ...view,
+        turn: { ...live, startedAt: logged?.startedAt ?? null },
+      }
     },
+    /** A new group starts from 设置 › 群聊 unless it names its own settings. */
     create: async (input: GroupCreateInput) => {
       await this.contactStore.ready()
+      await this.groupDefaults.get()
       return this.groupService.create(input)
     },
+    /** 设置 › 群聊 (GRP-08, D14). */
+    defaults: (): Promise<GroupPreferences> => this.groupDefaults.get(),
+    setDefaults: (change: Partial<GroupPreferences>) =>
+      this.groupDefaults.update(change),
     update: async (input: { id: string; patch: GroupUpdateInput }) => {
       await this.contactStore.ready()
       return this.groupService.update(input.id, input.patch)

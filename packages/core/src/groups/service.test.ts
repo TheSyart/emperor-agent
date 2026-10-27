@@ -8,10 +8,14 @@ import {
   GroupService,
   type GroupContact,
   type GroupLog,
+  type GroupServiceDeps,
   type GroupSessionEntry,
 } from './service'
 
-function fixture(contacts: GroupContact[] = CONTACTS) {
+function fixture(
+  contacts: GroupContact[] = CONTACTS,
+  extra: Pick<GroupServiceDeps, 'defaults'> = {},
+) {
   const sessions = new Map<string, GroupSessionEntry>()
   const logs = new Map<string, { type: string; data: unknown }[]>()
   const changes: unknown[] = []
@@ -51,6 +55,7 @@ function fixture(contacts: GroupContact[] = CONTACTS) {
     newId: (prefix) => `${prefix}${++n}`,
     now: () => 1_700_000_000_000 + n,
     onChange: (change) => changes.push(change),
+    ...extra,
   })
   return { service, sessions, logs, changes }
 }
@@ -371,6 +376,110 @@ describe('GroupService.history and list', () => {
     service.send(view.id, { way: 'broadcast', text: 'hi' })
     expect(changes).toEqual([
       { reason: 'created', groupId: view.id },
+      { reason: 'message', groupId: view.id },
+    ])
+  })
+})
+
+// GRP-08: what the group page reads besides the messages — the turn on
+// screen, each task's latest state, 设置 › 群聊's defaults for a new group,
+// and a change event whenever the view of a message changes.
+describe('GroupService for the group page (GRP-08)', () => {
+  it('starts a new group from 设置 › 群聊’s defaults; a group made before keeps its own', () => {
+    let defaults: ReturnType<NonNullable<GroupServiceDeps['defaults']>> = {}
+    const { service } = fixture(CONTACTS, { defaults: () => defaults })
+    const before = service.create({ title: '旧群', members: ['ct-arch'] })
+    defaults = { collaboration: 'moderated', loopGuard: false }
+    const after = service.create({ title: '新群', members: ['ct-arch'] })
+    expect(after.settings).toMatchObject({
+      collaboration: 'moderated',
+      loopGuard: false,
+    })
+    expect(service.get(before.id).settings).toMatchObject({
+      collaboration: 'autonomous',
+      loopGuard: true,
+    })
+    // What the user picks in the dialog still wins.
+    const picked = service.create({
+      title: '挑过的',
+      members: ['ct-arch'],
+      settings: { collaboration: 'autonomous' },
+    })
+    expect(picked.settings.collaboration).toBe('autonomous')
+  })
+
+  it('shows the latest turn with when it started', () => {
+    const { service, view } = group()
+    expect(service.get(view.id).turn).toBeNull()
+    const { message } = service.send(view.id, { way: 'broadcast', text: 'hi' })
+    service.append(view.id, 'group/turn', {
+      turnId: message.turnId,
+      state: 'started',
+      spend: { usd: 0, tokens: 0 },
+    })
+    expect(service.get(view.id).turn).toEqual({
+      turnId: message.turnId,
+      state: 'started',
+      spend: { usd: 0, tokens: 0 },
+      startedAt: message.at,
+      speakers: [],
+      queued: [],
+    })
+    service.append(view.id, 'group/turn', {
+      turnId: message.turnId,
+      state: 'stopped',
+      reason: 'user',
+      spend: { usd: 0.42, tokens: 900 },
+    })
+    expect(service.get(view.id).turn).toMatchObject({
+      state: 'stopped',
+      reason: 'user',
+      spend: { usd: 0.42, tokens: 900 },
+      startedAt: message.at,
+    })
+  })
+
+  it('gives each task message the task’s latest state', () => {
+    const { service, view } = group()
+    const { message } = service.send(view.id, {
+      way: 'task',
+      text: '整理成一页说明',
+      to: 'ct-rev',
+      task: {
+        title: '写说明',
+        deliverable: '一页 Markdown',
+        access: 'group_files',
+      },
+    })
+    service.append(view.id, 'group/task', {
+      ...message.task!,
+      state: 'running',
+    })
+    service.append(view.id, 'group/task', { ...message.task!, state: 'done' })
+    const shown = service
+      .history(view.id)
+      .messages.find((m) => m.id === message.id)!
+    expect(shown.task).toMatchObject({ title: '写说明', state: 'done' })
+  })
+
+  it('announces a reveal and a task’s new state, which change how messages show', () => {
+    const { service, view, changes } = group()
+    changes.length = 0
+    service.append(view.id, 'group/reveal', { batchId: 'gb_1' })
+    service.append(view.id, 'group/task', {
+      taskId: 'gt_1',
+      to: 'ct-rev',
+      title: 't',
+      deliverable: 'd',
+      access: 'readonly',
+      state: 'cancelled',
+    })
+    service.append(view.id, 'group/delivery', {
+      contactId: 'ct-rev',
+      upTo: 'x',
+    })
+    expect(changes).toEqual([
+      { reason: 'message', groupId: view.id },
       { reason: 'message', groupId: view.id },
     ])
   })

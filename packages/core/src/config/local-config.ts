@@ -178,6 +178,32 @@ export function normalizeUpdatePreferences(value: unknown): UpdatePreferences {
 }
 
 /**
+ * 设置 › 群聊 (GRP-08, D14): what a new group starts with. A group keeps the
+ * settings it was made with; changing these never touches an old group.
+ */
+export interface GroupPreferences {
+  collaboration: 'autonomous' | 'moderated'
+  loopGuard: boolean
+}
+
+export function defaultGroupPreferences(): GroupPreferences {
+  return { collaboration: 'autonomous', loopGuard: true }
+}
+
+export function normalizeGroupPreferences(value: unknown): GroupPreferences {
+  const data = objectOrEmpty(value)
+  const defaults = defaultGroupPreferences()
+  return {
+    collaboration:
+      data.collaboration === 'moderated' || data.collaboration === 'autonomous'
+        ? data.collaboration
+        : defaults.collaboration,
+    loopGuard:
+      typeof data.loopGuard === 'boolean' ? data.loopGuard : defaults.loopGuard,
+  }
+}
+
+/**
  * `settings.json` preferences. Retired keys from the old kernel
  * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
  * `memory.hybridMemory`, `codeIntelligence`) are ignored when reading so old
@@ -192,21 +218,23 @@ export interface LocalConfig {
   sessions: SessionPreferences
   taskBudget: TaskBudgetSettings
   updates: UpdatePreferences
+  groups: GroupPreferences
 }
 
 /**
  * What a save takes: a missing `browser`, `webTools`, `sessions`,
- * `taskBudget` or `updates` writes its defaults.
+ * `taskBudget`, `updates` or `groups` writes its defaults.
  */
 export type LocalConfigInput = Omit<
   LocalConfig,
-  'browser' | 'webTools' | 'sessions' | 'taskBudget' | 'updates'
+  'browser' | 'webTools' | 'sessions' | 'taskBudget' | 'updates' | 'groups'
 > & {
   browser?: BrowserPreferences
   webTools?: WebToolPreferences
   sessions?: SessionPreferences
   taskBudget?: TaskBudgetSettings
   updates?: UpdatePreferences
+  groups?: GroupPreferences
 }
 
 export function defaultWebToolPreferences(): WebToolPreferences {
@@ -282,6 +310,7 @@ function defaultLocalConfig(): LocalConfig {
     sessions: defaultSessionPreferences(),
     taskBudget: defaultTaskBudgetSettings(),
     updates: defaultUpdatePreferences(),
+    groups: defaultGroupPreferences(),
   }
 }
 
@@ -331,6 +360,7 @@ export function parseLocalConfig(
     sessions: normalizeSessionPreferences(data.sessions),
     taskBudget: normalizeTaskBudgetSettings(data.taskBudget),
     updates: normalizeUpdatePreferences(data.updates),
+    groups: normalizeGroupPreferences(data.groups),
   }
 }
 
@@ -415,6 +445,7 @@ export async function saveLocalConfig(
     sessions: normalizeSessionPreferences(config.sessions),
     taskBudget: normalizeTaskBudgetSettings(config.taskBudget),
     updates: normalizeUpdatePreferences(config.updates),
+    groups: normalizeGroupPreferences(config.groups),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({

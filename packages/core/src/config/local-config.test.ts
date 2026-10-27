@@ -53,6 +53,8 @@ describe('local config', () => {
         maxNoticeWakes: 32,
       },
       updates: { check: true },
+      // 设置 › 群聊 (GRP-08): what a new group starts with.
+      groups: { collaboration: 'autonomous', loopGuard: true },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -228,6 +230,7 @@ describe('local config', () => {
     expect(Object.keys(parsed).sort()).toEqual([
       'browser',
       'desktopPet',
+      'groups',
       'prompt',
       'sessions',
       'taskBudget',
@@ -260,6 +263,7 @@ describe('local config', () => {
     expect(Object.keys(loaded).sort()).toEqual([
       'browser',
       'desktopPet',
+      'groups',
       'prompt',
       'sessions',
       'taskBudget',
@@ -279,6 +283,7 @@ describe('local config', () => {
     ).toEqual([
       'browser',
       'desktopPet',
+      'groups',
       'prompt',
       'sessions',
       'taskBudget',
