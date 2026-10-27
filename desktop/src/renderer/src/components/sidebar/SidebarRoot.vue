@@ -33,6 +33,7 @@ import {
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
+import { isListedSession } from '../../runtime/appMode'
 import type { ProjectInfo, SessionInfo, SidebarSectionKey } from '../../types'
 import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
@@ -104,10 +105,17 @@ const content = useContentSearch(searchQuery)
 const searchResults = computed(() => {
   const titles = searchSidebarSessions(sessions.value, searchQuery.value)
   const seen = new Set(titles.map((result) => result.id))
+  const known = new Map(sessions.value.map((session) => [session.id, session]))
+  // A hit in a session nobody lists (a group member's, a trial) is dropped
+  // (MOD-01); MOD-04 shows the group instead.
+  const listable = (id: string) => {
+    const session = known.get(id)
+    return !session || isListedSession(session)
+  }
   return [
     ...titles.map((result) => ({ ...result, group: 'title' as const })),
     ...content.hits.value
-      .filter((hit) => !seen.has(hit.sessionId))
+      .filter((hit) => !seen.has(hit.sessionId) && listable(hit.sessionId))
       .map((hit) => ({
         id: hit.sessionId,
         title: hit.title || '新会话',

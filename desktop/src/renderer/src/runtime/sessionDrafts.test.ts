@@ -44,6 +44,40 @@ describe('session draft helpers', () => {
     expect(draft.project_name).toBe('demo')
   })
 
+  it('MOD-01 · keeps the group-chat fields of a created session as Core sent them', async () => {
+    const { applySessionCreated, applySessionTitleUpdated } =
+      await import('./sessionDrafts')
+    const created = applySessionCreated([], {
+      event: 'session_created',
+      session: session({
+        id: 'member-1',
+        surface: 'group_member',
+        contact_id: 'ct-codex',
+        group_id: 'grp-1',
+      }),
+    } as never)
+    expect(created[0]).toMatchObject({
+      surface: 'group_member',
+      contact_id: 'ct-codex',
+      group_id: 'grp-1',
+    })
+    const plain = applySessionCreated([], {
+      event: 'session_created',
+      session: session({ id: 'plain-1' }),
+    } as never)
+    for (const key of ['surface', 'contact_id', 'group_id'])
+      expect(plain[0]).not.toHaveProperty(key)
+    const renamed = applySessionTitleUpdated(created, {
+      event: 'session_title_updated',
+      session: session({
+        id: 'member-1',
+        title: '新名字',
+        surface: 'group_member',
+      }),
+    } as never)
+    expect(renamed[0]).toMatchObject({ title: '新名字', group_id: 'grp-1' })
+  })
+
   it('replaces a draft with the committed backend session', async () => {
     const { applySessionCreated, createDraftSession } =
       await import('./sessionDrafts')
