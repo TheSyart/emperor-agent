@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
+> 最后核验：2026-10-28（对照 `99d86f3b`）<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/home-backup.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/migrations/`、`desktop/src/main/recovery.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入「设置 › 高级 › 诊断」。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「导出诊断包」生成一个 zip（见下文[日志与诊断包](#日志与诊断包)），「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
@@ -165,14 +165,14 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子智能体�
 
 **导出备份**：点「导出…」，对话框先列出备份会包含的内容和大小，确认后选择保存位置（默认「文稿」），完成后可以「在访达中显示」。备份只保存在你选的位置，Emperor 不会上传。
 
-| 部分                 | 内容                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 设置与配置           | `settings.json`、`model_config.json`、`mcp_config.json`、`hooks.json`、首次使用记录、子智能体设置与「以后都允许」的选择 |
-| 记忆                 | 长期记忆、用户档案、情景记忆与版本历史                                                                                  |
-| Skills、插件与智能体 | 你安装和编写的 Skills、已安装的插件、自定义智能体                                                                       |
-| 项目与定时任务       | 项目设置、项目记忆和定时任务                                                                                            |
-| 会话（可选）         | 会话记录、附件和用量记录；默认包含，可以在对话框里取消「包含会话」                                                      |
-| 密码管理器（可选）   | 只有勾选「包含密码管理器」并设置备份口令（至少 12 个字符，输入两次）时才放进去，见下文                                  |
+| 部分                       | 内容                                                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 设置与配置                 | `settings.json`、`model_config.json`、`mcp_config.json`、`hooks.json`、首次使用记录、子智能体设置与「以后都允许」的选择 |
+| 记忆                       | 长期记忆、用户档案、情景记忆与版本历史                                                                                  |
+| Skills、插件、联系人与皮肤 | 你安装和编写的 Skills、已安装的插件、自定义智能体；联系人（岗位说明书、历史版本、个人记忆）和导入的皮肤                 |
+| 项目与定时任务             | 项目设置、项目记忆和定时任务                                                                                            |
+| 会话（可选）               | 会话记录、附件和用量记录；默认包含，可以在对话框里取消「包含会话」                                                      |
+| 密码管理器（可选）         | 只有勾选「包含密码管理器」并设置备份口令（至少 12 个字符，输入两次）时才放进去，见下文                                  |
 
 备份不包含：Agent 浏览器的登录资料与缓存（`browser/profiles`）、Agent 下载的文件、日志、受管环境工具、运行时与临时文件（`run/`、`spill/`、锁文件）、子智能体的运行目录，以及 `installation.json`。
 

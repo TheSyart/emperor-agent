@@ -9,7 +9,7 @@
  * `credentials.emperor-vault` (SEC-09's sealed vault and local key; main
  * imports it, Core never reads it).
  *
- * What a backup holds, by category: 设置与配置, 记忆, Skills、插件与智能体,
+ * What a backup holds, by category: 设置与配置, 记忆, Skills、插件、联系人与皮肤,
  * 项目与定时任务, and optionally 会话. Never: installation.json, the local
  * key and the vault (only sealed, above), browser profiles and downloads,
  * logs, the managed environment, the runtime and temp folders, delegation
@@ -108,13 +108,16 @@ const CATEGORIES: readonly Category[] = [
   },
   {
     id: 'extensions',
-    title: 'Skills、插件与智能体',
-    description: '你安装和编写的 Skills、插件与自定义智能体',
+    title: 'Skills、插件、联系人与皮肤',
+    description:
+      '你安装和编写的 Skills、插件与自定义智能体，联系人（岗位说明书、版本与个人记忆）和导入的皮肤',
     optional: false,
     roots: [
       { path: 'skills', exclude: ['.staging'] },
       { path: 'agents' },
       { path: 'plugins', exclude: ['staging'] },
+      { path: 'contacts' },
+      { path: 'skins' },
     ],
   },
   {
@@ -163,6 +166,8 @@ function junk(name: string): boolean {
   return (
     name === '.DS_Store' ||
     name.endsWith('.lock') ||
+    // An import still being copied (skins: `.staging-<id>`).
+    name.startsWith('.staging-') ||
     /\.tmp(-|$)/.test(name) ||
     name.includes('.corrupt-')
   )

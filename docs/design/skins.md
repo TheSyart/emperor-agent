@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：皮肤作者（社区）、设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
+> 最后核验：2026-10-28（对照 `99d86f3b`）<br>
 > 事实源：`desktop/src/shared/skin-contract.ts`（格式常量与渲染端的复查）、`desktop/src/main/skins/`（`skin-package.ts` 检查皮肤包，`theme-tokens.ts` 从主题文件读出可改的令牌，`skin-store.ts` 官方与导入的皮肤，`skin-protocol.ts` 的 `app://skin`，`skin-ipc.ts`）、`desktop/resources/skins/`（三套官方皮肤）、`desktop/src/renderer/src/skin/`（`skinState.ts` 即 SkinHost，`SkinSlot.vue`、`SkinExempt.vue`、`SkinStamp.vue`，`skinZones.test.ts` 列出禁区）、`desktop/src/renderer/src/components/settings/appearance/`（「设置 › 常规 › 外观 › 皮肤」）、`desktop/tests/visual/skins.spec.ts`
 
 皮肤只改外观：颜色令牌、标题字体和几张 PNG / WebP 装饰图。它不能带脚本，也不能改对话正文、代码、改动对比、权限确认、费用和登录界面的样子。Emperor 自带三套官方皮肤，你也可以照本文做一个皮肤包，在「设置 › 常规 › 外观 › 皮肤」里从文件夹导入。
@@ -98,7 +98,7 @@ paper/
 
 图片都只是装饰：没有替代文字，读屏软件跳过，不能拖动，点不到。设计稿里的 `composerCorner`、`thinking`、`done`、`error`、`groupBackdrop` 还没有开放，写了会被拒绝。
 
-「设置 › 常规 › 外观」以后会有「显示吉祥物」开关，关掉后所有装饰位都不显示（皮肤的颜色和字体不受影响）。
+「设置 › 常规 › 外观 › 显示吉祥物」（BRD-04，默认开）关掉后，所有装饰位都不显示（皮肤的颜色和字体不受影响）。皮肤的首页图和 Build 第一次首页的龙椅图在同一个位置，皮肤的图优先，一屏不会出现两个小单。
 
 ### 图片
 
