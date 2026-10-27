@@ -7,8 +7,9 @@ import { installVisualCoreBridge } from './visualBridge'
 
 // GRP-05: the Group mode — its home (预览 A: the composer with @, the
 // contacts, the recent groups) with its sidebar (群聊, 联系人), a contact's
-// profile (预览 B 第 2 步), a single chat with a contact (its avatar and name
-// on each reply, 👍 / 👎), and a group's interim page. Baselines: the home
+// profile (预览 B 第 2 步) and a single chat with a contact (its avatar and
+// name on each reply, 👍 / 👎); the group page is group-chat.spec.ts
+// (GRP-08). Baselines: the home
 // (which took over MOD-05's `shell/sidebar-group`) and the profile; the
 // rest are screenshots. The contacts and groups are answered here, over the
 // shared bridge.
@@ -381,7 +382,7 @@ async function shot(page: Page, name: string) {
 
 for (const theme of ['dark', 'light'] as const) {
   // ⌘3 from a Build session: no Group session was open yet, so the Group
-  // home. Its sidebar: 「Emperor Group ▾」, 新建群聊 still to come beside
+  // home. Its sidebar: 「Emperor Group ▾」, 新建群聊 (GRP-08) beside
   // 新建联系人, 群聊 then 联系人, and no Pull Request in the footer.
   test(`GRP-05 · the Group home and its sidebar (${theme}) @baseline`, async ({
     page,
@@ -398,10 +399,9 @@ for (const theme of ['dark', 'light'] as const) {
     expect(await sections(root)).toEqual(['groups', 'contacts'])
     await expect(root.locator('.session-row')).toHaveCount(0)
     const nav = root.getByRole('navigation', { name: '侧栏导航' })
-    await expect(nav.getByRole('button', { name: '新建群聊' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
+    await expect(
+      nav.getByRole('button', { name: '新建群聊' }),
+    ).not.toHaveAttribute('aria-disabled', 'true')
     await expect(nav.getByRole('button', { name: '新建联系人' })).toBeVisible()
     const footer = root.locator('[data-sidebar-block="footer"]')
     await expect(
@@ -498,17 +498,6 @@ test('GRP-05 · @ completes a contact’s name on the Group home', async ({
   await input.fill('@审稿人 看看这个改动')
   await input.press('Enter')
   await expect(page).toHaveURL(/\/chat\/chat-reviewer/)
-})
-
-test('GRP-05 · a group opens on its page until GRP-08', async ({ page }) => {
-  await install(page)
-  await open(page, '/contacts', 'dark')
-  await sidebar(page).locator('[data-row="grp-review"]').click()
-  await expect(page).toHaveURL(/\/groups\/grp-review/)
-  const groupPage = page.locator('[data-group-page]')
-  await expect(groupPage.locator('[data-group-message]')).toHaveCount(3)
-  await expect(groupPage).toContainText('私信 → 审稿人')
-  await shot(page, 'group-interim-dark')
 })
 
 test('GRP-05 · a profile in a narrow window', async ({ page }) => {

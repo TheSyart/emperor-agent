@@ -529,9 +529,9 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     await expect(dialog).toBeVisible()
     const nav = dialog.getByRole('navigation', { name: '设置分区' })
-    // Four groups, nine sections (UI-S07).
-    await expect(nav.getByRole('button')).toHaveCount(9)
-    for (const label of ['电脑操作', '浏览器', '语音', '记忆', '高级'])
+    // Four groups, ten sections (UI-S07; 群聊 since GRP-08).
+    await expect(nav.getByRole('button')).toHaveCount(10)
+    for (const label of ['电脑操作', '浏览器', '语音', '记忆', '群聊', '高级'])
       await expect(
         nav.getByRole('button', { name: label, exact: true }),
       ).toBeVisible()

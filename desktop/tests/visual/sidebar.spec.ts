@@ -541,7 +541,7 @@ test('MOD-02 1–2, 6 · the mode switcher by keyboard and pointer', async ({
   await expect(root.locator('[data-sidebar-section="projects"]')).toHaveCount(0)
 })
 
-test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 still to come', async ({
+test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 (GRP-08)', async ({
   page,
 }) => {
   await open(page, '/chat/build-ui')
@@ -558,13 +558,15 @@ test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 still to c
   )
   const nav = root.getByRole('navigation', { name: '侧栏导航' })
   const create = nav.getByRole('button', { name: '新建群聊' })
-  await expect(create).toHaveAttribute('aria-disabled', 'true')
-  await create.hover()
-  await expect(page.getByRole('tooltip', { name: '即将推出' })).toBeVisible()
-  // Marked unavailable (aria-disabled): a forced click does nothing.
-  await create.click({ force: true })
+  await expect(create).not.toHaveAttribute('aria-disabled', 'true')
+  // 新建群聊 runs ⌘N: the Group home with the new-group dialog.
+  await create.click()
+  const dialog = page.getByRole('dialog', { name: '新建群聊' })
+  await expect(dialog).toBeVisible()
   await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
   await expect(page).toHaveURL(/\/contacts(\?|$)/)
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await expect(dialog).toHaveCount(0)
   // No Pull Request outside Build.
   await expect(
     root.locator('[data-sidebar-block="footer"]').getByRole('button', {
