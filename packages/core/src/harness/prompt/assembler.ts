@@ -126,6 +126,12 @@ function interpolate(
 
 export type ToolProvider = (context: AssembleContext) => ToolSchema[]
 export type VariableProvider = (context: AssembleContext) => string | undefined
+/**
+ * Whether a section is part of this assembly; a section a gate refuses
+ * renders empty (a contact's prompt leaves out guidance for tools it does
+ * not have, GRP-03).
+ */
+export type SectionGate = (name: string, context: AssembleContext) => boolean
 
 /**
  * Registry of sections, contexts, variables, and tool providers. Each
@@ -136,6 +142,7 @@ export class SystemPromptAssembler {
   private readonly contexts = new Map<string, PromptContext>()
   private readonly variables = new Map<string, VariableProvider>()
   private readonly toolProviders = new Set<ToolProvider>()
+  private readonly gates = new Set<SectionGate>()
 
   section(section: PromptSection): () => void {
     return this.insert(this.sections, section.name, section, 'prompt section')
@@ -155,6 +162,13 @@ export class SystemPromptAssembler {
     this.toolProviders.add(provider)
     return () => {
       this.toolProviders.delete(provider)
+    }
+  }
+
+  sectionGate(gate: SectionGate): () => void {
+    this.gates.add(gate)
+    return () => {
+      this.gates.delete(gate)
     }
   }
 
@@ -192,10 +206,13 @@ export class SystemPromptAssembler {
         tools.set(schema.name, schema)
       }
     }
+    const included = (name: string): boolean =>
+      [...this.gates].every((gate) => gate(name, context))
     return {
-      sections: [...this.sections.values()]
-        .sort(byOrder)
-        .map((s) => ({ name: s.name, text: resolve(s.text) })),
+      sections: [...this.sections.values()].sort(byOrder).map((s) => ({
+        name: s.name,
+        text: included(s.name) ? resolve(s.text) : '',
+      })),
       contexts: [...this.contexts.values()]
         .sort(byOrder)
         .map((c) => ({ name: c.name, text: resolve(c.text) })),

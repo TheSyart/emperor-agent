@@ -563,4 +563,25 @@ describe('SessionStore group-chat fields (MOD-01)', () => {
     reloaded.list()
     expect(reloaded.diagnostics().rebuildReasons).toEqual([])
   })
+
+  it('creates a session with them, and without them as today (GRP-03)', () => {
+    const root = tmp('emperor-session-create-surface-')
+    const store = new SessionStore(root)
+    const single = store.create('单聊', {
+      surface: 'contact',
+      contactId: 'ct-abcdefghijkl',
+    })
+    expect(single).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-abcdefghijkl',
+    })
+    expect(single).not.toHaveProperty('group_id')
+    const plain = store.create('Chat', { contactId: '  ' })
+    for (const key of ['surface', 'contact_id', 'group_id'])
+      expect(plain).not.toHaveProperty(key)
+    expect(new SessionStore(root).get(single.id)).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-abcdefghijkl',
+    })
+  })
 })

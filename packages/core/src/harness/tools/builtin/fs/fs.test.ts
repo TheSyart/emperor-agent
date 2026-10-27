@@ -82,6 +82,7 @@ function fixture(
     cwd?: string
     protectedStateRoot?: string
     protectedHome?: string
+    readOnlyRoots?: string[]
   } = {},
 ): Fixture {
   const approvals: string[] = []
@@ -98,6 +99,9 @@ function fixture(
     sandbox: new SandboxPolicyService({
       defaultMode: options.mode ?? 'workspace-write',
       workspaceRoot: root,
+      ...(options.readOnlyRoots === undefined
+        ? {}
+        : { readOnlyRoots: () => options.readOnlyRoots! }),
     }),
     sandboxBackend: {
       confine() {
@@ -695,6 +699,64 @@ describe('sandbox', () => {
       `Error: ${sandboxDenialMarker('read-only')}\n${escalationHintMarker('edit')}`,
     )
     expect(readFileSync(path, 'utf8')).toBe('content')
+  })
+
+  it('a read-only root is read, never written, in every mode (GRP-03)', async () => {
+    const kb = join(root, 'kb')
+    mkdirSync(kb)
+    const guide = join(kb, 'guide.md')
+    writeFileSync(guide, 'house style\n')
+    for (const mode of [
+      'workspace-write',
+      'danger-full-access',
+    ] as SandboxMode[]) {
+      const f = fixture({ mode, readOnlyRoots: [kb], answer: 'allowed-once' })
+      expect(text(await f.call('read', { file_path: guide }))).toContain(
+        'house style',
+      )
+      // Even an approved escalation does not open it.
+      const written = await f.call('write', {
+        file_path: guide,
+        content: 'x',
+        ...(mode === 'workspace-write'
+          ? {
+              sandbox_permissions: 'danger-full-access',
+              justification: 'Rewrite it.',
+            }
+          : {}),
+      })
+      expect(codeOf(written), mode).toBe('FS_READ_ONLY_PATH')
+      expect(text(written)).not.toContain('escalation available')
+      expect(
+        codeOf(
+          await f.call('edit', {
+            file_path: guide,
+            old_string: 'house',
+            new_string: 'my',
+          }),
+        ),
+        mode,
+      ).toBe('FS_READ_ONLY_PATH')
+      expect(
+        codeOf(
+          await f.call('write', {
+            file_path: join(kb, 'new.md'),
+            content: 'x',
+          }),
+        ),
+        mode,
+      ).toBe('FS_READ_ONLY_PATH')
+      expect(readFileSync(guide, 'utf8')).toBe('house style\n')
+      // Beside it, writing works as the mode says.
+      expect(
+        (
+          await f.call('write', {
+            file_path: join(root, `beside-${mode}.md`),
+            content: 'x',
+          })
+        ).isError,
+      ).toBe(false)
+    }
   })
 
   it('danger-full-access is unfenced', async () => {
