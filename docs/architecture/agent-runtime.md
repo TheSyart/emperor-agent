@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
+> 最后核验：2026-10-27（对照 `4b438468`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
 
@@ -144,6 +144,8 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 **图片卸载**：视觉路由的请求里图片超过该路由的内联预算（默认 base64 20 MiB，`RouteSpec.maxRequestImageBytes`）时，`buildRequest` 从最早的图片开始卸载到预算的一半，每个节点写一条 `image/offload {seq, reason}`；最新的那张不在这里卸载。`Session.deriveMessages()` 与 `deriveEventMessage()` 对已记录的节点发送占位文字，所以换模型、备用模型接手或重新打开会话后仍是卸载状态，压缩摘要看到的也一样。适配器自己的请求上限仍作为兜底。
 
 **Token 账本**：host 为每次对话请求和每次压缩摘要写一行 `tokens.jsonl`，计数互不重叠：`input`（不含缓存）、`output`（不含 reasoning）、`cache_read`、`cache_create`、`reasoning`，另有 provider、model、`model_entry_id` 与成本（模型条目的单价，没有时用内置目录的单价；单价未知时记为成本不完整）。旧账本里的 `prompt_tokens`、`prompt_cache_hit_tokens`、`completion_tokens`、`cache_*_input_tokens` 读取时换算成这五项。
+
+每行还记 `session_id`：花费所属的根会话，子智能体的调用记在启动它的会话下。定时任务那一轮的调用另带 `source: "scheduler"`。Claude Code、Codex 的每次运行结束时也写一行（`usage_type: "executor"`，`source` 为执行器名，计数口径同上，reasoning 已含在 `output` 里）；订阅额度的运行带 `subscription: true`，费用记 0，Token 照算。执行器的行不更新上下文用量读数。`usage.summary({ range })` 按天、会话、来源汇总这些行：会话自己的调用按它现在所在的模式（对话、构建、群聊）归类，定时任务、Claude Code、Codex 各自一类，没有会话的旧行和已删除的会话归「其他」；它是「设置 › 用量」页的数据源。
 
 ## 长期上下文
 
