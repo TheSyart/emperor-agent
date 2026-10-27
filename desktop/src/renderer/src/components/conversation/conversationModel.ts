@@ -7,6 +7,7 @@ import type { SessionLineage } from '@emperor/core/runtime-contract'
 import type { ComposerPhase } from '../../conversation/composerPhase'
 import type { WindowOpenState } from '../../conversation/sessionWindow'
 import type { SessionInfo } from '../../types'
+import { memberName } from './contactChat'
 
 export interface HeaderCrumb {
   id: string
@@ -99,6 +100,20 @@ export function conversationCrumbs(input: {
   }
   const crumbs: HeaderCrumb[] = []
   const session = input.session
+  // A group member's work (「过程 ›」, GRP-08): its group, then the member.
+  if (session?.surface === 'group_member' && session.group_id) {
+    crumbs.push({
+      id: session.group_id,
+      label: input.titleOf(session.group_id) || '群聊',
+      sessionId: session.group_id,
+    })
+    crumbs.push({
+      id: input.sessionId || 'current',
+      label: `${memberName(session.title)} · 工作过程`,
+      current: true,
+    })
+    return crumbs
+  }
   if (session?.mode === 'build' && session.project_name)
     crumbs.push({
       id: `project:${session.project_id || session.project_name}`,

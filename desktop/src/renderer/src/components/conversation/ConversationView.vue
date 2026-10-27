@@ -60,7 +60,10 @@
  * as the contact, and the composer goes read-only once the contact is
  * deleted. A group's own session moves to the group's page. A message the
  * Group home hands over to be sent (its @ of one contact) is sent once the
- * chat is the active one.
+ * chat is the active one. A group member's own session (「过程 ›」 on the
+ * group page, GRP-08) is shown read-only: its group in the crumbs, its
+ * avatar and name on each reply, the composer pointing back to the group
+ * (a pending approval there can still be answered).
  */
 import {
   computed,
@@ -109,6 +112,7 @@ import type { ChatFeedback } from './chatContext'
 import {
   CONTACT_DELETED_REASON,
   contactChatOf,
+  groupMemberOf,
   groupPageOf,
 } from './contactChat'
 import ChildComposer from '../composer/ChildComposer.vue'
@@ -524,11 +528,13 @@ const providerOptions = computed(
 const composerUnavailableReason = computed(() =>
   contactChat.value?.deleted
     ? CONTACT_DELETED_REASON
-    : !unknownSession.value
-      ? ''
-      : lineageLoading.value
-        ? '正在读取会话…'
-        : '没有找到这个会话，请从侧栏打开其他会话',
+    : groupMember.value
+      ? groupMember.value?.readOnlyReason
+      : !unknownSession.value
+        ? ''
+        : lineageLoading.value
+          ? '正在读取会话…'
+          : '没有找到这个会话，请从侧栏打开其他会话',
 )
 const modelBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
@@ -564,10 +570,27 @@ const contactChat = computed(() =>
     loaded: contactDirectory.loaded.value,
   }),
 )
+/** A group member's own session (「过程 ›」, GRP-08); null otherwise. */
+const groupMember = computed(() =>
+  groupMemberOf(
+    knownSession.value,
+    {
+      contacts: contactDirectory.contacts.value,
+      loaded: contactDirectory.loaded.value,
+    },
+    (id) => sessionStore.getSession(id)?.title,
+  ),
+)
+/** The avatar and name over each reply: a single chat's contact, or the member's. */
+const replySpeaker = computed(
+  () => contactChat.value?.speaker ?? groupMember.value?.speaker ?? undefined,
+)
 watch(
-  () => knownSession.value?.surface === 'contact',
-  (single) => {
-    if (single) contactDirectory.ensure()
+  () =>
+    knownSession.value?.surface === 'contact' ||
+    knownSession.value?.surface === 'group_member',
+  (needed) => {
+    if (needed) contactDirectory.ensure()
   },
   { immediate: true },
 )
@@ -1287,7 +1310,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :provisional="
             viewingId === ctx.sessionId.value ? provisional.shown.value : []
           "
-          :speaker="contactChat?.speaker ?? undefined"
+          :speaker="replySpeaker"
           :feedback="contactChat?.speaker ? chatFeedback : undefined"
           @inspect="inspectCall"
           @open-subagent="openSubagent"

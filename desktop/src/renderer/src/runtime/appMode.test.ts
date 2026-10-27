@@ -203,6 +203,13 @@ describe('routeModeTarget (MOD-01 8–9)', () => {
     expect(
       routeModeTarget({ name: 'group', params: { groupId: 'grp-1' } }, find),
     ).toEqual({ mode: 'group', sessionId: 'grp-1' })
+    // 群设置 (GRP-08) is the group's too.
+    expect(
+      routeModeTarget(
+        { name: 'group-settings', params: { groupId: 'grp-1' } },
+        find,
+      ),
+    ).toEqual({ mode: 'group', sessionId: 'grp-1' })
   })
 })
 

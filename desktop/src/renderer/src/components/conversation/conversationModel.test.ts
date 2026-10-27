@@ -84,6 +84,25 @@ describe('conversation shell model', () => {
     expect(crumbs.at(-1)?.current).toBe(true)
   })
 
+  it('puts the group before a member’s work (GRP-08 「过程 ›」)', () => {
+    const crumbs = conversationCrumbs({
+      sessionId: 'member-1',
+      session: session({
+        title: '审稿人 · 0.3 方案评审',
+        surface: 'group_member',
+        group_id: 'grp-1',
+      }),
+      lineage: null,
+      titleOf: (id) => (id === 'grp-1' ? '0.3 方案评审' : undefined),
+    })
+    expect(crumbs.map((crumb) => crumb.label)).toEqual([
+      '0.3 方案评审',
+      '审稿人 · 工作过程',
+    ])
+    expect(crumbs[0]!.sessionId).toBe('grp-1')
+    expect(crumbs[1]!.current).toBe(true)
+  })
+
   it('builds navigable ancestor crumbs for child sessions', () => {
     const crumbs = conversationCrumbs({
       sessionId: 'kid2',
