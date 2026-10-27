@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /**
- * The Emperor mark (UI-S12): a rounded seal holding a crown line over a
- * hexagon node and a mirrored emblem, drawn as vector in `--brand` gold so
- * it stays crisp at any size and follows the theme. The same geometry is
- * `assets/generated/emperor-mark.svg` (the favicon, README, app icon art).
+ * The Emperor mark (BRD-02, 0.3): a rounded block in `--brand` gold with
+ * the crown seal cut out of it (three points, a heavy band, a square notch
+ * at its foot), drawn as vector so it stays crisp at any size and follows
+ * the theme. The same geometry is `assets/generated/emperor-mark.svg` (the
+ * favicon, the README); the app icon wears the same crown in gold on a
+ * graphite block (`assets/generated/emperor-app-icon.svg`).
  */
 import { computed } from 'vue'
 
@@ -26,7 +28,7 @@ const dimension = computed(() =>
 <template>
   <svg
     class="brand-mark"
-    viewBox="141 141.5 970 970"
+    viewBox="12 12 976 976"
     :role="props.alt ? 'img' : undefined"
     :aria-label="props.alt || undefined"
     :aria-hidden="props.alt ? undefined : 'true'"
@@ -34,15 +36,7 @@ const dimension = computed(() =>
   >
     <path
       fill-rule="evenodd"
-      d="M343 167H909A190 190 0 0 1 1099 357V896A190 190 0 0 1 909 1086H343A190 190 0 0 1 153 896V357A190 190 0 0 1 343 167ZM343 231A126 126 0 0 0 217 357V896A126 126 0 0 0 343 1022H909A126 126 0 0 0 1035 896V357A126 126 0 0 0 909 231Z"
-    />
-    <path d="M626.5 297L703.6 341.5V430.5L626.5 475L549.4 430.5V341.5Z" />
-    <path d="M282 383H366L440 488H813L887 383H971L885 562H368Z" />
-    <path
-      d="M275 603H569L617 651V961H549V736A60 60 0 0 0 489 676H275ZM275 728H460A45 45 0 0 1 505 773V961H416V799H275Z"
-    />
-    <path
-      d="M978 603H684L636 651V961H704V736A60 60 0 0 1 764 676H978ZM978 728H793A45 45 0 0 0 748 773V961H837V799H978Z"
+      d="M235 25H765A210 210 0 0 1 975 235V765A210 210 0 0 1 765 975H235A210 210 0 0 1 25 765V235A210 210 0 0 1 235 25ZM467.8 688.7L298.2 688.7Q288.9 688.7 288.9 679.4L288.9 620.5Q288.9 595.1 285.2 583.3L237.3 429.7Q226.3 394.2 256.1 416.5L399.9 523.8L488.9 346.3Q500 324.1 511.1 346.3L600.1 523.8L743.9 416.5Q773.7 394.2 762.7 429.7L714.8 583.3Q711.1 595.1 711.1 620.5L711.1 679.4Q711.1 688.7 701.8 688.7L532.2 688.7L532.2 641Q532.2 637.9 529.1 637.9L470.9 637.9Q467.8 637.9 467.8 641Z"
     />
   </svg>
 </template>
