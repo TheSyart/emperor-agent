@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-10-26（对照 `aa8aa69c`）<br>
+> 最后核验：2026-10-27（对照 `b28fc6e6`）<br>
 > 事实源：`docs/release/stable-release-notes.md`、`desktop/electron-builder.release.cjs`、`desktop/src/renderer/src/components/settings/model/`（添加模型对话框）、`desktop/src/renderer/src/components/composer/ModelPicker.vue`、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
 
 ## 1. 安装
@@ -46,11 +46,11 @@
 
 ### Chat：普通对话
 
-点击侧栏的「新对话」（⌘N），输入问题并发送。Chat 使用用户档案、全局长期记忆和当前会话历史，不绑定项目目录；需要写文件时，它的工作目录是 Emperor Home 下的 `workspace/`。
+侧栏左上角是「Emperor Chat ▾」时（不是的话点它选 Chat，或按 ⌘1），点击侧栏的「新对话」（⌘N），输入问题并发送。Chat 使用用户档案、全局长期记忆和当前会话历史，不绑定项目目录；需要写文件时，它的工作目录是 Emperor Home 下的 `workspace/`。
 
 ### Build：项目工作
 
-点击侧栏「项目」分组标题旁的 `+`，选择「使用现有文件夹」（或「新建空白项目」）并从本机选择项目文件夹；已绑定的项目列在「项目」分组里，项目行上的 `+` 在该项目中新建会话。Build 会把该目录作为 workspace，并读取项目中的 `AGENTS.md` / `CLAUDE.md`。项目私有记忆保存在全局 `stateRoot`，不会写回项目文件。
+先切到 Build（点侧栏左上角的模式名选 Build，或按 ⌘2），点「新建项目会话」右侧的 `+`，或「项目」分组标题旁的 `+` 里的「使用现有文件夹」（或「新建空白项目」），从本机选择项目文件夹；已绑定的项目列在「项目」分组里，项目行上的 `+` 在该项目中新建会话。Build 会把该目录作为 workspace，并读取项目中的 `AGENTS.md` / `CLAUDE.md`。项目私有记忆保存在全局 `stateRoot`，不会写回项目文件。
 
 新建时界面先创建本地草稿；发送第一条消息后，Core 才会创建真实 session 并持久化。这意味着空白草稿不会留下无用会话目录。
 
