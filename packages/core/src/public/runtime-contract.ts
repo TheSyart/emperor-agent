@@ -10,6 +10,8 @@ export type {
   RuntimeGoalView,
 } from '../runtime/types'
 export { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+// SET-02: a failed model request in Chinese, with where to fix it.
+export { modelFailureText } from '../llm/failure-text'
 // MOD-01: the three modes and which one a session belongs to.
 export {
   APP_MODES,

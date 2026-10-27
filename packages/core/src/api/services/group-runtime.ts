@@ -7,6 +7,7 @@
  * moderator's reviews and digests are one-shot calls on the default model,
  * written to the token ledger under the group so 用量与费用 counts them.
  */
+import { modelFailureText } from '../../llm/failure-text'
 import { findEntry } from '../../config/model-config'
 import type { SessionStore } from '../../sessions/store'
 import { groupCharter } from '../../groups/charter'
@@ -179,7 +180,13 @@ export function installGroupRuntime(opts: GroupRuntimeOptions): GroupScheduler {
         case 'aborted':
           return { text: '', outcome: 'aborted', spend }
         case 'error':
-          return { text: '', outcome: 'error', detail: result.message, spend }
+          // SET-02: what failed in words, not the provider's own.
+          return {
+            text: '',
+            outcome: 'error',
+            detail: modelFailureText(result),
+            spend,
+          }
         case 'blocked':
           return result.reason === 'step-limit' || result.reason === 'cost-cap'
             ? { text: '', outcome: result.reason, spend }

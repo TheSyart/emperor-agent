@@ -74,6 +74,27 @@ describe('group turns in Core', () => {
     })
   })
 
+  it('says a member’s failed speech in Chinese, not the provider’s words (SET-02)', async () => {
+    const fixture = await open({
+      replies: [
+        { error: 'Insufficient Balance (request_id: 7118)', code: 'QUOTA' },
+      ],
+    })
+    const { group } = await groupWithReviewer(fixture)
+    await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'mention', text: '@审稿人 看看方案' },
+    ])
+    await fixture.api.groups.settled(group.id)
+    const history = await invokeCoreOperation(fixture.api, 'groups.history', [
+      { id: group.id },
+    ])
+    const notice = history.messages.find((m) => m.kind === 'system')!
+    expect(notice.text).toMatch(
+      /审稿人 这次发言失败：模型服务的余额或额度用完了/,
+    )
+    expect(notice.text).not.toContain('Insufficient')
+  })
+
   it('a member’s group_pass leaves 没有补充 and ends its speech', async () => {
     const fixture = await open({
       replies: [{ tools: [{ name: 'group_pass', args: { reason: '同意' } }] }],

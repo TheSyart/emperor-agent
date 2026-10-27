@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：配置模型或管理本地上下文的用户<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
+> 最后核验：2026-10-28（对照 `966ce225`）<br>
 > 事实源：`packages/core/src/config/model-config.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/security/secret-sealer.ts`、`packages/core/src/llm/`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/harness/compaction/`、`packages/core/src/attachments/store.ts`、`desktop/src/renderer/src/components/settings/`（模型 / 记忆分区）
 
 ## 模型配置
@@ -70,6 +70,21 @@ Provider 为 `deepseek`、API 地址是官方的 `https://api.deepseek.com`（�
 ### 重试
 
 模型请求遇到空响应、限流、服务端错误、超时或网络错误时，最多自动重试 5 次，间隔从 0.5 秒指数增长到 10 秒；服务商返回的 Retry-After 在上限内时优先采用。认证、请求格式等错误不重试。
+
+### 出错时显示什么
+
+一轮因为模型请求失败而停下时，对话里显示「本轮失败」，写明原因和去哪里处理；群聊里成员的发言失败也用同样的说法。右侧的小字是错误码和 HTTP 状态，联系支持或查日志时用得上。
+
+| 原因                           | 显示                                            |
+| ------------------------------ | ----------------------------------------------- |
+| 余额或额度用完                 | 到服务商那里充值，或在「设置 › 模型」换一个模型 |
+| API Key 无效、过期或没有权限   | 到「设置 › 模型」检查或换一个 Key               |
+| 被限流                         | 稍等一会儿再试                                  |
+| 对话超出模型能读的长度         | 用 /compact 压缩上下文，或开一个新对话          |
+| 服务端暂时出错                 | 稍后再试；一直这样可以换一个模型                |
+| 模型很久没有回应、返回了空回答 | 再发一次试试                                    |
+
+服务商拒绝了请求（例如参数不合规）时，在「模型服务拒绝了这次请求：」后面附上服务商的原话；其他少见的错误照服务商的原话显示。轨迹页和请求详情始终保留服务商的原话。
 
 ### 备用模型与成本上限
 

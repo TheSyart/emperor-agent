@@ -323,7 +323,7 @@ describe('assistant streaming', () => {
     expect(describeNodes(snapshot)).toEqual(['retry: 1:scheduled'])
     expect(nodeOf(snapshot, 'retry').data.current).toMatchObject({
       delayMs: 2000,
-      message: 'boom (503)',
+      message: '模型服务暂时出错了：稍后再试；一直这样可以换一个模型。',
     })
 
     log.add('llm/retry-started', { retryId: 'r1', turn: 1, step: 1 })
@@ -845,7 +845,7 @@ describe('messages and notices', () => {
       'fallback: primary -> backup',
       'costCap: turn 1',
       'goal: create active',
-      'turnError: provider down',
+      'turnError: 模型服务暂时出错了：稍后再试；一直这样可以换一个模型。',
       'turnMaxTokens: turn 2',
       'goal: clear',
     ])
@@ -855,6 +855,45 @@ describe('messages and notices', () => {
       durationMs: 12,
     })
     expectConverges(log)
+  })
+})
+
+describe('a failed turn in words (SET-02)', () => {
+  it('says a spent balance in Chinese and keeps the code for support', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'hi')
+    log.add('turn/start', { turn: 1 })
+    log.add('turn/end', {
+      turn: 1,
+      reason: {
+        kind: 'error',
+        error: {
+          message: 'Insufficient Balance (request_id: 7118)',
+          code: 'QUOTA',
+          status: 402,
+        },
+      },
+    })
+    const node = nodeOf(replay(log.events).snapshot, 'turnError')
+    expect(node.data.message).toMatch(/余额或额度用完/)
+    expect(node.data.message).not.toContain('Insufficient')
+    expect(node.data).toMatchObject({ code: 'QUOTA', status: 402 })
+  })
+
+  it('keeps the provider’s words, with the status, for a code it does not know', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'hi')
+    log.add('turn/start', { turn: 1 })
+    log.add('turn/end', {
+      turn: 1,
+      reason: {
+        kind: 'error',
+        error: { message: 'teapot', code: 'HTTP_418', status: 418 },
+      },
+    })
+    expect(nodeOf(replay(log.events).snapshot, 'turnError').data.message).toBe(
+      'teapot (418)',
+    )
   })
 })
 
@@ -1033,7 +1072,9 @@ describe('turn files', () => {
     log.user('u2', 'again')
     log.add('turn/files', record)
     const kinds = describeNodes(snapshot(log))
-    const notice = kinds.indexOf('turnError: provider down')
+    const notice = kinds.indexOf(
+      'turnError: 模型服务暂时出错了：稍后再试；一直这样可以换一个模型。',
+    )
     expect(kinds[notice + 1]).toBe('turnFiles: turn 1 files=1')
     expect(kinds.at(-1)?.startsWith('user')).toBe(true)
     expectConverges(log)
