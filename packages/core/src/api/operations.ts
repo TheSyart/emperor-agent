@@ -2343,6 +2343,10 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.groups.history(input),
   ),
+  'groups.stop': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.stop(input),
+  ),
   'groups.files.list': operation(
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.files.list(input),

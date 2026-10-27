@@ -318,12 +318,20 @@ export class ContactRuntime {
   constructor(private readonly deps: ContactRuntimeDeps) {}
 
   /** The binding of one contact session (made with its agent). */
+  /** `extraTools`: tools its session has besides the contact's own (a member's group tools, GRP-07). */
   bind(
     contactId: string,
     session: Session,
     workspaceRoot: () => string,
+    extraTools: readonly string[] = [],
   ): ContactBinding {
-    return new ContactBinding(contactId, session, this, workspaceRoot)
+    return new ContactBinding(
+      contactId,
+      session,
+      this,
+      workspaceRoot,
+      extraTools,
+    )
   }
 
   ready(): Promise<void> {
@@ -447,6 +455,7 @@ export class ContactBinding implements ToolFilter {
     private readonly session: Session,
     private readonly runtime: ContactRuntime,
     private readonly workspaceRoot: () => string,
+    private readonly extraTools: readonly string[] = [],
   ) {}
 
   refresh(): ContactSnapshot {
@@ -458,9 +467,13 @@ export class ContactBinding implements ToolFilter {
     return this.current ?? this.refresh()
   }
 
-  /** ToolFilter: only the contact's tools (none once it is deleted). */
+  /** ToolFilter: only the contact's tools (none once it is deleted), and its session's extra ones. */
   get allow(): readonly string[] | undefined {
-    return this.snapshot.tools ?? undefined
+    const tools = this.snapshot.tools
+    if (tools === null) return undefined
+    return this.extraTools.length && this.snapshot.contact !== null
+      ? [...tools, ...this.extraTools]
+      : tools
   }
 
   /** What an agent of this session is made with. */
@@ -499,7 +512,8 @@ export class ContactBinding implements ToolFilter {
   /** A subagent's tool filter, kept within this contact's tools. */
   narrow(filter: ToolFilter | undefined): ToolFilter | undefined {
     if (this.snapshot.tools === null) return filter
-    const own = (): readonly string[] => this.allow ?? []
+    // A subagent never gets its session's extra tools.
+    const own = (): readonly string[] => this.snapshot.tools ?? []
     return {
       get allow(): readonly string[] {
         const allowed = filter?.allow

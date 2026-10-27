@@ -49,6 +49,14 @@ describe('novelty', () => {
     expect(v).toBe(0)
   })
 
+  it('ignores @-mentions: who is addressed is not new content', () => {
+    expect(
+      novelty('@审稿人 好的，方案可以，就这么定吧', [
+        '@架构师 好的，方案可以，就这么定吧',
+      ]),
+    ).toBe(0)
+  })
+
   it('treats an empty reply as nothing new', () => {
     expect(novelty('', ['什么都行'])).toBe(0)
   })

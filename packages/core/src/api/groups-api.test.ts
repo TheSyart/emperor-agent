@@ -18,6 +18,7 @@ const GROUP_OPERATIONS = [
   'groups.list',
   'groups.removeMember',
   'groups.send',
+  'groups.stop',
   'groups.update',
 ]
 

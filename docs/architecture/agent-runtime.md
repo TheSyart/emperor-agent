@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/contacts/runtime.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`
+> 最后核验：2026-10-27（对照 `8ad2c2fe`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/contacts/runtime.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`、`packages/core/src/groups/scheduler.ts`、`packages/core/src/api/services/group-runtime.ts`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
 
@@ -47,6 +47,15 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 - **已删除的联系人**：会话可以查看，发消息报 `contact_deleted`。
 
 内置的 Emperor 联系人（`ct-emperor`）的会话保留 persona 和全部工具，只多出它的个人记忆；Claude Code、Codex 两个外部联系人在这里不收窄，由各自执行器的设置决定。没有 `contact_id` 的会话，提示词和工具与原来逐字节相同（`contacts/__golden__/plain-session.*` 金样）。
+
+### 群聊的成员会话与调度（GRP-07）
+
+群聊的数据层见[全局私有存储根](global-state-store.md#群聊)。`api/services/group-runtime.ts` 把调度接进宿主：
+
+- **成员发言**：每位成员在群里有自己的会话（`surface: "group_member"`、`contact_id`、`group_id`），发言就是这个会话上的一个后台 turn（`runBackgroundTurn`，`source: "group"`）。它的联系人绑定照上节生效；群章程作为成员专用的提示词段落（`group:charter`，经 `group_charter` 变量放入）接在岗位说明书后面，其他会话里这段为空，提示词逐字节不变。投递给它的消息（游标之后、对它可见的，太长时先写群纪要）和「这次为什么请你」作为这个 turn 的输入；turn 结束后写 `group/delivery` 推进游标。
+- **群工具**：`group_whisper`、`group_assign`、`group_pass` 只对成员会话的根 agent 可见，`group_next`、`group_close` 只对主持人可见；成员会话的联系人绑定把它们加进工具过滤，成员启动的子智能体看不到。
+- **调度**（`groups/scheduler.ts`）：一轮从用户的消息开始，按发言计划一次一位成员发言，独立作答最多三位同时、一起揭晓；自主的群里没人被 @ 时向相关成员要「举手」，主持人审核的群里由主持人用 `group_next` / `group_close` 安排，成员的点名和交办先经主持人批准。举手、审核和群纪要是默认模型上的一次性调用，用量记在群会话下。不按次数、轮数或费用停下：队列空了、主持人收尾、用户停止（`groups.stop`）或防打转介入时结束。一次发言的步数和费用上限只截停这一次发言。用户在一轮进行中发新消息，正在说的人说完，队列换成新消息的计划。Core 关闭时停止全部轮次，重启时把没结束的轮次记为 `stopped`（`app_restart`）。
+- **事件**：`group_turn_changed`（轮次开始、谁在说、结束，附本轮花费）和 `group_member_status`（成员在想、排队、空闲、出错）。
 
 ## Turn 与 step
 
