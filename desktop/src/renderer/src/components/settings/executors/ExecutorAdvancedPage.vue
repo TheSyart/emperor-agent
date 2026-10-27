@@ -20,23 +20,31 @@ import { useExecutorSettings } from './useExecutorSettings'
 const s = useExecutorSettings()
 const { config, busy } = s
 
-// 每次运行最多轮数: absent means Core's default of 200.
-const DEFAULT_MAX_TURNS = 200
+// 每次运行最多轮数: absent means no cap, the default since 0.3 (SET-01).
 const turnOptions = computed(() => {
-  const current = config.value?.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS
-  return [...new Set([50, 100, 200, 300, 500, 1000, current])]
-    .sort((a, b) => a - b)
-    .map((n) => ({
-      value: String(n),
-      label: n === DEFAULT_MAX_TURNS ? `${n} 轮（默认）` : `${n} 轮`,
-    }))
+  const current = config.value?.limits.claudeMaxTurns
+  const caps = [50, 100, 200, 300, 500, 1000, ...(current ? [current] : [])]
+  return [
+    { value: 'none', label: '不限制（默认）' },
+    ...[...new Set(caps)]
+      .sort((a, b) => a - b)
+      .map((n) => ({ value: String(n), label: `${n} 轮` })),
+  ]
 })
+const turnValue = computed(() =>
+  String(config.value?.limits.claudeMaxTurns ?? 'none'),
+)
 function setMaxTurns(value: string | null | undefined) {
+  if (value === 'none') {
+    void s.change((draft) => {
+      delete draft.limits.claudeMaxTurns
+    })
+    return
+  }
   const turns = Number(value)
   if (!Number.isInteger(turns)) return
   void s.change((draft) => {
-    if (turns === DEFAULT_MAX_TURNS) delete draft.limits.claudeMaxTurns
-    else draft.limits.claudeMaxTurns = turns
+    draft.limits.claudeMaxTurns = turns
   })
 }
 
@@ -141,9 +149,7 @@ function setDiagnostics(on: boolean) {
           description="Claude Code 一次运行里最多调用模型的轮数。用完时这次运行以「达到最多轮数」结束，主会话可以发消息让它继续。"
         >
           <Select
-            :model-value="
-              String(config.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS)
-            "
+            :model-value="turnValue"
             :options="turnOptions"
             size="sm"
             data-claude-max-turns

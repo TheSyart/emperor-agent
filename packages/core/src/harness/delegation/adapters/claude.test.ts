@@ -359,6 +359,26 @@ it.each([
     f.cleanup()
   },
 )
+it('passes no turn cap unless one is set (SET-01)', async () => {
+  for (const maxTurns of [undefined, 300]) {
+    const f = fixture()
+    const session = await f.adapter.open({
+      ...f.input,
+      ...(maxTurns === undefined ? {} : { maxTurns }),
+    })
+    const submit = session.submit({
+      runId: 'dgr-turns',
+      messageId: 'dgm-turns',
+      text: 'fixture',
+    })
+    for await (const event of session.events)
+      if (event.type === 'turn_finished') break
+    await submit
+    expect(f.getOptions().maxTurns).toBe(maxTurns)
+    await session.close()
+    f.cleanup()
+  }
+})
 it('caps an API-billed run with the SDK maxBudgetUsd and leaves a subscription uncapped (AGT-07)', async () => {
   for (const budgetUsd of [3.5, undefined]) {
     const f = fixture()

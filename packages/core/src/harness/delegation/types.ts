@@ -59,19 +59,23 @@ export interface ExecutorLimits {
   maxDepth: number
   runTimeoutMs: number
   questionTimeoutMs: number
-  estimatedBudgetUsd: number
+  /**
+   * USD one task may spend on API-billed runs (AGT-07); null: no cap, the
+   * default since 0.3 (SET-01). Settings › 用量与费用.
+   */
+  estimatedBudgetUsd: number | null
   /**
    * Tokens one task may spend on API-billed runs whose price is unknown
-   * (AGT-07); absent: {@link DEFAULT_UNPRICED_TOKENS_PER_TASK}.
+   * (AGT-07); absent: {@link DEFAULT_UNPRICED_TOKENS_PER_TASK} while a USD
+   * cap is set, no cap while none is.
    */
   maxUnpricedTokensPerTask?: number
   /**
-   * Claude Code's turns per run (SDK `maxTurns`), 50–1000; absent:
-   * {@link DEFAULT_CLAUDE_MAX_TURNS}. Settings › 子智能体 › 高级 (AGT-02).
+   * Claude Code's turns per run (SDK `maxTurns`), 50–1000; absent: no cap,
+   * the default since 0.3 (SET-01). Settings › 用量与费用.
    */
   claudeMaxTurns?: number
 }
-export const DEFAULT_CLAUDE_MAX_TURNS = 200
 /** The token cap for unpriced API runs when the config sets none. */
 export const DEFAULT_UNPRICED_TOKENS_PER_TASK = 2_000_000
 /**
@@ -98,6 +102,11 @@ export interface ExecutorConfig {
   revision: number
   profiles: ExecutorProfile[]
   limits: ExecutorLimits
+  /**
+   * 2 once 0.3 saved the file (SET-01): a $10 budget is then the user's
+   * choice, not 0.2's default, which 0.3 reads as no cap.
+   */
+  limitsRevision?: 2
   /** When the user last saved these settings (absent: never saved). */
   touchedAt?: number
   /**

@@ -243,11 +243,29 @@ const workspaceDescription = computed(() =>
     ? 'Claude Code、Codex 直接改当前工作区；改完之前，主会话不能同时修改文件'
     : 'Claude Code、Codex 在独立的 Git 工作树里改，你看过差异后再应用到项目',
 )
+// No cap is the default since 0.3 (SET-01).
 const budgetOptions = computed(() => {
-  const current = config.value?.limits.estimatedBudgetUsd ?? 10
-  return [...new Set([1, 2, 5, 10, current])]
-    .sort((a, b) => a - b)
-    .map((n) => ({ value: String(n), label: `$${n}` }))
+  const current = config.value?.limits.estimatedBudgetUsd ?? null
+  const caps = [
+    1,
+    2,
+    5,
+    10,
+    20,
+    50,
+    100,
+    ...(current === null ? [] : [current]),
+  ]
+  return [
+    { value: 'none', label: '不限制（默认）' },
+    ...[...new Set(caps)]
+      .sort((a, b) => a - b)
+      .map((n) => ({ value: String(n), label: `$${n}` })),
+  ]
+})
+const budgetValue = computed(() => {
+  const current = config.value?.limits.estimatedBudgetUsd ?? null
+  return current === null ? 'none' : String(current)
 })
 function setConcurrency(value: string | null | undefined) {
   const n = Number(value)
@@ -263,8 +281,14 @@ function setWorkspace(value: string | null | undefined) {
   })
 }
 function setBudget(value: string | null | undefined) {
+  if (value === 'none') {
+    void s.change((draft) => {
+      draft.limits.estimatedBudgetUsd = null
+    })
+    return
+  }
   const n = Number(value)
-  if (!(n > 0 && n <= 10)) return
+  if (!(n > 0 && n <= 1000)) return
   void s.change((draft) => {
     draft.limits.estimatedBudgetUsd = n
   })
@@ -529,7 +553,7 @@ useSettingsHeader({
         description="按 API 计费时的估算费用；订阅额度不计费用"
       >
         <Select
-          :model-value="String(config.limits.estimatedBudgetUsd)"
+          :model-value="budgetValue"
           :options="budgetOptions"
           size="sm"
           data-task-budget

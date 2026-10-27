@@ -14,6 +14,15 @@ import { DelegationService } from './service'
 import type { ExecutorBilling, NormalizedExecutorEvent } from './types'
 
 const CODEX = 'codex-default'
+/** 0.2's default $10 cap; 0.3 has none unless the user sets one (SET-01). */
+function capped() {
+  const config = defaultExecutorConfig()
+  config.limits.estimatedBudgetUsd = 10
+  return config
+}
+const cap10 = (f: ReturnType<typeof fixture>) => {
+  f.config.limits.estimatedBudgetUsd = 10
+}
 
 describe('DelegationBudget by billing', () => {
   it('1 · a Claude subscription keeps running past $10 of nominal cost', async () => {
@@ -26,15 +35,15 @@ describe('DelegationBudget by billing', () => {
   })
 
   it('2 · API spend stops at the per-task cap', async () => {
-    const b = new DelegationBudget(defaultExecutorConfig())
+    const b = new DelegationBudget(capped())
     const lease = await b.reserve('task', CODEX)
     lease.release({ estimatedUsd: 10.5, billing: 'api' })
     await expect(b.reserve('task', CODEX)).rejects.toThrow('BUDGET_LIMIT')
     expect(b.remainingUsd('task')).toBe(0)
   })
 
-  it('4 · unpriced API tokens stop at 2M per task by default', async () => {
-    const config = defaultExecutorConfig()
+  it('4 · unpriced API tokens stop at 2M per task while a USD cap is set', async () => {
+    const config = capped()
     const b = new DelegationBudget(config)
     const lease = await b.reserve('task', CODEX)
     lease.release({ billing: 'api', totalTokens: 2_000_000 })
@@ -56,7 +65,7 @@ describe('DelegationBudget by billing', () => {
   })
 
   it('5 · a follow-up run in the same task does not reset its spend', async () => {
-    const b = new DelegationBudget(defaultExecutorConfig())
+    const b = new DelegationBudget(capped())
     const first = await b.reserve('task', CODEX)
     first.release({ estimatedUsd: 6, billing: 'api' })
     const second = await b.reserve('task', CODEX)
@@ -158,9 +167,11 @@ describe('DelegationService billing', () => {
   })
 
   it('2 · stops an API run that crosses the cap while it runs', async () => {
-    const { f, run } = await settledRun('api', [
-      { type: 'usage', inputTokens: 10, outputTokens: 5, estimatedUsd: 11 },
-    ])
+    const { f, run } = await settledRun(
+      'api',
+      [{ type: 'usage', inputTokens: 10, outputTokens: 5, estimatedUsd: 11 }],
+      cap10,
+    )
     expect(run.failureCode).toBe('BUDGET_LIMIT')
     f.cleanup()
   })
@@ -185,17 +196,21 @@ describe('DelegationService billing', () => {
     expect(priced.run.usage).toMatchObject({ billing: 'api', estimatedUsd: 1 })
     priced.f.cleanup()
 
-    const unknown = await settledRun('api', [
-      { type: 'usage', inputTokens: 1_500_000, outputTokens: 600_000 },
-    ])
+    const unknown = await settledRun(
+      'api',
+      [{ type: 'usage', inputTokens: 1_500_000, outputTokens: 600_000 }],
+      cap10,
+    )
     expect(unknown.run.failureCode).toBe('TOKEN_LIMIT')
     unknown.f.cleanup()
   })
 
   it('6 · restores the task spend after a restart', async () => {
-    const { f, record } = await settledRun('api', [
-      { type: 'usage', inputTokens: 1, outputTokens: 1, estimatedUsd: 10.5 },
-    ])
+    const { f, record } = await settledRun(
+      'api',
+      [{ type: 'usage', inputTokens: 1, outputTokens: 1, estimatedUsd: 10.5 }],
+      cap10,
+    )
     const again = new DelegationService(f.options)
     await again.reconcile()
     expect(record.owner.taskScopeId).toBe(f.owner.taskScopeId)

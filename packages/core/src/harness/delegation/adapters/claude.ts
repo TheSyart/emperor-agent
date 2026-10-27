@@ -17,7 +17,6 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
-  DEFAULT_CLAUDE_MAX_TURNS,
   DelegationError,
   ExecutorRefusal,
   type ExecutorAdapter,
@@ -588,7 +587,8 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         skills: [],
         mcpServers: {},
         strictMcpConfig: true,
-        maxTurns: input.maxTurns ?? DEFAULT_CLAUDE_MAX_TURNS,
+        // No cap unless the user set one (SET-01).
+        ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         // API billing only: what the task may still spend (AGT-07). A
         // subscription's cost is nominal and is not capped here.
         ...(input.budgetUsd !== undefined && input.budgetUsd > 0

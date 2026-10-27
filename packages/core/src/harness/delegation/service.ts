@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import {
   DelegationError,
   TERMINAL_RUN_PHASES,
-  DEFAULT_CLAUDE_MAX_TURNS,
   type ExecutorAuthState,
   type ExecutorConfig,
   type DelegationOwner,
@@ -1790,15 +1789,16 @@ export class DelegationService {
         },
         outputSchema: spec.outputSchema,
         usageBaseline,
-        ...(record.backend === 'claude-code' && {
-          maxTurns:
-            this.options.config().limits.claudeMaxTurns ??
-            DEFAULT_CLAUDE_MAX_TURNS,
-        }),
+        ...(record.backend === 'claude-code' &&
+          this.options.config().limits.claudeMaxTurns !== undefined && {
+            maxTurns: this.options.config().limits.claudeMaxTurns,
+          }),
         ...(preflight.executableVersion
           ? { executableVersion: preflight.executableVersion }
           : {}),
-        ...(billing === 'api'
+        // API billing with a cap only; no cap leaves the SDK budget open.
+        ...(billing === 'api' &&
+        Number.isFinite(this.budget.remainingUsd(record.owner.taskScopeId))
           ? { budgetUsd: this.budget.remainingUsd(record.owner.taskScopeId) }
           : {}),
         cwd: record.cwd,

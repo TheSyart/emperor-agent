@@ -5,11 +5,7 @@ import {
 } from './dev-environment'
 import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
-import {
-  DEFAULT_CLAUDE_MAX_TURNS,
-  DelegationError,
-  type ExecutorConfig,
-} from './types'
+import { DelegationError, type ExecutorConfig } from './types'
 import { durableReplaceSync } from '../../store/persistence'
 export { executorSpecialties } from './specialties'
 const segment = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
@@ -90,12 +86,13 @@ export const executorConfigSchema = z
           .int()
           .min(1000)
           .max(15 * 60_000),
-        estimatedBudgetUsd: z.number().positive().max(10),
+        estimatedBudgetUsd: z.number().positive().max(1000).nullable(),
         // 设置 › 子智能体 › 高级 (AGT-02).
         claudeMaxTurns: z.number().int().min(50).max(1000).optional(),
       })
       .strict(),
     touchedAt: z.number().int().nonnegative().optional(),
+    limitsRevision: z.literal(2).optional(),
     upgradeNotice: z.literal('external-default-off').optional(),
     diagnosticsMode: z.boolean().optional(),
     verifyBeforeApply: z.boolean().optional(),
@@ -193,7 +190,7 @@ export function defaultExecutorConfig(): ExecutorConfig {
       maxDepth: 3,
       runTimeoutMs: 30 * 60_000,
       questionTimeoutMs: 15 * 60_000,
-      estimatedBudgetUsd: 10,
+      estimatedBudgetUsd: null,
     },
   }
 }
@@ -231,6 +228,14 @@ export class ExecutorConfigStore {
       config.upgradeNotice = 'external-default-off'
       rewrite = true
     }
+    // 0.2 defaulted every task to a $10 cap; 0.3 has none (SET-01). Read a
+    // file 0.3 never saved that still holds the old default as no cap, in
+    // memory only, so a downgrade can still read the file.
+    if (
+      config.limitsRevision === undefined &&
+      config.limits.estimatedBudgetUsd === 10
+    )
+      config.limits.estimatedBudgetUsd = null
     // Compatibility is a handshake now (AGT-01) and Claude Code is always
     // the installed one (AGT-12): drop the old version pin and binary choice
     // from the file once. The revision is unchanged: no choice of the
@@ -267,8 +272,9 @@ export class ExecutorConfigStore {
     // Written only when on, so an older build can still read the file.
     if (!next.diagnosticsMode) delete next.diagnosticsMode
     if (!next.verifyBeforeApply) delete next.verifyBeforeApply
-    if (next.limits.claudeMaxTurns === DEFAULT_CLAUDE_MAX_TURNS)
+    if (next.limits.claudeMaxTurns === undefined)
       delete next.limits.claudeMaxTurns
+    next.limitsRevision = 2
     if (
       next.developmentEnvironment &&
       sameDevelopmentEnvironment(

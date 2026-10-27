@@ -237,10 +237,11 @@ describe('AGT-02 · maxTurns', () => {
     return { input, adapter, options: () => options! }
   }
 
-  it('8 · the SDK gets 200 turns by default and the configured number otherwise', async () => {
+  it('8 · the SDK gets no turn cap by default and the configured number otherwise', async () => {
     const a = sdk()
     const first = await a.adapter.open(a.input)
-    expect(a.options().maxTurns).toBe(200)
+    // SET-01: no cap unless the user sets one.
+    expect(a.options().maxTurns).toBeUndefined()
     await first.close()
     const b = sdk()
     const second = await b.adapter.open({ ...b.input, maxTurns: 500 })

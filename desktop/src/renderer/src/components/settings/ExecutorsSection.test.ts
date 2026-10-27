@@ -354,6 +354,11 @@ it('saves 同时运行, 改代码的位置 and the cost cap at once, each only a
   expect(lastSaved().config).not.toHaveProperty('defaultWorkspace')
   await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, '2')
   expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(2)
+  // SET-01: 不限制 is null, and caps above the old $10 ceiling exist.
+  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, 'none')
+  expect(lastSaved().config.limits.estimatedBudgetUsd).toBeNull()
+  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, '50')
+  expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(50)
   // Every other limit is kept as it was.
   expect(lastSaved().config.limits.maxRunsPerTask).toBe(32)
 })
@@ -903,21 +908,22 @@ it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only 
   await mount()
   const page = await openAdvanced()
   const select = page.querySelector<HTMLElement>('[data-claude-max-turns]')!
-  expect(select.textContent).toContain('200')
+  // SET-01: no turn cap unless the user sets one.
+  expect(select.textContent).toContain('不限制')
   select.click()
   await settle()
   const values = [
     ...document.querySelectorAll<HTMLElement>('[data-value]'),
   ].map((o) => o.dataset.value)
   expect(values).toEqual(
-    expect.arrayContaining(['50', '100', '200', '500', '1000']),
+    expect.arrayContaining(['none', '50', '100', '200', '500', '1000']),
   )
   document.querySelector<HTMLElement>('[data-value="500"]')!.click()
   await settle()
   expect(lastSaved().config.limits.claudeMaxTurns).toBe(500)
   await choose(
     page.querySelector<HTMLElement>('[data-claude-max-turns]')!,
-    '200',
+    'none',
   )
   expect(lastSaved().config.limits).not.toHaveProperty('claudeMaxTurns')
 })

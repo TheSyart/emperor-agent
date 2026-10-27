@@ -84,11 +84,9 @@ export class DelegationBudget {
   }
   /** What the scope may still spend in USD (an API run's SDK budget). */
   remainingUsd(scope: string): number {
-    return Math.max(
-      0,
-      this.config.limits.estimatedBudgetUsd -
-        this.usage(scope).knownEstimatedUsd,
-    )
+    const cap = this.config.limits.estimatedBudgetUsd
+    if (cap === null) return Number.POSITIVE_INFINITY
+    return Math.max(0, cap - this.usage(scope).knownEstimatedUsd)
   }
   /** Whether a run's usage so far takes its scope past a cap. */
   exceeds(scope: string, live: RunUsage): DelegationError | undefined {
@@ -98,15 +96,21 @@ export class DelegationBudget {
   }
   private spent(s: ScopeUsage): DelegationError | undefined {
     const limits = this.config.limits
-    if (s.knownEstimatedUsd >= limits.estimatedBudgetUsd)
+    if (
+      limits.estimatedBudgetUsd !== null &&
+      s.knownEstimatedUsd >= limits.estimatedBudgetUsd
+    )
       return new DelegationError(
         'BUDGET_LIMIT',
         'known estimated cost reached scope limit',
       )
-    if (
-      s.unpricedTokens >=
-      (limits.maxUnpricedTokensPerTask ?? DEFAULT_UNPRICED_TOKENS_PER_TASK)
-    )
+    // Unpriced tokens stand in for cost: capped only while cost is.
+    const tokenCap =
+      limits.maxUnpricedTokensPerTask ??
+      (limits.estimatedBudgetUsd === null
+        ? Number.POSITIVE_INFINITY
+        : DEFAULT_UNPRICED_TOKENS_PER_TASK)
+    if (s.unpricedTokens >= tokenCap)
       return new DelegationError(
         'TOKEN_LIMIT',
         'unpriced API tokens reached scope limit',
