@@ -39,7 +39,10 @@ async function open(page: Page, path: string, theme: Theme = 'dark') {
 
 /** 新对话: the start page, on a draft. */
 async function newChat(page: Page) {
-  await page.getByRole('button', { name: '新对话' }).first().click()
+  const button = page.getByRole('button', { name: '新对话' }).first()
+  // The primary row is the current mode's (MOD-02): Chat (⌘1) first.
+  if (!(await button.isVisible())) await page.keyboard.press('ControlOrMeta+1')
+  await button.click()
   await expect(page).toHaveURL(/\/chat\/draft:/)
   await expect(page.locator('.conversation-root')).toHaveAttribute(
     'data-phase',

@@ -430,6 +430,8 @@ test('sidebar rows and header tabs drive the /chat/:sessionId routes', async ({
   await page.getByRole('tab', { name: '对话' }).click()
   await expect(page).toHaveURL(/\/chat\/build-ui(\?|$)/)
 
+  // The sidebar lists the current mode's sessions (MOD-02): Chat (⌘1).
+  await page.keyboard.press('ControlOrMeta+1')
   await page.locator('.session-row', { hasText: '普通对话' }).click()
   await expect(page).toHaveURL(/\/chat\/chat-main/)
   await expect(page.locator('.conversation-root')).toHaveAttribute(
@@ -491,6 +493,8 @@ test('a new chat sends to its own draft session, never the previous one', async 
   page,
 }) => {
   await open(page, '/chat/build-ui')
+  // The primary row is the current mode's (MOD-02): Chat (⌘1) first.
+  await page.keyboard.press('ControlOrMeta+1')
   await page
     .getByRole('navigation', { name: '侧栏导航' })
     .getByRole('button', { name: '新对话', exact: true })
@@ -526,6 +530,8 @@ test('a slash command run from a draft moves the view to the new session', async
   page,
 }) => {
   await open(page, '/chat/build-ui')
+  // The primary row is the current mode's (MOD-02): Chat (⌘1) first.
+  await page.keyboard.press('ControlOrMeta+1')
   await page
     .getByRole('navigation', { name: '侧栏导航' })
     .getByRole('button', { name: '新对话', exact: true })

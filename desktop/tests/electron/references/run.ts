@@ -2160,6 +2160,9 @@ async function conversationResources(
       'ordinary Chat uploads and previews an image through the real attachment protocol',
       async () => {
         await closeResourceDetails(page)
+        // A Build session is open: Chat (⌘1) first, its primary row is
+        // 新对话 (MOD-02).
+        await page.keyboard.press('ControlOrMeta+1')
         await page
           .getByRole('button', { name: '新对话', exact: true })
           .first()

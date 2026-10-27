@@ -881,8 +881,9 @@ async function fullstack(
     page,
     'turning the Computer Use plugin off blocks the next action, and Settings follows',
     async () => {
+      // The pages are footer icons since MOD-02 (D4).
       await page
-        .getByRole('navigation', { name: '侧栏导航' })
+        .locator('[data-sidebar-block="footer"]')
         .getByRole('button', { name: '能力', exact: true })
         .click()
       await page.locator('[data-plugin-id="computer-use"]').first().click()
@@ -1068,10 +1069,13 @@ function failureToasts(page: Page) {
 
 /** 新对话: the start page, a draft Core has not created yet. */
 async function newChat(page: Page): Promise<void> {
-  await page
+  const button = page
     .getByRole('button', { name: '新对话', exact: true })
     .first()
-    .click()
+  // The primary row is the current mode's (MOD-02): Chat (⌘1) first.
+  if (!(await button.isVisible().catch(() => false)))
+    await page.keyboard.press('ControlOrMeta+1')
+  await button.click()
   await until(
     () => decodeURIComponent(page.url()).includes('/chat/draft:'),
     10_000,

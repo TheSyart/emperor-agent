@@ -776,6 +776,8 @@ test('scrubber hides in a narrow column', async ({ page }) => {
   await expect(page.locator('.turn-scrubber')).toBeHidden()
   await page.setViewportSize({ width: 1440, height: 900 })
   await expect(page.locator('.turn-scrubber')).toBeVisible()
+  // The sidebar lists the current mode's sessions (MOD-02): Chat (⌘1).
+  await page.keyboard.press('ControlOrMeta+1')
   await page.locator('.session-row', { hasText: '普通对话' }).click()
   await expect(page.locator('.turn-scrubber .tick')).toHaveCount(3)
 })
