@@ -46,6 +46,8 @@ export interface GroupState {
   title: string
   moderator: ContactId | null
   members: ContactId[]
+  /** Each member's own session (from `group/member`; kept after removal). */
+  memberSessions: Map<ContactId, string>
   charter: string
   settings: GroupSettings
   messages: GroupMessage[]
@@ -68,6 +70,7 @@ export function emptyGroupState(): GroupState {
     title: '',
     moderator: null,
     members: [],
+    memberSessions: new Map(),
     charter: '',
     settings: { ...DEFAULT_SETTINGS },
     messages: [],
@@ -106,6 +109,11 @@ export function foldGroupEvents(
         if (event.data.action === 'added') {
           if (!state.members.includes(event.data.contactId))
             state.members.push(event.data.contactId)
+          if (event.data.memberSessionId)
+            state.memberSessions.set(
+              event.data.contactId,
+              event.data.memberSessionId,
+            )
         } else {
           state.members = state.members.filter(
             (id) => id !== event.data.contactId,
