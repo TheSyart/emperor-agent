@@ -31,13 +31,16 @@
 //          height/hair-width ratio from its upright strips.
 //      One body size for all 24 strips: everyday idle as tall as 小单's idle,
 //      unless a frame (the robe's crown, raised arms mid-jump) would leave the
-//      cell — then the largest size where every frame fits.
+//      cell with its outline — then the largest size where every frame fits.
 //   4. Compose: area-average resampling with premultiplied alpha into
-//      192×208 cells. Feet on 小单's ground row; the ground of a strip is its
-//      lowest foot, so jumps keep their height. Frames are centred on the
-//      alpha-weighted median column (arms barely move it) — upright strips on
-//      the feet instead, so standing feet do not slide.
-//   5. Encode with canvas.toBlob('image/webp', 0.9); check the decoded strip
+//      192×208 cells. The ground of a strip is its lowest foot, so jumps keep
+//      their height. Frames are centred on the alpha-weighted median column
+//      (arms barely move it) — upright strips on the feet instead, so
+//      standing feet do not slide.
+//   5. Outline: 小单's white sticker outline (OUTLINE), a round dilation of
+//      the silhouette under the character; its bottom sits on 小单's ground
+//      row, like 小单's feet and outline.
+//   6. Encode with canvas.toBlob('image/webp', 0.9); check the decoded strip
 //      for green fringe and for pixels touching the cell edges.
 /* global process, Buffer */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -70,6 +73,14 @@ const UPRIGHT = new Set([
 const TOP_MARGIN = 1
 const SIDE_MARGIN = 1
 const WEBP_QUALITY = 0.9
+/**
+ * 小单's white sticker outline, measured on assets/desktop-pet/xiaodan at the
+ * 192×208 cell scale: about 3.5 px from the art's edge to the outer
+ * half-alpha edge (one anti-aliased pixel, then three solid ones), colour
+ * (253, 253, 253), and it fills gaps narrower than twice that (between an
+ * arm and the body) the way a dilation does.
+ */
+const OUTLINE = { width: 3.6, colour: [253, 253, 253] }
 
 // ---------------------------------------------------------------------------
 // Page side: these functions are serialised into the headless page. They may
@@ -250,15 +261,11 @@ function petCleanAndMeasure(keyed, region, name, index) {
     }
   }
 
-  // Bounding boxes: solid (alpha >= 0.5) and any coverage (alpha > 0).
+  // Bounding box of the solid pixels (alpha >= 0.5).
   let x0 = width
   let x1 = -1
   let y0 = height
   let y1 = -1
-  let ex0 = width
-  let ex1 = -1
-  let ey0 = height
-  let ey1 = -1
   const columnMass = new Float64Array(rw)
   for (let y = 0; y < height; y++) {
     for (let lx = 0; lx < rw; lx++) {
@@ -266,10 +273,6 @@ function petCleanAndMeasure(keyed, region, name, index) {
       if (a <= 0) continue
       const x = region.x0 + lx
       columnMass[lx] += a
-      ex0 = Math.min(ex0, x)
-      ex1 = Math.max(ex1, x)
-      ey0 = Math.min(ey0, y)
-      ey1 = Math.max(ey1, y)
       if (a < 0.5) continue
       x0 = Math.min(x0, x)
       x1 = Math.max(x1, x)
@@ -379,7 +382,6 @@ function petCleanAndMeasure(keyed, region, name, index) {
     x1,
     y0,
     y1,
-    extent: { x0: ex0, x1: ex1, y0: ey0, y1: ey1 },
     massCx,
     footCx,
     hairTop: hair.top,
@@ -414,8 +416,11 @@ function petWeights(n, sourceAt, scale, lo, hi) {
   return out
 }
 
-/** Resample one keyed frame into its cell of the strip (premultiplied). */
-function petResample(keyed, region, place, strip, cell) {
+/**
+ * Resample one keyed frame into a float cell (premultiplied box filter):
+ * alpha in `A`, straight colour in `C`.
+ */
+function petResample(keyed, region, place, cell) {
   const { width, alpha, rgb } = keyed
   const { scale, cx, ground } = place
   const xs = petWeights(
@@ -427,7 +432,7 @@ function petResample(keyed, region, place, strip, cell) {
   )
   const ys = petWeights(
     cell.height,
-    (d) => ground + (d - cell.groundY) / scale,
+    (d) => ground + (d - cell.artGround) / scale,
     scale,
     0,
     keyed.height,
@@ -439,7 +444,11 @@ function petResample(keyed, region, place, strip, cell) {
     rowLo = Math.min(rowLo, first)
     rowHi = Math.max(rowHi, first + weights.length - 1)
   }
-  if (rowHi < rowLo) return
+  const frame = {
+    A: new Float32Array(cell.width * cell.height),
+    C: new Float32Array(cell.width * cell.height * 3),
+  }
+  if (rowHi < rowLo) return frame
   const rows = rowHi - rowLo + 1
   const tmp = new Float64Array(rows * cell.width * 4)
   for (let r = 0; r < rows; r++) {
@@ -481,15 +490,78 @@ function petResample(keyed, region, place, strip, cell) {
         G += w * tmp[t + 2]
         B += w * tmp[t + 3]
       }
-      const a8 = Math.round(Math.min(1, A) * 255)
-      if (a8 < cell.minAlpha) continue
+      if (A <= 0) continue
       // Averaging a reddish and a bluish pixel can still lean green: clamp again.
-      const o = (dy * strip.width + cell.x + dx) * 4
-      const red = Math.round(R / A)
-      const blue = Math.round(B / A)
-      strip.data[o] = red
-      strip.data[o + 1] = Math.min(Math.round(G / A), Math.max(red, blue))
-      strip.data[o + 2] = blue
+      const p = dy * cell.width + dx
+      const red = R / A
+      const blue = B / A
+      frame.A[p] = Math.min(1, A)
+      frame.C[3 * p] = red
+      frame.C[3 * p + 1] = Math.min(G / A, Math.max(red, blue))
+      frame.C[3 * p + 2] = blue
+    }
+  }
+  return frame
+}
+
+/**
+ * The sticker outline: the silhouette dilated by `cell.outline.width` px
+ * with round joins, filled under the character. Each pixel's own edge sits
+ * `alpha - 0.5` px past its centre, which keeps the outline's rim
+ * anti-aliased; faint pixels (alpha < 0.25) do not grow it.
+ */
+function petOutline(frame, cell) {
+  const { width: w, height: h } = cell
+  const radius = cell.outline.width
+  const [wr, wg, wb] = cell.outline.colour
+  const reach = Math.ceil(radius + 1)
+  const offsets = []
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      const d = Math.hypot(dx, dy)
+      if (d < radius + 1) offsets.push(dx, dy, d)
+    }
+  }
+  const edge = new Float32Array(w * h).fill(Infinity)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = frame.A[y * w + x]
+      if (a < 0.25) continue
+      const past = a - 0.5
+      for (let k = 0; k < offsets.length; k += 3) {
+        const px = x + offsets[k]
+        const py = y + offsets[k + 1]
+        if (px < 0 || py < 0 || px >= w || py >= h) continue
+        const p = py * w + px
+        const s = offsets[k + 2] - past
+        if (s < edge[p]) edge[p] = s
+      }
+    }
+  }
+  for (let p = 0; p < w * h; p++) {
+    const ring = Math.min(1, Math.max(0, radius + 0.5 - edge[p]))
+    if (ring === 0) continue
+    const a = frame.A[p]
+    const out = a + (1 - a) * ring
+    const under = (1 - a) * ring
+    frame.C[3 * p] = (a * frame.C[3 * p] + under * wr) / out
+    frame.C[3 * p + 1] = (a * frame.C[3 * p + 1] + under * wg) / out
+    frame.C[3 * p + 2] = (a * frame.C[3 * p + 2] + under * wb) / out
+    frame.A[p] = out
+  }
+}
+
+/** Quantise a float cell into the strip; near-invisible pixels become 0. */
+function petWriteCell(frame, strip, cell, left) {
+  for (let y = 0; y < cell.height; y++) {
+    for (let x = 0; x < cell.width; x++) {
+      const p = y * cell.width + x
+      const a8 = Math.round(frame.A[p] * 255)
+      if (a8 < cell.minAlpha) continue
+      const o = (y * strip.width + left + x) * 4
+      strip.data[o] = Math.round(frame.C[3 * p])
+      strip.data[o + 1] = Math.round(frame.C[3 * p + 1])
+      strip.data[o + 2] = Math.round(frame.C[3 * p + 2])
       strip.data[o + 3] = a8
     }
   }
@@ -541,12 +613,11 @@ async function petCompose(b64, expected, name, places, cellSpec) {
       expected * cellSpec.width * cellSpec.height * 4,
     ),
   }
-  regions.forEach((region, i) =>
-    petResample(keyed, region, places[i], strip, {
-      ...cellSpec,
-      x: i * cellSpec.width,
-    }),
-  )
+  regions.forEach((region, i) => {
+    const frame = petResample(keyed, region, places[i], cellSpec)
+    if (cellSpec.outline) petOutline(frame, cellSpec)
+    petWriteCell(frame, strip, cellSpec, i * cellSpec.width)
+  })
   const canvas = document.createElement('canvas')
   canvas.width = strip.width
   canvas.height = strip.height
@@ -653,6 +724,8 @@ const PAGE_FUNCTIONS = [
   petAnalyze,
   petWeights,
   petResample,
+  petOutline,
+  petWriteCell,
   petInspect,
   petCompose,
   petMeasureReference,
@@ -705,8 +778,9 @@ function median(values) {
 
 /**
  * One body size for every strip: `unit` output pixels per body measure.
- * Starts at 小单's standing height for the everyday idle strip and shrinks
- * until every frame of every strip fits its cell.
+ * Starts at 小单's standing height (outline included) for the everyday idle
+ * strip and shrinks until every frame of every strip, with its outline, fits
+ * its cell.
  */
 function planScale(strips, reference, cell) {
   for (const strip of strips) {
@@ -733,16 +807,17 @@ function planScale(strips, reference, cell) {
     (s) => s.outfit.source === 'PA' && s.action === 'idle',
   )
   const anchorBox = median(anchor.frames.map((f) => anchor.ground - f.y0))
-  const wanted = (reference.standing * anchor.measure) / anchorBox
+  const ring = cell.outline ? cell.outline.width : 0
+  const wanted = ((reference.standing - 2 * ring) * anchor.measure) / anchorBox
   let unit = wanted
   let binding = null
-  const half = cell.width / 2 - SIDE_MARGIN
+  const half = cell.width / 2 - SIDE_MARGIN - ring
   for (const strip of strips) {
     strip.frames.forEach((f, i) => {
       const limits = [
-        ['top', (cell.groundY - TOP_MARGIN) / (strip.ground - f.extent.y0)],
-        ['left', half / (f.cx - f.extent.x0)],
-        ['right', half / (f.extent.x1 + 1 - f.cx)],
+        ['top', (cell.artGround - TOP_MARGIN - ring) / (strip.ground - f.y0)],
+        ['left', half / (f.cx - f.x0)],
+        ['right', half / (f.x1 + 1 - f.cx)],
       ]
       for (const [side, perMeasure] of limits) {
         const limit = perMeasure * strip.measure
@@ -779,10 +854,14 @@ async function main() {
       ([b64, frames, width]) => window.petMeasureReference(b64, frames, width),
       [referenceB64, SPRITES.idle.frames, SPRITE_FRAME.width],
     )
+    // 小单's ground row is the bottom of its outline: the art's feet stand
+    // one outline width above it.
     const cell = {
       width: SPRITE_FRAME.width,
       height: SPRITE_FRAME.height,
       groundY: reference.ground,
+      artGround: reference.ground - OUTLINE.width,
+      outline: OUTLINE,
       minAlpha: 3,
       quality: WEBP_QUALITY,
     }
@@ -805,7 +884,8 @@ async function main() {
     const plan = planScale(strips, reference, cell)
     console.log(
       `body unit ${plan.unit.toFixed(2)} px (wanted ${plan.wanted.toFixed(2)} for 小单's ${reference.standing} px idle); ` +
-        `everyday idle stands ${plan.standing.toFixed(1)} px on ground row ${cell.groundY - 1}; ` +
+        `everyday idle stands ${plan.standing.toFixed(1)} px, ${(plan.standing + 2 * OUTLINE.width).toFixed(1)} px with its ` +
+        `${OUTLINE.width} px outline, whose bottom is on ground row ${cell.groundY - 1}; ` +
         `limited by ${plan.binding ?? 'nothing'}; height/hair ratio ${JSON.stringify(plan.ratio)}`,
     )
 

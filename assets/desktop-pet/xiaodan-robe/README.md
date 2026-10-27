@@ -17,15 +17,19 @@ these strips, together with the everyday outfit in `../xiaodan-daily`.
   208 tall, with the frame counts of `SPRITES`.
 - WebP, quality 90 with lossless alpha (Chromium's encoder, which adds an
   sRGB ICC chunk).
+- 小单's white sticker outline: 3.6 px of (253, 253, 253) around the
+  silhouette, crown included, a round dilation drawn under the character
+  with an anti-aliased rim. Gaps narrower than about 7 px fill white, as on
+  小单.
 - The body is exactly as big as in `../xiaodan-daily` (one size for every
   strip of both outfits, measured to the top of the hair, so the crown sits
   on top): switching outfit never resizes the character. The crown and the
-  third cheer frame (jumping, one arm up) are what set that size: that frame
-  reaches row 1 of the cell.
-- Feet on row 202, 小单's ground row. A strip's ground is its lowest foot,
-  so jumps keep their height above it. Standing strips are centred on the
-  feet, the others on the body's mass.
-- Unlike 小单 there is no white sticker outline.
+  third cheer frame (jumping, one arm up) are what set that size: with its
+  outline that frame reaches row 1 of the cell.
+- The bottom of the outline is on row 202, 小单's ground row, so the feet
+  stand one outline width above it, as 小单's do. A strip's ground is its
+  lowest foot, so jumps keep their height above it. Standing strips are
+  centred on the feet, the others on the body's mass.
 
 ## Strips
 

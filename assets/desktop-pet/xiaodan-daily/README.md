@@ -17,16 +17,19 @@ these strips, together with the dragon-robe outfit in `../xiaodan-robe`.
   208 tall, with the frame counts of `SPRITES`.
 - WebP, quality 90 with lossless alpha (Chromium's encoder, which adds an
   sRGB ICC chunk).
+- 小单's white sticker outline: 3.6 px of (253, 253, 253) around the
+  silhouette, a round dilation drawn under the character with an
+  anti-aliased rim. Gaps narrower than about 7 px (between an arm and the
+  body, a lens that sticks out past the face) fill white, as on 小单.
 - One body size for every strip of both outfits, so switching outfit or
   action never resizes the character. Standing, the everyday character is
-  181 px tall (小单's idle: 198 px including its white sticker outline). It
-  is no larger because the robe's cheer jump (crown and raised arm) must
-  still fit the cell.
-- Feet on row 202, 小单's ground row. A strip's ground is its lowest foot,
-  so jumps keep their height above it. Standing strips are centred on the
-  feet, the others on the body's mass.
-- Unlike 小单 there is no white sticker outline; the black hair and clothes
-  have little contrast on a dark desktop.
+  175 px tall, 182 px with its outline (小单's idle: 198 px with its
+  outline). It is no larger because the robe's cheer jump (crown and raised
+  arm) must still fit the cell, outline included.
+- The bottom of the outline is on row 202, 小单's ground row, so the feet
+  stand one outline width above it, as 小单's do. A strip's ground is its
+  lowest foot, so jumps keep their height above it. Standing strips are
+  centred on the feet, the others on the body's mass.
 
 ## Strips
 
