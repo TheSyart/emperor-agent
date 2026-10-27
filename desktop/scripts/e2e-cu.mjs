@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security|diagnostics|updates]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security|diagnostics|updates|modes]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
@@ -21,6 +21,9 @@
 // against a fake GitHub feed on 127.0.0.1 (scripts/test-update-feed.mjs):
 // the first check, the offer, a verified and a refused download into a
 // temporary Downloads folder, the headers sent, and silence when off (REL-02).
+// `modes` checks the three modes (0.3 MOD-05): the mode picked in the menu
+// survives a restart, ⌘1 / ⌘2 / ⌘3, a new session lands in its mode's
+// section, and a notification from another mode switches to it.
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -37,7 +40,7 @@ const mode =
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
 // fullstack / real / references / plugins / userbrowser-app / settings /
-// renderer-security: the dev app
+// renderer-security / diagnostics / updates / modes: the dev app
 // (out/, run `npm run build` first) driven by Playwright from plain Node;
 // the other modes run the harness in Electron.
 const references =
@@ -48,6 +51,7 @@ const settingsApp = mode === '--mode=settings'
 const rendererSecurity = mode === '--mode=renderer-security'
 const diagnosticsApp = mode === '--mode=diagnostics'
 const updatesApp = mode === '--mode=updates'
+const modesApp = mode === '--mode=modes'
 const realModel = mode === '--mode=real' || mode === '--mode=references-real'
 const appMode =
   mode === '--mode=fullstack' ||
@@ -58,7 +62,8 @@ const appMode =
   settingsApp ||
   rendererSecurity ||
   diagnosticsApp ||
-  updatesApp
+  updatesApp ||
+  modesApp
 const entry = references
   ? 'tests/electron/references/run.ts'
   : plugins
@@ -73,9 +78,11 @@ const entry = references
             ? 'tests/electron/diagnostics/run.ts'
             : updatesApp
               ? 'tests/electron/updates/run.ts'
-              : appMode
-                ? 'tests/electron/fullstack/run.ts'
-                : 'tests/electron/harness/main.ts'
+              : modesApp
+                ? 'tests/electron/modes/run.ts'
+                : appMode
+                  ? 'tests/electron/fullstack/run.ts'
+                  : 'tests/electron/harness/main.ts'
 const bundle = references
   ? join(desktop, 'out-e2e', 'references.cjs')
   : plugins
@@ -90,9 +97,11 @@ const bundle = references
             ? join(desktop, 'out-e2e', 'diagnostics.cjs')
             : updatesApp
               ? join(desktop, 'out-e2e', 'updates.cjs')
-              : appMode
-                ? join(desktop, 'out-e2e', 'fullstack.cjs')
-                : outfile
+              : modesApp
+                ? join(desktop, 'out-e2e', 'modes.cjs')
+                : appMode
+                  ? join(desktop, 'out-e2e', 'fullstack.cjs')
+                  : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],
