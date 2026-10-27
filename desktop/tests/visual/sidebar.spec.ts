@@ -4,10 +4,12 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 
-// The sidebar (UI-S11: Emperor's own layout, redesigned): top row
-// (collapse, ← →), brand row with search + bell, the 新对话 primary row and
-// the pages, 置顶 / 项目 / 对话 sections, the footer, the 56px rail when
-// folded, search with content hits, and the notifications popover.
+// The sidebar (UI-S11: Emperor's own layout, redesigned; per mode since 0.3
+// MOD-02): top row (collapse, ← →), the brand row's mode switcher
+// (「Emperor Build ▾」) with search + bell, the mode's primary row, the
+// mode's sections (置顶 / 项目 or 置顶 / 对话), the footer with the page
+// icons, the 56px rail when folded, search with content hits, and the
+// notifications popover.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'sidebar')
 
 test.beforeAll(() => {
@@ -120,6 +122,39 @@ function bell(page: Page): Locator {
   return page.getByRole('button', { name: /^通知/ })
 }
 
+/** A Core runtime event, as main would forward it (visualBridge). */
+async function emitCoreEvent(page: Page, event: Record<string, unknown>) {
+  await page.evaluate((payload) => {
+    const target = window as unknown as {
+      __visualEmitCoreEvent?: (event: unknown) => void
+    }
+    target.__visualEmitCoreEvent?.(payload)
+  }, event)
+}
+
+/** A turn running in Build (build-api) and a question waiting in Chat. */
+async function busyElsewhere(page: Page) {
+  await emitCoreEvent(page, {
+    event: 'turn_phase',
+    seq: 16,
+    session_id: 'build-api',
+    turn_id: 'build-api:1',
+    phase: 'started',
+  })
+  await emitCoreEvent(page, {
+    event: 'ask_request',
+    seq: 32,
+    session_id: 'chat-main',
+    interaction: {
+      id: 'ask_mode_menu',
+      kind: 'ask',
+      status: 'waiting',
+      title: '选择数据库迁移策略',
+      questions: [],
+    },
+  })
+}
+
 async function sessionMenu(page: Page, title: string) {
   const row = page.locator('.session-row', { hasText: title })
   await row.hover()
@@ -137,17 +172,31 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(root.getByRole('button', { name: '收起侧栏' })).toBeVisible()
     await expect(root.getByRole('button', { name: '后退' })).toBeVisible()
     await expect(root.getByRole('button', { name: '前进' })).toBeVisible()
-    // The brand row only shows the mark and name: no menu.
+    // A Build session is open: the brand row is 「Emperor Build ▾」, a menu
+    // button (MOD-02).
     const brand = root.getByTestId('sidebar-brand')
-    await expect(brand).toContainText('Emperor')
-    await expect(
-      root.getByRole('button', { name: 'Emperor 菜单' }),
-    ).toHaveCount(0)
+    await expect(brand).toHaveText('Emperor Build')
+    await expect(brand).toHaveAttribute('aria-haspopup', 'menu')
     const nav = root.getByRole('navigation', { name: '侧栏导航' })
-    for (const label of ['新对话', 'Pull Request', '定时任务', '能力'])
+    for (const label of ['新建项目会话', '打开文件夹'])
       await expect(nav.getByRole('button', { name: label })).toBeVisible()
+    // The pages are footer icons (D4); Pull Request in Build only.
+    const footer = root.locator('[data-sidebar-block="footer"]')
+    for (const label of ['Pull Request', '定时任务', '能力'])
+      await expect(footer.getByRole('button', { name: label })).toBeVisible()
     // 探索 is part of 能力 since UI-S08.
-    await expect(nav.getByRole('button', { name: '探索' })).toHaveCount(0)
+    await expect(root.getByRole('button', { name: '探索' })).toHaveCount(0)
+    // Build lists projects only: no 对话 section, no chat rows.
+    expect(
+      await root
+        .locator('[data-sidebar-section]')
+        .evaluateAll((els) =>
+          els.map((el) => (el as HTMLElement).dataset.sidebarSection),
+        ),
+    ).toEqual(['projects'])
+    await expect(
+      root.locator('.session-row', { hasText: '普通对话' }),
+    ).toHaveCount(0)
     // UI-S11: Emperor's own order, flat columns, no ISO dates on rows.
     expect(
       await root
@@ -155,7 +204,7 @@ for (const theme of ['dark', 'light'] as const) {
         .evaluateAll((els) =>
           els.map((el) => (el as HTMLElement).dataset.sidebarBlock),
         ),
-    ).toEqual(['top', 'brand', 'new', 'pages', 'sections', 'footer'])
+    ).toEqual(['top', 'brand', 'new', 'sections', 'footer'])
     await expect(page.locator('.shell-panel')).toHaveCount(0)
     await expect(page.locator('.app-rail')).toHaveCount(0)
     // One hairline between the sidebar and the conversation (0.5px; a 1x
@@ -167,7 +216,7 @@ for (const theme of ['dark', 'light'] as const) {
     expect(edge[0]).toBe('solid')
     expect(edge[1]).toBeLessThanOrEqual(1)
     expect(await root.innerText()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
-    const row = root.locator('.session-row', { hasText: '普通对话' })
+    const row = root.locator('.session-row', { hasText: '构建 Visual API' })
     await expect(row.locator('.time')).toBeVisible()
     await row.hover()
     await expect(row.getByRole('button', { name: '会话操作' })).toBeVisible()
@@ -176,7 +225,7 @@ for (const theme of ['dark', 'light'] as const) {
       path: resolve(screenshotDir, `row-hover-${theme}.png`),
       animations: 'disabled',
     })
-    await expect(nav.locator('[aria-current="page"]')).toHaveCount(0)
+    await expect(footer.locator('[aria-current="page"]')).toHaveCount(0)
     await expect(root.getByRole('button', { name: '帮助' })).toHaveCount(0)
     // The search capsule stays folded until the search icon opens it.
     await expect(page.getByLabel('搜索对话')).toHaveCount(0)
@@ -208,9 +257,12 @@ for (const theme of ['dark', 'light'] as const) {
     expect(Math.round(column.width)).toBe(56)
     for (const label of [
       '展开侧栏',
+      'Chat',
+      'Build',
+      'Group',
       '后退',
       '前进',
-      '新对话',
+      '新建项目会话',
       '搜索对话',
       'Pull Request',
       '定时任务',
@@ -218,7 +270,16 @@ for (const theme of ['dark', 'light'] as const) {
       '设置',
       theme === 'dark' ? '切换浅色' : '切换深色',
     ])
-      await expect(rail.getByRole('button', { name: label })).toBeVisible()
+      await expect(
+        rail.getByRole('button', { name: label, exact: true }),
+      ).toBeVisible()
+    // The three modes under the mark, Build (the open session's) pressed.
+    await expect(
+      rail.getByRole('group', { name: '模式' }).getByRole('button'),
+    ).toHaveCount(3)
+    await expect(
+      rail.getByRole('button', { name: 'Build', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true')
     await expect(rail.getByRole('button', { name: /^通知/ })).toBeVisible()
     const railBox = (await rail.boundingBox())!
     const settingsBox = (await rail
@@ -243,15 +304,39 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByLabel('搜索对话')).toBeFocused()
   })
 
-  test(`BUG-06 8 · section headers fold with a chevron (${theme}) @baseline`, async ({
+  test(`MOD-02 10 · the mode switcher's menu (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui', { theme })
+    const switcher = sidebar(page).getByTestId('sidebar-brand')
+    await busyElsewhere(page)
+    await expect(switcher.locator('.switcher-dot')).toBeVisible()
+    await switcher.click()
+    const menu = page.getByRole('menu', { name: '切换模式' })
+    await expect(menu).toBeVisible()
+    const item = (name: string) =>
+      menu.getByRole('menuitemradio', { name: new RegExp(`^${name}`) })
+    await expect(item('Build')).toHaveAttribute('aria-checked', 'true')
+    await expect(item('Build')).toContainText('1 个在运行')
+    await expect(item('Chat')).toContainText('等你回答')
+    await page.mouse.move(640, 810)
+    await shot(page, `mode-menu-${theme}`)
+    await expectBaseline(page, 'shell', `mode-menu-${theme}`)
+  })
+
+  test(`BUG-06 8 · section headers fold with a chevron (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    // Build: 置顶 (its own pins) and 项目 (MOD-02).
+    await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)
+    const menu = await sessionMenu(page, '构建 Visual API')
+    await menu.getByRole('menuitem', { name: '置顶', exact: true }).click()
     const section = (key: string) =>
       root.locator(`[data-sidebar-section="${key}"]`)
     const label = (key: string) => section(key).locator('.section-label')
     const chevron = (key: string) => label(key).locator('.section-chevron')
+    await expect(label('pinned')).toHaveAttribute('aria-expanded', 'true')
     await expect(label('projects')).toHaveAttribute('aria-expanded', 'true')
     await expect(chevron('projects')).toHaveCSS('opacity', '0')
     // Hovered: the chevron shows beside 项目, pointing down.
@@ -261,75 +346,75 @@ for (const theme of ['dark', 'light'] as const) {
       'transform',
       'matrix(0, 1, -1, 0, 0, 0)',
     )
-    await expect(chevron('chats')).toHaveCSS('opacity', '0')
+    await expect(chevron('pinned')).toHaveCSS('opacity', '0')
     await shot(page, `sections-open-${theme}`)
     await section('projects').locator('.section-header').hover()
     await expectBaseline(root, 'shell', `sidebar-sections-open-${theme}`)
 
-    // Folded: 对话's rows go, its chevron stays, pointing right.
-    await label('chats').click()
-    await expect(label('chats')).toHaveAttribute('aria-expanded', 'false')
-    await expect(section('chats').locator('.session-row')).toHaveCount(0)
-    await label('chats').evaluate((element) => element.blur())
+    // Folded: 置顶's row goes, its chevron stays, pointing right.
+    await label('pinned').click()
+    await expect(label('pinned')).toHaveAttribute('aria-expanded', 'false')
+    await expect(section('pinned').locator('.session-row')).toHaveCount(0)
+    await label('pinned').evaluate((element) => element.blur())
     await page.mouse.move(640, 810)
-    await expect(chevron('chats')).toHaveCSS('opacity', '1')
-    await expect(chevron('chats')).toHaveCSS('transform', 'none')
+    await expect(chevron('pinned')).toHaveCSS('opacity', '1')
+    await expect(chevron('pinned')).toHaveCSS('transform', 'none')
     await expect(chevron('projects')).toHaveCSS('opacity', '0')
     await shot(page, `sections-folded-${theme}`)
     await expectBaseline(root, 'shell', `sidebar-sections-folded-${theme}`)
   })
 
-  test(`pinned section (${theme})`, async ({ page }) => {
+  test(`pinned section, per mode (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)
     await expect(root.locator('section[aria-label="置顶"]')).toHaveCount(0)
 
-    let menu = await sessionMenu(page, '普通对话')
+    let menu = await sessionMenu(page, '构建 Visual API')
     await menu.getByRole('menuitem', { name: '置顶', exact: true }).click()
-    menu = await sessionMenu(page, '构建 Visual API')
-    await menu.getByRole('menuitem', { name: '置顶', exact: true }).click()
-
     const pinned = root.locator('section[aria-label="置顶"]')
-    await expect(pinned).toBeVisible()
-    // Newest pin first; pinned rows leave 项目 / 对话.
-    await expect(pinned.locator('.session-row')).toHaveText([
-      /构建 Visual API/,
-      /普通对话/,
-    ])
-    await expect(
-      root.locator('.session-row', { hasText: '普通对话' }),
-    ).toHaveCount(1)
+    await expect(pinned.locator('.session-row')).toHaveText([/构建 Visual API/])
+    // The pinned row leaves 项目.
     await expect(
       root.locator('.session-row', { hasText: '构建 Visual API' }),
     ).toHaveCount(1)
+
+    // Chat (⌘1): its own 置顶 only — the Build pin stays in Build.
+    await page.keyboard.press('ControlOrMeta+1')
+    await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Chat')
+    await expect(pinned).toHaveCount(0)
+    menu = await sessionMenu(page, '普通对话')
+    await menu.getByRole('menuitem', { name: '置顶', exact: true }).click()
+    await expect(pinned.locator('.session-row')).toHaveText([/普通对话/])
     await expect(root.getByText('暂无对话')).toBeVisible()
     await shot(page, `pinned-${theme}`)
-
     menu = await sessionMenu(page, '普通对话')
     await menu.getByRole('menuitem', { name: '取消置顶' }).click()
-    await expect(pinned.locator('.session-row')).toHaveCount(1)
+    await expect(pinned).toHaveCount(0)
+
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Build')
+    await expect(pinned.locator('.session-row')).toHaveText([/构建 Visual API/])
     menu = await sessionMenu(page, '构建 Visual API')
     await menu.getByRole('menuitem', { name: '取消置顶' }).click()
-    await expect(root.locator('section[aria-label="置顶"]')).toHaveCount(0)
+    await expect(pinned).toHaveCount(0)
   })
 
-  test(`nav highlight on a page route (${theme})`, async ({ page }) => {
+  test(`page icon highlight on a page route (${theme})`, async ({ page }) => {
     await open(page, '/scheduler', { theme })
-    const nav = sidebar(page).getByRole('navigation', { name: '侧栏导航' })
-    await expect(nav.getByRole('button', { name: '定时任务' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
-    await expect(nav.locator('[aria-current="page"]')).toHaveCount(1)
+    const footer = sidebar(page).locator('[data-sidebar-block="footer"]')
+    await expect(
+      footer.getByRole('button', { name: '定时任务' }),
+    ).toHaveAttribute('aria-current', 'page')
+    await expect(footer.locator('[aria-current="page"]')).toHaveCount(1)
     await shot(page, `nav-scheduler-${theme}`)
-    await nav.getByRole('button', { name: '能力' }).click()
+    await footer.getByRole('button', { name: '能力' }).click()
     await expect(page).toHaveURL(/\/capabilities/)
-    await expect(nav.getByRole('button', { name: '能力' })).toHaveAttribute(
+    await expect(footer.getByRole('button', { name: '能力' })).toHaveAttribute(
       'aria-current',
       'page',
     )
     await expect(
-      nav.getByRole('button', { name: '定时任务' }),
+      footer.getByRole('button', { name: '定时任务' }),
     ).not.toHaveAttribute('aria-current', 'page')
   })
 
@@ -369,7 +454,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(forward).toBeDisabled()
 
     await root
-      .getByRole('navigation', { name: '侧栏导航' })
+      .locator('[data-sidebar-block="footer"]')
       .getByRole('button', { name: '能力' })
       .click()
     await expect(page).toHaveURL(/\/capabilities/)
@@ -386,6 +471,93 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(forward).toBeDisabled()
   })
 }
+
+test('MOD-02 1–2, 6 · the mode switcher by keyboard and pointer', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui')
+  const root = sidebar(page)
+  const switcher = root.getByTestId('sidebar-brand')
+  await expect(switcher).toHaveText('Emperor Build')
+  await expect(switcher.locator('.switcher-dot')).toHaveCount(0)
+  // A turn running in Build is no news; a question waiting in Chat is.
+  await busyElsewhere(page)
+  await expect(switcher.locator('.switcher-dot')).toBeVisible()
+  await expect(switcher).toHaveAccessibleName('Emperor Build，其他模式等你回答')
+
+  // Enter opens on the current mode, ↑ ↓ move, Esc closes and gives the
+  // focus back.
+  await switcher.focus()
+  await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu', { name: '切换模式' })
+  await expect(menu).toBeVisible()
+  const item = (name: string) =>
+    menu.getByRole('menuitemradio', { name: new RegExp(`^${name}`) })
+  await expect(item('Build')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(item('Group')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(item('Chat')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(item('Group')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(switcher).toBeFocused()
+
+  // A click outside closes it without switching.
+  await switcher.click()
+  await expect(menu).toBeVisible()
+  await page.mouse.click(900, 400)
+  await expect(menu).toBeHidden()
+  await expect(switcher).toHaveText('Emperor Build')
+
+  // Enter on Chat switches: the brand row, the sections and the dot follow.
+  await switcher.focus()
+  await page.keyboard.press('Space')
+  await expect(item('Build')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(item('Chat')).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(menu).toBeHidden()
+  await expect(switcher).toHaveText('Emperor Chat')
+  await expect(switcher).toBeFocused()
+  await expect(switcher.locator('.switcher-dot')).toHaveCount(0)
+  await expect(root.locator('[data-sidebar-section="chats"]')).toBeVisible()
+  await expect(root.locator('[data-sidebar-section="projects"]')).toHaveCount(0)
+})
+
+test('Group (⌘3): a placeholder, and the entries still to come', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui')
+  const root = sidebar(page)
+  await page.keyboard.press('ControlOrMeta+3')
+  await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
+  await expect(root.locator('.session-row')).toHaveCount(0)
+  await expect(root.locator('[data-sidebar-section="group"]')).toContainText(
+    '联系人和群聊在这里',
+  )
+  const nav = root.getByRole('navigation', { name: '侧栏导航' })
+  const create = nav.getByRole('button', { name: '新建群聊' })
+  await expect(create).toHaveAttribute('aria-disabled', 'true')
+  await create.hover()
+  await expect(page.getByRole('tooltip', { name: '即将推出' })).toBeVisible()
+  // Marked unavailable (aria-disabled): a forced click does nothing.
+  await create.click({ force: true })
+  await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
+  await expect(root.locator('.session-row')).toHaveCount(0)
+  await expect(nav.getByRole('button', { name: '新建联系人' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  )
+  // No Pull Request outside Build.
+  await expect(
+    root.locator('[data-sidebar-block="footer"]').getByRole('button', {
+      name: 'Pull Request',
+    }),
+  ).toHaveCount(0)
+  await shot(page, 'group-placeholder')
+})
 
 test('search icon toggles the capsule and Esc closes it', async ({ page }) => {
   await open(page, '/chat/build-ui')
