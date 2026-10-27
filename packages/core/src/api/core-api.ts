@@ -16,6 +16,12 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import {
+  defaultAppMode,
+  isAppMode,
+  normalizeModeRoutes,
+  type AppMode,
+} from '../sessions/app-mode'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
 import {
@@ -3569,6 +3575,11 @@ export class CoreApi {
     ) => this.environmentService.getInstallLog(input),
   }
 
+  /**
+   * The persisted sidebar layout, and the app mode with the last session of
+   * each mode (MOD-01). A file without `app_mode` (before 0.3, or never
+   * switched) reads as the mode of the most recently updated session.
+   */
   readonly sidebar = {
     get: (): Dict =>
       normalizeSidebarState(
@@ -3576,13 +3587,22 @@ export class CoreApi {
           join(this.paths.memoryRoot, 'sidebar_state.json'),
           readJson(join(this.root, 'memory', 'sidebar_state.json'), {}),
         ),
+        () => this.recentSessionAppMode(),
       ),
     patch: (patch: Dict): Dict => {
       const path = join(this.paths.memoryRoot, 'sidebar_state.json')
-      const next = normalizeSidebarState({ ...readJson(path, {}), ...patch })
+      const next = normalizeSidebarState(
+        { ...readJson(path, {}), ...patch },
+        () => this.recentSessionAppMode(),
+      )
       atomicWriteText(path, JSON.stringify(next, null, 2) + '\n')
       return next
     },
+  }
+
+  /** The mode of the most recently updated listed session, else Chat. */
+  private recentSessionAppMode(): AppMode {
+    return defaultAppMode(this.sessionApplicationService.list())
   }
 
   /**
@@ -4882,9 +4902,18 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
     filesTreeWidth: 280,
     pane: 'launcher',
   },
+  app_mode: 'chat',
+  mode_routes: {},
 }
 
-function normalizeSidebarState(value: unknown): Dict {
+/**
+ * `fallbackMode` answers a missing or unknown `app_mode` (MOD-01); it is
+ * only called then, since it lists the sessions.
+ */
+function normalizeSidebarState(
+  value: unknown,
+  fallbackMode: () => AppMode = () => 'chat',
+): Dict {
   const raw = isRecord(value) ? value : {}
   return {
     section_order: normalizeSidebarSectionOrder(raw.section_order),
@@ -4899,6 +4928,8 @@ function normalizeSidebarState(value: unknown): Dict {
     collapsed_sections: normalizeCollapsedSections(raw.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(raw.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(raw.right_workspace),
+    app_mode: isAppMode(raw.app_mode) ? raw.app_mode : fallbackMode(),
+    mode_routes: normalizeModeRoutes(raw.mode_routes),
   }
 }
 
