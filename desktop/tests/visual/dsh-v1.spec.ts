@@ -92,18 +92,45 @@ async function expectPageColumnFits(page: Page) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`hero empty session (${theme}) @baseline`, async ({ page }) => {
+  // MOD-03: the Chat home — greeting, composer, the five starters.
+  test(`chat home (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/chat-main', { theme })
     const root = page.locator('.conversation-root')
     await expect(root).toHaveAttribute('data-phase', 'hero')
-    await expect(page.locator('.empty-hero')).toBeVisible()
+    await expect(page.locator('.empty-hero h1')).toHaveText('今天想聊点什么？')
     const card = page.locator('.composer-root .card')
     await expect(card).toBeVisible()
     const box = (await card.boundingBox())!
     expect(box.width).toBeLessThanOrEqual(780)
+    const starters = page.getByRole('group', { name: '常用起手式' })
+    await expect(starters.getByRole('button')).toHaveCount(5)
+    await expect(page.locator('[data-hero-project]')).toHaveCount(0)
     await expectNoHorizontalOverflow(page)
-    await shot(page, `hero-empty-${theme}`)
-    await expectBaseline(page, 'conversation', `hero-empty-${theme}`)
+    await shot(page, `home-chat-${theme}`)
+    await expectBaseline(page, 'conversation', `home-chat-${theme}`)
+  })
+
+  // MOD-03: the Build home (⌘2 from a chat) — the current project in the
+  // gold chip with its branch, and the recent projects below.
+  test(`build home (${theme}) @baseline`, async ({ page }) => {
+    await open(page, '/chat/chat-main', { theme })
+    await page.keyboard.press('ControlOrMeta+2')
+    const root = page.locator('.conversation-root')
+    await expect(page.getByTestId('sidebar-brand')).toHaveText('Emperor Build')
+    await expect(root).toHaveAttribute('data-phase', 'hero')
+    await expect(page.locator('.empty-hero h1')).toHaveText(
+      '今天推进哪个项目？',
+    )
+    const chip = page.locator('[data-hero-project]')
+    await expect(chip).toContainText('Visual Build Project')
+    await expect(page.locator('[data-hero-branch]')).toContainText('main')
+    const recent = page.locator('.hero-recent-projects')
+    await expect(recent.locator('[data-project-id]')).toHaveCount(2)
+    await expect(recent.locator('[data-open-folder]')).toBeVisible()
+    await expect(page.getByRole('group', { name: '常用起手式' })).toHaveCount(0)
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `home-build-${theme}`)
+    await expectBaseline(page, 'conversation', `home-build-${theme}`)
   })
 
   test(`active conversation with docks (${theme}) @baseline`, async ({
@@ -128,6 +155,45 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `docks-todo-expanded-${theme}`)
   })
 }
+
+test('MOD-03 7 · a starter fills the Chat composer and sends nothing', async ({
+  page,
+}) => {
+  await open(page, '/chat/chat-main')
+  await page
+    .getByRole('group', { name: '常用起手式' })
+    .getByRole('button', { name: '翻译', exact: true })
+    .click()
+  await expect(page.locator('.composer-root .rich-input')).toContainText('翻译')
+  await expect(page.locator('.conversation-root')).toHaveAttribute(
+    'data-phase',
+    'hero',
+  )
+})
+
+test('MOD-03 3 · a recent project binds the Build draft in place', async ({
+  page,
+}) => {
+  await open(page, '/chat/chat-main')
+  await page.keyboard.press('ControlOrMeta+2')
+  const chip = page.locator('[data-hero-project]')
+  await expect(chip).toContainText('Visual Build Project')
+  const draftUrl = page.url()
+  await page.locator('.composer-root .rich-input').click()
+  await page.keyboard.type('先看一下')
+  await page
+    .locator('.hero-recent-projects [data-project-id="missing_visual_project"]')
+    .click()
+  await expect(chip).toContainText('Missing visual project')
+  // The same draft: the route and what was typed stay.
+  expect(page.url()).toBe(draftUrl)
+  await expect(page.locator('.composer-root .rich-input')).toContainText(
+    '先看一下',
+  )
+  await expect(
+    page.locator('.hero-recent-projects [aria-current="true"]'),
+  ).toHaveAttribute('data-project-id', 'missing_visual_project')
+})
 
 test('sidebar expanded vs collapsed rail', async ({ page }) => {
   await open(page, '/chat/build-ui')
@@ -1253,10 +1319,27 @@ test('first-run guide on a narrow window puts the artwork on top', async ({
   await shot(page, 'first-run-narrow')
 })
 
+test('MOD-03 8 · the first-run guide comes before the home', async ({
+  page,
+}) => {
+  await open(page, '/chat/chat-main?visualModel=unavailable')
+  const guide = page.getByTestId('first-run')
+  const starters = page.getByRole('group', { name: '常用起手式' })
+  await expect(guide).toBeVisible()
+  await expect(starters).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(guide).toHaveCount(0)
+  // Still no model: the hero offers 开始接入 only.
+  await expect(page.locator('.hero-model-prompt')).toContainText(
+    '还没有可用模型',
+  )
+  await expect(starters).toHaveCount(0)
+})
+
 test('the hero greets the user by the profile 称呼', async ({ page }) => {
   await open(page, '/chat/chat-main?visualProfile=named')
   await expect(page.locator('.empty-hero .headline')).toHaveText(
-    '小周，今天想推进什么？',
+    '小周，今天想聊点什么？',
   )
   await shot(page, 'hero-named')
 })

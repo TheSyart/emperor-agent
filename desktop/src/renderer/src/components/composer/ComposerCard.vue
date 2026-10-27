@@ -11,6 +11,9 @@
  * is at least 56px tall. All behaviour lives in composerController.ts —
  * this is its view.
  *
+ * The `lead` slot sits right after `+`: the Build home puts its project
+ * chip and branch there (MOD-03).
+ *
  * Dictation (VO-03, composerDictation.ts): the mic and the shortcut from
  * 设置 › 语音, on macOS. While it records, the recording bar takes the
  * bottom row (RV-06): × cancel, the waveform and ■ stop (DictationBar),
@@ -64,7 +67,12 @@ import { useComposerDictation } from './composerDictation'
 import ComposerEditor from './editor/ComposerEditor.vue'
 
 const props = defineProps<
-  ComposerControllerProps & { hero?: boolean; dictationChat?: string | null }
+  ComposerControllerProps & {
+    hero?: boolean
+    dictationChat?: string | null
+    /** The home's placeholder by mode (MOD-03); a default otherwise. */
+    heroPlaceholder?: string
+  }
 >()
 const emit = defineEmits<ComposerEmit>()
 const controller = useComposerController(props, emit)
@@ -201,7 +209,8 @@ const placeholder = computed(() =>
           ? '描述要持续完成的目标'
           : props.sendBlockedReason ||
             (props.hero
-              ? '有什么需要推进的？/ 调用技能，@ 引用插件，可拖入图片或文档'
+              ? props.heroPlaceholder ||
+                '有什么需要推进的？/ 调用技能，@ 引用插件，可拖入图片或文档'
               : '继续对话，/ 调用技能，@ 引用插件'),
 )
 
@@ -392,6 +401,8 @@ function addModel(): void {
         >
           <DsPlus :size="16" />
         </IconButton>
+        <!-- The Build home's project and branch (MOD-03). -->
+        <slot name="lead" />
         <PermissionChip
           :options="modeOptions"
           :current="currentMode"

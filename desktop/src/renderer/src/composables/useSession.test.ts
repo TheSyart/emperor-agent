@@ -398,6 +398,46 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
     })
     expect(session.getSession('s1')?.plan).toBeUndefined()
   })
+
+  it("MOD-03 · 3 · binds a Build draft's project in place, never a real session's", async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [{ id: 's1', title: 'Main', updated_at: '2026-01-01' }]
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    const draft = await session.create({ mode: 'build', title: '新会话' })
+    const alpha = {
+      project_id: 'alpha',
+      project_path: '/work/alpha',
+      project_name: 'Alpha',
+    }
+    session.setDraftProject(draft.id, alpha)
+    session.setDraftProject('s1', alpha)
+    // The same draft, now in the project: what was typed stays with its id.
+    expect(session.activeId.value).toBe(draft.id)
+    expect(session.getSession(draft.id)).toMatchObject({
+      mode: 'build',
+      ...alpha,
+    })
+    expect(session.getSession('s1')?.project_path).toBeUndefined()
+    // The project joins the list the Build home offers.
+    expect(session.projects.value.map((item) => item.project_id)).toContain(
+      'alpha',
+    )
+    session.setDraftProject(draft.id, null)
+    expect(session.getSession(draft.id)).toMatchObject({
+      project_id: null,
+      project_path: null,
+      project_name: null,
+    })
+  })
 })
 
 describe('the session a load lands on (MOD-02)', () => {

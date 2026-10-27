@@ -4,19 +4,28 @@
  * medium) centered above the composer card, with the gold backdrop glow
  * centered on the card. The card itself is the shared ComposerCard rendered
  * by ConversationView in the same seat (no remount between phases).
- * With the profile's 称呼 the headline greets the user by name (UI-S17).
  *
- * Props: projectName?, addressName? (the profile's 称呼, null: none).
+ * The words follow the mode of the session on screen (MOD-03,
+ * heroGreeting.ts): Chat greets by the profile's 称呼 (UI-S17) —
+ * 「安先生，今天想聊点什么？」; Build asks 「今天推进哪个项目？」 and says
+ * in a line under it where its sessions run (the project itself is the gold
+ * chip in the composer).
+ *
+ * Props: mode? (default chat), addressName? (the profile's 称呼, null: none).
  */
 import { computed } from 'vue'
+import type { AppMode } from '../../runtime/appMode'
 import BrandMark from '../brand/BrandMark.vue'
-import { heroHeadline } from './heroGreeting'
+import { heroHeadline, heroNote } from './heroGreeting'
 
 const props = defineProps<{
-  projectName?: string
+  mode?: AppMode
   addressName?: string | null
 }>()
-const headline = computed(() => heroHeadline(props.addressName))
+const headline = computed(() =>
+  heroHeadline(props.addressName, props.mode ?? 'chat'),
+)
+const note = computed(() => heroNote(props.mode ?? 'chat'))
 </script>
 
 <template>
@@ -26,9 +35,7 @@ const headline = computed(() => heroHeadline(props.addressName))
       <BrandMark :size="34" class="mark" />
       <span>{{ headline }}</span>
     </h1>
-    <p v-if="projectName" class="project">
-      项目 · <strong>{{ projectName }}</strong>
-    </p>
+    <p v-if="note" class="note">{{ note }}</p>
   </div>
 </template>
 
@@ -59,17 +66,13 @@ const headline = computed(() => heroHeadline(props.addressName))
   flex: none;
 }
 
-.project {
+.note {
   position: relative;
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--text-3));
-}
-
-.project strong {
-  color: rgb(var(--text-2));
-  font-weight: var(--weight-medium);
+  text-align: center;
 }
 
 .glow {
