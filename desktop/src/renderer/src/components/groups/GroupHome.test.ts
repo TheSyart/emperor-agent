@@ -297,6 +297,8 @@ describe('the Group home', () => {
   it('says a single chat with Claude Code is still to come', async () => {
     await mount()
     await type('@Claude Code 看看这个仓库')
+    // Said before sending too: no 「打开单聊」 promise.
+    expect(q('[data-send-plan]').textContent).toContain('即将推出')
     await key('Enter')
     expect(q('[data-home-hint]').textContent).toContain('即将推出')
     expect(calls('contacts.openChat')).toEqual([])

@@ -56,10 +56,19 @@ const nameOf = (id: string) =>
   contacts.value.find((contact) => contact.id === id)?.name ?? id
 
 /** What sending will do, under the composer (单聊 / 建临时群). */
+/** Claude Code and Codex have no single chat yet (contact_chat_unavailable). */
+function externalChatHint(name: string): string {
+  return `和「${name}」单聊即将推出；再 @ 一位联系人，就会和它一起建一个临时群`
+}
+
 const planLine = computed(() => {
   const current = plan.value
-  if (current.kind === 'chat')
-    return `发出后打开和「${nameOf(current.contactId)}」的单聊`
+  if (current.kind === 'chat') {
+    const contact = contacts.value.find((item) => item.id === current.contactId)
+    return contact?.kind === 'external'
+      ? externalChatHint(contact.name)
+      : `发出后打开和「${nameOf(current.contactId)}」的单聊`
+  }
   if (current.kind === 'group')
     return `发出后建临时群「${current.title}」：${current.ask
       .map(nameOf)
@@ -119,7 +128,7 @@ async function send() {
   if (current.kind === 'chat') {
     const contact = contacts.value.find((item) => item.id === current.contactId)
     if (contact?.kind === 'external') {
-      hint.value = `和「${contact.name}」单聊即将推出；再 @ 一位联系人，就会和它一起建一个临时群`
+      hint.value = externalChatHint(contact.name)
       return
     }
   }
