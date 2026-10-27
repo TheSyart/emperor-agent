@@ -85,6 +85,10 @@ export interface SessionCreateOptions {
   parentSessionId?: string | null
   lineageRootId?: string | null
   transitionReason?: 'clear' | null
+  /** Group chat (0.3): where the session lives, and its contact or group. */
+  surface?: SessionSurface | null
+  contactId?: string | null
+  groupId?: string | null
 }
 
 /** A deleted session waiting in `sessions/.trash/<id>` (FIX-01). */
@@ -190,6 +194,11 @@ export class SessionStore {
       transitioned_to_session_id: null,
       transitioned_at: null,
       version: VERSION,
+      ...groupChatFields({
+        surface: opts.surface,
+        contact_id: opts.contactId,
+        group_id: opts.groupId,
+      }),
     }
     this.appendSnapshot(entry)
     this.load()

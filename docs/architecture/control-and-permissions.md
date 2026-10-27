@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-10-23（对照 `cd4d8656`）<br>
-> 事实源：`packages/core/src/sandbox/`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/workflow/process-worker.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
+> 最后核验：2026-10-27（对照 `3a55b24f`）<br>
+> 事实源：`packages/core/src/sandbox/`、`packages/core/src/contacts/runtime.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/workflow/process-worker.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
 
@@ -17,6 +17,8 @@ Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写�
 
 新 session 从 `settings.json` 的 `sessions.defaultPermission` 开始（「设置 › 常规 › 会话 › 新会话的权限」，`sessions.defaults` / `sessions.setDefaults`，默认 `workspace-write`，不认识的值读作默认）；已经有日志的会话保留自己的预设。切换入口是 `/permissions <preset>`、Composer 的权限选择器和 `control.setPermissionMode`。选择记录为 session log 中的 `permission/preset`，随后只记录实际发生变化的 `sandbox/mode` 与 `approval/policy` 事件；当前预设从 log 推导。两个旋钮不对应任何预设时显示为 `custom`，该值不可选择。
 
+联系人的会话（GRP-03）有上限：联系人自己的权限与「新会话的权限」中较低的一个。会话从它开始；在会话里调到更高报 `contact_permission`；联系人或全局预设调低后，下一步之前自动降到上限。见 [Agent 执行链路](agent-runtime.md#联系人会话grp-03)。
+
 每个会话的权限状态完全存放在它的 session log 中；跨 session 的只有上面这个「新会话从哪个预设开始」，没有持久的权限规则，旧版 `settings.json` 的 `permissions.rules` 在读取时被忽略。
 
 ## 沙箱模式
@@ -29,7 +31,7 @@ Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写�
 
 执行方式：
 
-- `write` / `edit` 在进程内做路径围栏：`read-only` 直接拒绝；`workspace-write` 在写入前重新解析真实路径（能发现被替换的符号链接祖先），要求目标位于可写根内。
+- `write` / `edit` 在进程内做路径围栏：`read-only` 直接拒绝；`workspace-write` 在写入前重新解析真实路径（能发现被替换的符号链接祖先），要求目标位于可写根内。会话的只读根（联系人在工作区外的知识，GRP-03）在任何模式下都拒绝写入（`FS_READ_ONLY_PATH`），不提供提权；受限 `bash` 的 Seatbelt profile 也拒绝写这些路径。
 - `bash` 在受限模式下通过 OS 沙箱运行：macOS 使用 Seatbelt（`sandbox-exec`）。产品只发布 macOS；代码里另有 Linux 的 bubblewrap 后端（启动时做一次功能探测），没有后端的平台在 `read-only` 与 `workspace-write` 下启动前失败（fail closed）。
 - 受限 `bash` 主要限制文件写入，并拒绝向 Apple Events、WindowServer 和 Helper socket 发起部分连接；普通文件读取与互联网访问没有普遍禁止。读写都受下文「受保护路径」一表约束：`read`、`edit`、`write`、`glob`、`grep` 不经过 Shell 沙箱，但与 Seatbelt 共用这一张表（`sandbox/protected-state.ts`）。`danger-full-access` 下的 `bash`（包括一次经批准的提权）在 macOS 上也跑在只含这张表的 Seatbelt profile 里（`LocalSandbox.guard`），Seatbelt 起不来时 fail closed（`SANDBOX_UNAVAILABLE`，不会不带守护地运行）；Linux 与其他平台没有这层守护。
 - Shell 之外由 Emperor 启动的进程——MCP stdio server、插件 Hook、工作流脚本——与 Shell 共用同一套进程隔离（下一节）。托管环境不再在应用内安装（`environment.createInstallPlan` / `environment.install` 返回 `OperationRetiredError`），没有安装器进程。

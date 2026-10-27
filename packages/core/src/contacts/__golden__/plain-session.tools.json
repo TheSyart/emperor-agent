@@ -1,0 +1,1140 @@
+[
+  {
+    "name": "ask_user_question",
+    "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable id for this question; echoed in the answer."
+              },
+              "question": {
+                "type": "string",
+                "description": "The specific question to ask the user."
+              },
+              "header": {
+                "type": "string",
+                "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "description": "Short user-facing option label."
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "One sentence explaining the tradeoff or impact."
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ],
+                  "additionalProperties": {}
+                },
+                "description": "Optional choices to show the user. If you recommend one, put it first and append \"(Recommended)\" to that label."
+              },
+              "multi_select": {
+                "type": "boolean",
+                "description": "Whether the user may select more than one option. Defaults to false."
+              }
+            },
+            "required": [
+              "id",
+              "question"
+            ],
+            "additionalProperties": {}
+          },
+          "description": "Questions to ask the user before continuing."
+        }
+      },
+      "required": [
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "bash",
+    "description": "Execute a bash command (`bash -c`) and return its stdout/stderr. Provide `description` before `command` in the arguments. Each call runs in a fresh shell: no cwd, variables or functions persist between calls; pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. Managed `$EMPEROR_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Use `run_in_background` for long-running commands. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial rather than a bug in the command: do not retry it another way. Attempting a command the sandbox may deny is safe: run it and read the marker. When a denial would succeed in a wider mode, escalate in the same turn, the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. The approval prompt raised by that retry is how the user consents; do not ask in chat first. If the session states approval prompts are disabled, a denial is final: do not set `sandbox_permissions`. Never escalate speculatively: ground the request in a real denial, normally the one this command just hit, or the same access already denied in this session. A rejected escalation is final for that command (stop and explain, never work around it), but it does not forbid other commands later.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+        },
+        "command": {
+          "type": "string",
+          "description": "The command to execute."
+        },
+        "timeoutMs": {
+          "description": "Timeout in milliseconds (default 60000, max 600000); the command is killed on expiry.",
+          "type": "number"
+        },
+        "workdir": {
+          "description": "Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.",
+          "type": "string"
+        },
+        "run_in_background": {
+          "description": "Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.",
+          "type": "boolean"
+        },
+        "sandbox_permissions": {
+          "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+          "type": "string",
+          "enum": [
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "justification": {
+          "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "command"
+      ]
+    }
+  },
+  {
+    "name": "collect_agent",
+    "description": "Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. A writing run changes files only in its isolated workspace; its result lists them, and apply=true asks the user to apply them to the project (a three-way merge into the current workspace; a conflict applies nothing and lists the files). Check changed files before final delivery; execution completion is not evidence that tests passed. If the last run ended without an outcome (Emperor or the computer restarted, or its stop could not be confirmed), abandon=true asks the user to mark it as ended, which releases its workspace and lets the task and any Goal move on.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "expected_run_id": {
+          "type": "string"
+        },
+        "abandon": {
+          "description": "Mark the run as ended as it is, after the user approves. Only for a run that has no outcome; a live run is stopped with interrupt_agent.",
+          "type": "boolean"
+        },
+        "apply": {
+          "description": "Apply the settled run's changed files to the project, after the user approves on an approval card.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agent_id"
+      ]
+    }
+  },
+  {
+    "name": "create_goal",
+    "description": "Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say \"create a goal\". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "The concrete completion objective inferred from the direct human request."
+        },
+        "max_goal_rounds": {
+          "type": "number",
+          "description": "Optional positive safe-integer limit on automatic continuation rounds."
+        }
+      },
+      "required": [
+        "objective"
+      ]
+    }
+  },
+  {
+    "name": "edit",
+    "description": "Edit an existing UTF-8 text file by replacing literal text.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to edit: absolute, or relative to the session working directory."
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Literal text to replace. Must match exactly."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Literal replacement text. Use an empty string to delete the match."
+        },
+        "replace_all": {
+          "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once.",
+          "type": "boolean"
+        },
+        "sandbox_permissions": {
+          "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+          "type": "string",
+          "enum": [
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "justification": {
+          "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "old_string",
+        "new_string"
+      ]
+    }
+  },
+  {
+    "name": "exit_plan_mode",
+    "description": "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. Send the COMPLETE plan as markdown, starting with a # heading that names it. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": "string",
+          "description": "The complete plan, as markdown, starting with a # heading that names it."
+        }
+      },
+      "required": [
+        "plan"
+      ]
+    }
+  },
+  {
+    "name": "get_goal",
+    "description": "Read the current same-session goal, including its exact id/revision, objective, phase, completed continuation rounds, round limit, blocker reason when present, and whether another continuation is armed. Call this before updating a goal.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "glob",
+    "description": "Find files whose paths match a glob pattern. Returns matching file paths — never directories — including hidden and ignored files (VCS metadata directories are excluded). Up to 100 paths come back in modification-time order (newest first); a larger result returns the first 100 paths in modification-time order, says so, and reports where the complete sorted list was saved. This tool does not enumerate directory entries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+        },
+        "path": {
+          "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    }
+  },
+  {
+    "name": "grep",
+    "description": "Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns the first 250 matches inline; a capped result reports where the complete match list was saved. Use read on a matched file for surrounding context.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression to search for (ripgrep syntax)."
+        },
+        "path": {
+          "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it.",
+          "type": "string"
+        },
+        "include": {
+          "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    }
+  },
+  {
+    "name": "inspect_agent",
+    "description": "Inspect an owned child conversation and its run identity without consuming output.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ]
+    }
+  },
+  {
+    "name": "interrupt_agent",
+    "description": "Request cancellation of a background agent's current turn by its agent id. The target may be your direct child or a deeper agent created under you. Only the current turn stops: messages already queued for the agent stay parked until a later send_message, agents it started keep running, and the agent itself stays available for follow-ups. This call returns as soon as the stop request is accepted, so the target may keep running briefly; interrupting an agent that already finished is an accepted no-op.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "description": "The agent id of the running agent to interrupt."
+        },
+        "expected_run_id": {
+          "description": "External children only: the run to stop; defaults to the current run. Stopping an external child also cancels its queued messages.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ]
+    }
+  },
+  {
+    "name": "job_kill",
+    "description": "Request cancellation of a running background job by job id. Returns immediately; the job settles as killed once its work actually stops.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Job id returned by the tool that started the background work."
+        },
+        "reason": {
+          "description": "Optional short reason, recorded in the log and forwarded to the job.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
+    "name": "job_list",
+    "description": "List your background jobs (running and finished) with their ids, kinds, and statuses.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "job_output",
+    "description": "Read a background job. Stream jobs return only output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Job id returned by the tool that started the background work."
+        },
+        "wait": {
+          "description": "Block until the job reaches a terminal status or the timeout expires. A timed-out wait returns [status: running] and leaves the job alive.",
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "description": "Max wait in milliseconds (only meaningful with wait: true). Defaults to 30000; capped at 600000.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
+    "name": "list_agents",
+    "description": "List the background agents you started (children) or every agent under you (descendants), with their status.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "children",
+            "descendants"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "mcp_config",
+    "description": "管理 Emperor 自己的 MCP server 配置（Emperor Home 下的 mcp_config.json；Emperor 只读取这一个文件）。list 查看 server、transport、状态与工具数；add 传入用户给的 MCP JSON（Claude Desktop / Cursor 的 mcpServers、VS Code 的 servers、或带 name 的单个 server；stdio 用 command/args/env，远程用 url + 可选 headers，type 支持 stdio/sse/http），同名 server 默认跳过，overwrite=true 才覆盖；remove / enable / disable 按 name 修改；reload 重新连接全部 server。写操作可能需要用户审批；成功后自动重载，新的 mcp_<server>_<tool> 工具从下一步起可用。不要用 mcporter 或编辑其他客户端的配置文件来添加 MCP。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "add",
+            "remove",
+            "enable",
+            "disable",
+            "reload"
+          ],
+          "description": "要执行的动作。"
+        },
+        "config": {
+          "description": "add：MCP 配置 JSON（对象或 JSON 文本），例如 {\"mcpServers\":{\"name\":{\"type\":\"http\",\"url\":\"https://…\"}}}。",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "name": {
+          "description": "remove/enable/disable：server 名称；add 时可为不带 name 的单个 server 指定名称。",
+          "type": "string"
+        },
+        "overwrite": {
+          "description": "add：同名 server 已存在时是否覆盖（默认 false，跳过）。",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "memory_edit",
+    "description": "Edit the user's long-term memory. target \"memory\" is MEMORY.md (durable facts across conversations), \"user\" is USER.md (the user's profile and preferences), \"project\" is the current Build project's memory (markdown `##` sections). Replace an exact unique old_string with new_string, or omit old_string to append new_string. Only record information the user would want remembered; never store secrets.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "user",
+            "project"
+          ]
+        },
+        "old_string": {
+          "description": "Exact text to replace; must occur exactly once. Omit to append.",
+          "type": "string"
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Replacement (or appended) text."
+        }
+      },
+      "required": [
+        "target",
+        "new_string"
+      ]
+    }
+  },
+  {
+    "name": "ralph",
+    "description": "Run a foreground fresh-agent Ralph loop toward one immutable objective. Use only when the direct human explicitly asks for Ralph or fresh-agent iteration. Each round opens a new child with no parent conversation or prior child session; the shared workspace is long-term memory, and only a bounded structured report crosses rounds. The call returns when a worker reports completion or a concrete blocker, or at the round limit. Ordinary long-running same-session work belongs to goal tools.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "The immutable completion objective for every fresh Ralph round."
+        },
+        "maxRounds": {
+          "description": "Optional positive safe-integer round cap, bounded by the deployment ceiling.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "objective"
+      ]
+    }
+  },
+  {
+    "name": "read",
+    "description": "Read a UTF-8 text file and return line-numbered content.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to read: absolute, or relative to the session working directory."
+        },
+        "offset": {
+          "description": "1-based first line to return. Defaults to 1.",
+          "type": "number"
+        },
+        "limit": {
+          "description": "Maximum number of lines to return. Defaults to 2000.",
+          "type": "number"
+        },
+        "sandbox_permissions": {
+          "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+          "type": "string",
+          "enum": [
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "justification": {
+          "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path"
+      ]
+    }
+  },
+  {
+    "name": "scheduler",
+    "description": "管理本地持久定时任务：查看、创建、更新、暂停、恢复、删除或手动运行。只读检查使用 list；只有用户明确要求长期、未来或周期性自动执行时，才使用 add/update/remove/run。不要把一次性普通任务伪装成定时任务；调度器失败时报告调度器错误，不要改用系统 cron 或 crontab。新任务绑定到当前会话，触发时在本会话内作为一次新的 turn 执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "add",
+            "list",
+            "update",
+            "remove",
+            "pause",
+            "resume",
+            "run"
+          ],
+          "description": "要执行的调度动作。"
+        },
+        "job_id": {
+          "description": "已有定时任务 id，用于 update/remove/pause/resume/run。",
+          "type": "string"
+        },
+        "name": {
+          "description": "创建或更新时使用的任务名称。",
+          "type": "string"
+        },
+        "message": {
+          "description": "任务触发时交给 Agent 的提示词。",
+          "type": "string"
+        },
+        "deliver": {
+          "description": "执行结果是否显示到本地运行界面（默认显示）。",
+          "type": "boolean"
+        },
+        "at": {
+          "description": "一次性任务的 ISO 时间，例如 2026-05-20T09:30:00+08:00。",
+          "type": "string"
+        },
+        "every_seconds": {
+          "description": "循环任务的间隔秒数。",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cron_expr": {
+          "description": "循环任务使用的 cron 表达式。",
+          "type": "string"
+        },
+        "tz": {
+          "description": "cron 任务使用的 IANA 时区，例如 Asia/Shanghai。",
+          "type": "string"
+        },
+        "delete_after_run": {
+          "description": "一次性任务运行后是否自动删除。",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "send_message",
+    "description": "Send a message to a background subagent by its subagent id, continuing the same conversation. It becomes the subagent's next turn: if it is still working, the message waits until its current turn finishes, so it cannot redirect work already underway. This call returns no answer from the subagent — only confirmation that the message was delivered — so use it to give it more work. A failure means the message was NOT delivered.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "subagent_id": {
+          "type": "string",
+          "description": "The subagent id returned when the background subagent was started."
+        },
+        "message": {
+          "type": "string",
+          "description": "The message to deliver to the subagent."
+        },
+        "delivery": {
+          "description": "External children only: queue (default) waits for the current turn; steer redirects a running Codex turn (needs expected_run_id; Claude Code cannot steer).",
+          "type": "string",
+          "enum": [
+            "queue",
+            "steer"
+          ]
+        },
+        "expected_run_id": {
+          "description": "External children only: the run id a steer must still match.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subagent_id",
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "skill",
+    "description": "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The exact skill name from the available skills list."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "skill_manage",
+    "description": "Manage Emperor Skills. Read-only: list (Skills available in this session, plus invalid ones with reasons), validate (check SKILL.md text or an installed Skill). Writes: create / update (full SKILL.md in `content`, optional extra files in `files`), delete, import (from a local folder, a local .zip, pasted SKILL.md, or an https link — GitHub repository/folder links or direct .zip links). Writes need user approval unless the session runs with full access. Built-in and Plugin Skills are read-only. Use this tool instead of file or shell tools for anything under the Skills folders.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "validate",
+            "create",
+            "update",
+            "delete",
+            "import"
+          ],
+          "description": "What to do."
+        },
+        "name": {
+          "description": "Skill name (lowercase letters, digits, \".\", \"_\", \"-\"). Required for delete; for create/update it must equal the frontmatter name.",
+          "type": "string"
+        },
+        "content": {
+          "description": "Full SKILL.md text starting with YAML frontmatter (`name`, `description`). Required for create/update; optional for validate.",
+          "type": "string"
+        },
+        "files": {
+          "description": "Extra text files for create/update, keyed by path relative to the Skill folder, e.g. {\"scripts/run.py\": \"...\"}.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "description": "user (default) = personal Skills; project = this Build project (Build sessions only).",
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "source": {
+          "description": "import only: where the Skill comes from.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "folder"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Absolute path of a local folder."
+                }
+              },
+              "required": [
+                "kind",
+                "path"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "zip"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Absolute path of a local .zip file."
+                }
+              },
+              "required": [
+                "kind",
+                "path"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "url"
+                },
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "https link: https://github.com/<owner>/<repo>[/tree/<ref>/<folder>] or a direct .zip link."
+                }
+              },
+              "required": [
+                "kind",
+                "url"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "content"
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Full SKILL.md text."
+                },
+                "name": {
+                  "description": "Skill name; overrides the frontmatter name.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "content"
+              ]
+            }
+          ]
+        },
+        "overwrite": {
+          "description": "import only: replace existing Skills with the same name.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "subagent",
+    "description": "Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. Give it a complete, standalone prompt: it does not see this conversation. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "A short (3-5 word) description of the delegated task, for display."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+        },
+        "run_in_background": {
+          "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+          "type": "boolean"
+        },
+        "backend": {
+          "description": "Who runs the task. internal (default) is an Emperor subagent and needs none of the external fields. claude-code or codex hands it to that local CLI when it is enabled in Settings (the runtime context lists enabled executors): Emperor asks the user once before the first dispatch to each executor, since it uses their own quota or API billing, and runs the task as an internal subagent if they decline. External children get an isolated or brief context (never a fork of this conversation), are continued with send_message and collected with collect_agent.",
+          "type": "string",
+          "enum": [
+            "internal",
+            "claude-code",
+            "codex"
+          ]
+        },
+        "profile_id": {
+          "description": "External backends only: a specific executor profile id.",
+          "type": "string"
+        },
+        "context": {
+          "description": "External backends only: isolated (default) sends just the prompt; brief adds workspace instructions and the goal. fork is internal only.",
+          "type": "string",
+          "enum": [
+            "isolated",
+            "brief",
+            "fork"
+          ]
+        },
+        "workspace": {
+          "description": "External backends only: where the child works. shared-readonly reviews without writing (the only choice in Plan mode or a read-only session, and the default outside Git); isolated-worktree (default otherwise) writes in a separate worktree (a folder copy outside Git), and its changes come back as a result to apply.",
+          "type": "string",
+          "enum": [
+            "isolated-worktree",
+            "shared-readonly",
+            "shared-exclusive"
+          ]
+        },
+        "base": {
+          "description": "External backends only: the code a writing child starts from: snapshot (default) is the workspace as it is now, uncommitted and new files included (.gitignore respected); committed is the last commit only (use it above 10,000 changed files).",
+          "type": "string",
+          "enum": [
+            "committed",
+            "snapshot"
+          ]
+        },
+        "model": {
+          "description": "External backends only: the executor's model id; omit to use its default.",
+          "type": "string"
+        },
+        "output_schema": {
+          "description": "External backends only: a JSON schema the final answer must match.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "description",
+        "prompt"
+      ]
+    }
+  },
+  {
+    "name": "subagent_fork",
+    "description": "Delegate a task to a subagent that inherits this conversation: a child agent seeded with all completed turns so far (it does not see the current in-flight turn). Use this when the subtask builds on this conversation's context — a follow-up analysis, a review, a continuation — without consuming this conversation's context for the work itself. You receive its result, not its intermediate steps. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "A short (3-5 word) description of the delegated task, for display."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The task for the subagent. It already sees this conversation's completed turns, so build on them freely and state only what is new."
+        },
+        "run_in_background": {
+          "description": "Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.",
+          "type": "boolean"
+        },
+        "backend": {
+          "description": "Who runs the task. internal (default) is an Emperor subagent and needs none of the external fields. claude-code or codex hands it to that local CLI when it is enabled in Settings (the runtime context lists enabled executors): Emperor asks the user once before the first dispatch to each executor, since it uses their own quota or API billing, and runs the task as an internal subagent if they decline. External children get an isolated or brief context (never a fork of this conversation), are continued with send_message and collected with collect_agent.",
+          "type": "string",
+          "enum": [
+            "internal",
+            "claude-code",
+            "codex"
+          ]
+        },
+        "profile_id": {
+          "description": "External backends only: a specific executor profile id.",
+          "type": "string"
+        },
+        "context": {
+          "description": "External backends only: isolated (default) sends just the prompt; brief adds workspace instructions and the goal. fork is internal only.",
+          "type": "string",
+          "enum": [
+            "isolated",
+            "brief",
+            "fork"
+          ]
+        },
+        "workspace": {
+          "description": "External backends only: where the child works. shared-readonly reviews without writing (the only choice in Plan mode or a read-only session, and the default outside Git); isolated-worktree (default otherwise) writes in a separate worktree (a folder copy outside Git), and its changes come back as a result to apply.",
+          "type": "string",
+          "enum": [
+            "isolated-worktree",
+            "shared-readonly",
+            "shared-exclusive"
+          ]
+        },
+        "base": {
+          "description": "External backends only: the code a writing child starts from: snapshot (default) is the workspace as it is now, uncommitted and new files included (.gitignore respected); committed is the last commit only (use it above 10,000 changed files).",
+          "type": "string",
+          "enum": [
+            "committed",
+            "snapshot"
+          ]
+        },
+        "model": {
+          "description": "External backends only: the executor's model id; omit to use its default.",
+          "type": "string"
+        },
+        "output_schema": {
+          "description": "External backends only: a JSON schema the final answer must match.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "description",
+        "prompt"
+      ]
+    }
+  },
+  {
+    "name": "todo_write",
+    "description": "Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "todos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "What the task is — a short imperative line."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed"
+                ],
+                "description": "pending (not started) | in_progress (now) | completed (done)."
+              }
+            },
+            "required": [
+              "content",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "description": "The COMPLETE task list, replacing any previous list."
+        }
+      },
+      "required": [
+        "todos"
+      ]
+    }
+  },
+  {
+    "name": "update_goal",
+    "description": "Update the exact current goal revision. edit, pause, and resume require a direct top-level human request. During an automatic continuation of the current goal, complete and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "goal_id": {
+          "type": "string",
+          "description": "Exact id returned by get_goal."
+        },
+        "revision": {
+          "type": "number",
+          "description": "Exact positive revision returned by get_goal."
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "edit",
+            "pause",
+            "resume",
+            "complete",
+            "blocked"
+          ],
+          "description": "edit | pause | resume | complete | blocked"
+        },
+        "objective": {
+          "type": "string",
+          "description": "Replacement objective; valid only with action edit."
+        },
+        "max_goal_rounds": {
+          "type": "number",
+          "description": "Replacement cap; valid only with action edit."
+        },
+        "blocked_reason": {
+          "type": "string",
+          "description": "Concrete blocking condition; required only with action blocked."
+        }
+      },
+      "required": [
+        "goal_id",
+        "revision",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "web_fetch",
+    "description": "Read one public web page (http or https) and return its title, final URL and body converted to Markdown. No cookies or logins are sent; local and private network addresses are refused. Long pages come in parts: pass the offset named in the previous result to continue.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The http(s) URL of the page to read."
+        },
+        "offset": {
+          "description": "Character offset into the converted page, from a previous result that said more follows. Omit for the start.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "Search the web for current information. Provide 1–4 queries in the required queries array. Returns an optional summary answer and a list of source URLs.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Required search queries; accepts 1–4 items and merges their results."
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    }
+  },
+  {
+    "name": "workflow",
+    "description": "Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.\n\nThe workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.\n\nScript-body hooks:\n- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). External executors use `backend` (internal/claude-code/codex) and `profileId`; external calls reject the internal `provider` option. Their output includes the retained workspace location and remains unverified until artifact acceptance. Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.\n- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.\n- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.\n- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.\n\nMisused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.\n\nConstraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. By default the run executes in the foreground: this call returns when the whole script finishes. With run_in_background: true it becomes a background job — the call returns the job id at once, the result arrives as a notice when the run settles (read it with job_output), and job_kill stops it. A run is stopped after 30 minutes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "script": {
+          "type": "string",
+          "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Short kebab-case workflow name."
+            },
+            "description": {
+              "type": "string",
+              "description": "One-line description of what the workflow does."
+            },
+            "whenToUse": {
+              "description": "Optional guidance on when this workflow applies.",
+              "type": "string"
+            },
+            "phases": {
+              "description": "Optional phase declarations matched by phase() calls.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "The phase title phase() calls match by exact string."
+                  },
+                  "detail": {
+                    "description": "Optional one-line description of the phase.",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "description": "Optional provider override this phase is expected to use.",
+                    "type": "string"
+                  },
+                  "model": {
+                    "description": "Optional model override this phase is expected to use.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": [
+            "name",
+            "description"
+          ],
+          "additionalProperties": {},
+          "description": "The workflow identity block (plain JSON — never code)."
+        },
+        "args": {
+          "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "run_in_background": {
+          "description": "Run as a background job: the call returns its job id at once and the result arrives as a notice when the run settles; job_kill stops it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "script",
+        "meta"
+      ]
+    }
+  },
+  {
+    "name": "write",
+    "description": "Create or fully replace a UTF-8 text file.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to write: absolute, or relative to the session working directory."
+        },
+        "content": {
+          "type": "string",
+          "description": "Full UTF-8 text content to write."
+        },
+        "sandbox_permissions": {
+          "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+          "type": "string",
+          "enum": [
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "justification": {
+          "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "content"
+      ]
+    }
+  }
+]

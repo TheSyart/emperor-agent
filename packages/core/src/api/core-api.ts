@@ -126,6 +126,13 @@ import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { ContactStore } from '../contacts/store'
+import { ContactMemoryStore } from '../contacts/memory'
+import { ContactRuntime } from '../contacts/runtime'
+import { readPersonaText } from '../harness/prompt/persona'
+import {
+  CoreContactMemoryService,
+  type ContactFeedbackInput,
+} from './services/contact-memory-service'
 import type {
   ContactInput,
   ContactPatch,
@@ -454,6 +461,8 @@ export class CoreApi {
   readonly memoryService: CoreMemoryService
   /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
   readonly contactStore: ContactStore
+  /** Contacts' personal memory: feedback and its lines (GRP-03). */
+  readonly contactMemoryService: CoreContactMemoryService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
@@ -628,6 +637,34 @@ export class CoreApi {
           reason: change.reason,
           contact_id: change.contactId,
           version: change.version,
+        }),
+    })
+    // A session with `contact_id` runs as that contact (GRP-03).
+    const contactMemory = new ContactMemoryStore(this.paths.stateRoot)
+    const persona = readPersonaText(kept.templatesDir)
+    host.setContactRuntime(
+      new ContactRuntime({
+        contact: (id) => this.contactStore.peek(id),
+        ready: () => this.contactStore.ready(),
+        memory: contactMemory,
+        toolNames: () => host.registeredToolNames(),
+        globalPreset: () => host.defaultPreset,
+        route: (id) => host.llm.listRoutes().find((route) => route.id === id),
+        defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
+        persona: () => persona,
+      }),
+    )
+    this.contactMemoryService = new CoreContactMemoryService({
+      contacts: this.contactStore,
+      memory: contactMemory,
+      session: (id) => kept.sessionStore.get(id),
+      sessionLog: (id) => host.sessionLog(id),
+      changed: (contact) =>
+        host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: contact.id,
+          version: contact.version,
         }),
     })
     this.memoryService = new CoreMemoryService({
@@ -1840,6 +1877,12 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      // Contact sessions look their contact up without waiting (GRP-03).
+      await api.contactStore
+        .ready()
+        .catch((error: unknown) =>
+          logger.warn('reading contacts failed', { error: String(error) }),
+        )
       await api.claudeKeysMigrated
       await api.delegationRuntime.reconcile()
       api.agentService.rebuild()
@@ -3472,6 +3515,18 @@ export class CoreApi {
     templates: () => this.contactStore.templates(),
     fromTemplate: (input: FromTemplateInput) =>
       this.contactStore.fromTemplate(input),
+    /** 👍 / 👎 on a reply, with the user's words: one line of memory (GRP-03). */
+    feedback: (input: ContactFeedbackInput) =>
+      this.contactMemoryService.feedback(input),
+    /** A contact's personal memory, line by line. */
+    memory: {
+      list: (input: { contactId: string }) =>
+        this.contactMemoryService.list(input),
+      update: (input: { contactId: string; entryId: string; text: string }) =>
+        this.contactMemoryService.update(input),
+      delete: (input: { contactId: string; entryId: string }) =>
+        this.contactMemoryService.delete(input),
+    },
   }
 
   /**

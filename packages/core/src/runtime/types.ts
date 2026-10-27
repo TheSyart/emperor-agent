@@ -382,11 +382,12 @@ export type RuntimeEvent = RuntimeEventEnvelope &
       }
     | {
         /**
-         * A contact was created, changed, restored or deleted (GRP-02);
-         * `version` is the one after the change (null once deleted).
+         * A contact was created, changed, restored or deleted (GRP-02), or
+         * its personal memory changed (`memory`, GRP-03); `version` is the
+         * one after the change (null once deleted).
          */
         event: 'contacts_changed'
-        reason: 'created' | 'updated' | 'deleted' | 'restored'
+        reason: 'created' | 'updated' | 'deleted' | 'restored' | 'memory'
         contact_id: string
         version: number | null
       }

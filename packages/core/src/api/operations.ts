@@ -1091,6 +1091,32 @@ const contactFieldsSchema = {
   memory: z.object({ enabled: z.boolean() }).strict().optional(),
 }
 const contactNameSchema = z.string().max(200)
+// GRP-03: personal memory. Shapes only; the service applies the limits.
+const contactMemoryEntryIdSchema = z.string().regex(/^m-[0-9a-f]{12}$/)
+const contactFeedbackSchema = z
+  .object({
+    contactId: contactIdSchema,
+    messageRef: z
+      .object({
+        sessionId: idSchema,
+        messageId: z.string().min(1).max(256).optional(),
+      })
+      .strict(),
+    rating: z.enum(['up', 'down']),
+    note: z.string().max(2000).optional(),
+  })
+  .strict()
+const contactMemoryRefSchema = z.object({ contactId: contactIdSchema }).strict()
+const contactMemoryEntrySchema = z
+  .object({ contactId: contactIdSchema, entryId: contactMemoryEntryIdSchema })
+  .strict()
+const contactMemoryUpdateSchema = z
+  .object({
+    contactId: contactIdSchema,
+    entryId: contactMemoryEntryIdSchema,
+    text: z.string().max(4000),
+  })
+  .strict()
 const contactTemplateIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)
 const contactCreateSchema = z
   .object({
@@ -2270,6 +2296,22 @@ export const CORE_OPERATION_REGISTRY = {
         .strict(),
     ]),
     (api, [input]) => api.contacts.fromTemplate(input),
+  ),
+  'contacts.feedback': operation(
+    z.tuple([contactFeedbackSchema]),
+    (api, [input]) => api.contacts.feedback(input),
+  ),
+  'contacts.memory.list': operation(
+    z.tuple([contactMemoryRefSchema]),
+    (api, [input]) => api.contacts.memory.list(input),
+  ),
+  'contacts.memory.update': operation(
+    z.tuple([contactMemoryUpdateSchema]),
+    (api, [input]) => api.contacts.memory.update(input),
+  ),
+  'contacts.memory.delete': operation(
+    z.tuple([contactMemoryEntrySchema]),
+    (api, [input]) => api.contacts.memory.delete(input),
   ),
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
