@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `8230fad1`）<br>
+> 最后核验：2026-10-27（对照 `4f569338`）<br>
 > 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`ModeSwitcher.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
@@ -42,8 +42,8 @@
 
 搜索：
 
-- 品牌行的放大镜（或 ⌘K）在主按钮下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。搜索不分模式，查全部会话。
-- 先列「会话」：标题、项目名、路径即时匹配（`searchSidebarSessions`，不含已归档）；停顿 250ms 后列「内容」：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch`，旧查询的结果丢弃）。
+- 品牌行的放大镜（或 ⌘K）在主按钮下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。搜索不分模式，查全部会话，按模式分段：当前模式的结果在前，标题是模式名；其余在「其他模式」下按时间排。每行标题右侧一个模式小标签（Badge neutral：Chat / Build / Group）（[三种模式](modes.md#侧栏)）。
+- 每段里先列标题、项目名、路径即时匹配的会话（`searchSidebarSessions`，不含已归档）；停顿 250ms 后接着列内容命中的：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch` → `searchContentResults`，旧查询的结果丢弃）。群成员会话的命中显示成它所在的群，试用台会话不出现。
 - ↑ / ↓ 选择、回车打开；Esc 先清空，再关闭。
 
 ## 内容宽度

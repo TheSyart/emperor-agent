@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `8230fad1`）<br>
-> 事实源：本文是 0.3 的设计稿，已实现的部分以 `desktop/src/renderer/src/runtime/appMode.ts`、`desktop/src/renderer/src/components/sidebar/`（`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarRoot.vue`、`SidebarNav.vue`、`SidebarFooter.vue`、`SidebarRail.vue`）、`desktop/src/renderer/src/components/conversation/`（首页：`EmptyHero.vue`、`heroGreeting.ts`、`heroSuggestions.ts`、`HeroSuggestions.vue`、`heroHome.ts`、`heroProjects.ts`、`HeroRecentProjects.vue`、`HeroProjectChip.vue`、`useBuildHome.ts`）、`packages/core/src/api/core-api.ts`（侧栏状态的 `app_mode`、`mode_routes`、`collapsed_sections`，`projects.branch`）和 `desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/dsh-v1.spec.ts`（首页）为准
+> 最后核验：2026-10-27（对照 `4f569338`）<br>
+> 事实源：本文是 0.3 的设计稿，已实现的部分以 `desktop/src/renderer/src/runtime/appMode.ts`、`desktop/src/renderer/src/components/sidebar/`（`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarRoot.vue`、`SidebarNav.vue`、`SidebarFooter.vue`、`SidebarRail.vue`、`SidebarSearchResults.vue`、`NotificationsPopover.vue`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`（搜索：`searchSidebarSessions`、`searchContentResults`、`arrangeSearchResults`）、`desktop/src/renderer/src/components/conversation/`（首页：`EmptyHero.vue`、`heroGreeting.ts`、`heroSuggestions.ts`、`HeroSuggestions.vue`、`heroHome.ts`、`heroProjects.ts`、`HeroRecentProjects.vue`、`HeroProjectChip.vue`、`useBuildHome.ts`）、`packages/core/src/api/core-api.ts`（侧栏状态的 `app_mode`、`mode_routes`、`collapsed_sections`，`projects.branch`）和 `desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/dsh-v1.spec.ts`（首页）为准
 
 Emperor 有三种模式：**Chat**（对话）、**Build**（构建）、**Group**（群聊）。模式是界面层的概念，决定侧栏放什么、首页长什么样、⌘N 新建什么；会话本身仍然只有 `mode: chat | build`，群聊相关的会话用 `surface` 字段标记。
 
@@ -43,7 +43,10 @@ Emperor 有三种模式：**Chat**（对话）、**Build**（构建）、**Group
 - 别的模式有事不会漏：菜单里每种模式旁显示「N 个在运行」和「等你回答」；**只有「等你回答」**（待批准、待回答的问题）会在标的右上角点亮一个小圆点，运行中不打扰。通知铃铛照旧汇总全部。按钮的 `aria-label` 这时加上「，其他模式等你回答」。
 - 删除或归档正在看的会话后，打开本模式的下一个会话；本模式没有别的会话了，就进本模式的首页（新草稿），不会跳到别的模式。会话在别处被删、启动时找不到当前会话这类情况，也是先找本模式的，再找最近的；群成员、试用台会话永远不会被选中。
 - 窄轨（56px）：标下面三个模式图标（提示写 Chat / Build / Group 和快捷键），当前模式高亮，点了直接切；别的模式有人等你时，那个模式的图标上也有小圆点。窄轨的新建按钮和页面入口同样跟着模式变。
-- 搜索查全部模式，结果标出 Chat / Build / Group，当前模式的结果在前；打开结果时自动切模式。群成员会话折算成它所在的群，试用台会话不出现。
+- 搜索查全部模式（标题、项目名和路径即时查，停顿 250ms 后再查聊天内容）。结果分两段：当前模式的结果在前，标题写模式名（「Build」）；别的模式的结果在后，标题「其他模式」，不论哪种模式都按时间排。每段里先列标题命中的，再列内容命中的（带命中的那一句），各自按时间排；内容命中的会话已经按标题列出过就不再列。每一行右侧有模式小标签 Chat / Build / Group；列表不认识的会话（比如之后归档的）没有标签。
+- 一条命中、一条通知打开的是它所属的会话（`shownSessionTarget`）：列在侧栏里的会话就是它自己；群成员会话折算成它所在的群（同一个 `group_id` 的群会话，同一个群只列一次）；试用台会话、群不在列表里的成员会话不出现。打开时走路由，模式跟着切（上面的不变量）。
+- 通知列表里，属于某个会话的通知在标题旁有同样的模式小标签；定时任务、更新这类通知没有。
+- 后退 / 前进只记路由，不记模式：退到哪个会话，就切到那个会话的模式；退到定时任务这类页面，模式不变。
 
 ## 首页
 
