@@ -13,7 +13,8 @@
  *                   `id` AV-01-1 … AV-15-9, on a round tile in its tint;
  *                   an unknown id falls back to the colour tile
  *   size: 16 | 20 | 24 (default) | 28 | 40 — off-scale sizes are refused in
- *         development and drawn at the nearest step
+ *         development and drawn at the nearest step; a library portrait may
+ *         also be 56 (the contact editor's and profile's large portrait)
  * `status` puts a small state dot on a sprite (running / completed /
  * failed). Decorative (aria-hidden) unless `labelled`, which exposes it as
  * an image named by `label`.
@@ -32,6 +33,7 @@ import {
   avatarInitial,
   isAvatarSize,
   nearestAvatarSize,
+  PORTRAIT_HERO_SIZE,
   type AvatarSize,
 } from './avatar'
 import {
@@ -46,7 +48,7 @@ import { contactAvatarCell } from './contactAvatars'
 const props = withDefaults(
   defineProps<{
     kind?: 'sprite' | 'color' | 'logo' | 'initials' | 'library'
-    size?: AvatarSize
+    size?: AvatarSize | typeof PORTRAIT_HERO_SIZE
     id?: string | null
     frameId?: string
     iconId?: string | null
@@ -68,8 +70,10 @@ const props = withDefaults(
   },
 )
 
-const size = computed<AvatarSize>(() => {
+const size = computed<AvatarSize | typeof PORTRAIT_HERO_SIZE>(() => {
   if (isAvatarSize(props.size)) return props.size
+  if (props.kind === 'library' && props.size === PORTRAIT_HERO_SIZE)
+    return PORTRAIT_HERO_SIZE
   if (import.meta.env.DEV)
     console.error(
       `Avatar size "${String(props.size)}" is off the scale; use 16 | 20 | 24 | 28 | 40`,
@@ -251,6 +255,10 @@ const colorSlot = computed(() =>
   border-radius: var(--r-md);
 }
 
+.ds-avatar[data-size='56'] {
+  --avatar-box: 56px;
+}
+
 /* Portraits are cut out of their sheets (UI-S13): no tile, no frame. */
 .ds-avatar[data-shown='sprite'] {
   border-radius: 0;
@@ -285,7 +293,8 @@ const colorSlot = computed(() =>
   overflow: hidden;
 }
 
-.library {
+/* The whole cell fills the circle (the head is centred in it, BRD-07). */
+.ds-avatar[data-shown='library'] .library {
   width: 100%;
   height: 100%;
   background-repeat: no-repeat;

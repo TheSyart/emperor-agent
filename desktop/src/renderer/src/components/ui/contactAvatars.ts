@@ -62,6 +62,43 @@ export const CONTACT_AVATAR_THEMES = [
 ] as const
 export type ContactAvatarTheme = (typeof CONTACT_AVATAR_THEMES)[number]
 
+/** The picker's theme names (docs/design/agent-contacts.md › 头像). */
+export const CONTACT_AVATAR_THEME_LABELS: Readonly<
+  Record<ContactAvatarTheme, string>
+> = {
+  engineering: '工程',
+  design: '设计',
+  content: '内容',
+  product: '产品',
+  'court-civil': '文臣',
+  'court-military': '武将',
+  'court-life': '宫廷',
+  'court-modern': '混搭',
+  animals: '动物',
+  robots: '机器人',
+  people: '人物',
+  whimsy: '奇想',
+}
+
+/** The theme of each sheet, AV-01 … AV-15 (avatar-prompts.md §2). */
+const SHEET_THEMES: readonly ContactAvatarTheme[] = [
+  'engineering',
+  'engineering',
+  'design',
+  'content',
+  'product',
+  'court-civil',
+  'court-military',
+  'court-life',
+  'court-modern',
+  'animals',
+  'animals',
+  'robots',
+  'people',
+  'people',
+  'whimsy',
+]
+
 const ID = /^AV-(0[1-9]|1[0-5])-([1-9])$/
 
 /** Every library id in prompt order: AV-01-1 … AV-15-9. */
@@ -104,6 +141,12 @@ export function contactAvatarCell(id: string): ContactAvatarCell | null {
     size: CONTACT_AVATAR_CELL,
     tint: TINTS[(sheet + index + 1) % TINTS.length]!,
   }
+}
+
+/** A library avatar's theme from its id alone (null: not a library id). */
+export function contactAvatarTheme(id: string): ContactAvatarTheme | null {
+  const match = ID.exec(id)
+  return match ? (SHEET_THEMES[Number(match[1]) - 1] ?? null) : null
 }
 
 /** The labels and themes, for the picker; kept out of the startup bundle. */

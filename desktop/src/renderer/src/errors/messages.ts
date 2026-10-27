@@ -52,6 +52,11 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   contact_deleted: '这个联系人已删除，这个会话只能查看。',
   contact_permission: '这个联系人的权限有上限，不能在会话里调高。',
   contact_model_unavailable: '这个联系人的模型不可用。',
+  // The contact editor (GRP-04).
+  contact_import_too_large: '这个文件超过 64 KB，不导入。',
+  contact_import_unreadable: '读不了这个文件，换一个文本文件再试。',
+  contact_draft_failed: '没能起草岗位说明书，换个说法再试一次。',
+  contact_trial_running: '这次试用已经在运行，等它结束或先停止。',
   interaction_not_pending: '这个问题已经回答过或已失效。',
   turn_paused: '这一轮已暂停。',
   turn_busy: '已有一轮正在运行，请等它结束。',

@@ -29,6 +29,7 @@ const GitHubIssuesPage = () =>
   import('./components/pages/github/GitHubIssuesPage.vue')
 const GitHubRunsPage = () =>
   import('./components/pages/github/GitHubRunsPage.vue')
+const ContactEditor = () => import('./components/contacts/ContactEditor.vue')
 
 /** Routes that render inside the conversation shell (workspace available). */
 export const CONVERSATION_ROUTE_NAMES: readonly string[] = [
@@ -82,6 +83,19 @@ export const routeRecords: RouteRecordRaw[] = [
     name: 'chat',
     component: ConversationView,
     meta: { label: '对话', tab: 'chat' },
+  },
+  // Group (GRP-04): the contact editor — a new contact, or a saved one.
+  {
+    path: '/contacts/new',
+    name: 'contact-new',
+    component: ContactEditor,
+    meta: { label: '新建联系人', page: true },
+  },
+  {
+    path: '/contacts/:id/edit',
+    name: 'contact-edit',
+    component: ContactEditor,
+    meta: { label: '编辑联系人', page: true },
   },
   // Full pages (no workspace column).
   {

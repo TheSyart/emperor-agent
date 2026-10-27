@@ -7,6 +7,12 @@ import { avatarIndex } from '../workspace/environmentModel'
 export const AVATAR_SIZES = [16, 20, 24, 28, 40] as const
 export type AvatarSize = (typeof AVATAR_SIZES)[number]
 
+/**
+ * A contact's portrait shown large (the editor and the profile, BRD-07): a
+ * size for `kind="library"` only, outside the scale of the other marks.
+ */
+export const PORTRAIT_HERO_SIZE = 56
+
 export function isAvatarSize(value: unknown): value is AvatarSize {
   return AVATAR_SIZES.includes(value as AvatarSize)
 }
