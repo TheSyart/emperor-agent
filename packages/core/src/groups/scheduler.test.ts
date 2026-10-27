@@ -477,9 +477,8 @@ describe('the loop guard', () => {
 
 describe('interrupting, stopping and restarting', () => {
   it('12 · a new message while someone speaks: they finish, then the queue follows the new one', async () => {
-    let r!: ReturnType<typeof room>
     let resent: Promise<unknown> | undefined
-    r = room({
+    const r: ReturnType<typeof room> = room({
       settings: { summarizeAtEnd: false },
       script: (req) => {
         if (req.member === 'ct-rev' && !resent)
@@ -498,8 +497,7 @@ describe('interrupting, stopping and restarting', () => {
   })
 
   it('13 · after stop no message is added and the task is cancelled', async () => {
-    let r!: ReturnType<typeof room>
-    r = room({
+    const r: ReturnType<typeof room> = room({
       settings: { summarizeAtEnd: false },
       script: async (req) => {
         r.scheduler.stop(r.view.id)
