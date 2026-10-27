@@ -3709,9 +3709,28 @@ export class CoreApi {
    * in the contact store, so every call waits for it to load first.
    */
   readonly groups = {
+    /**
+     * Each group with who speaks and who waits while a turn runs (GRP-13):
+     * a window opened mid-turn starts the sidebar from it, then follows
+     * the runtime events. `live` is null when no turn runs, after a
+     * restart too.
+     */
     list: async () => {
       await this.contactStore.ready()
-      return this.groupService.list()
+      return this.groupService.list().map((summary) => {
+        const live = this.groupScheduler.live(summary.id)
+        return {
+          ...summary,
+          live: live
+            ? {
+                turnId: live.turnId,
+                state: live.state,
+                speakers: live.speakers,
+                queued: live.queued,
+              }
+            : null,
+        }
+      })
     },
     /** The group, with the running turn's speakers and queue when one runs (GRP-08). */
     get: async (input: { id: string }) => {

@@ -8,7 +8,8 @@ import { installVisualCoreBridge } from './visualBridge'
 // GRP-08: a group in progress (预览 B 第 3 步) — independent answers, an @,
 // a private message, a member speaking now, a task queued; the live bar
 // and 停止; the members column — and 群设置 (第 5 步). Baselines: the group
-// page and its settings, dark and light. Screenshots: 发给 ▾, a member's
+// page and its settings, and the sidebar's group rows saying who speaks
+// now (GRP-13), dark and light. Screenshots: 发给 ▾, a member's
 // question as chat (D29) and the line the group log keeps once it is
 // answered (GRP-12), 新建群聊, 设置 › 群聊 and a member's work
 // (「过程 ›」). The contacts, the group and its messages are answered here,
@@ -55,6 +56,7 @@ async function install(page: Page) {
     type Row = Record<string, unknown>
     const params = new URLSearchParams(window.location.search)
     const asking = params.has('visualAsk')
+    const busy = params.has('visualLive')
     const base = (overrides: Row): Row => ({
       kind: 'local',
       intro: '',
@@ -316,14 +318,62 @@ async function install(page: Page) {
         case 'contacts.list':
           return { contacts, readOnly: null }
         case 'groups.list':
-          return [
-            {
-              id: 'grp-review',
-              title: '0.3 方案评审',
-              memberCount: members.length,
-              lastMessageAt: minutes(1.2),
-            },
-          ]
+          // GRP-13: who speaks in each group now (the sidebar's line).
+          return busy
+            ? [
+                {
+                  id: 'grp-review',
+                  title: '0.3 方案评审',
+                  memberCount: members.length,
+                  lastMessageAt: minutes(1.2),
+                  live: {
+                    turnId: 't1',
+                    state: 'speaking',
+                    speakers: ['ct-architect0001'],
+                    queued: ['ct-researcher001'],
+                  },
+                },
+                {
+                  id: 'grp-release',
+                  title: '发布说明正反方',
+                  memberCount: 3,
+                  lastMessageAt: minutes(4),
+                  live: {
+                    turnId: 't2',
+                    state: 'speaking',
+                    speakers: ['ct-reviewer00001', 'ct-architect0001'],
+                    queued: [],
+                  },
+                },
+                {
+                  id: 'grp-weekly',
+                  title: '周报整理',
+                  memberCount: 2,
+                  lastMessageAt: minutes(9),
+                  live: {
+                    turnId: 't3',
+                    state: 'speaking',
+                    speakers: [],
+                    queued: ['ct-researcher001'],
+                  },
+                },
+                {
+                  id: 'grp-login',
+                  title: '登录页走查',
+                  memberCount: 3,
+                  lastMessageAt: minutes(26 * 60),
+                  live: null,
+                },
+              ]
+            : [
+                {
+                  id: 'grp-review',
+                  title: '0.3 方案评审',
+                  memberCount: members.length,
+                  lastMessageAt: minutes(1.2),
+                  live: null,
+                },
+              ]
         case 'groups.get':
           return {
             id: 'grp-review',
@@ -487,6 +537,25 @@ for (const theme of ['dark', 'light'] as const) {
       '你回答了 研究员 的提问：防打转',
     )
     await shot(page, `ask-answered-${theme}`)
+  })
+}
+
+// GRP-13: the sidebar's group rows say who speaks now (预览 A): one
+// speaker, several at once, only a queue, and a group at rest.
+for (const theme of ['dark', 'light'] as const) {
+  test(`GRP-13 · who speaks, in the sidebar (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await install(page)
+    await open(page, '/groups/grp-review?visualLive=1', theme)
+    const groups = page.locator('[data-sidebar-section="groups"]')
+    const line = (id: string) => groups.locator(`[data-row="${id}"] .line`)
+    await expect(line('grp-review')).toHaveText('架构师 发言中…')
+    await expect(line('grp-release')).toHaveText('审稿人 等 2 人发言中…')
+    await expect(line('grp-weekly')).toHaveText('排队：研究员')
+    await expect(line('grp-login')).toHaveText('3 人 · 昨天')
+    await shot(page, `sidebar-live-${theme}`)
+    await expectBaseline(groups, 'group', `sidebar-live-${theme}`)
   })
 }
 

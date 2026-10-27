@@ -3,7 +3,8 @@
  * GRP-05 (预览 A 的 Group 侧栏): 群聊 and 联系人 replace the placeholder —
  * each row an avatar, a name and a line under it; a contact opens its
  * profile, a group its page; the row of the contact (or group) on screen is
- * marked; the lists follow `contacts_changed` / `groups_changed`.
+ * marked; the lists follow `contacts_changed` / `groups_changed`. GRP-13:
+ * a group's line says who speaks now, or who waits.
  */
 import { createApp, h, nextTick, ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
@@ -33,6 +34,7 @@ const { default: SidebarGroupSections } =
   await import('./SidebarGroupSections.vue')
 const { resetContactDirectoryForTest } =
   await import('../contacts/contactDirectory')
+const { resetGroupLiveForTest } = await import('../groups/groupLive')
 
 function contact(
   id: string,
@@ -119,6 +121,7 @@ function row(id: string): HTMLElement {
 
 beforeEach(() => {
   resetContactDirectoryForTest()
+  resetGroupLiveForTest()
   events.listeners = []
   sessions.list = ref([
     {
@@ -136,6 +139,7 @@ beforeEach(() => {
       intro: '主持人 · 通才',
     }),
     contact('ct-reviewer00001', '审稿人', { intro: '代码与方案评审' }),
+    contact('ct-architect0001', '架构师', { intro: '系统设计' }),
     contact('ct-claude-code', 'Claude Code', {
       kind: 'external',
       backend: 'claude-code',
@@ -182,6 +186,7 @@ describe('the Group sidebar', () => {
     expect(rows('contacts')).toEqual([
       'ct-emperor',
       'ct-reviewer00001',
+      'ct-architect0001',
       'ct-claude-code',
     ])
     expect(row('grp-review').textContent).toContain('4 人')
@@ -233,18 +238,91 @@ describe('the Group sidebar', () => {
 
   it('follows contacts_changed and groups_changed', async () => {
     await mount()
-    contacts = [...contacts, contact('ct-architect0001', '架构师')]
+    contacts = [...contacts, contact('ct-researcher001', '研究员')]
     for (const listener of events.listeners)
       listener({
         event: 'contacts_changed',
         reason: 'created',
-        contact_id: 'ct-architect0001',
+        contact_id: 'ct-researcher001',
         version: 1,
       })
     await flush()
     await new Promise((resolve) => setTimeout(resolve, 120))
     await flush()
-    expect(rows('contacts')).toContain('ct-architect0001')
+    expect(rows('contacts')).toContain('ct-researcher001')
+  })
+
+  it('says who speaks in a group now, who waits, and goes back to its count (GRP-13)', async () => {
+    await mount()
+    const line = () =>
+      row('grp-review').querySelector<HTMLElement>('[data-group-line]')!
+    expect(line().textContent?.trim()).toBe('4 人 · 还没有消息')
+    expect(line().dataset.tone).toBeUndefined()
+    const send = (event: Record<string, unknown>) => {
+      for (const listener of [...events.listeners])
+        listener({ group_id: 'grp-review', ...event })
+    }
+    send({
+      event: 'group_turn_changed',
+      turn_id: 't1',
+      state: 'started',
+      spend: { usd: 0, tokens: 0 },
+    })
+    send({
+      event: 'group_member_status',
+      contact_id: 'ct-architect0001',
+      status: 'thinking',
+    })
+    send({
+      event: 'group_member_status',
+      contact_id: 'ct-reviewer00001',
+      status: 'queued',
+    })
+    await flush()
+    expect(line().textContent?.trim()).toBe('架构师 发言中…')
+    expect(line().dataset.tone).toBe('busy')
+    send({
+      event: 'group_member_status',
+      contact_id: 'ct-architect0001',
+      status: 'idle',
+    })
+    await flush()
+    expect(line().textContent?.trim()).toBe('排队：审稿人')
+    expect(line().dataset.tone).toBe('queued')
+    send({
+      event: 'group_turn_changed',
+      turn_id: 't1',
+      state: 'finished',
+      spend: { usd: 0, tokens: 0 },
+    })
+    await flush()
+    expect(line().textContent?.trim()).toBe('4 人 · 还没有消息')
+  })
+
+  it('starts from what groups.list says when the window opens mid-turn (GRP-13)', async () => {
+    core.mockImplementation(async (op: string) => {
+      if (op === 'contacts.list') return { contacts, readOnly: null }
+      if (op === 'groups.list')
+        return [
+          {
+            id: 'grp-review',
+            title: '设置页评审',
+            memberCount: 4,
+            lastMessageAt: null,
+            live: {
+              turnId: 't1',
+              state: 'speaking',
+              speakers: ['ct-architect0001', 'ct-reviewer00001'],
+              queued: [],
+            },
+          },
+        ]
+      return {}
+    })
+    await mount()
+    expect(
+      row('grp-review').querySelector('[data-group-line]')?.textContent?.trim(),
+    ).toBe('架构师 等 2 人发言中…')
   })
 
   it('says what to do while there is no group yet', async () => {
