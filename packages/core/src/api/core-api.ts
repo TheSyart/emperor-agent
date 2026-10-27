@@ -139,6 +139,11 @@ import {
 } from '../groups/service'
 import { ContactMemoryStore } from '../contacts/memory'
 import { ContactRuntime } from '../contacts/runtime'
+import { ContactChatFailedError, ExternalChat } from '../contacts/external-chat'
+import {
+  ContactDeletedError,
+  ContactExternalChatError,
+} from '../contacts/errors'
 import { ContactTrials, TRIAL_TIMEOUT_MS } from '../contacts/trials'
 import { CoreContactEditorService } from './services/contact-editor-service'
 import { entryPrices, ledgerUsage, usageCostUsd } from '../model/usage-cost'
@@ -483,6 +488,8 @@ export class CoreApi {
   readonly groupScheduler: GroupScheduler
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
   readonly contactMemoryService: CoreContactMemoryService
+  /** Single chats with Claude Code and Codex: their delegations (GRP-11). */
+  readonly externalChat: ExternalChat
   /** Contacts at run time; trial sessions run as their draft (GRP-04). */
   readonly contactRuntime: ContactRuntime
   /** 试用台 runs and their hidden sessions (GRP-04). */
@@ -729,6 +736,23 @@ export class CoreApi {
       sessions: kept.sessionStore,
       groups: this.groupService,
       tokenTracker: kept.tokenTracker,
+      contact: (id) => this.contactStore.peek(id),
+    })
+    const delegations = () => {
+      if (!host.delegations)
+        throw new ContactChatFailedError(
+          '子智能体服务没有启动，暂时不能和 Claude Code、Codex 单聊',
+        )
+      return host.delegations
+    }
+    this.externalChat = new ExternalChat({
+      delegations: {
+        start: (...args) => delegations().start(...args),
+        send: (...args) => delegations().send(...args),
+        list: () => host.delegations?.list() ?? [],
+      },
+      parentAgentId: (sessionId) => host.agentFor(sessionId).id,
+      session: (id) => kept.sessionStore.get(id) ?? null,
       contact: (id) => this.contactStore.peek(id),
     })
     this.contactMemoryService = new CoreContactMemoryService({
@@ -1414,6 +1438,15 @@ export class CoreApi {
       acceptance: this.delegationAcceptance,
       integration: this.delegationIntegration,
       session: (id) => host.kept.sessionStore.get(id),
+      // A deleted contact's single chat is read, not continued (GRP-11).
+      refuseSend: (owner) => {
+        if (owner.source !== 'contact') return
+        const contactId = host.kept.sessionStore.get(
+          owner.rootSessionId,
+        )?.contact_id
+        if (contactId && this.contactStore.peek(contactId) === null)
+          throw new ContactDeletedError(contactId)
+      },
       // Guarded by the owning chat itself, named by the caller (KRN-01).
       assertMutation: (id, action) => {
         if (action !== 'control')
@@ -2350,8 +2383,9 @@ export class CoreApi {
       unconsumed?: 'keep' | 'withdraw' | null
       /** Accepted for adapter compatibility; turn ids are assigned by the kernel. */
       turnId?: string | null
-    }) =>
-      await this.chatService.submit({
+    }) => {
+      this.refuseExternalChat(opts.sessionId)
+      return await this.chatService.submit({
         content: String(opts.content ?? ''),
         displayContent: opts.displayContent ?? null,
         clientMessageId: opts.clientMessageId ?? null,
@@ -2367,7 +2401,8 @@ export class CoreApi {
         source: opts.source ?? 'chat',
         emit: opts.emit ?? null,
         unconsumed: opts.unconsumed ?? null,
-      }),
+      })
+    },
     listQueuedPrompts: (opts: { sessionId: string }) =>
       this.chatService.listQueuedPrompts(opts),
     manageQueuedPrompt: (opts: {
@@ -3783,6 +3818,27 @@ export class CoreApi {
       })
     },
     /**
+     * A message to Claude Code or Codex in their single chat (GRP-11): the
+     * first starts the chat's delegation, the rest continue it.
+     */
+    chatSend: async (input: {
+      sessionId: string
+      text: string
+      clientMessageId: string
+    }) => {
+      await this.contactStore.ready()
+      return this.externalChat.send(
+        input.sessionId,
+        input.text,
+        input.clientMessageId,
+      )
+    },
+    /** The single chat's delegation with Claude Code or Codex, if it has one. */
+    chatDelegation: async (input: { sessionId: string }) => {
+      await this.contactStore.ready()
+      return { delegationId: this.externalChat.delegationOf(input.sessionId) }
+    },
+    /**
      * The profile's four numbers (GRP-05): the groups it is in, how often
      * it spoke (in groups, and the replies of its single chats), the user's
      * 👍 / 👎 still in its memory, and its version.
@@ -4717,6 +4773,15 @@ export class CoreApi {
     if (wasInterview)
       result.profileOnboarding = this.onboardingService.payload()
     return result
+  }
+
+  /** A chat with Claude Code or Codex never takes an ordinary turn (GRP-11). */
+  private refuseExternalChat(sessionId: string | null | undefined): void {
+    if (!sessionId) return
+    const contactId = this.host.kept.sessionStore.get(sessionId)?.contact_id
+    const contact = contactId ? this.contactStore.peek(contactId) : null
+    if (contact?.kind === 'external')
+      throw new ContactExternalChatError(contact.name)
   }
 
   private rootAgentOf(sessionId: string): Agent | null {

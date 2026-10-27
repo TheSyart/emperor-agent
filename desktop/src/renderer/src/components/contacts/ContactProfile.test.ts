@@ -59,6 +59,8 @@ function contact(overrides: Partial<Contact> = {}): Contact {
 }
 
 let current: Contact = contact()
+/** The delegation of an external contact's single chat, once it has one. */
+let chatDelegation: string | null = null
 let memoryEntries = [
   {
     id: 'm-1',
@@ -95,6 +97,11 @@ async function mount(id = 'ct-reviewer00001') {
       { path: '/contacts', name: 'contacts', component: stub },
       { path: '/contacts/:id', name: 'contact', component: ContactProfile },
       { path: '/contacts/:id/edit', name: 'contact-edit', component: stub },
+      {
+        path: '/chat/:sessionId/agents/:delegationId',
+        name: 'external-agent',
+        component: stub,
+      },
       { path: '/chat/:sessionId?', name: 'chat', component: stub },
     ],
   })
@@ -133,6 +140,7 @@ beforeEach(() => {
   resetContactDirectoryForTest()
   answerConfirmsForTest(() => true)
   current = contact()
+  chatDelegation = null
   memoryEntries = [
     {
       id: 'm-1',
@@ -224,6 +232,8 @@ beforeEach(() => {
           contact_id: current.id,
           mode: 'chat',
         }
+      case 'contacts.chatDelegation':
+        return { delegationId: chatDelegation }
       default:
         throw new Error(`unexpected ${op}`)
     }
@@ -349,7 +359,7 @@ describe('the contact profile', () => {
     expect(router.currentRoute.value.fullPath).toBe('/chat/chat-reviewer')
   })
 
-  it('offers 编辑, and has no single chat with Claude Code yet', async () => {
+  it('offers 编辑, and opens the single chat with Claude Code (GRP-11)', async () => {
     await mount()
     button('编辑').click()
     await flush()
@@ -367,11 +377,23 @@ describe('the contact profile', () => {
     app?.unmount()
     container?.remove()
     await mount('ct-claude-code')
-    const send = button('发消息')
-    expect(send.getAttribute('aria-disabled')).toBe('true')
-    send.click()
+    expect(q('[data-contact-profile]').textContent).toContain('只读')
+    // No message yet: the chat's own page takes the first one.
+    button('发消息').click()
     await flush()
-    expect(calls('contacts.openChat')).toEqual([])
+    expect(calls('contacts.openChat')).toEqual([
+      ['contacts.openChat', { id: 'ct-claude-code' }],
+    ])
+    expect(router.currentRoute.value.fullPath).toBe('/chat/chat-reviewer')
+    // Once it has a delegation, the chat opens on its conversation page.
+    chatDelegation = 'dlg-chat1'
+    await router.push('/contacts/ct-claude-code')
+    await flush()
+    button('发消息').click()
+    await flush()
+    expect(router.currentRoute.value.fullPath).toBe(
+      '/chat/chat-reviewer/agents/dlg-chat1',
+    )
   })
 
   it('says a deleted contact is gone (card test: 联系人删除后只读)', async () => {

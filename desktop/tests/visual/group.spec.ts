@@ -173,6 +173,18 @@ async function install(page: Page) {
         message_count: 2,
         version: 1,
       },
+      {
+        id: 'chat-codex',
+        title: 'Codex · 单聊',
+        mode: 'chat',
+        surface: 'contact',
+        contact_id: 'ct-codex',
+        created_at: iso(minutes(5)),
+        updated_at: iso(minutes(5)),
+        preview: '',
+        message_count: 0,
+        version: 1,
+      },
       ...groups.map((group) => ({
         id: group.id,
         title: group.title,
@@ -292,6 +304,8 @@ async function install(page: Page) {
           return { ...memory, contactId: input.contactId }
         case 'contacts.openChat':
           return extraSessions[0]
+        case 'contacts.chatDelegation':
+          return { delegationId: null }
         case 'contacts.feedback':
           return { entry: memory.entries[1], memory }
         case 'groups.list':
@@ -478,6 +492,20 @@ for (const theme of ['dark', 'light'] as const) {
     await form.getByRole('button', { name: '记下' }).click()
     await expect(form).toHaveCount(0)
     await expect(page.getByText('已记进「审稿人」的个人记忆')).toBeVisible()
+  })
+
+  test(`GRP-11 · a single chat with Codex before its first message (${theme})`, async ({
+    page,
+  }) => {
+    await install(page)
+    await open(page, '/chat/chat-codex', theme)
+    const composer = page.locator('[data-external-chat-composer]')
+    await expect(composer.getByRole('textbox')).toHaveAttribute(
+      'placeholder',
+      '给 Codex 发消息',
+    )
+    await expect(composer).toContainText('单聊里它只读、不改文件')
+    await shot(page, `chat-codex-${theme}`)
   })
 }
 

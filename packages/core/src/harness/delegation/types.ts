@@ -420,8 +420,10 @@ export interface DelegationOwner {
   /**
    * group: a Claude Code or Codex member speaking in a group (GRP-09); the
    * group scheduler waits for the run, so it never wakes the member session.
+   * contact: the user's own single chat with Claude Code or Codex (GRP-11);
+   * the chat page follows the delegation, its runs never wake the session.
    */
-  source: 'human' | 'model' | 'workflow' | 'scheduler' | 'group'
+  source: 'human' | 'model' | 'workflow' | 'scheduler' | 'group' | 'contact'
 }
 export interface DelegationStart {
   backend: ExternalBackend

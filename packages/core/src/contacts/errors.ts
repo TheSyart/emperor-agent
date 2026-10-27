@@ -79,15 +79,26 @@ export class ContactDeletedError extends EmperorError {
   }
 }
 
-/**
- * A single chat with Claude Code or Codex (GRP-05): not yet — an external
- * contact speaks in groups (GRP-09); its own chat is a later change.
- */
+/** A message for Claude Code or Codex sent to a session that is not their single chat (GRP-11). */
 export class ContactChatUnavailableError extends EmperorError {
   constructor(readonly contactName: string) {
     super(
-      `和「${contactName}」单聊即将推出；现在可以把它拉进群聊`,
+      `「${contactName}」不是和 Claude Code、Codex 的单聊，消息没有发出`,
       'contact_chat_unavailable',
+    )
+  }
+}
+
+/**
+ * A message for a chat with Claude Code or Codex sent as an ordinary turn
+ * (GRP-11): it goes to the executor (`contacts.chatSend`), never to a local
+ * agent speaking for it.
+ */
+export class ContactExternalChatError extends EmperorError {
+  constructor(readonly contactName: string) {
+    super(
+      `和「${contactName}」的单聊发给它本身，不会由本地模型代答`,
+      'contact_chat_external',
     )
   }
 }

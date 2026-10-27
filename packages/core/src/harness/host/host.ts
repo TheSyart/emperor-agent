@@ -116,6 +116,7 @@ import {
 } from '../../contacts/runtime'
 import {
   ContactDeletedError,
+  ContactExternalChatError,
   ContactPermissionError,
 } from '../../contacts/errors'
 import { SessionProjector, type UiEvent } from '../projection/projector'
@@ -1216,13 +1217,18 @@ export class HarnessHost {
     this.clampContactPermission(agent)
   }
 
-  /** A deleted contact's session can be read, not written to (GRP-05 shows it read-only). */
-  private async refuseDeletedContact(agent: Agent): Promise<void> {
+  /**
+   * A deleted contact's session can be read, not written to (GRP-05 shows
+   * it read-only); Claude Code's and Codex's take no local turn (GRP-11).
+   */
+  private async refuseContactTurn(agent: Agent): Promise<void> {
     const binding = this.contactBindings.get(agent.id)
     if (binding === undefined || this.contactRuntime === null) return
     await this.contactRuntime.ready()
-    if (binding.refresh().contact === null)
-      throw new ContactDeletedError(binding.contactId)
+    const contact = binding.refresh().contact
+    if (contact === null) throw new ContactDeletedError(binding.contactId)
+    if (contact.kind === 'external')
+      throw new ContactExternalChatError(contact.name)
   }
 
   /**
@@ -1237,6 +1243,10 @@ export class HarnessHost {
     if (binding === undefined) return undefined
     if (binding.snapshot.contact === null)
       throw new ContactDeletedError(binding.contactId)
+    // Claude Code and Codex answer for themselves: a local model never
+    // takes a turn as one of them (GRP-11).
+    if (binding.snapshot.contact.kind === 'external')
+      throw new ContactExternalChatError(binding.snapshot.contact.name)
     const missing = binding.missingModel()
     if (missing === null) return undefined
     const fallback = this.contactRuntime?.defaultModelName() ?? '默认模型'
@@ -2596,7 +2606,7 @@ export class HarnessHost {
     beforeSend?: (messageId: string, agent: Agent) => void,
   ): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
-    await this.refuseDeletedContact(agent)
+    await this.refuseContactTurn(agent)
     const message: UserMessage = createUserMessage({
       content: this.userContent(input),
       source: { kind: 'user' },

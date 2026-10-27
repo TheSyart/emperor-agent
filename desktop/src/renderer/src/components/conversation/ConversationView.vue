@@ -112,6 +112,12 @@ import {
   groupPageOf,
 } from './contactChat'
 import ChildComposer from '../composer/ChildComposer.vue'
+import {
+  EXTERNAL_CHAT_INTRO,
+  externalChatLocation,
+  externalChatPlaceholder,
+  sendExternalChat,
+} from '../contacts/externalChat'
 import { useProvisionalPrompts } from './provisionalPrompts'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
@@ -601,6 +607,52 @@ const chatFeedback: ChatFeedback = {
       return false
     }
   },
+}
+// ── a single chat with Claude Code or Codex (GRP-11) ─────────────────────
+/**
+ * Once it has a delegation the chat opens on that delegation's page (a
+ * deleted contact's too, to be read); before, its home takes the first
+ * message with a plain composer.
+ */
+const externalChat = computed(() =>
+  contactChat.value?.external ? contactChat.value : null,
+)
+const externalComposer = ref<InstanceType<typeof ChildComposer> | null>(null)
+const externalSending = ref(false)
+const externalSendError = ref('')
+watch(
+  () =>
+    knownSession.value?.surface === 'contact' ? knownSession.value.id : null,
+  async (sessionId) => {
+    externalSendError.value = ''
+    if (!sessionId) return
+    try {
+      const { delegationId } = await core('contacts.chatDelegation', {
+        sessionId,
+      })
+      if (delegationId && routeSessionId.value === sessionId)
+        await router.replace(externalChatLocation(sessionId, delegationId))
+    } catch {
+      // The chat's own page stays; its first message tries again.
+    }
+  },
+  { immediate: true },
+)
+async function sendToExternalChat(text: string) {
+  const sessionId = viewingId.value
+  if (!sessionId || externalSending.value) return
+  externalSending.value = true
+  externalSendError.value = ''
+  try {
+    const target = await sendExternalChat(sessionId, text)
+    externalComposer.value?.clear()
+    await router.replace(target)
+  } catch (error) {
+    externalSendError.value =
+      error instanceof Error ? error.message : String(error)
+  } finally {
+    externalSending.value = false
+  }
 }
 // A group's own session opens on the group's page (GRP-08 fills it in).
 watch(
@@ -1347,7 +1399,10 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :mode="heroMode"
         :address-name="ctx.boot.value?.profileOnboarding?.addressName ?? null"
         :speaker="contactChat?.speaker ?? null"
-        :speaker-intro="contactChat?.contact?.intro ?? ''"
+        :speaker-intro="
+          contactChat?.contact?.intro ||
+          (externalChat ? EXTERNAL_CHAT_INTRO : '')
+        "
       />
       <template v-if="child">
         <TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />
@@ -1364,6 +1419,17 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @stop="stopChild"
         />
       </template>
+      <ChildComposer
+        v-else-if="externalChat?.speaker"
+        ref="externalComposer"
+        data-external-chat-composer
+        :placeholder="externalChatPlaceholder(externalChat.speaker.name)"
+        idle-hint="单聊里它只读、不改文件"
+        :sending="externalSending"
+        :error="externalSendError || undefined"
+        :can-stop="false"
+        @send="sendToExternalChat"
+      />
       <div v-else class="stack">
         <ChangesPill
           v-if="!takeoverOpen && viewingId"

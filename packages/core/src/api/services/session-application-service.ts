@@ -1,7 +1,4 @@
-import {
-  ContactChatUnavailableError,
-  ContactNotFoundError,
-} from '../../contacts/errors'
+import { ContactNotFoundError } from '../../contacts/errors'
 import { CoreMutationGuardError } from '../mutation-guard'
 import type {
   SessionEntry,
@@ -120,12 +117,10 @@ export class CoreSessionApplicationService {
     return this.createContactChat(contact.id)
   }
 
-  /** A contact one can chat with alone: it exists and is not Claude Code or Codex. */
+  /** A contact one can chat with alone: one that exists (Claude Code and Codex too, GRP-11). */
   private chatContact(contactId: string): ContactFacts {
     const contact = this.deps.contact?.(contactId) ?? null
     if (!contact) throw new ContactNotFoundError(contactId)
-    if (contact.kind === 'external')
-      throw new ContactChatUnavailableError(contact.name)
     return contact
   }
 

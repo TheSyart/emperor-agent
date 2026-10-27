@@ -998,3 +998,47 @@ it('VER-06 · a version failure shows its reason and buttons in a banner; an old
   const old = await mount()
   expect(old.querySelector('[data-version-failure-banner]')).toBeNull()
 })
+
+it('GRP-11 · a single chat with Codex leads back to the contact, never to the chat that opens it', async () => {
+  useSession().sessions.value = [
+    {
+      id: 'root',
+      title: 'Codex · 单聊',
+      surface: 'contact',
+      contact_id: 'ct-codex',
+    } as never,
+  ]
+  const base = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    async (key: string, input: Record<string, unknown>) => {
+      const result = await base(key, input)
+      if (key === 'delegations.get')
+        result.record.owner = {
+          rootSessionId: 'root',
+          parentAgentId: 'root',
+          source: 'contact',
+        }
+      return result
+    },
+  )
+  const dom = await mount()
+  expect(dom.querySelector('nav')!.textContent).toContain('联系人')
+  expect(dom.querySelector('nav')!.textContent).not.toContain('主会话')
+  expect(
+    dom.querySelector('[data-child-input]')!.getAttribute('placeholder'),
+  ).toBe('给 Codex 发消息')
+  const back = dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!
+  expect(back.getAttribute('aria-label')).toBe('返回联系人档案')
+  back.click()
+  await settle()
+  expect(bridge.push).toHaveBeenLastCalledWith({
+    name: 'contact',
+    params: { id: 'ct-codex' },
+  })
+  dom.querySelector<HTMLButtonElement>('[data-chat-contact]')!.click()
+  await settle()
+  expect(bridge.push).toHaveBeenCalledTimes(2)
+  expect(bridge.push).not.toHaveBeenCalledWith(
+    expect.objectContaining({ name: 'chat' }),
+  )
+})

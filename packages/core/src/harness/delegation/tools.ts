@@ -100,6 +100,7 @@ export interface DelegationToolService {
       delivery: 'queue' | 'steer'
       expectedRunId?: string
       signal?: AbortSignal
+      taskScopeId?: string
     },
   ): Promise<{
     messageId: string
