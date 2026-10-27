@@ -378,6 +378,41 @@ function savedAppMode(home: string): string {
   }
 }
 
+interface ListedSession {
+  id: string
+  updated_at?: number
+  archived_at?: number | null
+  project_path?: string | null
+  surface?: string | null
+}
+
+/**
+ * The most recently updated session a list shows, with its mode by the
+ * D2 rule (runtime/appMode): a group or contact → group, a project → build,
+ * otherwise chat. Group members' and trials' sessions are never listed.
+ */
+function latestListed(
+  sessions: readonly ListedSession[],
+): { id: string; mode: 'chat' | 'build' | 'group' } | null {
+  const listed = sessions
+    .filter(
+      (session) =>
+        !session.archived_at &&
+        session.surface !== 'group_member' &&
+        session.surface !== 'trial',
+    )
+    .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))
+  const latest = listed[0]
+  if (!latest) return null
+  const mode =
+    latest.surface === 'group' || latest.surface === 'contact'
+      ? 'group'
+      : latest.project_path?.trim()
+        ? 'build'
+        : 'chat'
+  return { id: latest.id, mode }
+}
+
 // ---------------------------------------------------------------------------
 
 interface Sessions {
@@ -685,29 +720,37 @@ async function main(): Promise<void> {
     await shortcuts(page, ids)
     await crossModeNotification(page, model, ids)
 
-    // Last: the menu picks Chat, though the latest session is in Build; a
-    // restart opens Chat on its last session.
-    let before = ''
+    // Last: a Build turn makes Build the latest session (the mode a home
+    // without a saved one would open), then the menu picks Chat; a restart
+    // opens Chat on its last session.
     await check(
       page,
       'the mode picked in the menu survives a restart',
       async () => {
+        await page.keyboard.press('ControlOrMeta+2')
+        await brandIs(page, 'Emperor Build')
+        model.enqueue(() => ({ text: '重启前的最后一轮。' }))
+        await send(page, '重启前再答一轮')
+        await replyShown(page, '重启前的最后一轮。')
         await pickInMenu(page, 'Chat')
         await brandIs(page, 'Emperor Chat')
+        await until(
+          async () => (await urlSession(page)) === ids.chat,
+          10_000,
+          'the Chat session',
+        )
         await until(
           () => savedAppMode(home) === 'chat',
           10_000,
           'sidebar_state.json to hold app_mode chat',
         )
-        const latest = (
-          await core<Array<{ id: string; updated_at?: number }>>(
-            page,
-            'sessions.list',
-          )
+        const latest = latestListed(
+          await core<ListedSession[]>(page, 'sessions.list'),
         )
-          .filter((session) => session.id !== ids.group)
-          .sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))[0]?.id
-        before = latest ?? ''
+        if (latest?.mode !== 'build')
+          throw new Error(
+            `the latest session is ${latest?.id} (${latest?.mode}), not Build`,
+          )
         await app!.close()
         app = null
         const relaunched = await launch(home)
@@ -725,7 +768,7 @@ async function main(): Promise<void> {
         await page.screenshot({ path: join(shots, 'after-restart.png') })
         return {
           saved: savedAppMode(home),
-          latestBeforeRestart: before === ids.buildSecond ? 'Build' : before,
+          latestBeforeRestart: latest.mode,
           opened: 'Chat',
         }
       },
