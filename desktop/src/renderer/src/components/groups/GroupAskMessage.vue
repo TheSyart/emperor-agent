@@ -210,6 +210,7 @@ function setFreeform(id: string, value: string): void {
               :active="askOptionActive(draft(question), question, option)"
               :aria-pressed="askOptionActive(draft(question), question, option)"
               :title="option.description || undefined"
+              class="reply"
               data-reply
               @click="tap(question, option)"
               >{{ option.label }}</Chip
@@ -322,6 +323,17 @@ function setFreeform(id: string, value: string): void {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1-5);
+}
+
+.reply {
+  background: rgb(var(--surface-raised));
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  color: rgb(var(--text-1));
+}
+
+.reply[data-active] {
+  background: rgb(var(--accent-soft));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent));
 }
 
 .own {

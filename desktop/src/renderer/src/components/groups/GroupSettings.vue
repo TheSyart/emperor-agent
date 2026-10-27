@@ -2,10 +2,11 @@
 /**
  * GroupSettings — 群设置, `/groups/:groupId/settings` (GRP-08, 预览 B 第 5
  * 步): the name; the announcement every member reads before speaking
- * (群公告, saved with 「保存公告」); the members (移出, 邀请); the
+ * (群公告, saved with 「保存公告」); the
  * collaboration (自主 / 主持人审核 — 设置 › 群聊 holds the default, this
  * changes the group only) and the moderator; then 每轮结束时主持人出结论,
- * 防打转 and 安静模式, each saved at once; last, the group's files.
+ * 防打转 and 安静模式, each saved at once (预览 B 第 5 步's order); then
+ * the members; last, the group's files.
  * Every change goes to `groups.update` (members: addMember / removeMember)
  * and shows what Core returns; a change that fails says so and goes back.
  */
@@ -276,6 +277,58 @@ function back(): void {
 
         <section class="block">
           <h2 class="block-title">
+            协作方式 <small>默认值在「设置 › 群聊」，这里只改本群</small>
+          </h2>
+          <div class="options" role="radiogroup" aria-label="协作方式">
+            <Surface
+              v-for="option in COLLABORATIONS"
+              :key="option.value"
+              as="button"
+              pad="sm"
+              interactive
+              role="radio"
+              class="option"
+              :aria-checked="settings.collaboration === option.value"
+              :data-collaboration-option="option.value"
+              @click="setSetting('collaboration', option.value)"
+            >
+              <b>{{ option.title }}</b>
+              <span>{{ option.text }}</span>
+            </Surface>
+          </div>
+          <p class="hint">
+            你自己的 @
+            和交办永远不需要审核；不论哪种方式，改项目代码都要你确认。
+          </p>
+          <Field label="主持人">
+            <Select
+              :model-value="group.moderator ?? ''"
+              :options="moderatorOptions"
+              size="sm"
+              @update:model-value="setModerator(String($event))"
+            />
+          </Field>
+        </section>
+
+        <section
+          v-for="item in SWITCHES"
+          :key="item.key"
+          class="switch-row"
+          :data-setting="item.key"
+        >
+          <Switch
+            :model-value="settings[item.key]"
+            :aria-label="item.title"
+            @update:model-value="setSetting(item.key, $event)"
+          />
+          <span class="switch-text">
+            <b>{{ item.title }}</b>
+            <span>{{ item.text }}</span>
+          </span>
+        </section>
+
+        <section class="block">
+          <h2 class="block-title">
             成员 {{ group.members.length }}
             <Button
               size="sm"
@@ -325,58 +378,6 @@ function back(): void {
               >
             </li>
           </ul>
-        </section>
-
-        <section class="block">
-          <h2 class="block-title">
-            协作方式 <small>默认值在「设置 › 群聊」，这里只改本群</small>
-          </h2>
-          <div class="options" role="radiogroup" aria-label="协作方式">
-            <Surface
-              v-for="option in COLLABORATIONS"
-              :key="option.value"
-              as="button"
-              pad="sm"
-              interactive
-              role="radio"
-              class="option"
-              :aria-checked="settings.collaboration === option.value"
-              :data-collaboration-option="option.value"
-              @click="setSetting('collaboration', option.value)"
-            >
-              <b>{{ option.title }}</b>
-              <span>{{ option.text }}</span>
-            </Surface>
-          </div>
-          <p class="hint">
-            你自己的 @
-            和交办永远不需要审核；不论哪种方式，改项目代码都要你确认。
-          </p>
-          <Field label="主持人">
-            <Select
-              :model-value="group.moderator ?? ''"
-              :options="moderatorOptions"
-              size="sm"
-              @update:model-value="setModerator(String($event))"
-            />
-          </Field>
-        </section>
-
-        <section
-          v-for="item in SWITCHES"
-          :key="item.key"
-          class="switch-row"
-          :data-setting="item.key"
-        >
-          <Switch
-            :model-value="settings[item.key]"
-            :aria-label="item.title"
-            @update:model-value="setSetting(item.key, $event)"
-          />
-          <span class="switch-text">
-            <b>{{ item.title }}</b>
-            <span>{{ item.text }}</span>
-          </span>
         </section>
 
         <section class="block">
