@@ -398,6 +398,29 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         group_id: string
       }
     | {
+        /** A group turn started, someone speaks, or it ended (GRP-07); `spend` so far. */
+        event: 'group_turn_changed'
+        group_id: string
+        turn_id: string
+        state:
+          | 'started'
+          | 'planning'
+          | 'speaking'
+          | 'paused'
+          | 'finished'
+          | 'stopped'
+        speakers?: string[]
+        reason?: string
+        spend: { usd: number; tokens: number }
+      }
+    | {
+        /** A member of a group is thinking, queued, idle or failed (GRP-07). */
+        event: 'group_member_status'
+        group_id: string
+        contact_id: string
+        status: 'idle' | 'thinking' | 'queued' | 'error'
+      }
+    | {
         /** Installed plugins, their toggles, the active project, or a plugin hook's failure changed. */
         event: 'plugins_changed'
         reason: 'plugins' | 'project' | 'hooks'

@@ -108,6 +108,7 @@ import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
 import { readPersonaText } from '../prompt/persona'
+import { GROUP_TOOL_NAMES } from '../../groups/tools'
 import {
   presetRank,
   type ContactBinding,
@@ -1993,6 +1994,8 @@ export class HarnessHost {
             entry.contact_id,
             opened,
             () => opened.cwd ?? this.chatWorkspace(),
+            // A member's own session in a group has the group tools (GRP-07).
+            entry.surface === 'group_member' ? GROUP_TOOL_NAMES : [],
           )
         : undefined
     if (binding !== undefined) this.contactBindings.set(sessionId, binding)

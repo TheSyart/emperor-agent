@@ -165,6 +165,7 @@ const EXPECTED_OPERATIONS = [
   'groups.list',
   'groups.removeMember',
   'groups.send',
+  'groups.stop',
   'groups.update',
   'hooks.cancelRun',
   'hooks.getAudit',

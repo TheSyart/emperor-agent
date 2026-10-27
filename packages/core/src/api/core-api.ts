@@ -128,6 +128,8 @@ import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { ContactStore } from '../contacts/store'
 import type { GroupEventMap } from '../groups/events'
+import type { GroupScheduler } from '../groups/scheduler'
+import { installGroupRuntime } from './services/group-runtime'
 import {
   GroupService,
   type GroupCreateInput,
@@ -470,6 +472,7 @@ export class CoreApi {
   /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
   readonly contactStore: ContactStore
   readonly groupService: GroupService
+  readonly groupScheduler: GroupScheduler
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
   readonly contactMemoryService: CoreContactMemoryService
   readonly modelService: CoreModelService
@@ -704,6 +707,13 @@ export class CoreApi {
           reason: change.reason,
           group_id: change.groupId,
         }),
+    })
+    // Who speaks when; member speeches are background turns (GRP-07).
+    this.groupScheduler = installGroupRuntime({
+      host,
+      sessions: kept.sessionStore,
+      groups: this.groupService,
+      tokenTracker: kept.tokenTracker,
     })
     this.contactMemoryService = new CoreContactMemoryService({
       contacts: this.contactStore,
@@ -2012,6 +2022,8 @@ export class CoreApi {
           new Promise<void>((done) => setTimeout(done, 2000).unref()),
         ])
       this.updateService.close()
+      // Group turns stop before the sessions they speak in close.
+      await this.groupScheduler.shutdown()
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
@@ -3577,11 +3589,28 @@ export class CoreApi {
       await this.contactStore.ready()
       return this.groupService.removeMember(input.id, input.contactId)
     },
+    /** Log what the user sent and start (or re-plan) the turn. */
     send: async (input: { id: string } & GroupSendInput) => {
       await this.contactStore.ready()
       const { id, ...send } = input
-      return this.groupService.send(id, send)
+      const sent = this.groupService.send(id, send)
+      void this.groupScheduler
+        .start(id, sent.message, sent.plan)
+        .catch((error: unknown) =>
+          logger.warn('group turn failed', {
+            groupId: id,
+            error: String(error),
+          }),
+        )
+      return sent
     },
+    /** Stop the group's turn: speeches aborted, tasks cancelled. */
+    stop: async (input: { id: string }) => {
+      this.groupService.state(input.id)
+      return { stopped: this.groupScheduler.stop(input.id) }
+    },
+    /** Resolves once the group's current turn has settled (tests, shutdown). */
+    settled: (id: string) => this.groupScheduler.settled(id),
     history: async (input: { id: string; before?: string; limit?: number }) => {
       await this.contactStore.ready()
       return this.groupService.history(input.id, input)

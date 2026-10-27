@@ -169,6 +169,18 @@ export class GroupScheduler {
     return this.runs.has(groupId)
   }
 
+  /** Resolves once the group's current run (if any) has settled. */
+  settled(groupId: string): Promise<void> {
+    return this.runs.get(groupId)?.done ?? Promise.resolve()
+  }
+
+  /** Core is closing: every run stops (`app_close`) and is waited for. */
+  async shutdown(): Promise<void> {
+    const runs = [...this.runs.values()]
+    for (const run of runs) this.halt(run, 'app_close')
+    await Promise.allSettled(runs.map((run) => run.done))
+  }
+
   /**
    * Run the plan of the user's new message. While a turn runs, the member
    * speaking finishes and the queue is replaced by the new plan.
@@ -210,6 +222,13 @@ export class GroupScheduler {
   stop(groupId: string): boolean {
     const run = this.runs.get(groupId)
     if (!run || run.stopped) return false
+    this.halt(run, 'user')
+    return true
+  }
+
+  private halt(run: Run, reason: 'user' | 'app_close'): void {
+    if (run.stopped) return
+    const groupId = run.groupId
     run.stopped = true
     run.queue = []
     run.pending = null
@@ -221,8 +240,7 @@ export class GroupScheduler {
           ...task,
           state: 'cancelled',
         })
-    this.turn(run, 'stopped', 'user')
-    return true
+    this.turn(run, 'stopped', reason)
   }
 
   /** Turns a restart left open are marked stopped (`app_restart`). */
