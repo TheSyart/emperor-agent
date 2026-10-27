@@ -2,39 +2,39 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、发布维护者<br>
-> 最后核验：2026-10-22（对照 `b4b98b8c`）<br>
-> 事实源：`assets/generated/emperor-mark.svg`、`desktop/src/renderer/src/components/brand/BrandMark.vue`、`desktop/src/renderer/public/favicon.svg`、`desktop/build/icon.png`、`desktop/build/background.tiff`、`desktop/electron-builder.yml`（`dmg`）、`assets/generated/model-setup-hero-{dark,light}.webp`、`assets/generated/readme-product-hero.png`（`desktop/tests/visual/dsh-v1.spec.ts`）、`assets/generated/PROMPTS.md`
+> 最后核验：2026-10-27（对照 `ed72ffcd`）<br>
+> 事实源：`assets/generated/emperor-mark.svg`、`assets/generated/emperor-app-icon.svg`、`desktop/scripts/render-brand-icons.mjs`、`desktop/src/renderer/src/components/brand/BrandMark.vue`、`desktop/src/renderer/public/favicon.svg`、`desktop/build/icon.png`、`desktop/build/background.tiff`、`desktop/electron-builder.yml`（`dmg`）、`assets/generated/model-setup-hero-{dark,light}.webp`、`assets/generated/readme-product-hero.png`（`desktop/tests/visual/dsh-v1.spec.ts`）、`assets/generated/PROMPTS.md`
 
-Emperor 的标是一枚现代印章：圆角方框里，一条冠线压在左右对称的结构上，中间一个小六边形节点暗示 Agent。它没有可读的字母或汉字，只用一种颜色。0.2 起所有品牌位置都用同一份矢量几何，不再使用位图字标。
+Emperor 的标是一枚冠印（0.3，BRD-02）：一顶三尖王冠，冠带厚、底部正中一个方缺口，像印章的印纽。界面里它刻在一块金色圆角方块上（王冠镂空），应用图标里它是石墨方块上的一顶金冠。没有可读的字母或汉字；所有品牌位置都用同一份矢量几何，不用位图。
 
 ## 标
 
-| 项目     | 规则                                                                                                                                                                   |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 几何     | `assets/generated/emperor-mark.svg`：`viewBox="141 141.5 970 970"`，五个形状（外框、六边形、冠线、左右对称的两半）。右半是左半以 x = 626.5 为轴的镜像。                |
-| 颜色     | 界面里用 `--brand`（随主题变化）；脱离界面的文件（README、favicon、安装包）用 `#D4AA5E`。只用一种颜色，不加渐变、描边或阴影。                                          |
-| 界面组件 | `BrandMark.vue` 内联同一份路径，`size` 默认 24。侧栏品牌行 22、窄轨 24、空会话首屏 34、首启引导 22。                                                                   |
-| 最小尺寸 | 16px 仍可辨认（favicon 与扩展 16px 图标已核对）；更小时不用标，只写名字。                                                                                              |
-| 名字     | 标旁的名字写「Emperor Agent」（首启引导）或「Emperor」（侧栏），用系统字体 600，不做成图片。                                                                           |
-| 不要     | 改比例、拆开单独使用六边形、给标加底色块（应用图标除外）、换成其他颜色、与旧的六边形 lucide 图标混用（`icons.ts` 不导出 `brandIcon`，`brandMarkUsage.test.ts` 检查）。 |
+| 项目     | 规则                                                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 几何     | `assets/generated/emperor-mark.svg`：`viewBox="12 12 976 976"`，一条 `evenodd` 路径——950 的圆角方块（圆角 210），王冠按 62% 镂空在正中。王冠左右对称，三个尖是圆角，方缺口宽 104、深 82（王冠自身 850 单位宽）。 |
+| 颜色     | 界面里用 `--brand`（浅色主题深金、深色主题亮金）；脱离界面的文件（README、favicon）用 `#D4AA5E`。只用一种颜色，不加渐变、描边或阴影；镂空处露出底下的背景。                                                      |
+| 界面组件 | `BrandMark.vue` 内联同一条路径，`size` 默认 24。侧栏品牌行 22、窄轨 24、空会话首屏 34、首启引导 22。                                                                                                             |
+| 最小尺寸 | 16px 仍可辨认（favicon、扩展 16px 图标）：王冠约 8px 宽，方缺口约 1px。更小时不用标，只写名字。                                                                                                                  |
+| 名字     | 标旁的名字写「Emperor Agent」（首启引导）或「Emperor」（侧栏），用系统字体 600，不做成图片。                                                                                                                     |
+| 不要     | 改比例、把王冠从方块里拿出来单独用（应用图标除外）、填上镂空、换成其他颜色、与旧的六边形 lucide 图标混用（`icons.ts` 不导出 `brandIcon`，`brandMarkUsage.test.ts` 检查）。                                       |
 
-一致性由 `components/brand/brandMarkUsage.test.ts` 保证：`BrandMark.vue`、`favicon.svg` 与 `emperor-mark.svg` 的路径必须相同，品牌位置必须用 `BrandMark` 且不引用退役的位图。
+一致性由 `components/brand/brandMarkUsage.test.ts` 保证：`BrandMark.vue`、`favicon.svg` 与 `emperor-mark.svg` 的路径和 `viewBox` 必须相同，应用图标的王冠必须是标里镂空的那一顶（同一条子路径），品牌位置必须用 `BrandMark` 且不引用退役的位图。
 
 ## 应用图标
 
-- `desktop/build/icon.png`：1024 × 1024，macOS 图标网格——824 × 824 的圆角方块居中（四边各留 100），深暖石墨底，金色缎面的标居中，约占方块宽度的 64%。electron-builder 由它生成 `.icns`；两个 Helper 的图标也由它生成（`native/macos/scripts/helper-icon.sh`）。
-- 浏览器扩展的 `desktop/extension/icons/icon-{16,32,48,128}.png` 由同一张图缩小。
-- 改图标时同时检查 16 / 32 / 128 三个尺寸在深浅 Dock 背景上的样子。
+- 矢量源 `assets/generated/emperor-app-icon.svg`：macOS 图标网格——1024 画布上 824 的圆角方块居中（四边各留 100，圆角 185），石墨底带极淡的上浅下深（`#2B2926` → `#1A1918`），王冠 `#D4AA5E` 居中，约占方块宽度的 64%。
+- `desktop/build/icon.png`（1024）与浏览器扩展的 `desktop/extension/icons/icon-{16,32,48,128}.png` 都由 `desktop/scripts/render-brand-icons.mjs` 从矢量源逐个尺寸渲染（仓库里的 Playwright，无头 Chromium），不是从 1024 缩小。electron-builder 由 `icon.png` 生成 `.icns`；两个 Helper 的图标也由它生成（`native/macos/scripts/helper-icon.sh`）。`main/brand-icons.test.ts` 检查尺寸和透明通道。
+- 改图标：改矢量源，再跑一次脚本；同时检查 16 / 32 / 128 三个尺寸在深浅 Dock 背景上的样子。
 
 ## 安装窗口（DMG）
 
 - `desktop/build/background.tiff` 内含 660 × 400 与 1320 × 800 两张，Retina 下不糊。
-- 象牙纸底、居中一支细金色箭头，右下角极淡的印章浮雕。
+- 象牙纸底、居中一支细金色箭头，右下角极淡的印章浮雕。浮雕还是 0.2 的旧标（Codex 画进位图里的），0.3 用新标重出后替换。
 - `electron-builder.yml` 的 `dmg`：窗口 660 × 400，图标 96；应用放在 (165, 185)，`/Applications` 链接放在 (495, 185)，与箭头同高。`release-config.test.ts` 检查这些值与 TIFF 的两种尺寸。
 
 ## 首启引导插图
 
-- `assets/generated/model-setup-hero-dark.webp`、`model-setup-hero-light.webp`：1600 × 1000，构图一致——右侧一块刻着标的石质印章、一枚钥匙和三张浮动卡片，左侧约 40% 留空。
+- `assets/generated/model-setup-hero-dark.webp`、`model-setup-hero-light.webp`：1600 × 1000，构图一致——右侧一块刻着标的石质印章、一枚钥匙和三张浮动卡片，左侧约 40% 留空。石印上刻的还是 0.2 的旧标，0.3 用新标重出后替换。
 - 首启引导（UI-S17，`onboarding/FirstRunOnboarding.vue`）铺满窗口，插图放在右侧：
   - 宽度不超过 1040px。原图 1600 宽，这样在 Retina 上仍然清楚。
   - 左、上、下三边用两层渐变遮罩（`mask-composite: intersect`）淡入画布，右边贴着窗口。

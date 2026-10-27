@@ -9,6 +9,10 @@ function readRenderer(path: string): string {
   return readFileSync(resolve(rendererRoot, path), 'utf8')
 }
 
+function viewBox(svg: string): string {
+  return /viewBox="([^"]+)"/.exec(svg)![1]!
+}
+
 function pathData(svg: string): string[] {
   return [...svg.matchAll(/\sd="([^"]+)"/g)].map((match) => match[1])
 }
@@ -41,15 +45,33 @@ describe('brand mark usage', () => {
       'utf8',
     )
     const favicon = readRenderer('../public/favicon.svg')
-    const component = pathData(readRenderer('components/brand/BrandMark.vue'))
-    const [frame, node, crown, ...half] = pathData(asset)
+    const component = readRenderer('components/brand/BrandMark.vue')
 
     expect(favicon).toBe(asset)
-    expect(component.slice(0, 3)).toEqual([frame, node, crown])
-    // The asset mirrors the left emblem with <use>; the component spells
-    // both halves out, so its fourth path is the asset's left half.
-    expect(component[3]).toBe(half.join(''))
-    expect(component).toHaveLength(5)
+    // 0.3 (BRD-02): one path, a rounded block with the crown cut out.
+    expect(pathData(asset)).toHaveLength(1)
+    expect(pathData(component)).toEqual(pathData(asset))
+    expect(asset).toContain('fill-rule="evenodd"')
+    expect(component).toContain('fill-rule="evenodd"')
+    expect(component).toContain(`viewBox="${viewBox(asset)}"`)
+  })
+
+  it('cuts the same crown out of the mark as the app icon wears (BRD-02)', () => {
+    const [mark] = pathData(
+      readFileSync(
+        resolve(repoRoot, 'assets/generated/emperor-mark.svg'),
+        'utf8',
+      ),
+    )
+    const icon = readFileSync(
+      resolve(repoRoot, 'assets/generated/emperor-app-icon.svg'),
+      'utf8',
+    )
+    // The mark's second subpath is the crown; the icon draws it in gold.
+    const crown = mark!.slice(mark!.indexOf('Z') + 1)
+    expect(crown).toMatch(/^M.+Z$/)
+    expect(pathData(icon)).toContain(crown)
+    expect(icon).toContain('viewBox="0 0 1024 1024"')
   })
 
   it('keeps key brand surfaces on BrandMark instead of brandIcon', () => {
