@@ -827,3 +827,61 @@ describe('timeline model', () => {
     ).toEqual(new Set(['a']))
   })
 })
+
+describe('a single chat with a contact (GRP-05)', () => {
+  function contactLog(): LogBuilder {
+    const log = new LogBuilder()
+    for (const turn of [1, 2]) {
+      log.user(`u${turn}`, `第 ${turn} 个问题`)
+      log.add('turn/start', { turn })
+      log.add('step/start', { turn, step: 1 })
+      log.message(turn, 1, [{ type: 'text', text: `第 ${turn} 个回答` }])
+      log.add('step/end', { turn, step: 1 })
+      log.add('turn/end', { turn, reason: { kind: 'completed' } })
+    }
+    return log
+  }
+
+  it('puts the contact’s avatar and name above each reply (card test: 头像与名字)', async () => {
+    const root = mount(
+      'contact-chat',
+      [{ id: 'contact-chat', events: [...contactLog().events] }],
+      {},
+      undefined,
+      {
+        speaker: {
+          name: '审稿人',
+          avatar: { kind: 'library', id: 'AV-01-2', label: '审稿人' },
+        },
+      },
+    )
+    await settle()
+    const speakers = [
+      ...root.querySelectorAll<HTMLElement>('[data-contact-speaker]'),
+    ]
+    expect(speakers).toHaveLength(2)
+    expect(speakers[0]!.textContent?.trim()).toBe('审稿人')
+    expect(
+      speakers[0]!.querySelector('.ds-avatar')?.getAttribute('data-avatar'),
+    ).toBe('AV-01-2')
+    // Between the question and its answer.
+    const order = [
+      ...root.querySelectorAll<HTMLElement>(
+        '[data-contact-speaker], [data-chat-flow-kind]',
+      ),
+    ].map((element) =>
+      element.dataset.contactSpeaker !== undefined
+        ? 'speaker'
+        : element.dataset.chatFlowKind,
+    )
+    expect(order.slice(0, 3)).toEqual(['user', 'speaker', 'assistant'])
+  })
+
+  it('has no speaker line in a plain chat', async () => {
+    const root = mount('plain-chat', [
+      { id: 'plain-chat', events: [...contactLog().events] },
+    ])
+    await settle()
+    expect(root.querySelector('[data-contact-speaker]')).toBeNull()
+  })
+})

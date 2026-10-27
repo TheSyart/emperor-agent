@@ -49,3 +49,13 @@ export function heroNote(mode: AppMode): string {
 export function heroPlaceholder(mode: AppMode): string {
   return PLACEHOLDER[mode]
 }
+
+/** A single chat's home (GRP-05): the contact's intro, or what it is. */
+export function contactHeroNote(intro: string): string {
+  return intro.trim() || '单聊：日志、计划模式、目标、工作台都照常'
+}
+
+/** A single chat's composer placeholder (GRP-05). */
+export function contactHeroPlaceholder(name: string): string {
+  return `给「${name}」发消息；/ 调用技能，@ 引用插件`
+}

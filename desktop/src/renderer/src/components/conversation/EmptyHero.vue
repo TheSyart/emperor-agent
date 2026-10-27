@@ -11,28 +11,49 @@
  * in a line under it where its sessions run (the project itself is the gold
  * chip in the composer).
  *
- * Props: mode? (default chat), addressName? (the profile's 称呼, null: none).
+ * A single chat with a contact (GRP-05) greets as the contact instead: its
+ * avatar and name, and its intro under them.
+ *
+ * Props: mode? (default chat), addressName? (the profile's 称呼, null:
+ * none), speaker? (a single chat's contact), speakerIntro?.
  */
 import { computed } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
 import BrandMark from '../brand/BrandMark.vue'
-import { heroHeadline, heroNote } from './heroGreeting'
+import Avatar from '../ui/Avatar.vue'
+import type { ContactSpeaker } from './contactChat'
+import { contactHeroNote, heroHeadline, heroNote } from './heroGreeting'
 
 const props = defineProps<{
   mode?: AppMode
   addressName?: string | null
+  speaker?: ContactSpeaker | null
+  speakerIntro?: string
 }>()
 const headline = computed(() =>
-  heroHeadline(props.addressName, props.mode ?? 'chat'),
+  props.speaker
+    ? props.speaker.name
+    : heroHeadline(props.addressName, props.mode ?? 'chat'),
 )
-const note = computed(() => heroNote(props.mode ?? 'chat'))
+const note = computed(() =>
+  props.speaker
+    ? contactHeroNote(props.speakerIntro ?? '')
+    : heroNote(props.mode ?? 'chat'),
+)
 </script>
 
 <template>
   <div class="empty-hero">
     <div class="glow" aria-hidden="true" />
-    <h1 class="headline">
-      <BrandMark :size="34" class="mark" />
+    <h1 class="headline" :data-contact-hero="speaker ? '' : undefined">
+      <Avatar
+        v-if="speaker"
+        v-bind="speaker.avatar"
+        :size="40"
+        labelled
+        class="mark"
+      />
+      <BrandMark v-else :size="34" class="mark" />
       <span>{{ headline }}</span>
     </h1>
     <p v-if="note" class="note">{{ note }}</p>

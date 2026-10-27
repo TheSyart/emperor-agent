@@ -395,6 +395,8 @@ export interface TurnTailChatData {
   readonly steps: number
   /** Text of the last text-bearing assistant message (copy action). */
   readonly closingText: string | null
+  /** That message's id: what 👍 / 👎 in a single chat rate (GRP-05). */
+  readonly closingMessageId?: string
 }
 
 /** `turnFiles`: the files one turn changed (E-track contract §5). */

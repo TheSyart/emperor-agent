@@ -218,7 +218,9 @@ describe('the home by mode (MOD-03)', () => {
     expect(source).toContain(':send-blocked-reason="sendBlockedReason"')
     expect(source).toContain('<template v-if="buildHomeShown" #lead>')
     expect(source).toContain('<HeroProjectChip')
-    expect(source).toContain(':hero-placeholder="heroPlaceholder(heroMode)"')
+    // The mode's placeholder, or a single chat's contact's (GRP-05).
+    expect(source).toContain(':hero-placeholder="composerHeroPlaceholder"')
+    expect(source).toContain(': heroPlaceholder(heroMode.value)')
   })
 
   it('4 · 5 · 6 · the Build home lists recent projects and takes a dropped folder', () => {
@@ -241,5 +243,33 @@ describe('the home by mode (MOD-03)', () => {
     expect(source).toContain('firstRunOpen: ctx.firstRunOpen.value')
     expect(context).toContain('firstRunOpen: Readonly<Ref<boolean>>')
     expect(app).toMatch(/provideAppContext\(\{[\s\S]*firstRunOpen,/)
+  })
+})
+
+describe('a single chat with a contact (GRP-05)', () => {
+  it('reads the contact of the session on screen and shows its speaker line', () => {
+    expect(source).toContain('contactChatOf(knownSession.value')
+    expect(source).toMatch(
+      /<ChatTimeline[\s\S]*?:speaker="contactChat\?\.speaker/,
+    )
+  })
+
+  it('takes 👍 / 👎 to contacts.feedback', () => {
+    expect(source).toContain("core('contacts.feedback'")
+  })
+
+  it('turns read-only once the contact is deleted', () => {
+    expect(source).toContain('CONTACT_DELETED_REASON')
+  })
+
+  it('sends a message handed over to be sent (the Group home’s @)', () => {
+    expect(source).toContain('takeHandoff(ownerSessionId)')
+    expect(source).toMatch(
+      /sendFromComposer\(\{\s*content: handoff\.text\s*\}\)/,
+    )
+  })
+
+  it('moves a group’s session to its page', () => {
+    expect(source).toContain('groupPageOf(knownSession.value)')
   })
 })

@@ -106,6 +106,7 @@ interface StepReading {
   readonly completedTime: number | null
   readonly usage: TokenUsage | null
   readonly closingText: string | null
+  readonly closingMessageId: string | null
 }
 
 interface TurnTailState {
@@ -121,6 +122,7 @@ const EMPTY_READING: StepReading = {
   completedTime: null,
   usage: null,
   closingText: null,
+  closingMessageId: null,
 }
 
 function withStep(
@@ -168,6 +170,7 @@ function applyTail(
       completedTime: event.time,
       usage: event.data.usage ?? reading.usage,
       closingText: text === '' ? null : text,
+      closingMessageId: text === '' ? null : event.data.message.id,
     }))
   }
   return state
@@ -211,10 +214,14 @@ function tailData(state: TurnTailState): TurnTailChatData | null {
   let decodeMs = 0
   let outputTokens = 0
   let closingText: string | null = null
+  let closingMessageId: string | null = null
   let steps = 0
   for (const [, reading] of ordered) {
     if (reading.completedTime !== null) steps++
-    if (reading.closingText !== null) closingText = reading.closingText
+    if (reading.closingText !== null) {
+      closingText = reading.closingText
+      closingMessageId = reading.closingMessageId
+    }
     if (
       reading.firstTokenTime !== null &&
       reading.completedTime !== null &&
@@ -232,6 +239,7 @@ function tailData(state: TurnTailState): TurnTailChatData | null {
     usage: sumUsage(state.steps.values()),
     steps,
     closingText,
+    ...(closingMessageId === null ? {} : { closingMessageId }),
     ...(state.startedAt === null
       ? {}
       : { durationMs: Math.max(0, end.time - state.startedAt) }),

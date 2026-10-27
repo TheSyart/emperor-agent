@@ -18,7 +18,12 @@
  * reports them with the rows (the status bar above the composer shows only
  * while no group at work is in view).
  *
- * Props: sessionId; store? (injected ConversationStore — tests/gallery).
+ * In a single chat with a contact (GRP-05) the contact's avatar and name
+ * head each reply (`speaker`, ContactSpeakerLine above the first row after
+ * the user's message), and `feedback` puts 👍 / 👎 in the turn tails.
+ *
+ * Props: sessionId; store? (injected ConversationStore — tests/gallery);
+ * speaker?, feedback? (a single chat with a contact).
  * Emits: inspect(callId), open-subagent(sessionId), edit-message(text),
  * first-visible(key | null) — the topmost visible row, reported once per
  * frame while the reader scrolls (the turn scrubber's active tick);
@@ -57,7 +62,13 @@ import {
 import { DsChevronDown } from '../icons/ds'
 import { useUiPreferences } from '../../composables/useUiPreferences'
 import ChatNodeSeat from './ChatNodeSeat.vue'
-import { createExpansionStore, provideChatContext } from './chatContext'
+import {
+  createExpansionStore,
+  provideChatContext,
+  type ChatFeedback,
+} from './chatContext'
+import ContactSpeakerLine from './ContactSpeakerLine.vue'
+import { speakerRowIds, type ContactSpeaker } from './contactChat'
 import TurnStatus from './TurnStatus.vue'
 import ProvisionalUserBubble from './nodes/ProvisionalUserBubble.vue'
 import ConversationLoading from './ConversationLoading.vue'
@@ -81,8 +92,18 @@ const props = withDefaults(
     store?: ConversationStore
     /** Messages inserted into the running turn, not in the log yet (BUG-07). */
     provisional?: ProvisionalPrompt[]
+    /** A single chat's contact, above each reply (GRP-05). */
+    speaker?: ContactSpeaker
+    /** 👍 / 👎 under its replies (GRP-05). */
+    feedback?: ChatFeedback
   }>(),
-  { store: undefined, rootSessionId: undefined, provisional: () => [] },
+  {
+    store: undefined,
+    rootSessionId: undefined,
+    provisional: () => [],
+    speaker: undefined,
+    feedback: undefined,
+  },
 )
 const emit = defineEmits<{
   inspect: [callId: string]
@@ -145,6 +166,13 @@ provideChatContext({
     observe: observeAgents,
     highlighted: () => highlightedAgents.value,
   },
+  // Read through the prop each time: the contact's memory switch can change.
+  feedback: {
+    enabled: () => props.feedback?.enabled() === true,
+    rated: (turn) => props.feedback?.rated(turn) ?? null,
+    submit: async (input) =>
+      props.feedback ? props.feedback.submit(input) : false,
+  },
 })
 const { preferences } = useUiPreferences()
 
@@ -186,6 +214,12 @@ const rows = computed<readonly TimelineRow[]>(() => {
   return previousRows
 })
 const rowIndex = computed(() => rowIndexOf(rows.value))
+/** The rows a reply starts with, under the speaker line (GRP-05). */
+const speakerRows = computed(() => {
+  const current = snapshot.value
+  if (!props.speaker || current === undefined) return new Set<string>()
+  return speakerRowIds(rows.value, (id) => current.nodes.get(id)?.kind)
+})
 const itemCache = new WeakMap<TimelineRow, { id: string; row: TimelineRow }>()
 const items = computed(() =>
   rows.value.map((row) => {
@@ -565,6 +599,10 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
         >
           <template #default="{ item, active }">
             <DynamicScrollerItem :item="item" :active="active">
+              <ContactSpeakerLine
+                v-if="speaker && speakerRows.has(item.id)"
+                :speaker="speaker"
+              />
               <template v-if="handle">
                 <ProcessGroup
                   v-if="item.row.kind === 'process'"

@@ -871,6 +871,25 @@ describe('turn footer', () => {
     expect(describeNodes(snapshot).at(-1)).toBe('turnTail: turn 1 steps=1')
     expectConverges(log)
   })
+
+  it('names the reply it closes on, for 👍 / 👎 in a single chat (GRP-05)', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'review it')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'Looking.' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('step/start', { turn: 1, step: 2 })
+    log.message(1, 2, [{ type: 'text', text: 'Fix the overflow first.' }])
+    log.add('step/end', { turn: 1, step: 2 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    const { snapshot } = replay(log.events)
+    expect(nodeOf(snapshot, 'turnTail').data).toMatchObject({
+      closingText: 'Fix the overflow first.',
+      closingMessageId: 'msg-1-2',
+    })
+    expectConverges(log)
+  })
 })
 
 describe('task budget (KRN-03)', () => {

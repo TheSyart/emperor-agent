@@ -27,6 +27,23 @@ export interface ExpansionStore {
   set(key: string, value: boolean): void
 }
 
+/**
+ * 👍 / 👎 under the replies of a single chat with a contact (GRP-05): shown
+ * while `enabled()` (its personal memory is on); `submit` writes the
+ * rating, one line of why and the reply's id to the contact's memory and
+ * says whether it went through; `rated` is what this window recorded.
+ */
+export interface ChatFeedback {
+  enabled(): boolean
+  rated(turn: number): 'up' | 'down' | null
+  submit(input: {
+    turn: number
+    rating: 'up' | 'down'
+    note: string
+    messageId?: string
+  }): Promise<boolean>
+}
+
 export interface ChatContext {
   readonly actions: ChatActions
   readonly expansion: ExpansionStore
@@ -44,6 +61,8 @@ export interface ChatContext {
     observe(element: Element, id: string): () => void
     highlighted(): string | null
   }
+  /** Only in a single chat with a contact (GRP-05). */
+  readonly feedback?: ChatFeedback
 }
 
 const CHAT_CONTEXT: InjectionKey<ChatContext> = Symbol('chat-context')
