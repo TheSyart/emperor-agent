@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-26（对照 `41838be4`）<br>
+> 最后核验：2026-10-27（对照 `966ce225`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -227,7 +227,7 @@ Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / 
 
 Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留子智能体的错误文本（经秘密脱敏），不再是「Claude execution failed」，前面加上 FIX-16 的一句原因（JSON 错误读成状态、类型和原话；模型被拒为 `EXECUTOR_MODEL_UNSUPPORTED`）。任务详情按代码显示中文原因与下一步。
 
-SDK `maxTurns` 默认 200（`DEFAULT_CLAUDE_MAX_TURNS`），`limits.claudeMaxTurns` 可设 50–1000（「设置 › 子智能体 › 高级 › 每次运行最多轮数」；等于默认值时不写入文件；改过之后，降级到更早的版本会因严格校验把配置判为无效）。
+0.3 起 Claude Code 每次运行不限制轮数（SET-01）：`limits.claudeMaxTurns` 没有设置时不传 SDK `maxTurns`。旧版本写下的值仍然生效，「设置 › 用量与费用 › 防失控」显示它并给出「轮数改为不限制」（删掉这个字段）。运行时长（`runTimeoutMs`，默认 30 分钟）、每个任务最多外部运行（`maxRunsPerTask`，1–32，默认 32）也在那一页设置。
 
 Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CODEX_HOME 里的 `auth.json` 是指向用户 `auth.json`（`$CODEX_HOME` 或 `~/.codex`）的符号链接，隔离进程刷新令牌时写回用户的同一份文件，用户自己的 Codex 不会拿着已作废的旧令牌被登出：
 

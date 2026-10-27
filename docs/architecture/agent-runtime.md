@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `4b438468`）<br>
+> 最后核验：2026-10-27（对照 `966ce225`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
@@ -145,7 +145,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 **Token 账本**：host 为每次对话请求和每次压缩摘要写一行 `tokens.jsonl`，计数互不重叠：`input`（不含缓存）、`output`（不含 reasoning）、`cache_read`、`cache_create`、`reasoning`，另有 provider、model、`model_entry_id` 与成本（模型条目的单价，没有时用内置目录的单价；单价未知时记为成本不完整）。旧账本里的 `prompt_tokens`、`prompt_cache_hit_tokens`、`completion_tokens`、`cache_*_input_tokens` 读取时换算成这五项。
 
-每行还记 `session_id`：花费所属的根会话，子智能体的调用记在启动它的会话下。定时任务那一轮的调用另带 `source: "scheduler"`。Claude Code、Codex 的每次运行结束时也写一行（`usage_type: "executor"`，`source` 为执行器名，计数口径同上，reasoning 已含在 `output` 里）；订阅额度的运行带 `subscription: true`，费用记 0，Token 照算。执行器的行不更新上下文用量读数。`usage.summary({ range })` 按天、会话、来源汇总这些行：会话自己的调用按它现在所在的模式（对话、构建、群聊）归类，定时任务、Claude Code、Codex 各自一类，没有会话的旧行和已删除的会话归「其他」；它是「设置 › 用量」页的数据源。
+每行还记 `session_id`：花费所属的根会话，子智能体的调用记在启动它的会话下。定时任务那一轮的调用另带 `source: "scheduler"`。Claude Code、Codex 的每次运行结束时也写一行（`usage_type: "executor"`，`source` 为执行器名，计数口径同上，reasoning 已含在 `output` 里）；订阅额度的运行带 `subscription: true`，费用记 0，Token 照算。执行器的行不更新上下文用量读数。`usage.summary({ range })` 按天、会话、来源汇总这些行：会话自己的调用按它现在所在的模式（对话、构建、群聊）归类，定时任务、Claude Code、Codex 各自一类，没有会话的旧行和已删除的会话归「其他」；它是「设置 › 用量与费用」页的数据源。
 
 ## 长期上下文
 
@@ -206,11 +206,11 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 - **生命周期**：子智能体被 dispose（根会话停止、工作流收回它的子智能体）时，它的后台 job 立即停止，驱动空闲后从宿主的 `agents`、`projectors`、`unsubscribes` 中移除，日志随后关闭。根会话卸载时整棵树一起清理。永久删除根会话（最近删除里「永久删除」或 30 天到期）时，按日志里的 `subagent/started` 递归找出全部子会话，删除它们的目录，以及根会话和子会话的 spill 目录（`spill/session-<hash>/`）。
 - **任务**：每一次送进根会话的消息（`HarnessHost.deliver()`：用户、定时任务、ACP、onboarding 的后台 turn 与插话，以及 `chat.manageQueuedPrompt` 的 `send` / `interject`）都开始一个新任务，直到下一条消息为止；预算按任务计算，只保存在内存里，重启后从零开始（Claude Code / Codex 的用量另由委派日志恢复，见[外部子智能体](external-agent-delegation.md)）。
 - **步数**：一个 turn 最多 `maxSteps` 步（默认 400）；定时任务的 turn 与 Goal 轮次最多 `maxBackgroundSteps` 步（默认 120）。到达后下一步不再开始。
-- **费用**：`model_config.json` 的 `policy.cost.maxUsdPerAgentTurn`（「设置 › 模型」的「每个任务的费用上限」）现在是一个任务的上限：根会话、全部子智能体和失败的请求都计入，按条目的 `pricing` 在每次请求返回后累计；没有单价的用量不计入，也不会因此停止（`TaskTree.verdict()` 只比较已计价的花费，超过上限时才在结果里附 `unpricedRoutes`）。达到上限后，树里每个 Agent 做完当前这一步就停下，不再启动新的子智能体，根会话不再被通知唤醒，直到用户的下一条消息；根会话的 Goal 被解除自动推进。
+- **费用**：`model_config.json` 的 `policy.cost.maxUsdPerAgentTurn`（「设置 › 用量与费用 › 费用上限」的「Emperor 的模型 · 每个任务」）现在是一个任务的上限：根会话、全部子智能体和失败的请求都计入，按条目的 `pricing` 在每次请求返回后累计；没有单价的用量不计入，也不会因此停止（`TaskTree.verdict()` 只比较已计价的花费，超过上限时才在结果里附 `unpricedRoutes`）。达到上限后，树里每个 Agent 做完当前这一步就停下，不再启动新的子智能体，根会话不再被通知唤醒，直到用户的下一条消息；根会话的 Goal 被解除自动推进。
 - **并发与总数**：同时运行的子智能体最多 `maxActiveAgents` 个（默认 8），多出的等空位（排队，不报错）；在前台等待子智能体结果的父智能体把自己的名额让给子智能体。一个任务最多启动 `maxTotalAgents` 个子智能体（默认 64），再启动时工具返回 `AGENT_BUDGET_EXCEEDED`。工作流的 `agent()` 同样计入。
 - **结果唤醒**：子智能体的结果（结束通知、`report`）在父智能体空闲时唤醒它，每个父智能体每个任务最多 `maxNoticeWakes` 次（默认 32）；之后的结果放进父智能体的下一步，第一次拒绝时在父智能体的日志里写一条说明。
 - **Goal**：根会话还有运行中（或排队中）的子智能体或后台 job 时，Goal 不开始新一轮；它们结束后再继续。轮次提示要求模型在只剩等待时结束本轮，不要睡眠或轮询。
-- 步数、并发、总数与唤醒次数设置在 `settings.json` 的 `taskBudget`（「设置 › 高级 › 任务预算」，CoreApi `tasks.budget` / `tasks.setBudget`），修改后从每个任务的下一次判断起生效；费用上限在「设置 › 模型」。
+- 步数、并发、总数与唤醒次数设置在 `settings.json` 的 `taskBudget`（「设置 › 用量与费用 › 防失控」，CoreApi `tasks.budget` / `tasks.setBudget`），修改后从每个任务的下一次判断起生效；费用上限在同一页的「费用上限」里。
 
 ## Turn 的结束语义
 

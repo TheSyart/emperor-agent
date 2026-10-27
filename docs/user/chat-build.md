@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-27（对照 `0ca74447`）<br>
+> 最后核验：2026-10-27（对照 `966ce225`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -378,7 +378,7 @@ Agent 正在回复时仍可输入文字、添加附件和引用 Skill：
 - 编辑排队消息或历史消息时，如果输入框里已有内容，原内容保留，被编辑的消息接在后面；排队消息的附件和芯片一起回来。
 - 消息里像是 API Key、令牌或私钥时，发送前会提示：可以「遮掩后发送」（替换为 `[已遮掩]`）、「仍然发送」或取消。
 
-一轮最多 400 步（定时任务与目标每轮 120 步），可在「设置 › 高级 › 任务预算」修改；达到上限时这一轮停下，时间线里显示「已达到单轮步数上限」，Agent 也知道为什么停。连续重复完全相同的工具调用时，Agent 会收到提醒。
+一轮最多 400 步（定时任务与目标每轮 120 步），可在「设置 › 用量与费用 › 防失控」修改；达到上限时这一轮停下，时间线里显示「已达到单轮步数上限」，Agent 也知道为什么停。连续重复完全相同的工具调用时，Agent 会收到提醒。
 
 ## 权限和路径
 
