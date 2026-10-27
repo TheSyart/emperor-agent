@@ -55,6 +55,11 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // Groups (GRP-06).
   group_invalid: '群聊的设置不符合要求，请检查后重试。',
   group_not_found: '没有找到这个群，可能已被删除。',
+  // The contact editor (GRP-04).
+  contact_import_too_large: '这个文件超过 64 KB，不导入。',
+  contact_import_unreadable: '读不了这个文件，换一个文本文件再试。',
+  contact_draft_failed: '没能起草岗位说明书，换个说法再试一次。',
+  contact_trial_running: '这次试用已经在运行，等它结束或先停止。',
   interaction_not_pending: '这个问题已经回答过或已失效。',
   turn_paused: '这一轮已暂停。',
   turn_busy: '已有一轮正在运行，请等它结束。',

@@ -7,7 +7,11 @@ import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
 import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
-import type { ContactInput, ContactPatch } from '../contacts/types'
+import type {
+  ContactDraftInput,
+  ContactInput,
+  ContactPatch,
+} from '../contacts/types'
 import { SessionRequiredError, type ViewScope } from '../harness/host/scope'
 import {
   MAX_MESSAGE_REFERENCES,
@@ -1148,8 +1152,37 @@ const groupSettingsSchema = z
     loopGuard: z.boolean().optional(),
   })
   .strict()
-const groupMemberRefSchema = z
-  .object({ id: groupIdSchema, contactId: contactIdSchema })
+const groupMemberRefSchema = z.object({
+  id: groupIdSchema,
+  contactId: contactIdSchema,
+})
+// GRP-04: the editor. Shapes and bounds only; the services apply the rules.
+const contactDraftSchema = z
+  .object({
+    id: contactIdSchema.optional(),
+    name: contactNameSchema.optional(),
+    kind: z.enum(['local', 'external']).optional(),
+    backend: contactBackendSchema.optional(),
+    templateId: contactTemplateIdSchema.optional(),
+    ...contactFieldsSchema,
+  })
+  .strict()
+const contactTrialIdSchema = z.string().regex(/^tr-[a-z0-9]{6,32}$/)
+const contactBriefSchema = z
+  .object({
+    brief: z.string().max(4000),
+    answers: z
+      .array(
+        z
+          .object({
+            question: z.string().max(1000),
+            answer: z.string().max(4000),
+          })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
+  })
   .strict()
 
 const sessionPatchSchema = z.union([
@@ -2419,6 +2452,49 @@ export const CORE_OPERATION_REGISTRY = {
         .strict(),
     ]),
     (api, [input]) => api.contacts.fromTemplate(input),
+  ),
+  'contacts.recommendAvatar': operation(
+    z.tuple([
+      z
+        .object({
+          templateId: contactTemplateIdSchema.optional(),
+          exclude: z.array(z.string().max(32)).max(200).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.recommendAvatar(input),
+  ),
+  'contacts.draftFromBrief': operation(
+    z.tuple([contactBriefSchema]),
+    (api, [input]) => api.contacts.draftFromBrief(input),
+  ),
+  'contacts.importAgentFile': operation(
+    z.tuple([z.object({ path: z.string().min(1).max(4096) }).strict()]),
+    (api, [input]) => api.contacts.importAgentFile(input),
+  ),
+  'contacts.preview': operation(
+    z.tuple([z.object({ draft: contactDraftSchema }).strict()]),
+    (api, [input]) =>
+      api.contacts.preview(input as { draft: ContactDraftInput }),
+  ),
+  'contacts.trial': operation(
+    z.tuple([
+      z
+        .object({
+          draft: contactDraftSchema,
+          task: z.string().max(8000),
+          trialId: contactTrialIdSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input]) =>
+      api.contacts.trial(
+        input as { draft: ContactDraftInput; task: string; trialId: string },
+      ),
+  ),
+  'contacts.stopTrial': operation(
+    z.tuple([z.object({ trialId: contactTrialIdSchema }).strict()]),
+    (api, [input]) => api.contacts.stopTrial(input),
   ),
   'contacts.feedback': operation(
     z.tuple([contactFeedbackSchema]),

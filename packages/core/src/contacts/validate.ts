@@ -452,6 +452,18 @@ export function checkContactContext(
       fail('role.knowledge', `不是文件夹：${ref.path}`)
   }
 
+  checkCapabilityContext(contact, context)
+}
+
+/**
+ * The rules of a contact's capabilities that depend on the install: tool
+ * names the registry has, and a permission no higher than the global
+ * preset. The trial bench and the prompt preview check only these (GRP-04).
+ */
+export function checkCapabilityContext(
+  contact: Contact,
+  context: Pick<ContactContext, 'toolNames' | 'globalPermission'>,
+): void {
   if (contact.kind === 'local') {
     for (const key of ['allow', 'deny'] as const) {
       const unknown = (contact.capabilities.tools[key] ?? []).filter(

@@ -5,7 +5,9 @@ import {
   CONTACT_AVATAR_CELL,
   CONTACT_AVATAR_IDS,
   CONTACT_AVATAR_THEMES,
+  CONTACT_AVATAR_THEME_LABELS,
   contactAvatarCell,
+  contactAvatarTheme,
   loadContactAvatarManifest,
 } from './contactAvatars'
 
@@ -134,5 +136,20 @@ describe('contactAvatarCell', () => {
       'AV-05-5',
     ]
     for (const id of defaults) expect(contactAvatarCell(id), id).not.toBeNull()
+  })
+})
+
+describe('contactAvatarTheme (GRP-04)', () => {
+  it('knows every avatar’s theme from its id, as the manifest has it', () => {
+    for (const entry of manifest)
+      expect(contactAvatarTheme(entry.id), entry.id).toBe(entry.theme)
+    expect(contactAvatarTheme('AV-16-1')).toBeNull()
+  })
+
+  it('names every theme in Chinese', () => {
+    expect(Object.keys(CONTACT_AVATAR_THEME_LABELS).sort()).toEqual(
+      [...CONTACT_AVATAR_THEMES].sort(),
+    )
+    expect(CONTACT_AVATAR_THEME_LABELS['court-military']).toBe('武将')
   })
 })

@@ -46,6 +46,8 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 - **知识**：工作区外的知识文件和文件夹是这个任务的只读根（沙箱策略的 `readOnlyRoots`），可以读，`write` / `edit` 在任何模式下都拒绝（`FS_READ_ONLY_PATH`，不提供提权），受限 Shell 也写不了。
 - **已删除的联系人**：会话可以查看，发消息报 `contact_deleted`。
 
+试用台的会话（`surface: 'trial'`，GRP-04）按编辑器里还没保存的草稿运行：`ContactRuntime` 先查这个会话的草稿（`ContactTrials.draft`），没有才查保存的联系人，所以保存的联系人和它自己的会话不受影响。试用是一个后台回合（`interactionPolicy: 'auto-reject'`，10 分钟超时），宿主不把这类会话的事件发给窗口（`unseenSessions`）。
+
 内置的 Emperor 联系人（`ct-emperor`）的会话保留 persona 和全部工具，只多出它的个人记忆；Claude Code、Codex 两个外部联系人在这里不收窄，由各自执行器的设置决定。没有 `contact_id` 的会话，提示词和工具与原来逐字节相同（`contacts/__golden__/plain-session.*` 金样）。
 
 ### 群聊的成员会话与调度（GRP-07）

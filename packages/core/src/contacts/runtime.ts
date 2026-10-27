@@ -278,6 +278,11 @@ export function knowledgeReadOnlyRoots(
 export interface ContactRuntimeDeps {
   /** A contact as the store has it now; null when there is none (deleted). */
   contact(id: string): Contact | null
+  /**
+   * The unsaved draft a trial (试用台) session runs as, by session id
+   * (GRP-04); null for every other session.
+   */
+  draft?(sessionId: string): Contact | null
   /** Resolves once the contacts are read ({@link contact} answers from then on). */
   ready(): Promise<void>
   memory: ContactMemoryStore
@@ -342,9 +347,19 @@ export class ContactRuntime {
     return this.deps.defaultCallConfig()
   }
 
+  /** The contact a session runs as: a trial's draft, else the saved one. */
+  private resolve(contactId: string, sessionId?: string): Contact | null {
+    return (
+      (sessionId === undefined
+        ? null
+        : (this.deps.draft?.(sessionId) ?? null)) ??
+      this.deps.contact(contactId)
+    )
+  }
+
   /** The highest preset a contact's session may have (null: no ceiling). */
-  ceiling(contactId: string): string | null {
-    const contact = this.deps.contact(contactId)
+  ceiling(contactId: string, sessionId?: string): string | null {
+    const contact = this.resolve(contactId, sessionId)
     if (contact === null) return 'read-only'
     if (contact.kind === 'external' || contact.builtin) return null
     return contactPermissionPreset(
@@ -363,8 +378,35 @@ export class ContactRuntime {
     }
   }
 
-  snapshot(contactId: string, workspaceRoot: string): ContactSnapshot {
-    const contact = this.deps.contact(contactId)
+  snapshot(
+    contactId: string,
+    workspaceRoot: string,
+    sessionId?: string,
+  ): ContactSnapshot {
+    return this.snapshotOf(this.resolve(contactId, sessionId), workspaceRoot)
+  }
+
+  /**
+   * What a session of `contact` would get, for the editor's preview: the
+   * persona section exactly as it runs (Emperor's persona for Emperor; ''
+   * for an external contact, whose CLI keeps its own) and its tools.
+   */
+  preview(
+    contact: Contact,
+    workspaceRoot: string,
+  ): { prompt: string; tools: string[] | null } {
+    const snapshot = this.snapshotOf(contact, workspaceRoot)
+    if (contact.kind === 'external') return { prompt: '', tools: null }
+    return {
+      prompt: snapshot.prompt ?? this.deps.persona().trimEnd(),
+      tools: snapshot.tools === null ? null : [...snapshot.tools],
+    }
+  }
+
+  private snapshotOf(
+    contact: Contact | null,
+    workspaceRoot: string,
+  ): ContactSnapshot {
     if (contact === null)
       return {
         contact: null,
@@ -459,7 +501,11 @@ export class ContactBinding implements ToolFilter {
   ) {}
 
   refresh(): ContactSnapshot {
-    this.current = this.runtime.snapshot(this.contactId, this.workspaceRoot())
+    this.current = this.runtime.snapshot(
+      this.contactId,
+      this.workspaceRoot(),
+      this.session.id,
+    )
     return this.current
   }
 

@@ -63,6 +63,14 @@ describe('renderer routes', () => {
     expect((await resolve('/chat/s1/trajectory')).path).toBe('/chat/s1')
   })
 
+  it('serves the contact editor (GRP-04)', async () => {
+    const created = await resolve('/contacts/new')
+    expect(created.name).toBe('contact-new')
+    const edited = await resolve('/contacts/ct-reviewer00001/edit')
+    expect(edited.name).toBe('contact-edit')
+    expect(edited.params.id).toBe('ct-reviewer00001')
+  }, 20_000)
+
   it('serves the full pages', async () => {
     expect((await resolve('/scheduler')).name).toBe('scheduler')
     const capabilities = await resolve('/capabilities')

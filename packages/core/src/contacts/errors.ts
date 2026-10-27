@@ -95,3 +95,34 @@ export class ContactModelUnavailableError extends EmperorError {
     super('这个联系人的模型不可用', 'contact_model_unavailable')
   }
 }
+
+/** An agent file to import that is over 64 KB (GRP-04). */
+export class ContactImportTooLargeError extends EmperorError {
+  constructor(bytes: number) {
+    super(
+      `文件有 ${Math.ceil(bytes / 1024)} KB，超过 64 KB，不导入`,
+      'contact_import_too_large',
+    )
+  }
+}
+
+/** An agent file to import that cannot be read as text (GRP-04). */
+export class ContactImportUnreadableError extends EmperorError {
+  constructor(message: string) {
+    super(message, 'contact_import_unreadable')
+  }
+}
+
+/** The model's answer to 「说说你要什么人」 was not a usable draft (GRP-04). */
+export class ContactDraftError extends EmperorError {
+  constructor(detail = '模型没有按格式回答，换个说法再试一次') {
+    super(`没能起草岗位说明书：${detail}`, 'contact_draft_failed')
+  }
+}
+
+/** A trial with this id is already running (GRP-04). */
+export class ContactTrialRunningError extends EmperorError {
+  constructor() {
+    super('这次试用已经在运行', 'contact_trial_running')
+  }
+}

@@ -36,6 +36,12 @@ const SESSION_ROUTE_NAMES: readonly string[] = [
 /** The Group home (contacts and groups); the route arrives with GRP-05. */
 export const GROUP_HOME_ROUTE = 'contacts'
 
+/** The contact editor's routes (GRP-04): Group, like the Group home. */
+export const CONTACT_EDITOR_ROUTES: readonly string[] = [
+  'contact-new',
+  'contact-edit',
+]
+
 type ModeFacts = Pick<
   SessionInfo,
   'mode' | 'surface' | 'project_path' | 'draft'
@@ -138,7 +144,8 @@ export function routeModeTarget(
   find: (id: string) => SessionInfo | undefined,
 ): RouteModeTarget {
   const name = typeof route.name === 'string' ? route.name : ''
-  if (name === GROUP_HOME_ROUTE) return { mode: 'group', sessionId: '' }
+  if (name === GROUP_HOME_ROUTE || CONTACT_EDITOR_ROUTES.includes(name))
+    return { mode: 'group', sessionId: '' }
   if (!SESSION_ROUTE_NAMES.includes(name)) return NO_ROUTE_MODE
   const raw = route.params.sessionId
   const id = typeof raw === 'string' ? raw : ''

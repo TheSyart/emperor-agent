@@ -139,16 +139,22 @@ import {
 } from '../groups/service'
 import { ContactMemoryStore } from '../contacts/memory'
 import { ContactRuntime } from '../contacts/runtime'
+import { ContactTrials, TRIAL_TIMEOUT_MS } from '../contacts/trials'
+import { CoreContactEditorService } from './services/contact-editor-service'
+import { entryPrices, ledgerUsage, usageCostUsd } from '../model/usage-cost'
+import type { TokenUsage } from '../llm/types'
 import { readPersonaText } from '../harness/prompt/persona'
 import {
   CoreContactMemoryService,
   type ContactFeedbackInput,
 } from './services/contact-memory-service'
 import type {
+  ContactDraftInput,
   ContactInput,
   ContactPatch,
   FromTemplateInput,
 } from '../contacts/types'
+import type { DraftFromBriefInput } from '../contacts/draft'
 import {
   CoreModelService,
   type ModelConnectionInput,
@@ -287,7 +293,7 @@ import {
   type ExecutorAdapter,
 } from '../harness/delegation/types'
 import { ManagedAgentProcess } from '../harness/delegation/process'
-import { loadModelConfig } from '../config/model-config'
+import { findEntry, loadModelConfig } from '../config/model-config'
 import {
   TurnFileRecorder,
   mayWriteFiles,
@@ -476,6 +482,12 @@ export class CoreApi {
   readonly groupScheduler: GroupScheduler
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
   readonly contactMemoryService: CoreContactMemoryService
+  /** Contacts at run time; trial sessions run as their draft (GRP-04). */
+  readonly contactRuntime: ContactRuntime
+  /** 试用台 runs and their hidden sessions (GRP-04). */
+  readonly contactTrials: ContactTrials
+  /** The contact editor: avatar, drafting, import, preview, trial (GRP-04). */
+  readonly contactEditorService: CoreContactEditorService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
@@ -655,18 +667,19 @@ export class CoreApi {
     // A session with `contact_id` runs as that contact (GRP-03).
     const contactMemory = new ContactMemoryStore(this.paths.stateRoot)
     const persona = readPersonaText(kept.templatesDir)
-    host.setContactRuntime(
-      new ContactRuntime({
-        contact: (id) => this.contactStore.peek(id),
-        ready: () => this.contactStore.ready(),
-        memory: contactMemory,
-        toolNames: () => host.registeredToolNames(),
-        globalPreset: () => host.defaultPreset,
-        route: (id) => host.llm.listRoutes().find((route) => route.id === id),
-        defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
-        persona: () => persona,
-      }),
-    )
+    this.contactRuntime = new ContactRuntime({
+      contact: (id) => this.contactStore.peek(id),
+      // A trial session runs as the editor's draft (GRP-04).
+      draft: (sessionId) => this.contactTrials?.draft(sessionId) ?? null,
+      ready: () => this.contactStore.ready(),
+      memory: contactMemory,
+      toolNames: () => host.registeredToolNames(),
+      globalPreset: () => host.defaultPreset,
+      route: (id) => host.llm.listRoutes().find((route) => route.id === id),
+      defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
+      persona: () => persona,
+    })
+    host.setContactRuntime(this.contactRuntime)
     // A group is a session whose log holds the group events (GRP-06).
     this.groupService = new GroupService({
       sessions: {
@@ -1708,6 +1721,57 @@ export class CoreApi {
       activateSession: (sessionId) => this.activateSession(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
     })
+    // 试用台 (GRP-04): hidden sessions that run as the editor's draft.
+    this.contactTrials = new ContactTrials({
+      createSession: (title, contactId) =>
+        kept.sessionStore.create(title, { surface: 'trial', contactId }),
+      runTurn: (sessionId, task, signal) =>
+        host.runBackgroundTurn(host.scopeFor(sessionId), task, {
+          source: 'trial',
+          // Nobody is there to answer a question or approve a step.
+          interactionPolicy: 'auto-reject',
+          unconsumed: 'withdraw',
+          timeoutMs: TRIAL_TIMEOUT_MS,
+          signal,
+        }),
+      events: (sessionId) => host.sessionLog(sessionId)?.events ?? [],
+      costOf: (routeId, usage) => this.callCostUsd(routeId, usage),
+      trialSessions: () =>
+        kept.sessionStore
+          .list({ includeArchived: true })
+          .filter((session) => session.surface === 'trial'),
+      removeSession: async (sessionId) => {
+        await this.sessionApplicationService.delete(sessionId)
+        await this.sessionApplicationService.purgeDeleted(sessionId)
+      },
+      unload: (sessionId) => host.unloadSession(sessionId),
+    })
+    this.contactEditorService = new CoreContactEditorService({
+      contacts: this.contactStore,
+      runtime: this.contactRuntime,
+      trials: this.contactTrials,
+      llm: host.llm,
+      toolNames: () => host.registeredToolNames(),
+      globalPermission: () => host.defaultPreset,
+      workspaceRoot: () => host.chatWorkspace(),
+      cost: (routeId, usage) => this.callCostUsd(routeId, usage),
+      record: ({ routeId, model, usage, costUsd }) => {
+        try {
+          kept.tokenTracker.record(
+            model,
+            { ...ledgerUsage(usage) },
+            {
+              provider: findEntry(kept.modelConfig, routeId)?.provider ?? null,
+              usageType: 'contact_draft',
+              modelEntryId: routeId,
+              costUsd,
+            },
+          )
+        } catch {
+          // usage accounting never fails a draft
+        }
+      },
+    })
     this.retention = new RetentionService({
       paths: this.paths,
       memoryVersions: kept.sharedMemory.versions,
@@ -1946,6 +2010,12 @@ export class CoreApi {
         .catch((error: unknown) =>
           logger.warn('reading contacts failed', { error: String(error) }),
         )
+      // Trial sessions older than a day go (GRP-04).
+      void api.contactTrials.purgeExpired().catch((error: unknown) =>
+        logger.warn('clearing trial sessions failed', {
+          error: String(error),
+        }),
+      )
       await api.claudeKeysMigrated
       await api.delegationRuntime.reconcile()
       api.agentService.rebuild()
@@ -3682,6 +3752,22 @@ export class CoreApi {
     templates: () => this.contactStore.templates(),
     fromTemplate: (input: FromTemplateInput) =>
       this.contactStore.fromTemplate(input),
+    // The editor (GRP-04): nothing below saves the contact.
+    recommendAvatar: (input: { templateId?: string; exclude?: string[] }) =>
+      this.contactEditorService.recommendAvatar(input),
+    draftFromBrief: (input: DraftFromBriefInput) =>
+      this.contactEditorService.draftFromBrief(input),
+    importAgentFile: (input: { path: string }) =>
+      this.contactEditorService.importAgentFile(input),
+    preview: (input: { draft: ContactDraftInput }) =>
+      this.contactEditorService.preview(input),
+    trial: (input: {
+      draft: ContactDraftInput
+      task: string
+      trialId: string
+    }) => this.contactEditorService.trial(input),
+    stopTrial: (input: { trialId: string }) =>
+      this.contactEditorService.stopTrial(input),
     /** 👍 / 👎 on a reply, with the user's words: one line of memory (GRP-03). */
     feedback: (input: ContactFeedbackInput) =>
       this.contactMemoryService.feedback(input),
@@ -4306,6 +4392,14 @@ export class CoreApi {
    * (KRN-01): nothing runs differently. The plugin list the UI shows depends
    * on the project, so say when that changes.
    */
+  /** One model call's price in USD (null: the model or its price is unknown). */
+  private callCostUsd(routeId: string, usage: TokenUsage): number | null {
+    const entry = findEntry(this.host.kept.modelConfig, routeId)
+    return entry === undefined
+      ? null
+      : usageCostUsd(ledgerUsage(usage), entryPrices(entry))
+  }
+
   private activateSession(sessionId: string) {
     const entry = this.host.kept.sessionStore.get(sessionId)
     if (entry === null)

@@ -28,10 +28,12 @@ import { loadContactTemplates } from './templates'
 import {
   CONTACTS_SCHEMA_VERSION,
   CONTACT_LIMITS,
+  DRAFT_CONTACT_ID,
   EXTERNAL_CAPABILITIES,
   type Capabilities,
   type Contact,
   type ContactAvatar,
+  type ContactDraftInput,
   type ContactInput,
   type ContactPatch,
   type ContactTemplate,
@@ -45,6 +47,7 @@ import {
 } from './types'
 import {
   charCount,
+  checkCapabilityContext,
   checkContactContext,
   normalizeAvatar,
   normalizeContact,
@@ -247,6 +250,56 @@ export class ContactStore {
 
   async templates(): Promise<ContactTemplate[]> {
     return structuredClone(this.templateList())
+  }
+
+  /**
+   * The editor's unsaved contact as a whole one, for the trial bench and
+   * the prompt preview (GRP-04): create's defaults, a blank name read as
+   * 「新联系人」, tools and permission checked as a save checks them. The
+   * name need not be unique and knowledge that is gone may stay (the
+   * prompt marks it). It keeps the id of the saved contact being edited
+   * (`ct-draft` when there is none); a builtin's draft is the builtin with
+   * the draft's intro. Nothing is saved.
+   */
+  async draft(input: ContactDraftInput): Promise<Contact> {
+    const state = await this.load()
+    if (!isRecord(input as unknown))
+      throw new ContactValidationError('contact', '联系人不对')
+    const id = input.id
+    if (id !== undefined && isBuiltinContactId(id)) {
+      const builtin = this.find(state, id)
+      return structuredClone({
+        ...builtin,
+        intro:
+          input.intro === undefined
+            ? builtin.intro
+            : normalizeIntro(input.intro),
+      })
+    }
+    const saved =
+      id === undefined
+        ? undefined
+        : state.contacts.find((contact) => contact.id === id)
+    const name =
+      typeof input.name === 'string' && input.name.trim()
+        ? input.name
+        : '新联系人'
+    const contact: Contact = {
+      ...this.build({ ...input, name }, state),
+      id: id ?? DRAFT_CONTACT_ID,
+      ...(saved
+        ? {
+            version: saved.version,
+            createdAt: saved.createdAt,
+            updatedAt: saved.updatedAt,
+          }
+        : {}),
+    }
+    checkCapabilityContext(contact, {
+      toolNames: new Set(this.options.toolNames?.() ?? []),
+      globalPermission: this.globalPermission(),
+    })
+    return contact
   }
 
   // ── changes ─────────────────────────────────────────────────────────

@@ -47,10 +47,11 @@ export class CoreSessionApplicationService {
     this.deps = deps
   }
 
+  /** The sessions there are, but trial (试用台) sessions: no list shows them (GRP-04). */
   list(opts: { includeArchived?: boolean } = {}): SessionEntry[] {
-    return this.deps.sessions.list({
-      includeArchived: opts.includeArchived ?? false,
-    })
+    return this.deps.sessions
+      .list({ includeArchived: opts.includeArchived ?? false })
+      .filter((session) => session.surface !== 'trial')
   }
 
   create(

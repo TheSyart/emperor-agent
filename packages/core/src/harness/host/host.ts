@@ -476,6 +476,11 @@ export class HarnessHost {
   private eventSink: HostEventSink | null
   private readonly taps = new Set<HostEventSink>()
   private readonly rawTaps = new Set<RawSessionTap>()
+  /**
+   * Root sessions nobody watches: trial (试用台) sessions run unseen, so
+   * none of their events reach the window (GRP-04).
+   */
+  private readonly unseenSessions = new Set<string>()
   private closed = false
   private unwatchSkillRoots: (() => void) | undefined
   /** Catalog-resolved ripgrep path for the search tools (undefined → `rg` on PATH, else JS fallback). */
@@ -1173,7 +1178,9 @@ export class HarnessHost {
     const contactId =
       this.contactBindings.get(sessionId)?.contactId ??
       this.kept.sessionStore.get(sessionId)?.contact_id
-    return contactId === undefined ? null : runtime.ceiling(contactId)
+    return contactId === undefined
+      ? null
+      : runtime.ceiling(contactId, sessionId)
   }
 
   /** `preset`, or the session's contact's ceiling when that is lower. */
@@ -1981,6 +1988,7 @@ export class HarnessHost {
     if (entry === null)
       throw new InvalidSessionError(`unknown session ${sessionId}`, sessionId)
     const cwd = this.workspaceRootFor(entry)
+    if (entry.surface === 'trial') this.unseenSessions.add(sessionId)
     let session =
       this.sessions.get(sessionId) ?? this.sessions.tryOpen(sessionId)
     const fresh = session === undefined
@@ -3032,6 +3040,11 @@ export class HarnessHost {
 
   private async sink(event: Record<string, unknown>): Promise<void> {
     if (this.closed) return
+    if (
+      typeof event.session_id === 'string' &&
+      this.unseenSessions.has(event.session_id)
+    )
+      return
     for (const listener of [
       ...(this.eventSink === null ? [] : [this.eventSink]),
       ...this.taps,
@@ -3059,6 +3072,7 @@ export class HarnessHost {
     this.projectMcp.release(sessionId)
     this.agents.get(sessionId)?.dispose()
     this.agents.delete(sessionId)
+    this.contactBindings.delete(sessionId)
     this.unsubscribes.get(sessionId)?.()
     this.unsubscribes.delete(sessionId)
     this.projectors.delete(sessionId)

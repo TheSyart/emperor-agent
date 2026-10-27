@@ -179,6 +179,19 @@ describe('routeModeTarget (MOD-01 8–9)', () => {
       sessionId: '',
     })
   })
+
+  it('puts the contact editor in Group (GRP-04)', () => {
+    expect(routeModeTarget({ name: 'contact-new', params: {} }, find)).toEqual({
+      mode: 'group',
+      sessionId: '',
+    })
+    expect(
+      routeModeTarget(
+        { name: 'contact-edit', params: { id: 'ct-reviewer00001' } },
+        find,
+      ),
+    ).toEqual({ mode: 'group', sessionId: '' })
+  })
 })
 
 describe('mode_routes (MOD-01 5)', () => {
