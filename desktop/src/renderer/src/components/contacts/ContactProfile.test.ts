@@ -96,6 +96,7 @@ async function mount(id = 'ct-reviewer00001') {
       { path: '/contacts/:id', name: 'contact', component: ContactProfile },
       { path: '/contacts/:id/edit', name: 'contact-edit', component: stub },
       { path: '/chat/:sessionId?', name: 'chat', component: stub },
+      { path: '/groups/:groupId', name: 'group', component: stub },
     ],
   })
   await router.push(`/contacts/${id}`)
@@ -129,7 +130,10 @@ function calls(op: string): unknown[][] {
   return core.mock.calls.filter((call) => call[0] === op)
 }
 
+let groups: Array<Record<string, unknown>> = []
+
 beforeEach(() => {
+  groups = []
   resetContactDirectoryForTest()
   answerConfirmsForTest(() => true)
   current = contact()
@@ -151,7 +155,9 @@ beforeEach(() => {
       case 'contacts.list':
         return { contacts: [current], readOnly: null }
       case 'groups.list':
-        return []
+        return groups
+      case 'groups.addMember':
+        return { id: arg?.id, members: [] }
       case 'contacts.get':
         if (arg?.id !== current.id)
           throw Object.assign(new Error('没有找到这个联系人，可能已被删除。'), {
@@ -347,6 +353,34 @@ describe('the contact profile', () => {
       expect.objectContaining({ id: 'chat-reviewer' }),
     )
     expect(router.currentRoute.value.fullPath).toBe('/chat/chat-reviewer')
+  })
+
+  it('pulls the contact into a group, then opens it (GRP-08 拉进群)', async () => {
+    groups = [
+      {
+        id: 'grp-review',
+        title: '设置页评审',
+        memberCount: 3,
+        lastMessageAt: 2,
+      },
+    ]
+    await mount()
+    const pull = button('拉进群')
+    expect(pull.getAttribute('aria-disabled')).toBeNull()
+    pull.click()
+    await flush()
+    const item = [
+      ...document.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+    ].find((element) => element.textContent?.includes('设置页评审'))!
+    item.click()
+    await flush()
+    expect(calls('groups.addMember')).toEqual([
+      ['groups.addMember', { id: 'grp-review', contactId: 'ct-reviewer00001' }],
+    ])
+    expect(ctx.showToast).toHaveBeenCalledWith(
+      '已把「审稿人」拉进「设置页评审」',
+    )
+    expect(router.currentRoute.value.fullPath).toBe('/groups/grp-review')
   })
 
   it('offers 编辑, and has no single chat with Claude Code yet', async () => {

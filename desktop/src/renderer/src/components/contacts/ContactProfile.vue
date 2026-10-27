@@ -3,7 +3,8 @@
  * ContactProfile — `/contacts/:id` (GRP-05, 预览 B 第 2 步): a contact as a
  * long-standing colleague. The avatar (换头像 opens the library), the name,
  * its domains and intro; 发消息 (its most recent single chat, or a new one —
- * `contacts.openChat`), 拉进群 (GRP-08) and 编辑; four numbers
+ * `contacts.openChat`), 拉进群 (a group from the list, `groups.addMember`,
+ * then the group opens; GRP-08) and 编辑; four numbers
  * (`contacts.stats`: the groups it is in, how often it spoke, the user's
  * rating out of their 👍 / 👎, the version); and five tabs —
  * 职责与方法, 知识, 能力, 记忆 (each line changed or deleted, the switch),
@@ -30,6 +31,8 @@ import type { SessionInfo } from '../../types'
 import Avatar from '../ui/Avatar.vue'
 import Button from '../ui/Button.vue'
 import EmptyState from '../ui/EmptyState.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
 import Notice from '../ui/Notice.vue'
 import Select from '../ui/Select.vue'
 import Surface from '../ui/Surface.vue'
@@ -165,6 +168,27 @@ async function sendMessage() {
     ctx.showError(error, '没有打开单聊')
   } finally {
     opening.value = false
+  }
+}
+
+// ── 拉进群 (GRP-08) ───────────────────────────────────────────────────────
+const pullAnchor = ref<HTMLElement | null>(null)
+const pulling = ref(false)
+
+function openPull(event: MouseEvent): void {
+  pullAnchor.value = event.currentTarget as HTMLElement
+  pulling.value = true
+}
+
+async function pullInto(groupId: string, title: string): Promise<void> {
+  const current = contact.value
+  if (!current) return
+  try {
+    await core('groups.addMember', { id: groupId, contactId: current.id })
+    ctx.showToast(`已把「${current.name}」拉进「${title}」`)
+    await router.push({ name: 'group', params: { groupId } })
+  } catch (error) {
+    ctx.showError(error, '没有拉进群')
   }
 }
 
@@ -489,13 +513,27 @@ function backHome() {
               @click="sendMessage"
               >发消息</Button
             >
-            <Button
-              size="sm"
-              variant="secondary"
-              aria-disabled="true"
-              :title="`拉进群${COMING_SOON}`"
+            <Button size="sm" variant="secondary" @click="openPull"
               >拉进群</Button
             >
+            <Menu
+              v-model:open="pulling"
+              :anchor="pullAnchor"
+              placement="bottom"
+              label="拉进群"
+              dense
+            >
+              <MenuItem
+                v-for="group in directory.groups.value"
+                :key="group.id"
+                :description="`${group.memberCount} 人`"
+                @select="pullInto(group.id, group.title)"
+                >{{ group.title }}</MenuItem
+              >
+              <MenuItem v-if="!directory.groups.value.length" disabled
+                >还没有群聊</MenuItem
+              >
+            </Menu>
             <Button size="sm" @click="edit">编辑</Button>
           </div>
         </div>
