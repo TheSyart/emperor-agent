@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `4f569338`）<br>
+> 最后核验：2026-10-27（对照 `76a61ad1`）<br>
 > 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`ModeSwitcher.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
@@ -27,8 +27,8 @@
 
 1. **顶行**（`SidebarTopRow`）：收起、后退、前进（`shell/navHistory`，各自在历史尽头禁用）。
 2. **品牌行**（`SidebarBrandRow`）：模式切换器（`ModeSwitcher`）——标 +「Emperor Chat ▾」，高 32、圆角 `--radius-row`，悬停和菜单打开时 `--surface-hover`；名字 16/600，▾ 14、三级色，打开时翻转。别的模式有人等你回答时，标的右上角有一个 `attention` 小圆点（Dot sm，描一圈侧栏底色）。右侧搜索、通知铃铛。
-3. **主按钮**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。文字随模式：新对话 / 新建项目会话 / 新建群聊。Build 旁边的 `+` 打开文件夹，Group 旁边的 `+` 是新建联系人；Group 的两个入口还没做好，图标和文字降到 45% 不透明度，悬停提示「即将推出」。
-4. **会话**（`data-sidebar-section`）：Chat 是置顶（只含 Chat 会话）+ 按日期的分区（`chats.today` 等，日期就是分区标题）；Build 是置顶（只含 Build 会话）+ 项目；Group 现在是一段占位（EmptyState：「联系人和群聊在这里」）。总在最上方的「置顶」只在这个模式有置顶时出现。
+3. **主按钮**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。文字随模式：新对话 / 新建项目会话 / 新建群聊。Build 旁边的 `+` 打开文件夹，Group 旁边的 `+` 是新建联系人；Group 的「新建群聊」打开群聊首页和新建群聊的对话框。
+4. **会话**（`data-sidebar-section`）：Chat 是置顶（只含 Chat 会话）+ 按日期的分区（`chats.today` 等，日期就是分区标题）；Build 是置顶（只含 Build 会话）+ 项目；Group 是「群聊」和「联系人」两段（GRP-05）；群聊页、群设置和某位成员的工作过程都亮着它所在的群那一行。总在最上方的「置顶」只在这个模式有置顶时出现。
 5. **底部**（`SidebarFooter`）：「设置」在左；右边是页面图标——Pull Request（只在 Build 模式、且 GitHub 插件启用时出现，`visibleSidebarPages`）、定时任务、能力——和明暗切换，都是 36 的圆形图标按钮，当前页 `--surface-selected` + 主文字。原「探索」是能力页顶部的「推荐」。
 
 节奏：
@@ -85,7 +85,7 @@
 ## 设置面板
 
 - 尺寸 880 × min(720, 100vh − 80)，圆角 r-xl（24），lv3 阴影，遮罩模糊。左侧导航 200px，底色 `--surface-canvas`；右侧页面底色 `--surface-base`，页面标题 16/600，顶栏 54px。
-- 导航四组九项：「常规」单独一组，然后「智能」（模型、子智能体、记忆）、「操控」（电脑操作、浏览器、语音）、「系统」（用量、高级），组标签 12/500 三级文字。导航项是 32px 的纯文字行，选中用 `--surface-selected`。面板窄于 640px 时导航折成顶部一行，组标签隐藏。
+- 导航四组十项：「常规」单独一组，然后「智能」（模型、子智能体、群聊、记忆）、「操控」（电脑操作、浏览器、语音）、「系统」（用量、高级），组标签 12/500 三级文字。导航项是 32px 的纯文字行，选中用 `--surface-selected`。面板窄于 640px 时导航折成顶部一行，组标签隐藏。
 - 每页只有一种排法：分组标签 + 一张卡片 + 行（`SettingsGroup` + `SettingsRow`）。卡片里不再放卡片，列表自带外框时分组用 `plain`。打开二级页的行是 `SettingsLinkRow`（整行可点，末尾箭头）；列表行只留一个主操作按钮，其余（包括删除）放进行尾的「⋯」（`SettingsRowMenu`）。
 - 不常用的内容放二级页（`?settings=<分区>&page=<页面>`，标题「分区 › 页面」）：常规 › 已归档对话、记忆 › 历史 / 情景记忆 / Watchlist、用量 › 详细、高级 › Hooks / 诊断。
 - 会自己刷新的分区（记忆、电脑操作；能力 › 插件）不放刷新按钮。编辑类页面接入未保存守卫（[浮层规范](overlays.md#模态弹窗)）。
