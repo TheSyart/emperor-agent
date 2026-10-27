@@ -2,32 +2,35 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
-> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/modeEntries.ts`、`desktop/src/renderer/src/components/sidebar/SidebarFooter.vue`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
+> 最后核验：2026-10-28（对照 `5e3cc8b2`）<br>
+> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/modeEntries.ts`、`desktop/src/renderer/src/components/sidebar/SidebarFooter.vue`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`、`GroupsSection.vue`、`GeneralSection.vue` 的外观）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
 
 ## 推荐阅读顺序
 
-1. [首次使用](getting-started.md)：安装与首次打开、添加模型、第一次 Chat 或 Build。
-2. [Chat 与 Build](chat-build.md)：界面布局、会话、项目绑定、右侧工作台、斜杠命令和上下文边界。
-3. [计划与目标](plan-goal.md)：权限预设、先规划再执行和持续推进目标。
-4. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
-5. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。
-6. [定时任务、Hooks、桌宠与子智能体](automation-collaboration.md)：定时任务、Hooks、Watchlist、桌宠，以及本地、Claude Code、Codex 子智能体。
-7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、Chrome/Edge 连接、凭据，以及怎样让 Agent 停下。
+1. [首次使用](getting-started.md)：安装与首次打开、添加模型、第一次 Chat、Build 或 Group。
+2. [三种模式](modes.md)：Chat、Build、Group 怎样切换，各自的侧栏、首页和 ⌘N。
+3. [Chat 与 Build](chat-build.md)：界面布局、会话、项目绑定、右侧工作台、斜杠命令和上下文边界。
+4. [联系人与群聊](contacts-groups.md)：建联系人、单聊（包括和 Claude Code、Codex 单聊）、群聊的发法、什么时候停和群设置。
+5. [计划与目标](plan-goal.md)：权限预设、先规划再执行和持续推进目标。
+6. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
+7. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。
+8. [定时任务、Hooks、桌宠与子智能体](automation-collaboration.md)：定时任务、Hooks、Watchlist，以及本地、Claude Code、Codex 子智能体。
+9. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、Chrome/Edge 连接、凭据，以及怎样让 Agent 停下。
    - 自己浏览网页、管理下载与导入登录，见 [浏览器设置与数据](chat-build.md#浏览器设置与数据)。
    - 输入框麦克风与本机识别，见 [语音听写](chat-build.md#语音听写)。
-8. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查；日志、诊断包、存储清理与备份恢复。
+10. [外观](appearance.md)：主题、皮肤、吉祥物小单、宫廷用语和桌宠。
+11. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查；日志、诊断包、存储清理与备份恢复。
 
 ## 侧栏
 
 左侧侧栏从上到下依次是：
 
 - 收起按钮与后退 / 前进；
-- 模式切换「Emperor Chat ▾」（Chat、Build、Group 三种模式，⌘1 / ⌘2 / ⌘3），旁边是搜索和通知铃铛；
+- 模式切换「Emperor Chat ▾」（Chat、Build、Group 三种模式，⌘1 / ⌘2 / ⌘3，见[三种模式](modes.md)），旁边是搜索和通知铃铛；
 - 当前模式的新建按钮（⌘N）：「新对话」「新建项目会话」（右侧的 `+` 打开项目文件夹）或「新建群聊」（右侧的 `+` 新建联系人）；
-- 当前模式的会话：Chat 是「置顶」和按日期的分组（今天、昨天……），Build 是「置顶」「项目」，Group 是「群聊」「联系人」（联系人档案、单聊和群聊首页见 [Group：联系人与单聊](chat-build.md#group联系人与单聊)）；
+- 当前模式的会话：Chat 是「置顶」和按日期的分组（今天、昨天……），Build 是「置顶」「项目」，Group 是「群聊」「联系人」（见[联系人与群聊](contacts-groups.md#侧栏)）；
 - 底部的「设置」、整页入口图标和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。整页入口：
 
 | 入口         | 用途                                                                                                                    | 详细说明                                         |
@@ -44,19 +47,20 @@
 
 编辑中的内容（长期记忆、用户档案、Hooks 的 `hooks.json`、模型编辑、能力 › MCP 的 JSON）没有保存时，关闭弹窗、按 Esc、点遮罩、切换分区或二级页都会先问「放弃未保存的修改？」：选「放弃」才离开，「继续编辑」留在原处。后台刷新（例如一轮对话结束后记忆重新读取）只更新没有改过的草稿。
 
-| 分区       | 用途                                                                                                                                                                                                                                                                                                                                                                                                                                               | 详细说明                                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| 常规       | 外观（主题、「皮肤」二级页、显示吉祥物、宫廷用语、桌宠的衣服、桌宠开关）；会话（新会话的权限、处理过程、网页链接、网站图标）；开发者（显示轨迹、显示系统步骤，默认都关闭）；「已归档对话」二级页（归档的对话和最近删除，删除的保留 30 天）；更新（检查更新开关、当前版本与「立即检查」，有新版本时页面最上方提示下载，见[更新](getting-started.md#6-更新)）；最下面「关于」：小单、名字和一句话，落款是「单」字印                                                  | [Chat 与 Build](chat-build.md#侧栏与会话操作)             |
-| 模型       | 模型配置卡片、连通测试、执行策略（备用模型）                                                                                                                                                                                                                                                                                                                                                                                                       | [模型、记忆与附件](models-memory-attachments.md#模型配置) |
-| 子智能体   | 可用的子智能体（本地子智能体的模型，Claude Code、Codex 的开关、默认模型与「登录 Claude Code」）；子任务（同时运行、改代码的位置）；「高级」二级页（开发环境、排查）；每个子智能体的详情页                                                                                                                                                                                                                                                          | [子智能体](automation-collaboration.md#子智能体)          |
-| 记忆       | 上下文概览，「长期记忆」「用户档案」两个编辑器；编辑器上的「历史」打开版本列表；右上角「更多」里是情景记忆和 Watchlist                                                                                                                                                                                                                                                                                                                             | [模型、记忆与附件](models-memory-attachments.md#记忆层)   |
-| 电脑操作   | 提醒卡（缺权限、Helper 未连接时）；总开关；任意应用、Chrome 和 Edge 两个驱动（Chrome 和 Edge 二级页：安装扩展、连接与配对、浏览器权限、智能体权限）；系统权限；截图                                                                                                                                                                                                                                                                                | [电脑操作（实验）](computer-use.md)                       |
-| 浏览器     | 让 Emperor 控制内置浏览器；本地 URL 打开位置、完整网址、浏览数据与浏览历史；从 Chrome/Edge 导入；密码管理器、登录状态；下载位置、下载前询问、下载历史记录与保留时间；网站设置                                                                                                                                                                                                                                                                      | [Chat 与 Build](chat-build.md#浏览器设置与数据)           |
-| 语音       | 麦克风与语音识别权限、麦克风、识别语言与听写快捷键；听写组件不可用时说明原因（macOS）                                                                                                                                                                                                                                                                                                                                                              | [Chat 与 Build](chat-build.md#语音听写)                   |
-| 用量与费用 | 花费概览与按来源（Chat、Build、Group、定时任务、Claude Code、Codex）；费用上限（Emperor 的模型、Claude Code 和 Codex，按任务计，默认都不限制）；防失控（每次回答最多步数、外部运行的时长和次数、子智能体数量、结果唤醒次数）；「Token 明细」「按会话和群查看花费」二级页                                                                                                                                                                           | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口) |
-| 高级       | 网络工具：网页读取（`web_fetch`）与网页搜索（`web_search`）两个开关；「任务预算」一行通往「用量与费用」；「Hooks」二级页（配置 / 测试 / 审计）；「诊断」二级页（结论、需要关注的项目，可折叠的运行时、环境工具、桌面、存储路径和配置）；「存储」二级页（各类数据的磁盘占用与「清理」、「备份与恢复」、来自更新版本的只读文件，见[存储与清理](diagnostics-troubleshooting.md#存储与清理)与[备份与恢复](diagnostics-troubleshooting.md#备份与恢复)） | [Tools、Skills 与 MCP](tools-skills-mcp.md#tools)         |
+| 分区       | 用途                                                                                                                                                                                                                                                                                                                                                                                                                                               | 详细说明                                                             |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 常规       | 外观（主题、「皮肤」二级页、显示吉祥物、宫廷用语、桌宠的衣服、桌宠开关）；会话（新会话的权限、处理过程、网页链接、网站图标）；开发者（显示轨迹、显示系统步骤，默认都关闭）；「已归档对话」二级页（归档的对话和最近删除，删除的保留 30 天）；更新（检查更新开关、当前版本与「立即检查」，有新版本时页面最上方提示下载，见[更新](getting-started.md#6-更新)）；最下面「关于」：小单、名字和一句话，落款是「单」字印                                  | [外观](appearance.md)、[Chat 与 Build](chat-build.md#侧栏与会话操作) |
+| 模型       | 模型配置卡片、连通测试、执行策略（备用模型）                                                                                                                                                                                                                                                                                                                                                                                                       | [模型、记忆与附件](models-memory-attachments.md#模型配置)            |
+| 子智能体   | 可用的子智能体（本地子智能体的模型，Claude Code、Codex 的开关、默认模型与「登录 Claude Code」）；子任务（同时运行、改代码的位置）；「高级」二级页（开发环境、排查）；每个子智能体的详情页                                                                                                                                                                                                                                                          | [子智能体](automation-collaboration.md#子智能体)                     |
+| 群聊       | 新群的默认设置：协作方式（自主或主持人审核）、防打转；只影响以后新建的群                                                                                                                                                                                                                                                                                                                                                                           | [联系人与群聊](contacts-groups.md#新群的默认设置)                    |
+| 记忆       | 上下文概览，「长期记忆」「用户档案」两个编辑器；编辑器上的「历史」打开版本列表；右上角「更多」里是情景记忆和 Watchlist                                                                                                                                                                                                                                                                                                                             | [模型、记忆与附件](models-memory-attachments.md#记忆层)              |
+| 电脑操作   | 提醒卡（缺权限、Helper 未连接时）；总开关；任意应用、Chrome 和 Edge 两个驱动（Chrome 和 Edge 二级页：安装扩展、连接与配对、浏览器权限、智能体权限）；系统权限；截图                                                                                                                                                                                                                                                                                | [电脑操作（实验）](computer-use.md)                                  |
+| 浏览器     | 让 Emperor 控制内置浏览器；本地 URL 打开位置、完整网址、浏览数据与浏览历史；从 Chrome/Edge 导入；密码管理器、登录状态；下载位置、下载前询问、下载历史记录与保留时间；网站设置                                                                                                                                                                                                                                                                      | [Chat 与 Build](chat-build.md#浏览器设置与数据)                      |
+| 语音       | 麦克风与语音识别权限、麦克风、识别语言与听写快捷键；听写组件不可用时说明原因（macOS）                                                                                                                                                                                                                                                                                                                                                              | [Chat 与 Build](chat-build.md#语音听写)                              |
+| 用量与费用 | 花费概览与按来源（Chat、Build、Group、定时任务、Claude Code、Codex）；费用上限（Emperor 的模型、Claude Code 和 Codex，按任务计，默认都不限制）；防失控（每次回答最多步数、外部运行的时长和次数、子智能体数量、结果唤醒次数）；「Token 明细」「按会话和群查看花费」二级页                                                                                                                                                                           | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)            |
+| 高级       | 网络工具：网页读取（`web_fetch`）与网页搜索（`web_search`）两个开关；「任务预算」一行通往「用量与费用」；「Hooks」二级页（配置 / 测试 / 审计）；「诊断」二级页（结论、需要关注的项目，可折叠的运行时、环境工具、桌面、存储路径和配置）；「存储」二级页（各类数据的磁盘占用与「清理」、「备份与恢复」、来自更新版本的只读文件，见[存储与清理](diagnostics-troubleshooting.md#存储与清理)与[备份与恢复](diagnostics-troubleshooting.md#备份与恢复)） | [Tools、Skills 与 MCP](tools-skills-mcp.md#tools)                    |
 
-「设置 › 常规 › 外观 › 皮肤」换皮肤：Emperor 自带「御书房」（默认，就是原来的样子，侧栏底部是穿龙袍的小单）、「朱批」（宣纸和朱砂色，只有浅色，标题用宋体，允许操作后盖一枚「单」字印）和「日常」（原来的颜色，日常版和卫衣版小单）。皮肤只改颜色、标题字体和几张装饰图，对话正文、代码、改动对比、权限确认、费用和登录界面保持原样。也可以「从文件夹导入…」别人做的皮肤包（只有 `skin.json` 和 PNG / WebP 图片，导入前会检查，不通过时列出原因），格式见[皮肤](../design/skins.md)。
+主题、皮肤、显示吉祥物、宫廷用语和桌宠的衣服见[外观](appearance.md)。
 
 定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。原来单独的「Hooks」「诊断」现在是「高级」的二级页，「桌宠」是「常规 › 外观」里的开关；`?settings=hooks`、`?settings=diagnostics`、`?settings=pet` 和 `/pet` 会打开新位置。
 

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
+> 最后核验：2026-10-28（对照 `5e3cc8b2`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -81,7 +81,7 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 
 ## 桌宠 companion
 
-「设置 › 常规 › 外观 › 桌宠」可以启用或关闭 companion，默认关闭；窗口出错时开关下方显示最近的错误。它上面一行「桌宠的衣服」三选一：日常版（默认）、龙袍混搭、原版（胸口写着「小单」的那一套）；换了马上生效，桌宠正开着也不用重开，关着时下次打开就穿这一套。窗口由主 Electron 进程托管。桌宠只投影空闲、工作等状态，不能代替真实的任务状态，也不能直接修改 Core 状态。
+桌宠（companion）在「设置 › 常规 › 外观 › 桌宠」打开，默认关闭；它的三套衣服和能做什么见[外观 › 桌宠](appearance.md#桌宠)。
 
 ## 子智能体
 

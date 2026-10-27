@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
+> 最后核验：2026-10-28（对照 `5e3cc8b2`）<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、设计规范和发布流程。
@@ -13,12 +13,15 @@
 | ---------------------------------------------- | ------------------------------------------------------------------- |
 | 安装并完成第一次对话                           | [首次使用](user/getting-started.md)                                 |
 | 理解 Chat 与 Build                             | [会话与项目工作](user/chat-build.md)                                |
+| 在 Chat、Build、Group 三种模式之间切换         | [三种模式](user/modes.md)                                           |
+| 建联系人、单聊，或让几位联系人在群里协作       | [联系人与群聊](user/contacts-groups.md)                             |
+| 换主题、皮肤，打开宫廷用语或桌宠               | [外观](user/appearance.md)                                          |
 | 使用右侧工作台、快捷键或 Pull Request 页       | [会话与项目工作](user/chat-build.md#右侧工作台)                     |
 | 权限预设、先规划再执行或持续推进目标           | [计划与目标](user/plan-goal.md)                                     |
 | 配置模型、记忆和附件                           | [模型、记忆与附件](user/models-memory-attachments.md)               |
 | 使用 Tools、Skills、Plugins 或 MCP             | [工具与扩展能力](user/tools-skills-mcp.md)                          |
 | 使用 `/` 命令和真正的新上下文                  | [Slash command 平台](architecture/slash-command-platform.md)        |
-| 使用定时任务、Hooks 或桌宠                     | [定时任务、Hooks、桌宠与子智能体](user/automation-collaboration.md) |
+| 使用定时任务或 Hooks                           | [定时任务、Hooks、桌宠与子智能体](user/automation-collaboration.md) |
 | 把子任务交给本地子智能体、Claude Code 或 Codex | [子智能体](user/automation-collaboration.md#子智能体)               |
 | 浏览网页、管理下载与导入 Chrome/Edge 登录      | [浏览器设置与数据](user/chat-build.md#浏览器设置与数据)             |
 | 在聊天输入框使用 macOS 本机听写                | [语音听写](user/chat-build.md#语音听写)                             |
@@ -38,12 +41,15 @@
 
 - [用户手册首页](user/README.md)
 - [首次使用](user/getting-started.md)
+- [三种模式](user/modes.md)
 - [Chat 与 Build](user/chat-build.md)
+- [联系人与群聊](user/contacts-groups.md)
 - [计划与目标](user/plan-goal.md)
 - [模型、记忆与附件](user/models-memory-attachments.md)
 - [Tools、Skills 与 MCP](user/tools-skills-mcp.md)
 - [定时任务、Hooks、桌宠与子智能体](user/automation-collaboration.md)
 - [电脑操作（实验）](user/computer-use.md)
+- [外观](user/appearance.md)
 - [诊断与排障](user/diagnostics-troubleshooting.md)
 
 ### 架构与开发

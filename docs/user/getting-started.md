@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-10-27（对照 `b28fc6e6`）<br>
-> 事实源：`docs/release/stable-release-notes.md`、`desktop/electron-builder.release.cjs`、`desktop/src/renderer/src/components/settings/model/`（添加模型对话框）、`desktop/src/renderer/src/components/composer/ModelPicker.vue`、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
+> 最后核验：2026-10-28（对照 `5e3cc8b2`）<br>
+> 事实源：`docs/release/stable-release-notes.md`、`desktop/electron-builder.release.cjs`、`desktop/src/renderer/src/components/settings/model/`（添加模型对话框）、`desktop/src/renderer/src/components/composer/ModelPicker.vue`、`desktop/src/renderer/src/components/sidebar/`（新对话、项目会话与群聊入口）、`desktop/src/renderer/src/components/groups/GroupHome.vue`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
 
 ## 1. 安装
 
@@ -54,6 +54,12 @@
 
 新建时界面先创建本地草稿；发送第一条消息后，Core 才会创建真实 session 并持久化。这意味着空白草稿不会留下无用会话目录。
 
+### Group：联系人与群聊
+
+按 ⌘3 切到 Group，进群聊首页「今天找谁帮忙？」。Emperor 自带三位联系人：Emperor、Claude Code 和 Codex；也可以点「联系人」旁的 `+`，从 18 个岗位模板里建一位，例如「代码审稿人」。在输入框里 @ 一位联系人就是和它单聊；@ 两位及以上，会建一个临时群，由 Emperor 主持。详见[联系人与群聊](contacts-groups.md)。
+
+三种模式各自的侧栏、首页和 ⌘N 见[三种模式](modes.md)；想换主题、皮肤或打开桌宠，见[外观](appearance.md)。
+
 ## 4. 确认工作正常
 
 完成下面四项即可确认基础链路可用：
@@ -82,9 +88,9 @@
 
 Emperor 的安装包没有签名，不能像签名应用那样自动替换自己。它会告诉你有新版本、替你下载并核对安装包，替换旧版本由你来做。
 
-**检查**：启动 30 秒后和之后每 24 小时，Emperor 向 GitHub 请求一次发布列表，只比较同一渠道里更高的版本：Preview 版会看到更新的 Preview 和 Stable，Stable 版只看 Stable。请求里只有版本号这样的固定信息（`Emperor-Agent/0.2.1`），不带账号、令牌或设备标识。连不上 GitHub 时不会弹出任何提示，稍后自动重试，每 24 小时最多重试 3 次。不想联网检查时，在「设置 › 常规 › 更新」关闭「检查更新」，之后 Emperor 不会为更新发出任何请求；打开时同一处有「立即检查」，下面一行写着当前版本和上次检查的结果。
+**检查**：启动 30 秒后和之后每 24 小时，Emperor 向 GitHub 请求一次发布列表，只比较同一渠道里更高的版本：Preview 版会看到更新的 Preview 和 Stable，Stable 版只看 Stable。请求里只有版本号这样的固定信息（`Emperor-Agent/0.3.0`），不带账号、令牌或设备标识。连不上 GitHub 时不会弹出任何提示，稍后自动重试，每 24 小时最多重试 3 次。不想联网检查时，在「设置 › 常规 › 更新」关闭「检查更新」，之后 Emperor 不会为更新发出任何请求；打开时同一处有「立即检查」，下面一行写着当前版本和上次检查的结果。
 
-**有新版本时**：「设置 › 常规」最上方和侧栏的通知里都会出现「Emperor 0.2.2 可用」，旁边是「查看更新说明」（打开 GitHub 上的发布页）和「下载」。
+**有新版本时**：「设置 › 常规」最上方和侧栏的通知里都会出现「Emperor 0.3.1 可用」，旁边是「查看更新说明」（打开 GitHub 上的发布页）和「下载」。
 
 **下载与核对**：点「下载」后，Emperor 下载这台 Mac 架构的 DMG，显示进度，可以取消。下载完先用同一个发布里的 `SHA256SUMS.txt` 核对 SHA-256，不符就拒绝并删除下载的文件；再在装有并登录了 GitHub CLI（`gh`）时运行 `gh attestation verify`，核对它确实出自本仓库的发布流程。没有 gh 或 gh 没有登录时只核对 SHA-256，页面会写明「没有核验 GitHub 来源证明」；在终端运行 `gh auth login` 后重新下载即可核验。gh 使用你自己的登录，Emperor 不传任何令牌。
 
@@ -98,4 +104,4 @@ Emperor 不会打开或运行下载的 DMG。会话、记忆和设置都在 `~/.
 
 **内置浏览器的版本**：「设置 › 高级 › 诊断 › 桌面」的「Electron 版本」写着内置浏览器内核的版本。检查更新时 Emperor 会顺带读到最新发布内置的 Electron 版本（来自同一份发布列表，不额外联网）；落后 2 个以上主版本时这一行变成提醒：内置浏览器可能缺少安全修复，请更新 Emperor。
 
-**测试更新源**：开发和验收时可以用环境变量 `EMPEROR_UPDATE_FEED_URL` 让 Emperor 改读本机的测试发布源（只能是 `127.0.0.1` 或 `localhost`，`scripts/test-update-feed.mjs` 可以提供一个）。生效时「设置 › 常规 › 更新」和诊断页都会写明「正在使用测试更新源」，从它下载的安装包不核验 GitHub 来源证明。正常使用时不要设置它。
+**测试更新源**：开发和验证时可以用环境变量 `EMPEROR_UPDATE_FEED_URL` 让 Emperor 改读本机的测试发布源（只能是 `127.0.0.1` 或 `localhost`，`scripts/test-update-feed.mjs` 可以提供一个）。生效时「设置 › 常规 › 更新」和诊断页都会写明「正在使用测试更新源」，从它下载的安装包不核验 GitHub 来源证明。正常使用时不要设置它。
