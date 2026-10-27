@@ -70,6 +70,11 @@ export function memoryGroups(contacts: GroupContact[] = TEST_CONTACTS) {
       get: (id) => sessions.get(id) ?? null,
       list: () => [...sessions.values()],
       rename: () => true,
+      trashGroup: (groupId) => {
+        for (const [id, entry] of sessions)
+          if (id === groupId || entry.group_id === groupId) sessions.delete(id)
+        return { restorableUntil: new Date(clock).toISOString() }
+      },
     },
     log: (id): GroupLog => {
       const events = logs.get(id) ?? []

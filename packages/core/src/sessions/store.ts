@@ -99,6 +99,12 @@ export interface TrashedSession {
   project_name: string | null
   project_path: string | null
   deleted_at: string
+  /**
+   * A group's session or a member's (GRP-16): a deleted group is listed,
+   * restored and purged with its members.
+   */
+  surface?: SessionSurface
+  group_id?: string
 }
 
 const TRASH_DIR = SESSION_TRASH_DIR
@@ -224,11 +230,17 @@ export class SessionStore {
   /**
    * Soft delete: drop the session from the index and move its directory
    * (meta, log, attachments) to `sessions/.trash/<id>` with a trash
-   * record. The last session is kept. Returns the entry, or null.
+   * record. The last session is kept unless `allowLast` (a group's
+   * sessions, GRP-16: never the Chat page's last conversation). Returns
+   * the entry, or null.
    */
-  trash(sessionId: string, deletedAt = stamp()): SessionEntry | null {
+  trash(
+    sessionId: string,
+    deletedAt = stamp(),
+    opts: { allowLast?: boolean } = {},
+  ): SessionEntry | null {
     const items = this.load()
-    if (items.length <= 1) return null
+    if (items.length <= 1 && !opts.allowLast) return null
     const idx = items.findIndex((item) => item.id === sessionId)
     if (idx < 0) return null
     const [entry] = items.splice(idx, 1)
@@ -245,6 +257,8 @@ export class SessionStore {
       project_name: entry!.project_name,
       project_path: entry!.project_path,
       deleted_at: deletedAt,
+      ...(entry!.surface ? { surface: entry!.surface } : {}),
+      ...(entry!.group_id ? { group_id: entry!.group_id } : {}),
     }
     writeFileSync(join(target, TRASH_RECORD), JSON.stringify(record), {
       encoding: 'utf8',
@@ -628,6 +642,12 @@ export class SessionStore {
         project_name: raw.project_name ?? null,
         project_path: raw.project_path ?? null,
         deleted_at: raw.deleted_at,
+        ...(typeof raw.surface === 'string' && raw.surface
+          ? { surface: raw.surface }
+          : {}),
+        ...(typeof raw.group_id === 'string' && raw.group_id
+          ? { group_id: raw.group_id }
+          : {}),
       }
     } catch {
       return null

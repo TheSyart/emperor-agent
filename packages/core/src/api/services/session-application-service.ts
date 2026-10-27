@@ -33,6 +33,8 @@ export interface SessionApplicationServiceDeps {
    * copies, private refs and undo records (AGT-06).
    */
   forgetDelegations?(sessionId: string): Promise<void>
+  /** Remove what a purged group keeps outside its session: 群文件 (GRP-16). */
+  forgetGroup?(groupId: string): Promise<void>
   closeTerminals(sessionId: string): void
   activateSession(sessionId: string): SessionEntry
   /** Optional: interrupt a running turn when the session is archived (host.stop). */
@@ -186,25 +188,75 @@ export class CoreSessionApplicationService {
     }
   }
 
-  /** Deleted sessions still in the trash (设置 › 常规 › 最近删除). */
-  listDeleted(): TrashedSession[] {
-    return this.deps.sessions.listTrashed()
+  /**
+   * Delete a group (GRP-16): its own session and every member session (one
+   * that left the group too) go to the trash at the same moment, the way
+   * delete() moves one conversation. The last sessions go as well: a group
+   * is never the Chat page's last conversation. 最近删除 lists the group
+   * alone; restoring or purging it takes its members along. The caller
+   * stops the group's turn first.
+   */
+  deleteGroup(groupId: string): {
+    deleted: true
+    restorable: true
+    restorableUntil: string
+  } {
+    const group = this.deps.sessions.get(groupId)
+    if (group?.surface !== 'group') throw new Error('cannot delete group')
+    const members = this.deps.sessions
+      .list({ includeArchived: true })
+      .filter(
+        (session) =>
+          session.surface === 'group_member' && session.group_id === groupId,
+      )
+    const deletedAt = new Date().toISOString()
+    for (const session of [...members, group]) {
+      this.deps.unloadSession(session.id)
+      const moved = this.deps.sessions.trash(session.id, deletedAt, {
+        allowLast: true,
+      })
+      if (!moved && session === group) throw new Error('cannot delete group')
+      this.deps.closeTerminals(session.id)
+      this.deps.sessionLeftList?.(session.id)
+    }
+    return {
+      deleted: true,
+      restorable: true,
+      restorableUntil: new Date(
+        Date.parse(deletedAt) + SESSION_TRASH_RETENTION_MS,
+      ).toISOString(),
+    }
   }
 
-  /** Undo a delete: the session returns exactly as it was. */
+  /**
+   * Deleted sessions still in the trash (设置 › 常规 › 最近删除); a group's
+   * member sessions deleted with it are listed as the group alone.
+   */
+  listDeleted(): TrashedSession[] {
+    const trashed = this.deps.sessions.listTrashed()
+    const groups = new Set(
+      trashed.filter((item) => item.surface === 'group').map((item) => item.id),
+    )
+    return trashed.filter((item) => !this.withGroup(item, groups))
+  }
+
+  /** Undo a delete: the session returns exactly as it was, a group with its members. */
   async restoreDeleted(sessionId: string): Promise<SessionEntry> {
     const entry = this.deps.sessions.restoreTrashed(sessionId)
     if (!entry) throw new Error('该会话已不在最近删除中，无法恢复')
+    if (entry.surface === 'group')
+      for (const member of this.trashedMembers(sessionId))
+        this.deps.sessions.restoreTrashed(member.id)
     return entry
   }
 
-  /** Delete a trashed session for good (its turn snapshots too). */
+  /** Delete a trashed session for good (its turn snapshots too; a group's members and files). */
   async purgeDeleted(sessionId: string): Promise<{ purged: true }> {
-    this.forgetSessionTree(sessionId)
-    const record = this.deps.sessions.purgeTrashed(sessionId)
+    const record = await this.purgeOne(sessionId)
     if (!record) throw new Error('该会话已不在最近删除中')
-    await this.forgetTurnFiles(record)
-    await this.forgetDelegations(sessionId)
+    if (record.surface === 'group')
+      for (const member of this.trashedMembers(sessionId))
+        await this.purgeOne(member.id)
     return { purged: true }
   }
 
@@ -213,15 +265,38 @@ export class CoreSessionApplicationService {
     const purged: string[] = []
     for (const id of this.deps.sessions.trashedBefore(
       now - SESSION_TRASH_RETENTION_MS,
-    )) {
-      this.forgetSessionTree(id)
-      const record = this.deps.sessions.purgeTrashed(id)
-      if (!record) continue
-      await this.forgetTurnFiles(record)
-      await this.forgetDelegations(id)
-      purged.push(id)
-    }
+    ))
+      if (await this.purgeOne(id)) purged.push(id)
     return purged
+  }
+
+  /** One trashed session gone for good, with what it left elsewhere. */
+  private async purgeOne(sessionId: string): Promise<TrashedSession | null> {
+    this.forgetSessionTree(sessionId)
+    const record = this.deps.sessions.purgeTrashed(sessionId)
+    if (!record) return null
+    await this.forgetTurnFiles(record)
+    await this.forgetDelegations(sessionId)
+    if (record.surface === 'group')
+      await this.deps.forgetGroup?.(sessionId).catch(() => undefined)
+    return record
+  }
+
+  /** The member sessions in the trash with their group. */
+  private trashedMembers(groupId: string): TrashedSession[] {
+    return this.deps.sessions
+      .listTrashed()
+      .filter(
+        (item) => item.surface === 'group_member' && item.group_id === groupId,
+      )
+  }
+
+  private withGroup(item: TrashedSession, groups: Set<string>): boolean {
+    return (
+      item.surface === 'group_member' &&
+      item.group_id !== undefined &&
+      groups.has(item.group_id)
+    )
   }
 
   /** Before the trashed directory goes: its log names the subagent sessions. */

@@ -392,9 +392,13 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         version: number | null
       }
     | {
-        /** A group was created or changed, or the user sent to it (GRP-06). */
+        /**
+         * A group was created or changed, or the user sent to it (GRP-06);
+         * deleted to 最近删除, or restored from it (GRP-16).
+         */
         event: 'groups_changed'
-        reason: 'created' | 'updated' | 'member' | 'message'
+        reason:
+          'created' | 'updated' | 'member' | 'message' | 'deleted' | 'restored'
         group_id: string
       }
     | {

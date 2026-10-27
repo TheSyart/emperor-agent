@@ -172,6 +172,7 @@ const EXPECTED_OPERATIONS = [
   'groups.confirmTask',
   'groups.create',
   'groups.defaults',
+  'groups.delete',
   'groups.files.list',
   'groups.get',
   'groups.history',

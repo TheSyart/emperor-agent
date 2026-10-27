@@ -2398,6 +2398,11 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.stop(input),
   ),
+  // GRP-16: to 最近删除 with its member sessions; a running turn stops first.
+  'groups.delete': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.delete(input),
+  ),
   // 设置 › 群聊 (GRP-08, D14): what a new group starts with.
   'groups.defaults': operation(z.tuple([]), (api) => api.groups.defaults()),
   'groups.setDefaults': operation(
