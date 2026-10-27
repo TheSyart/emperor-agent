@@ -417,7 +417,11 @@ export interface DelegationOwner {
   requiredForGoal: boolean
   parentCallId?: string
   depth: number
-  source: 'human' | 'model' | 'workflow' | 'scheduler'
+  /**
+   * group: a Claude Code or Codex member speaking in a group (GRP-09); the
+   * group scheduler waits for the run, so it never wakes the member session.
+   */
+  source: 'human' | 'model' | 'workflow' | 'scheduler' | 'group'
 }
 export interface DelegationStart {
   backend: ExternalBackend
@@ -431,6 +435,12 @@ export interface DelegationStart {
   outputSchema?: ObjectJsonSchema
   runInBackground: boolean
   clientRequestId: string
+  /**
+   * Added to the executor's own system prompt on every run (Claude's
+   * `systemPrompt.append`, Codex's developer instructions): a contact's
+   * job card and the group charter (GRP-09). At most 24 KiB.
+   */
+  instructions?: string
 }
 export interface DelegationRecord {
   dispatchPaused?: boolean
@@ -578,6 +588,8 @@ export interface ExecutorOpenInput {
   budgetUsd?: number
   /** Claude Code's turns per run (AGT-02). */
   maxTurns?: number
+  /** The start spec's instructions (GRP-09), after Emperor's own. */
+  instructions?: string
   /** The CLI's version as the run's probe read it (`claude --version`). */
   executableVersion?: string
   policy: SandboxExecutionPolicy

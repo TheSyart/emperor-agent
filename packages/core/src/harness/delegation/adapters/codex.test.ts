@@ -721,3 +721,16 @@ it('AGT-13 · the real 0.163 user agent passes the handshake', async () => {
     other.cleanup()
   }
 })
+
+it('appends the contact’s job card and the group charter to the developer instructions (GRP-09)', async () => {
+  const f = fixture()
+  const session = await f.adapter.open({
+    ...f.input,
+    instructions: '# 身份\n你是「代码审稿人」。\n\n# 群聊：登录页',
+  })
+  const params = f.calls[2]!.params as { developerInstructions: string }
+  expect(params.developerInstructions).toContain('你是「代码审稿人」')
+  expect(params.developerInstructions).toContain('# 群聊：登录页')
+  await session.close()
+  f.cleanup()
+})

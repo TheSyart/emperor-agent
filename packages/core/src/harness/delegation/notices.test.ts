@@ -184,3 +184,15 @@ it('VER-06 · 5 · a version failure ends with the fixed sentence: why, the last
     settlementNotice(record, { ...failed, versionFailure: undefined }).text,
   ).not.toContain('失败原因')
 })
+
+it('GRP-09 · a group speech never wakes the member’s session: its notice goes to the collector', () => {
+  const base = fixtureDelegationRecord()
+  const record = { ...base, owner: { ...base.owner, source: 'group' as const } }
+  const run = {
+    ...fixtureDelegationRun(),
+    generation: 3,
+    phase: 'completed' as const,
+  }
+  expect(settlementNotice(record, run).recipient).toBe('collector')
+  expect(settlementNotice(base, run).recipient).toBe('parent')
+})

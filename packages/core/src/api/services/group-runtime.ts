@@ -17,7 +17,9 @@ import {
   type ReviewVerdict,
   type SpeakResult,
 } from '../../groups/scheduler'
+import { ExternalSpeaker } from '../../groups/external'
 import { createGroupTools } from '../../groups/tools'
+import type { Contact } from '../../contacts/types'
 import type { ContactId, GroupMember, GroupMessage } from '../../groups/types'
 import type { Agent } from '../../harness/agent/agent'
 import type { HarnessHost } from '../../harness/host/host'
@@ -32,10 +34,37 @@ export interface GroupRuntimeOptions {
   sessions: SessionStore
   groups: GroupService
   tokenTracker: TokenTracker
+  /** Contacts as stored (an external member's backend and job card). */
+  contact: (id: ContactId) => Contact | null
 }
 
 export function installGroupRuntime(opts: GroupRuntimeOptions): GroupScheduler {
   const { host, sessions, groups, tokenTracker } = opts
+
+  // Claude Code and Codex speak through delegations (GRP-09).
+  const external = new ExternalSpeaker({
+    delegations: {
+      start: (...args) => delegationService().start(...args),
+      send: (...args) => delegationService().send(...args),
+      wait: (...args) => delegationService().wait(...args),
+      interrupt: (...args) => delegationService().interrupt(...args),
+      list: () => host.delegations?.list() ?? [],
+    },
+    parentAgentId: (sessionId) => host.agentFor(sessionId).id,
+    contact: opts.contact,
+    charter: (groupId, contactId) => {
+      const state = groups.state(groupId)
+      return groupCharter(state, groups.roster(state), contactId)
+    },
+    title: (groupId) => groups.state(groupId).title,
+  })
+  const delegationService = () => {
+    if (!host.delegations)
+      throw new Error(
+        '子智能体服务没有启动，Claude Code、Codex 暂时不能在群里发言',
+      )
+    return host.delegations
+  }
 
   /** The member a member session's root agent speaks as. */
   const memberOf = (
@@ -129,6 +158,9 @@ export function installGroupRuntime(opts: GroupRuntimeOptions): GroupScheduler {
     estimateTokens: estimateTextTokens,
     emit: (event) => host.emitHost(event as unknown as Record<string, unknown>),
     speak: async (request): Promise<SpeakResult> => {
+      const roster = groups.roster(groups.state(request.groupId))
+      if (roster.find((m) => m.id === request.member)?.external)
+        return external.speak(request)
       const before = spentBy(request.memberSessionId)
       const outcome = await host.runBackgroundTurn(
         host.scopeFor(request.memberSessionId, 'groups.speak'),

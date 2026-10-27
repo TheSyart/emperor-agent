@@ -531,6 +531,8 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             SUBAGENT_IDENTITY,
             SUBAGENT_HANDOFF,
             EXTERNAL_REPORT_TRANSPORT,
+            // A contact's job card and the group charter (GRP-09).
+            input.instructions,
             // The repository's CLAUDE.md as text, not its settings: project
             // settings could pre-approve tools past canUseTool (AGT-08).
             projectInstructions(input.cwd, [

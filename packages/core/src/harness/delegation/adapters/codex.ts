@@ -178,6 +178,8 @@ export function codexThreadParams(
       (input.policy.mode === 'read-only'
         ? 'The source workspace is readonly; review only.'
         : 'Deliver changes as files. Do not commit or change Git metadata.') +
+      // A contact's job card and the group charter (GRP-09).
+      (input.instructions ? `\n\n${input.instructions}` : '') +
       (agents ? `\n\n${agents}` : ''),
   }
 }

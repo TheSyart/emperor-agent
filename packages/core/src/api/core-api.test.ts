@@ -158,6 +158,7 @@ const EXPECTED_OPERATIONS = [
   'goals.resume',
   'goals.start',
   'groups.addMember',
+  'groups.confirmTask',
   'groups.create',
   'groups.files.list',
   'groups.get',

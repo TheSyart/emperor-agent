@@ -2343,6 +2343,18 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.groups.history(input),
   ),
+  'groups.confirmTask': operation(
+    z.tuple([
+      z
+        .object({
+          id: groupIdSchema,
+          taskId: z.string().min(1).max(128),
+          approve: z.boolean(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.confirmTask(input),
+  ),
   'groups.stop': operation(
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.stop(input),

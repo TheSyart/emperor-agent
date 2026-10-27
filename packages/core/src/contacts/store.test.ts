@@ -155,6 +155,15 @@ describe('creating from a template (card test 2)', () => {
       capabilities: { model: 'inherit', permission: 'inherit' },
       templateId: 'security-auditor',
     })
+    // GRP-09: an external member speaks only when @-mentioned by default
+    // (its runs are slower and dearer), whatever the template says.
+    expect(external.groupHabit.speak).toBe('mentioned')
+    const plain = await store.create({
+      name: 'Codex 小帮手',
+      kind: 'external',
+      backend: 'codex',
+    })
+    expect(plain.groupHabit.speak).toBe('mentioned')
 
     await store.fromTemplate({ templateId: 'code-reviewer' })
     const second = await store.fromTemplate({ templateId: 'code-reviewer' })
