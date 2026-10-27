@@ -15,6 +15,13 @@ export declare const SPRITES: Record<string, PetStrip>
 /** Runtime animation key → key of SPRITES. */
 export declare const ASSETS: Record<string, string>
 export declare function spriteFor(animation: string): PetStrip
+export type PetOutfit = 'daily' | 'robe' | 'original'
+export declare const PET_OUTFITS: readonly PetOutfit[]
+/** `<folder>/<file>` of a strip in an outfit; unknown outfits wear everyday. */
+export declare function stripPath(
+  outfit: string | undefined,
+  sprite: PetStrip,
+): string
 export declare function mapPetEvent(
   event: unknown,
 ): Record<string, unknown> | null

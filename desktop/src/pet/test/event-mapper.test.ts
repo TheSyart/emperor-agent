@@ -52,3 +52,51 @@ describe('pet event mapper', () => {
     expect(mapPetEvent({ type: 'activity', label: 'unknown' })).toBeNull()
   })
 })
+
+describe('the pet’s outfits (BRD-04)', () => {
+  it('finds each strip in its outfit’s folder', async () => {
+    const { stripPath, PET_OUTFITS, SPRITES } =
+      await import('../event-mapper.js')
+    expect(PET_OUTFITS).toEqual(['daily', 'robe', 'original'])
+    expect(stripPath('daily', SPRITES.idle!)).toBe(
+      'xiaodan-daily/daily-idle.webp',
+    )
+    expect(stripPath('robe', SPRITES.cheer!)).toBe(
+      'xiaodan-robe/robe-cheer.webp',
+    )
+    expect(stripPath('original', SPRITES.doze!)).toBe(
+      'xiaodan/xiaodan-doze.webp',
+    )
+  })
+
+  it('dresses an unknown outfit in everyday clothes', async () => {
+    const { stripPath, SPRITES } = await import('../event-mapper.js')
+    expect(stripPath('penguin', SPRITES.walk!)).toBe(
+      'xiaodan-daily/daily-walk.webp',
+    )
+    expect(stripPath(undefined, SPRITES.walk!)).toBe(
+      'xiaodan-daily/daily-walk.webp',
+    )
+  })
+
+  it('has every strip of every outfit on disk', async () => {
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { stripPath, PET_OUTFITS, SPRITES } =
+      await import('../event-mapper.js')
+    const root = join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      '..',
+      'assets',
+      'desktop-pet',
+    )
+    for (const outfit of PET_OUTFITS)
+      for (const sprite of Object.values(SPRITES))
+        expect(existsSync(join(root, stripPath(outfit, sprite))), outfit).toBe(
+          true,
+        )
+  })
+})

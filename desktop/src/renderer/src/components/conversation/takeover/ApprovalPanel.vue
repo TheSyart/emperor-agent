@@ -22,6 +22,9 @@ import {
   riskLabel,
   type ApprovalAction,
 } from './approvalModel'
+import { COURTLY, courtlyAction } from '../../../copy/courtly'
+import { useUiPreferences } from '../../../composables/useUiPreferences'
+import askSticker from '../../../assets/mascot/sticker-en.webp'
 
 const props = defineProps<{ interaction: ControlInteraction }>()
 const ctx = useAppContext()
@@ -31,6 +34,13 @@ const root = ref<HTMLElement | null>(null)
 const presentation = computed(() => approvalPresentation(props.interaction))
 const actions = computed(() => approvalActions(props.interaction))
 const multiple = computed(() => presentation.value.operations.length > 1)
+// 宫廷用语 (BRD-06): 准奏 / 驳回 before the plain words, and 小单 asking.
+const { preferences } = useUiPreferences()
+const courtly = computed(() => preferences.value.courtlyCopy)
+const sticker = computed(() => courtly.value && preferences.value.showMascot)
+function actionLabel(action: ApprovalAction): string {
+  return courtly.value ? courtlyAction(action.label, action.deny) : action.label
+}
 
 watch(
   () => props.interaction.id,
@@ -69,6 +79,15 @@ function decide(action: ApprovalAction) {
         <span v-if="presentation.count > 1" class="count"
           >· {{ presentation.count }} 项操作</span
         >
+        <span v-if="sticker" class="sticker" aria-hidden="true">
+          <img
+            :src="askSticker"
+            alt=""
+            draggable="false"
+            data-courtly-sticker
+          />
+          <span>{{ COURTLY.askSticker }}</span>
+        </span>
       </div>
       <div class="body" tabindex="0" role="group" aria-label="授权详情">
         <div class="headline">{{ presentation.headline }}</div>
@@ -106,10 +125,11 @@ function decide(action: ApprovalAction) {
           :variant="action.variant"
           :data-option-id="action.optionId || undefined"
           :title="action.description || undefined"
+          :aria-label="courtly ? action.label : undefined"
           :disabled="answered"
           @click="decide(action)"
         >
-          {{ action.label }}
+          {{ actionLabel(action) }}
         </Button>
       </div>
     </section>
@@ -135,6 +155,21 @@ function decide(action: ApprovalAction) {
   color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
+}
+
+.sticker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  color: rgb(var(--state-error-label));
+  font-family: 'Songti SC', 'STSong', serif;
+  font-weight: var(--weight-semibold);
+}
+
+.sticker img {
+  height: 28px;
+  width: auto;
 }
 
 .strip {

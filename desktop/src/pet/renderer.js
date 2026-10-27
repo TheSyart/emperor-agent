@@ -14,15 +14,28 @@ let idleSceneTimer = null
 let idleSceneIndex = 0
 let subagentCount = 0
 let pendingInteractionActive = false
+// What the pet wears (BRD-04): from main at start, then outfit events.
+let outfit = cfg.outfit || 'daily'
 
 function spriteUrl(sprite) {
-  return `${cfg.assetBaseUrl || ''}${sprite.file}`
+  return `${cfg.assetBaseUrl || ''}${mapper.stripPath(outfit, sprite)}`
 }
 
 // Warm every strip once so a state change never flashes an empty frame.
-for (const sprite of Object.values(mapper.SPRITES)) {
-  const image = new Image()
-  image.src = spriteUrl(sprite)
+function warmStrips() {
+  for (const sprite of Object.values(mapper.SPRITES)) {
+    const image = new Image()
+    image.src = spriteUrl(sprite)
+  }
+}
+warmStrips()
+
+/** Change clothes without restarting the animation it plays. */
+function dress(next) {
+  if (!mapper.PET_OUTFITS.includes(next) || next === outfit) return
+  outfit = next
+  warmStrips()
+  if (pet.style.backgroundImage) showSprite(mapper.spriteFor(currentAnimation))
 }
 
 /** Point #pet at a strip; renderer.css steps through its frames. */
@@ -135,6 +148,10 @@ function updateBadge(delta) {
 
 function applyPetEvent(event) {
   if (!event || typeof event !== 'object') return
+  if (event.type === 'outfit') {
+    dress(event.outfit)
+    return
+  }
   if (event.type === 'attention' && event.kind === 'approval') {
     pendingInteractionActive = true
   }

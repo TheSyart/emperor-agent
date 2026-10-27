@@ -702,6 +702,17 @@ const buildHome = useBuildHome({
   notify: (message) => ctx.showToast(message),
   fail: (error) => ctx.showError(error),
 })
+/**
+ * The first Build home, before any project (BRD-04): 小单 on his throne
+ * above the words, unless 显示吉祥物 is off.
+ */
+const buildFirstHome = computed(
+  () =>
+    buildHomeShown.value &&
+    uiPrefs.value.showMascot &&
+    buildHome.recent.value.length === 0 &&
+    !buildHome.project.value,
+)
 /** The starters and recent projects: after the first-run guide (UI-S17). */
 const heroExtras = computed(
   () =>
@@ -1421,6 +1432,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         v-if="phase === 'hero'"
         :mode="heroMode"
         :address-name="ctx.boot.value?.profileOnboarding?.addressName ?? null"
+        :scene="buildFirstHome"
         :speaker="contactChat?.speaker ?? null"
         :speaker-intro="
           contactChat?.contact?.intro ||

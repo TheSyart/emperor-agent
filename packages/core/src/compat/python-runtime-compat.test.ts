@@ -23,6 +23,7 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
     expect(settings.desktopPet).toEqual({
       enabled: true,
       autoStartWithWebui: false,
+      outfit: 'daily',
     })
     expect(Object.keys(settings).sort()).toEqual([
       'browser',

@@ -102,6 +102,7 @@ const EXPECTED_OPERATIONS = [
   'delegations.validate',
   'desktopPet.get',
   'desktopPet.setEnabled',
+  'desktopPet.setOutfit',
   'diagnostics.get',
   'environment.cancelInstall',
   'environment.createInstallPlan',

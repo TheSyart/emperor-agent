@@ -487,7 +487,12 @@ function backHome() {
           <span class="portrait">
             <Avatar
               v-bind="contactAvatarProps(contact.avatar, contact.name)"
-              :size="contact.avatar.kind === 'library' ? 56 : 40"
+              :size="
+                contact.avatar.kind === 'library' ||
+                contact.avatar.kind === 'mascot'
+                  ? 56
+                  : 40
+              "
               labelled
             />
           </span>

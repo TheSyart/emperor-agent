@@ -670,7 +670,11 @@ export interface ModelConfigPayload {
   rejectedEntries?: RejectedModelEntryPayload[]
 }
 
+/** What the desktop pet wears (BRD-04). */
+export type DesktopPetOutfit = 'daily' | 'robe' | 'original'
+
 export interface DesktopPetPayload {
+  outfit?: DesktopPetOutfit
   enabled: boolean
   autoStartWithWebui: boolean
   running: boolean

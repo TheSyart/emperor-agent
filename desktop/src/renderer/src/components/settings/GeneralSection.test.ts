@@ -43,7 +43,8 @@ let container: HTMLDivElement | null = null
 const showToast = vi.fn()
 const showError = vi.fn()
 const setDesktopPetEnabled = vi.fn(async () => {})
-const pet = ref({ enabled: false, running: false })
+const setDesktopPetOutfit = vi.fn(async () => {})
+const pet = ref({ enabled: false, running: false, outfit: 'daily' })
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve()
@@ -60,6 +61,7 @@ async function mount(): Promise<HTMLDivElement> {
     showToast,
     showError,
     setDesktopPetEnabled,
+    setDesktopPetOutfit,
     runSafely: async (task: () => Promise<void>) => await task(),
   } as never)
   app.mount(container)
@@ -142,6 +144,49 @@ describe('GeneralSection main page (UI-S07)', () => {
     petSwitch?.click()
     await settle()
     expect(setDesktopPetEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it('dresses the pet in one of three outfits, everyday first (BRD-04)', async () => {
+    const root = await mount()
+    const outfits = root.querySelector('[aria-label="桌宠的衣服"]')!
+    const options = [...outfits.querySelectorAll<HTMLElement>('[role="radio"]')]
+    expect(options.map((option) => option.textContent?.trim())).toEqual([
+      '日常版',
+      '龙袍混搭',
+      '原版',
+    ])
+    expect(options[0]!.getAttribute('aria-checked')).toBe('true')
+    options[1]!.click()
+    await settle()
+    expect(setDesktopPetOutfit).toHaveBeenCalledWith('robe')
+  })
+
+  it('has 显示吉祥物 under 外观, on by default (BRD-04)', async () => {
+    const root = await mount()
+    const appearance = root.querySelector('[data-group="appearance"]')!
+    const mascot = appearance.querySelector<HTMLButtonElement>(
+      '#general-show-mascot',
+    )!
+    expect(mascot.getAttribute('aria-checked')).toBe('true')
+    mascot.click()
+    await settle()
+    expect(mascot.getAttribute('aria-checked')).toBe('false')
+    expect(
+      JSON.parse(localStorage.getItem(UI_PREFERENCES_STORAGE_KEY)!).showMascot,
+    ).toBe(false)
+  })
+
+  it('has 宫廷用语 under 外观, off by default (BRD-06)', async () => {
+    const root = await mount()
+    const appearance = root.querySelector('[data-group="appearance"]')!
+    const courtly =
+      appearance.querySelector<HTMLButtonElement>('#general-courtly')!
+    expect(courtly.getAttribute('aria-checked')).toBe('false')
+    courtly.click()
+    await settle()
+    expect(
+      JSON.parse(localStorage.getItem(UI_PREFERENCES_STORAGE_KEY)!).courtlyCopy,
+    ).toBe(true)
   })
 
   it('has 显示轨迹 and 显示系统步骤 under 开发者, both off by default', async () => {

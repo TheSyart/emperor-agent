@@ -213,6 +213,8 @@ import {
   BROWSER_REVEAL_CHANNEL,
   PET_CLOSE_CHANNEL,
   PET_OPEN_CHANNEL,
+  PET_OUTFIT_CHANNEL,
+  PET_EVENT_CHANNEL,
   PET_RENDERER_BOOTSTRAP_CHANNEL,
   PET_RENDERER_CLOSE_CHANNEL,
   PET_STATUS_CHANNEL,
@@ -643,8 +645,29 @@ registerScreenshotIpc({
   },
 })
 
-ipcMain.handle(PET_OPEN_CHANNEL, async (event) => {
+/** What the pet wears (BRD-04); the main window says, Core keeps it. */
+const PET_OUTFITS = ['daily', 'robe', 'original'] as const
+let petOutfit: (typeof PET_OUTFITS)[number] = 'daily'
+
+function takePetOutfit(outfit: unknown): void {
+  if (!PET_OUTFITS.includes(outfit as (typeof PET_OUTFITS)[number])) return
+  petOutfit = outfit as (typeof PET_OUTFITS)[number]
+  if (petWindow && !petWindow.isDestroyed())
+    petWindow.webContents.send(PET_EVENT_CHANNEL, {
+      type: 'outfit',
+      outfit: petOutfit,
+    })
+}
+
+ipcMain.handle(PET_OUTFIT_CHANNEL, async (event, outfit: unknown) => {
   trustedRendererPolicy.authorizeIpc(event)
+  takePetOutfit(outfit)
+  return petStatus()
+})
+
+ipcMain.handle(PET_OPEN_CHANNEL, async (event, outfit?: unknown) => {
+  trustedRendererPolicy.authorizeIpc(event)
+  takePetOutfit(outfit)
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.showInactive()
     return { open: true }
@@ -1261,7 +1284,8 @@ function registerAppProtocol(): void {
     else if (url.host === 'pet-assets')
       filePath = resolveStaticAssetPath(
         url.pathname,
-        path.join(config.runtimeRoot, 'assets', 'desktop-pet', 'xiaodan'),
+        // Every outfit's folder (BRD-04): xiaodan, xiaodan-daily, xiaodan-robe.
+        path.join(config.runtimeRoot, 'assets', 'desktop-pet'),
       )
     if (!filePath) return new Response('asset not found', { status: 404 })
     return net.fetch(pathToFileURL(filePath).toString())
@@ -1553,7 +1577,10 @@ function createPetWindow(): void {
       nodeIntegration: false,
       sandbox: true,
       devTools: !app.isPackaged,
-      additionalArguments: [`--emperor-asset-base-url=${assetBaseUrl}`],
+      additionalArguments: [
+        `--emperor-asset-base-url=${assetBaseUrl}`,
+        `--emperor-pet-outfit=${petOutfit}`,
+      ],
     },
   })
 

@@ -14,26 +14,36 @@
  * A single chat with a contact (GRP-05) greets as the contact instead: its
  * avatar and name, and its intro under them.
  *
+ * The first Build home (no project yet, BRD-04) shows 小单 on his throne
+ * above the words instead of the mark (`scene`); it is decoration only.
+ *
  * Props: mode? (default chat), addressName? (the profile's 称呼, null:
- * none), speaker? (a single chat's contact), speakerIntro?.
+ * none), speaker? (a single chat's contact), speakerIntro?, scene?.
  */
 import { computed } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
+import throne from '../../assets/mascot/throne.webp'
 import BrandMark from '../brand/BrandMark.vue'
 import Avatar from '../ui/Avatar.vue'
 import type { ContactSpeaker } from './contactChat'
 import { contactHeroNote, heroHeadline, heroNote } from './heroGreeting'
+import { courtlyHeadline } from '../../copy/courtly'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 
 const props = defineProps<{
   mode?: AppMode
   addressName?: string | null
   speaker?: ContactSpeaker | null
   speakerIntro?: string
+  scene?: boolean
 }>()
+const { preferences } = useUiPreferences()
 const headline = computed(() =>
   props.speaker
     ? props.speaker.name
-    : heroHeadline(props.addressName, props.mode ?? 'chat'),
+    : preferences.value.courtlyCopy
+      ? courtlyHeadline(props.mode ?? 'chat')
+      : heroHeadline(props.addressName, props.mode ?? 'chat'),
 )
 const note = computed(() =>
   props.speaker
@@ -45,6 +55,9 @@ const note = computed(() =>
 <template>
   <div class="empty-hero">
     <div class="glow" aria-hidden="true" />
+    <div v-if="scene && !speaker" class="scene" aria-hidden="true">
+      <img :src="throne" alt="" draggable="false" data-hero-scene />
+    </div>
     <h1 class="headline" :data-contact-hero="speaker ? '' : undefined">
       <Avatar
         v-if="speaker"
@@ -53,7 +66,7 @@ const note = computed(() =>
         labelled
         class="mark"
       />
-      <BrandMark v-else :size="34" class="mark" />
+      <BrandMark v-else-if="!scene" :size="34" class="mark" />
       <span>{{ headline }}</span>
     </h1>
     <p v-if="note" class="note">{{ note }}</p>
@@ -61,6 +74,25 @@ const note = computed(() =>
 </template>
 
 <style scoped>
+.scene {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.scene img {
+  height: 148px;
+  width: auto;
+  user-select: none;
+}
+
+/* A short window keeps the composer in view: the picture goes first. */
+@media (max-height: 640px) {
+  .scene {
+    display: none;
+  }
+}
+
 .empty-hero {
   position: relative;
   display: flex;

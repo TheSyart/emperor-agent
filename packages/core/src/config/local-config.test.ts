@@ -22,7 +22,7 @@ describe('local config', () => {
   it('round-trips webui and desktop pet preferences with Python-compatible field names', async () => {
     await saveLocalConfig(dir, {
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
-      desktopPet: { enabled: true, autoStartWithWebui: false },
+      desktopPet: { enabled: true, autoStartWithWebui: false, outfit: 'robe' },
       prompt: { profile: 'classic' },
     })
 
@@ -33,7 +33,7 @@ describe('local config', () => {
       // REL-03: settings.json says which version wrote it.
       version: 1,
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
-      desktopPet: { enabled: true, autoStartWithWebui: false },
+      desktopPet: { enabled: true, autoStartWithWebui: false, outfit: 'robe' },
       prompt: { profile: 'classic' },
       browser: {
         linkTarget: 'system',
@@ -72,6 +72,7 @@ describe('local config', () => {
     expect(loaded.desktopPet).toEqual({
       enabled: true,
       autoStartWithWebui: false,
+      outfit: 'robe',
     })
     expect(loaded.prompt).toEqual({ profile: 'classic' })
     expect(prefs).toEqual({ host: '127.0.0.1', port: 8765, openBrowser: false })
@@ -225,6 +226,7 @@ describe('local config', () => {
     expect(parsed.desktopPet).toEqual({
       enabled: true,
       autoStartWithWebui: false,
+      outfit: 'daily',
     })
     expect(parsed.prompt).toEqual({ profile: 'technical' })
     expect(Object.keys(parsed).sort()).toEqual([

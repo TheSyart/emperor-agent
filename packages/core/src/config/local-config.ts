@@ -20,9 +20,20 @@ export interface WebUIPreferences {
   openBrowser: boolean
 }
 
+/** The desktop pet's outfits (BRD-04): everyday (the default), robe, original. */
+export const PET_OUTFITS = ['daily', 'robe', 'original'] as const
+export type PetOutfit = (typeof PET_OUTFITS)[number]
+
 export interface DesktopPetPreferences {
   enabled: boolean
   autoStartWithWebui: boolean
+  outfit: PetOutfit
+}
+
+function normalizePetOutfit(value: unknown): PetOutfit {
+  return PET_OUTFITS.includes(value as PetOutfit)
+    ? (value as PetOutfit)
+    : 'daily'
 }
 
 export type PromptProfile = 'classic' | 'neutral' | 'technical'
@@ -303,7 +314,7 @@ export interface LocalConfigPersistenceOptions {
 function defaultLocalConfig(): LocalConfig {
   return {
     webui: { host: '127.0.0.1', port: 8765, openBrowser: false },
-    desktopPet: { enabled: false, autoStartWithWebui: true },
+    desktopPet: { enabled: false, autoStartWithWebui: true, outfit: 'daily' },
     prompt: { profile: 'technical' },
     browser: defaultBrowserPreferences(),
     webTools: defaultWebToolPreferences(),
@@ -351,6 +362,7 @@ export function parseLocalConfig(
         desktopPet.auto_start_with_webui ??
         true,
       ),
+      outfit: normalizePetOutfit(desktopPet.outfit),
     },
     prompt: {
       profile: normalizePromptProfile(prompt.profile),
@@ -436,6 +448,7 @@ export async function saveLocalConfig(
     desktopPet: {
       enabled: config.desktopPet.enabled,
       autoStartWithWebui: config.desktopPet.autoStartWithWebui,
+      outfit: normalizePetOutfit(config.desktopPet.outfit),
     },
     prompt: {
       profile: normalizePromptProfile(config.prompt?.profile),

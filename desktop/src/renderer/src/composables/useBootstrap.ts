@@ -1,6 +1,10 @@
 import { ref } from 'vue'
 import { core } from '../api/http'
-import type { BootstrapPayload, McpConfigPayload } from '../types'
+import type {
+  BootstrapPayload,
+  DesktopPetOutfit,
+  McpConfigPayload,
+} from '../types'
 
 export interface BootstrapOptions {
   /**
@@ -188,7 +192,7 @@ export function useBootstrap(
     const emperor = (window as any).emperor
     let windowStatus: { open?: boolean; error?: string } | undefined
     if (enabled) {
-      windowStatus = await emperor?.openPet?.()
+      windowStatus = await emperor?.openPet?.(payload.outfit)
       showToast(
         windowStatus?.error
           ? `桌宠未启动：${windowStatus.error}`
@@ -202,6 +206,12 @@ export function useBootstrap(
     payload.lastError = windowStatus?.error || null
     if (boot.value) boot.value.desktopPet = payload
     return payload
+  }
+
+  async function setDesktopPetOutfit(outfit: DesktopPetOutfit) {
+    const payload = await core('desktopPet.setOutfit', outfit)
+    await (window as any).emperor?.setPetOutfit?.(outfit)
+    if (boot.value?.desktopPet) boot.value.desktopPet.outfit = payload.outfit
   }
 
   return {
@@ -227,5 +237,6 @@ export function useBootstrap(
     saveWatchlist,
     checkWatchlist,
     setDesktopPetEnabled,
+    setDesktopPetOutfit,
   }
 }

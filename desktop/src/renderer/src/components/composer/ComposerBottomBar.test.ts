@@ -7,6 +7,10 @@
  * model chip with 添加模型…, the context ring, and the send slot — which is
  * the microphone while the composer is empty.
  */
+import {
+  UI_PREFERENCES_STORAGE_KEY,
+  reloadUiPreferences,
+} from '../../composables/useUiPreferences'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DictationStatus } from '../../api/dictation'
@@ -339,6 +343,24 @@ describe('the + menu', () => {
       .find((item) => item.textContent?.includes('计划模式'))!
       .click()
     expect(props.onActivatePlan).toHaveBeenCalledOnce()
+  })
+
+  it('names Plan 内阁票拟 while 宫廷用语 is on, plain meaning kept (BRD-06)', async () => {
+    localStorage.setItem(
+      UI_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ courtlyCopy: true }),
+    )
+    reloadUiPreferences()
+    try {
+      const { root } = mount()
+      await settle()
+      barButton(root, '添加附件与能力').click()
+      await settle()
+      expect(menuItems(openMenu('添加'))).toContain('内阁票拟（计划模式）')
+    } finally {
+      localStorage.removeItem(UI_PREFERENCES_STORAGE_KEY)
+      reloadUiPreferences()
+    }
   })
 
   it('has no screenshot where it cannot be taken', async () => {

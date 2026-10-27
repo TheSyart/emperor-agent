@@ -9,6 +9,7 @@ import {
   OPEN_PATH_CHANNEL,
   PET_CLOSE_CHANNEL,
   PET_OPEN_CHANNEL,
+  PET_OUTFIT_CHANNEL,
   PET_STATUS_CHANNEL,
   PET_STATUS_REQUEST_CHANNEL,
   SCREENSHOT_CAPTURE_CHANNEL,
@@ -29,7 +30,10 @@ contextBridge.exposeInMainWorld('emperor', {
     ipcRenderer.invoke(OPEN_PATH_CHANNEL, target),
   /** The composer's + › 截图: the system's region capture (macOS). */
   captureScreenshot: () => ipcRenderer.invoke(SCREENSHOT_CAPTURE_CHANNEL),
-  openPet: () => ipcRenderer.invoke(PET_OPEN_CHANNEL),
+  /** Open the pet in an outfit (BRD-04: daily, robe or original). */
+  openPet: (outfit?: string) => ipcRenderer.invoke(PET_OPEN_CHANNEL, outfit),
+  setPetOutfit: (outfit: string) =>
+    ipcRenderer.invoke(PET_OUTFIT_CHANNEL, outfit),
   closePet: () => ipcRenderer.invoke(PET_CLOSE_CHANNEL),
   petStatus: () => ipcRenderer.invoke(PET_STATUS_REQUEST_CHANNEL),
   onPetStatus: (listener: (status: unknown) => void) => {

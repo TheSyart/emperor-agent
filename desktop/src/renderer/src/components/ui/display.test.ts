@@ -205,6 +205,36 @@ describe('props snapshot (test 1)', () => {
     expect(unknown!.textContent?.trim()).toBe('研')
   })
 
+  it('Avatar draws a mascot pose round, a letter for an unknown pose (BRD-04)', () => {
+    const root = mount(() =>
+      h('div', [
+        h(Avatar, {
+          kind: 'mascot',
+          id: 'crown-head',
+          label: 'Emperor',
+          size: 40,
+        }),
+        h(Avatar, {
+          kind: 'mascot',
+          id: 'crown-head',
+          label: 'Emperor',
+          size: 56,
+        }),
+        h(Avatar, { kind: 'mascot', id: 'nope', label: 'Emperor', size: 24 }),
+      ]),
+    )
+    const [head, hero, unknown] = [
+      ...root.querySelectorAll<HTMLElement>('.ds-avatar'),
+    ]
+    expect(head!.dataset.shown).toBe('mascot')
+    expect(head!.querySelector('img')!.getAttribute('src')).toContain(
+      'emperor-head',
+    )
+    expect(hero!.dataset.size).toBe('56')
+    expect(unknown!.dataset.shown).toBe('color')
+    expect(unknown!.textContent?.trim()).toBe('E')
+  })
+
   it('ListRow, Surface, List, ListSection, EmptyState and Notice', () => {
     const root = mount(() =>
       h('div', [

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * GeneralSection — Settings › 常规 (UI-S07), one card per group:
- * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme) and 桌宠 (the desktop
+ * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme), 显示吉祥物 (BRD-04, a
+ *   per-Mac UI preference), 桌宠的衣服 and 桌宠 (the desktop
  *   companion's switch, ctx.setDesktopPetEnabled; its last error under it);
  * - 会话: 新会话的权限 (Core `sessions.defaults`; choosing 完全访问 asks
  *   first), 处理过程 (how a finished turn's steps show), 网页链接 (where a
@@ -14,6 +15,7 @@
  *   最近删除 (FIX-01: deleted sessions kept 30 days, restore or delete for
  *   good after a confirmation). A list that failed to load says so with
  *   重试 instead of looking empty.
+ * - 关于 (BRD-04, AboutGroup): 小单, the name, one line and the 「单」 seal;
  * - 更新 (REL-02, updates/UpdateGroup): 检查更新 and 当前版本; while a newer
  *   release is offered or downloading, updates/UpdateNotice opens the page
  *   (「Emperor 0.2.1 可用 · 查看更新说明 · 下载」).
@@ -30,12 +32,17 @@ import {
   useUiPreferences,
   type ProcessDisplay,
 } from '../../composables/useUiPreferences'
-import type { DeletedSessionInfo, SessionInfo } from '../../types'
+import type {
+  DeletedSessionInfo,
+  DesktopPetOutfit,
+  SessionInfo,
+} from '../../types'
 import { composerModeOptions } from '../chat/composerControls'
 import Button from '../ui/Button.vue'
 import { confirm } from '../ui/confirm'
 import { useSettingsPages } from './settingsHeader'
 import UpdateGroup from './updates/UpdateGroup.vue'
+import AboutGroup from './AboutGroup.vue'
 import UpdateNotice from './updates/UpdateNotice.vue'
 import {
   EmptyState,
@@ -114,6 +121,27 @@ function setPet(next: boolean): void {
     })
     .finally(() => {
       petBusy.value = false
+    })
+}
+
+/** The pet's outfits (BRD-04): everyday by default. */
+const PET_OUTFITS: SegmentedOption<DesktopPetOutfit>[] = [
+  { value: 'daily', label: '日常版' },
+  { value: 'robe', label: '龙袍混搭' },
+  { value: 'original', label: '原版' },
+]
+const petOutfit = computed<DesktopPetOutfit>(() => pet.value?.outfit ?? 'daily')
+const outfitBusy = ref(false)
+
+function dressPet(next: DesktopPetOutfit): void {
+  if (outfitBusy.value || next === petOutfit.value) return
+  outfitBusy.value = true
+  void ctx
+    .runSafely(async () => {
+      await ctx.setDesktopPetOutfit(next)
+    })
+    .finally(() => {
+      outfitBusy.value = false
     })
 }
 
@@ -398,6 +426,42 @@ onMounted(() => void loadPermission())
             "
           />
         </SettingsRow>
+        <SettingsRow
+          title="显示吉祥物"
+          description="在构建的第一次首页、皮肤的装饰里显示小单；关了这些地方都不放图"
+          label-for="general-show-mascot"
+        >
+          <Switch
+            id="general-show-mascot"
+            :model-value="uiPrefs.showMascot"
+            @update:model-value="
+              (on: boolean) => setUiPreference('showMascot', on)
+            "
+          />
+        </SettingsRow>
+        <SettingsRow
+          title="宫廷用语"
+          description="首页问候和授权按钮换成宫廷说法，例如「准奏（允许本次）」；按钮里始终带着原来的意思"
+          label-for="general-courtly"
+        >
+          <Switch
+            id="general-courtly"
+            :model-value="uiPrefs.courtlyCopy"
+            @update:model-value="
+              (on: boolean) => setUiPreference('courtlyCopy', on)
+            "
+          />
+        </SettingsRow>
+        <SettingsRow title="桌宠的衣服">
+          <Segmented
+            :model-value="petOutfit"
+            :options="PET_OUTFITS"
+            aria-label="桌宠的衣服"
+            @update:model-value="
+              (value?: DesktopPetOutfit) => value && dressPet(value)
+            "
+          />
+        </SettingsRow>
         <SettingsRow title="桌宠" label-for="general-pet">
           <template #description>
             <span>{{ petDescription }}</span>
@@ -517,6 +581,7 @@ onMounted(() => void loadPermission())
       </SettingsGroup>
 
       <UpdateGroup />
+      <AboutGroup />
     </template>
   </SettingsSection>
 </template>

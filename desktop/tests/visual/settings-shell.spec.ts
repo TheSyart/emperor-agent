@@ -68,6 +68,21 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+// BRD-04: 常规 ends with 关于 — 小单, the name, one line, the 「单」 seal.
+test('general section ends with 关于', async ({ page }) => {
+  const dialog = await openSettings(page, 'general', { theme: 'light' })
+  const about = dialog.locator('[data-group="about"]')
+  await about.scrollIntoViewIfNeeded()
+  await expect(about).toContainText('你做决定，agent 们办事。')
+  await expect(about.locator('[data-about-figure]')).toBeVisible()
+  await expect(about.locator('[data-about-seal]')).toBeVisible()
+  await page.waitForTimeout(200)
+  await about.screenshot({
+    path: resolve(screenshotDir, 'general-about-light.png'),
+    animations: 'disabled',
+  })
+})
+
 test('follow-system theme tracks prefers-color-scheme live', async ({
   page,
 }) => {
