@@ -12,9 +12,13 @@
  *         library   a contact's portrait from the avatar library (BRD-07),
  *                   `id` AV-01-1 … AV-15-9, on a round tile in its tint;
  *                   an unknown id falls back to the colour tile
+ *         mascot    a portrait of the mascot by pose (`id`, BRD-04: Emperor
+ *                   wears `crown-head`), round like a library portrait;
+ *                   an unknown pose falls back to the colour tile
  *   size: 16 | 20 | 24 (default) | 28 | 40 — off-scale sizes are refused in
  *         development and drawn at the nearest step; a library portrait may
- *         also be 56 (the contact editor's and profile's large portrait)
+ *         also be 56 (the contact editor's and profile's large portrait),
+ *         and so may a mascot portrait
  * `status` puts a small state dot on a sprite (running / completed /
  * failed). Decorative (aria-hidden) unless `labelled`, which exposes it as
  * an image named by `label`.
@@ -44,10 +48,11 @@ import {
 } from './spriteAvatar'
 import { SUBAGENT_PORTRAITS, subagentPortrait } from './subagentPortraits'
 import { contactAvatarCell } from './contactAvatars'
+import { mascotPortrait } from './mascotPortraits'
 
 const props = withDefaults(
   defineProps<{
-    kind?: 'sprite' | 'color' | 'logo' | 'initials' | 'library'
+    kind?: 'sprite' | 'color' | 'logo' | 'initials' | 'library' | 'mascot'
     size?: AvatarSize | typeof PORTRAIT_HERO_SIZE
     id?: string | null
     frameId?: string
@@ -72,7 +77,10 @@ const props = withDefaults(
 
 const size = computed<AvatarSize | typeof PORTRAIT_HERO_SIZE>(() => {
   if (isAvatarSize(props.size)) return props.size
-  if (props.kind === 'library' && props.size === PORTRAIT_HERO_SIZE)
+  if (
+    (props.kind === 'library' || props.kind === 'mascot') &&
+    props.size === PORTRAIT_HERO_SIZE
+  )
     return PORTRAIT_HERO_SIZE
   if (import.meta.env.DEV)
     console.error(
@@ -133,6 +141,11 @@ watch(
   () => (broken.value = false),
 )
 
+// ── mascot ──
+const mascot = computed(() =>
+  props.kind === 'mascot' ? mascotPortrait(props.id) : null,
+)
+
 // ── library ──
 const cell = computed(() =>
   props.kind === 'library' ? contactAvatarCell(props.id ?? '') : null,
@@ -152,6 +165,7 @@ const libraryStyle = computed(() => {
 const shown = computed(() => {
   if (props.kind === 'sprite') return 'sprite'
   if (props.kind === 'library') return cell.value ? 'library' : 'color'
+  if (props.kind === 'mascot') return mascot.value ? 'mascot' : 'color'
   if (props.kind === 'logo') {
     if (props.src && !broken.value) return 'image'
     if (asset.value) return monochrome.value ? 'mask' : 'asset'
@@ -204,6 +218,13 @@ const colorSlot = computed(() =>
       v-else-if="shown === 'library'"
       class="art library"
       :style="libraryStyle"
+    />
+    <img
+      v-else-if="shown === 'mascot'"
+      class="art mascot"
+      :src="mascot!"
+      alt=""
+      draggable="false"
     />
     <span v-else-if="shown === 'mask'" class="art mono" :style="maskStyle" />
     <img
@@ -299,6 +320,19 @@ const colorSlot = computed(() =>
   height: 100%;
   background-repeat: no-repeat;
   background-size: 300% 300%;
+}
+
+/* The mascot's portrait (BRD-04): round like a library portrait. */
+.ds-avatar[data-shown='mascot'] {
+  border-radius: var(--r-full);
+  background: rgb(var(--brand) / 0.16);
+  overflow: hidden;
+}
+
+.ds-avatar[data-shown='mascot'] .mascot {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* Plugin art is a full-bleed rounded tile already: no frame. */

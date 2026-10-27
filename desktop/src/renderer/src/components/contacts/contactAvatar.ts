@@ -1,14 +1,14 @@
 /**
  * A contact's avatar as ui/Avatar draws it (GRP-04): a library portrait on
  * its round tint, a subagent plush head, the vendor mark of Claude Code or
- * Codex, or — until the mascot's portraits ship (BRD-03) — Emperor's first
- * letter on a colour tile.
+ * Codex, or the mascot in a pose (Emperor wears its crowned head, BRD-04).
+ * An unknown kind is the first letter on a colour tile.
  */
 import type { ContactAvatar } from '@emperor/core/api'
 import { SUBAGENT_PORTRAITS } from '../ui/subagentPortraits'
 
 export interface ContactAvatarProps {
-  kind: 'library' | 'sprite' | 'logo' | 'color'
+  kind: 'library' | 'sprite' | 'logo' | 'color' | 'mascot'
   id?: string
   frameId?: string
   iconId?: string
@@ -33,6 +33,8 @@ export function contactAvatarProps(
         ? { kind: 'sprite', frameId: frame.id, label: name }
         : { kind: 'color', id: name, label: name }
     }
+    case 'mascot':
+      return { kind: 'mascot', id: avatar.pose, label: name }
     case 'logo':
       return {
         kind: 'logo',
