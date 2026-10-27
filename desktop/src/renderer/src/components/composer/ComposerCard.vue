@@ -65,6 +65,8 @@ import PermissionChip from './PermissionChip.vue'
 import PlanChip from './PlanChip.vue'
 import { useComposerDictation } from './composerDictation'
 import ComposerEditor from './editor/ComposerEditor.vue'
+import { COURTLY } from '../../copy/courtly'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 
 const props = defineProps<
   ComposerControllerProps & {
@@ -75,6 +77,8 @@ const props = defineProps<
   }
 >()
 const emit = defineEmits<ComposerEmit>()
+// 宫廷用语 (BRD-06): the + menu's plan item reads 内阁票拟（计划模式）.
+const { preferences: uiPreferences } = useUiPreferences()
 const controller = useComposerController(props, emit)
 const {
   editor,
@@ -508,7 +512,7 @@ function addModel(): void {
         @select="emit('activate-plan')"
       >
         <template #icon><DsPlan :size="16" /></template>
-        计划模式
+        {{ uiPreferences.courtlyCopy ? COURTLY.planMode : '计划模式' }}
       </MenuItem>
       <MenuItem
         :disabled="props.busy || props.lifecycleMode === 'goal'"

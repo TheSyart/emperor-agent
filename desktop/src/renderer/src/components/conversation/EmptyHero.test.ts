@@ -4,6 +4,10 @@
 import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, expect, it } from 'vitest'
 import EmptyHero from './EmptyHero.vue'
+import {
+  UI_PREFERENCES_STORAGE_KEY,
+  reloadUiPreferences,
+} from '../../composables/useUiPreferences'
 import type { AppMode } from '../../runtime/appMode'
 
 let app: App | undefined
@@ -69,4 +73,21 @@ it('BRD-04 · no scene unless asked', async () => {
   await mount('build', null)
   expect(root!.querySelector('[data-hero-scene]')).toBeNull()
   expect(root!.querySelector('.brand-mark')).not.toBeNull()
+})
+
+it('BRD-06 · asks in court words while 宫廷用语 is on, without the 称呼', async () => {
+  localStorage.setItem(
+    UI_PREFERENCES_STORAGE_KEY,
+    JSON.stringify({ courtlyCopy: true }),
+  )
+  reloadUiPreferences()
+  try {
+    expect((await mount('chat', '安先生')).headline).toBe('朕今日要办何事？')
+    app?.unmount()
+    root?.remove()
+    expect((await mount('group', null)).headline).toBe('今日宣谁议事？')
+  } finally {
+    localStorage.removeItem(UI_PREFERENCES_STORAGE_KEY)
+    reloadUiPreferences()
+  }
 })

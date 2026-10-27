@@ -27,6 +27,8 @@ import BrandMark from '../brand/BrandMark.vue'
 import Avatar from '../ui/Avatar.vue'
 import type { ContactSpeaker } from './contactChat'
 import { contactHeroNote, heroHeadline, heroNote } from './heroGreeting'
+import { courtlyHeadline } from '../../copy/courtly'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 
 const props = defineProps<{
   mode?: AppMode
@@ -35,10 +37,13 @@ const props = defineProps<{
   speakerIntro?: string
   scene?: boolean
 }>()
+const { preferences } = useUiPreferences()
 const headline = computed(() =>
   props.speaker
     ? props.speaker.name
-    : heroHeadline(props.addressName, props.mode ?? 'chat'),
+    : preferences.value.courtlyCopy
+      ? courtlyHeadline(props.mode ?? 'chat')
+      : heroHeadline(props.addressName, props.mode ?? 'chat'),
 )
 const note = computed(() =>
   props.speaker

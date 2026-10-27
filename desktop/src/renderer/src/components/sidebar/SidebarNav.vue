@@ -9,6 +9,8 @@
  * unavailable (`aria-disabled`, not `disabled`, so the hover still says
  * 「即将推出」) and do nothing.
  */
+import { COURTLY } from '../../copy/courtly'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 import { computed, ref } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
 import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
@@ -23,6 +25,13 @@ const emit = defineEmits<{ 'new-session': []; secondary: [] }>()
 
 const entry = computed(() => modeEntry(props.mode))
 const primary = computed(() => entry.value.primary)
+// 宫廷用语 (BRD-06): Group's 新建群聊 shows 召集议事; its name stays plain.
+const { preferences } = useUiPreferences()
+const primaryLabel = computed(() =>
+  preferences.value.courtlyCopy && props.mode === 'group'
+    ? COURTLY.newGroup
+    : primary.value.label,
+)
 const secondary = computed(() => entry.value.secondary)
 const newShortcut = shortcutLabel('session.new', detectShortcutPlatform())
 
@@ -56,7 +65,7 @@ function runSecondary(): void {
         v-on="soon.listeners"
       >
         <component :is="primary.icon" :size="16" class="new-chat-icon" />
-        <span class="new-chat-label">{{ primary.label }}</span>
+        <span class="new-chat-label">{{ primaryLabel }}</span>
         <Kbd v-if="newShortcut && primary.ready" class="new-chat-key">{{
           newShortcut
         }}</Kbd>

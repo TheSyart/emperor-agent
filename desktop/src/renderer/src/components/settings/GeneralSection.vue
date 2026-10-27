@@ -439,6 +439,19 @@ onMounted(() => void loadPermission())
             "
           />
         </SettingsRow>
+        <SettingsRow
+          title="宫廷用语"
+          description="首页问候和授权按钮换成宫廷说法，例如「准奏（允许本次）」；按钮里始终带着原来的意思"
+          label-for="general-courtly"
+        >
+          <Switch
+            id="general-courtly"
+            :model-value="uiPrefs.courtlyCopy"
+            @update:model-value="
+              (on: boolean) => setUiPreference('courtlyCopy', on)
+            "
+          />
+        </SettingsRow>
         <SettingsRow title="桌宠的衣服">
           <Segmented
             :model-value="petOutfit"

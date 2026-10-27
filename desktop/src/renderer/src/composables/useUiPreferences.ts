@@ -32,6 +32,8 @@ export interface UiPreferences {
    * home, the skins' decorations. Off: every such place has no picture.
    */
   showMascot: boolean
+  /** 宫廷用语 (BRD-06): a few words the court way, plain meaning kept. */
+  courtlyCopy: boolean
 }
 
 export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
@@ -42,6 +44,7 @@ export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
   showHiddenFiles: false,
   showIgnoredFiles: false,
   showMascot: true,
+  courtlyCopy: false,
 })
 
 const PROCESS_DISPLAYS: readonly ProcessDisplay[] = [
@@ -69,6 +72,7 @@ export function parseUiPreferences(raw: unknown): UiPreferences {
     showHiddenFiles: flag('showHiddenFiles'),
     showIgnoredFiles: flag('showIgnoredFiles'),
     showMascot: flag('showMascot'),
+    courtlyCopy: flag('courtlyCopy'),
   }
 }
 

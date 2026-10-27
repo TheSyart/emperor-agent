@@ -9,6 +9,10 @@ import QuestionComposer from './QuestionComposer.vue'
 import TakeoverSeat from './TakeoverSeat.vue'
 import { approvalActions, approvalPresentation } from './approvalModel'
 import {
+  UI_PREFERENCES_STORAGE_KEY,
+  reloadUiPreferences,
+} from '../../../composables/useUiPreferences'
+import {
   isTakeoverMinimized,
   minimizeTakeover,
   resetTakeoverMinimized,
@@ -275,6 +279,48 @@ describe('ApprovalPanel', () => {
     expect(allow.disabled).toBe(true)
     deny.click()
     expect(ctx.sendInteractionAnswer).toHaveBeenCalledTimes(1)
+  })
+
+  it('says 准奏 / 驳回 with the plain meaning when 宫廷用语 is on (BRD-06)', async () => {
+    localStorage.setItem(
+      UI_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ courtlyCopy: true }),
+    )
+    reloadUiPreferences()
+    try {
+      const { ctx, root } = await mount(ApprovalPanel, {
+        interaction: permission(),
+      })
+      const allow = [
+        ...root.querySelectorAll<HTMLButtonElement>('button'),
+      ].find((item) => item.textContent?.trim() === '准奏（允许本次）')!
+      const deny = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+        (item) => item.textContent?.trim() === '驳回（拒绝）',
+      )!
+      // Screen readers hear the plain words.
+      expect(allow.getAttribute('aria-label')).toBe('允许本次')
+      expect(deny.getAttribute('aria-label')).toBe('拒绝')
+      expect(root.querySelector('[data-courtly-sticker]')).not.toBeNull()
+      allow.click()
+      await nextTick()
+      // The answer is the option's own, never the court words.
+      expect(ctx.sendInteractionAnswer).toHaveBeenCalledWith('approval_1', {
+        permission: {
+          option_id: 'allow_once',
+          choice: '允许本次',
+          freeform: '',
+        },
+      })
+    } finally {
+      localStorage.removeItem(UI_PREFERENCES_STORAGE_KEY)
+      reloadUiPreferences()
+    }
+  })
+
+  it('keeps plain words and no sticker while 宫廷用语 is off', async () => {
+    const { root } = await mount(ApprovalPanel, { interaction: permission() })
+    expect(button(root, '允许本次')).toBeTruthy()
+    expect(root.querySelector('[data-courtly-sticker]')).toBeNull()
   })
 
   it('re-arms after a rejected send; Esc folds the card instead of cancelling', async () => {

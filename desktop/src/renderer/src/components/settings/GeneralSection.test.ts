@@ -176,6 +176,19 @@ describe('GeneralSection main page (UI-S07)', () => {
     ).toBe(false)
   })
 
+  it('has 宫廷用语 under 外观, off by default (BRD-06)', async () => {
+    const root = await mount()
+    const appearance = root.querySelector('[data-group="appearance"]')!
+    const courtly =
+      appearance.querySelector<HTMLButtonElement>('#general-courtly')!
+    expect(courtly.getAttribute('aria-checked')).toBe('false')
+    courtly.click()
+    await settle()
+    expect(
+      JSON.parse(localStorage.getItem(UI_PREFERENCES_STORAGE_KEY)!).courtlyCopy,
+    ).toBe(true)
+  })
+
   it('has 显示轨迹 and 显示系统步骤 under 开发者, both off by default', async () => {
     const root = await mount()
     const developer = root.querySelector('[data-group="developer"]')!
