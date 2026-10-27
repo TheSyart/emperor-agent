@@ -105,3 +105,37 @@ describe('App wiring (MOD-01 6–10)', () => {
     expect(read('appStartup.ts')).toContain('await landInAppMode?.()')
   })
 })
+
+describe('the sidebar reaches the same controller (MOD-02 7)', () => {
+  it('provides the mode and the controller to the sidebar through the app context', () => {
+    const app = read('App.vue')
+    const provided = app.slice(app.indexOf('provideAppContext({'))
+    expect(provided).toMatch(/appMode: \{[^}]*mode: appMode\.mode/)
+    expect(provided).toMatch(
+      /appMode: \{[^}]*switchTo: appModeController\.switchTo/,
+    )
+    expect(provided).toMatch(
+      /appMode: \{[^}]*newSession: appModeController\.newSession/,
+    )
+    // The primary row and the rail's new-session button run ⌘N's code.
+    const root = read('components/sidebar/SidebarRoot.vue')
+    expect(root).toContain('ctx.runSafely(ctx.appMode.newSession)')
+    expect(root).not.toContain("create({ mode: 'chat'")
+  })
+})
+
+describe('picking the next session (MOD-02)', () => {
+  it('every picker skips unlisted sessions and prefers the current mode', () => {
+    const app = read('App.vue')
+    const leave = app.slice(
+      app.indexOf('async function leaveUnavailableSession('),
+      app.indexOf('async function openProfileInterviewSession('),
+    )
+    expect(leave).toContain('nextListedSession(')
+    expect(leave).toContain('appMode.mode.value')
+    expect(read('composables/useSession.ts')).toContain('nextListedSession(')
+    const root = read('components/sidebar/SidebarRoot.vue')
+    const first = root.slice(root.indexOf('function firstOtherSession('))
+    expect(first.slice(0, 400)).toContain('nextListedSession(')
+  })
+})

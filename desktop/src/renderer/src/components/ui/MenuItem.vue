@@ -6,6 +6,9 @@
  * - variant: 'item' (default) | 'label' (12/16 tertiary heading) |
  *   'separator' (l1 hairline).
  * - selected?: trailing check mark.
+ * - radio?: one of a set where exactly one is current (a mode switcher):
+ *   `menuitemradio` with `aria-checked` true / false; every row keeps the
+ *   check's room, so trailing content lines up.
  * - danger?: error color + danger hover.
  * - disabled?.
  * - description?: 12/18 secondary line under the label.
@@ -21,6 +24,7 @@ const props = withDefaults(
   defineProps<{
     variant?: 'item' | 'label' | 'separator'
     selected?: boolean
+    radio?: boolean
     danger?: boolean
     disabled?: boolean
     description?: string
@@ -29,6 +33,7 @@ const props = withDefaults(
   {
     variant: 'item',
     selected: false,
+    radio: false,
     danger: false,
     disabled: false,
     description: undefined,
@@ -52,11 +57,11 @@ function activate() {
   <button
     v-else
     type="button"
-    role="menuitem"
+    :role="radio ? 'menuitemradio' : 'menuitem'"
     class="item"
     :data-dense="menu?.dense || undefined"
     :data-danger="danger || undefined"
-    :aria-checked="selected || undefined"
+    :aria-checked="radio ? selected : selected || undefined"
     :disabled="disabled"
     @click="activate"
   >
@@ -66,7 +71,12 @@ function activate() {
       <span v-if="description" class="description">{{ description }}</span>
     </span>
     <slot name="trailing" />
-    <DsCheck v-if="selected" :size="16" class="check" />
+    <DsCheck
+      v-if="selected || radio"
+      :size="16"
+      class="check"
+      :data-off="!selected || undefined"
+    />
   </button>
 </template>
 
@@ -145,6 +155,10 @@ function activate() {
 .check {
   flex: none;
   color: rgb(var(--text-1));
+}
+
+.check[data-off] {
+  visibility: hidden;
 }
 
 .label {

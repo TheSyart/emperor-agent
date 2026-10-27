@@ -15,7 +15,8 @@
  *
  * Nothing is written before the saved state has been read (like
  * useSidebarState): a write built on the defaults would forget the
- * remembered sessions. The sidebar does not filter by mode yet (MOD-02).
+ * remembered sessions. The sidebar reaches the mode and the controller
+ * through the app context (`AppModeAccess`, MOD-02).
  */
 import {
   readonly,
@@ -230,3 +231,14 @@ export function createAppModeController(
 }
 
 export type AppModeController = ReturnType<typeof createAppModeController>
+
+/**
+ * The mode as the sidebar sees it (app context, MOD-02): the current mode
+ * and the controller's switch and ⌘N, so the switcher, the rail and the
+ * primary row run the very code ⌘1–⌘3 and ⌘N run.
+ */
+export interface AppModeAccess {
+  mode: Readonly<Ref<AppMode>>
+  switchTo: (mode: AppMode) => Promise<void>
+  newSession: () => Promise<void>
+}
