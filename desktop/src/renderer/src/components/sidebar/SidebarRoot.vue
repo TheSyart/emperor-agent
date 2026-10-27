@@ -5,12 +5,16 @@
  * (collapse, ← →), SidebarBrandRow (the mode switcher 「Emperor Chat ▾」,
  * search toggle, bell), SidebarNav (the mode's ⌘N primary row), the search
  * box while searching, then the current mode's sessions only — Chat: 置顶
- * (its pins) + 对话 by day; Build: 置顶 (its pins) + 项目 → sessions;
+ * (its pins), then a section per day (今天 / 昨天 / 7 天内 / 30 天内 / 更早,
+ * MOD-03: the buckets are the headings, the first carries the sort menu; a
+ * manual order is one 对话 section); Build: 置顶 (its pins) + 项目 →
+ * sessions;
  * Group: a placeholder until contacts and groups arrive (GRP-05) — and
  * SidebarFooter (设置, the page icons, 明暗切换). The mode and its
  * controller come from the app context, so the switcher, the rail and the
  * primary row run what ⌘1–⌘3 and ⌘N run. Search finds titles at once and
- * contents after a pause (useContentSearch), in every mode; ↑ / ↓ on a
+ * contents after a pause (useContentSearch), in every mode, the current
+ * mode's results first and each tagged with its mode (MOD-04); ↑ / ↓ on a
  * focused row move to the next one and open it. Collapsed, the column
  * renders the 56px SidebarRail instead. Geometry is owned by AppFrame; this
  * fills the column it is given. The persisted layout (sorts, orders, pins,
@@ -31,15 +35,16 @@ import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
+  arrangeSearchResults,
   groupSessionsByDay,
   pinnedInMode,
+  searchContentResults,
   searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import {
-  isListedSession,
   modeActivity,
   nextListedSession,
   type AppMode,
@@ -122,37 +127,53 @@ const activity = computed(() =>
       ),
   }),
 )
-const chatDayGroups = computed(() =>
-  sidebarState.value.chat_sort === 'manual'
-    ? [{ key: 'manual', label: '', sessions: grouped.value.chats }]
-    : groupSessionsByDay(grouped.value.chats),
-)
+/** A Chat section: a day bucket, or the one 对话 of a manual order. */
+interface ChatSection {
+  key: SidebarSectionKey
+  label: string
+  sessions: SessionInfo[]
+}
+/**
+ * Chat's sections (MOD-03, preview A): the day buckets as headings, each
+ * folding on its own; a manual order has no days, so one 对话 section.
+ * None without a Chat session (the list says 暂无对话).
+ */
+const chatSections = computed<ChatSection[]>(() => {
+  if (!grouped.value.chats.length) return []
+  const sort = sidebarState.value.chat_sort
+  if (sort === 'manual')
+    return [{ key: 'chats', label: '对话', sessions: grouped.value.chats }]
+  return groupSessionsByDay(
+    grouped.value.chats,
+    Date.now(),
+    sort === 'created_at' ? 'created_at' : 'updated_at',
+  ).map((group) => ({
+    key: `chats.${group.key}` as const,
+    label: group.label,
+    sessions: group.sessions,
+  }))
+})
 const searching = computed(() => searchQuery.value.trim().length > 0)
 const searchVisible = computed(() => searchOpen.value || searching.value)
 const content = useContentSearch(searchQuery)
-const searchResults = computed(() => {
-  const titles = searchSidebarSessions(sessions.value, searchQuery.value)
-  const seen = new Set(titles.map((result) => result.id))
-  const known = new Map(sessions.value.map((session) => [session.id, session]))
-  // A hit in a session nobody lists (a group member's, a trial) is dropped
-  // (MOD-01); MOD-04 shows the group instead.
-  const listable = (id: string) => {
-    const session = known.get(id)
-    return !session || isListedSession(session)
-  }
-  return [
-    ...titles.map((result) => ({ ...result, group: 'title' as const })),
-    ...content.hits.value
-      .filter((hit) => !seen.has(hit.sessionId) && listable(hit.sessionId))
-      .map((hit) => ({
-        id: hit.sessionId,
-        title: hit.title || '新会话',
-        subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
-        mode: 'chat' as const,
-        group: 'content' as const,
-      })),
-  ]
-})
+/**
+ * The search over every mode (MOD-04): titles at once, contents after a
+ * pause, each showing the session it belongs to (a group member's hit
+ * shows its group, a trial's none), the current mode's results first.
+ */
+const searchSections = computed(() =>
+  arrangeSearchResults(
+    [
+      ...searchSidebarSessions(sessions.value, searchQuery.value),
+      ...searchContentResults(content.hits.value, sessions.value),
+    ],
+    mode.value,
+  ),
+)
+/** The rows in screen order, for ↑ / ↓ / Enter. */
+const searchResults = computed(() =>
+  searchSections.value.flatMap((section) => section.results),
+)
 const layoutLoaded = ref(false)
 const visibleRootIds = computed(() =>
   sessions.value
@@ -233,11 +254,12 @@ const selectedPlace = computed<{
     )
     if (project) return { root, section: 'projects', projectId: project.id }
   }
-  if (
-    mode.value === 'chat' &&
-    grouped.value.chats.some((session) => session.id === root)
-  )
-    return { root, section: 'chats' }
+  if (mode.value === 'chat') {
+    const section = chatSections.value.find((group) =>
+      group.sessions.some((session) => session.id === root),
+    )
+    if (section) return { root, section: section.key }
+  }
   return null
 })
 /** The conversation last revealed; the open one once the layout loads. */
@@ -271,7 +293,7 @@ const keyboardOrder = computed(() => [
       )
     : []),
   ...(mode.value === 'chat'
-    ? chatDayGroups.value.flatMap((group) =>
+    ? chatSections.value.flatMap((group) =>
         group.sessions.map((session) => session.id),
       )
     : []),
@@ -562,7 +584,7 @@ defineExpose({ focusSearch })
 
       <SidebarSearchResults
         v-else-if="searching"
-        :results="searchResults"
+        :sections="searchSections"
         :pending="content.pending.value"
         :selected-index="searchIndex"
         @hover="searchIndex = $event"
@@ -670,31 +692,33 @@ defineExpose({ focusSearch })
           </template>
         </section>
 
-        <section
-          v-if="mode === 'chat'"
-          class="section"
-          data-sidebar-section="chats"
-        >
-          <SidebarSectionHeader
-            :collapsed="layout.isSectionCollapsed('chats')"
-            label="对话"
-            @update:collapsed="layout.toggleSection('chats')"
+        <template v-if="mode === 'chat'">
+          <section
+            v-for="(group, index) in chatSections"
+            :key="group.key"
+            class="section"
+            :aria-label="group.label"
+            :data-sidebar-section="group.key"
           >
-            <IconButton
-              :ref="(c) => (chatMenuAnchor = elementOf(c))"
-              class="head-button"
-              label="对话排序"
-              size="xs"
-              :active="chatMenuOpen"
-              :aria-expanded="chatMenuOpen"
-              @click="chatMenuOpen = !chatMenuOpen"
+            <SidebarSectionHeader
+              :collapsed="layout.isSectionCollapsed(group.key)"
+              :label="group.label"
+              @update:collapsed="layout.toggleSection(group.key)"
             >
-              <DsMore :size="16" />
-            </IconButton>
-          </SidebarSectionHeader>
-          <template v-if="!layout.isSectionCollapsed('chats')">
-            <template v-for="group in chatDayGroups" :key="group.key">
-              <div v-if="group.label" class="day-label">{{ group.label }}</div>
+              <IconButton
+                v-if="index === 0"
+                :ref="(c) => (chatMenuAnchor = elementOf(c))"
+                class="head-button"
+                label="对话排序"
+                size="xs"
+                :active="chatMenuOpen"
+                :aria-expanded="chatMenuOpen"
+                @click="chatMenuOpen = !chatMenuOpen"
+              >
+                <DsMore :size="16" />
+              </IconButton>
+            </SidebarSectionHeader>
+            <template v-if="!layout.isSectionCollapsed(group.key)">
               <template v-for="session in group.sessions" :key="session.id">
                 <SessionRow
                   :session="session"
@@ -713,9 +737,16 @@ defineExpose({ focusSearch })
                 />
               </template>
             </template>
-            <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
-          </template>
-        </section>
+          </section>
+          <section
+            v-if="!chatSections.length"
+            class="section"
+            aria-label="对话"
+            data-sidebar-section="chats"
+          >
+            <div class="empty">暂无对话</div>
+          </section>
+        </template>
 
         <!-- Group: contacts and groups arrive with GRP-05. -->
         <section
@@ -856,13 +887,6 @@ defineExpose({ focusSearch })
 
 .section + .section {
   margin-top: var(--space-2);
-}
-
-.day-label {
-  padding: var(--space-2) var(--space-2) var(--space-1);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--text-3));
 }
 
 .empty {

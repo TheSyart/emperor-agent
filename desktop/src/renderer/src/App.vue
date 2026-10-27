@@ -834,6 +834,7 @@ provideAppContext({
   refreshAll,
   refreshMemory,
   openModelSetup,
+  firstRunOpen,
   startProfileInterview,
   skipProfileInterview,
   compactMemory,

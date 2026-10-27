@@ -251,6 +251,22 @@ export function useSession() {
     if (hit) Object.assign(hit, patch)
   }
 
+  /**
+   * Bind (or clear) a draft's project in place (the Build home, MOD-03):
+   * the same draft, so what was typed stays; it goes to Core with the
+   * first message. A real session's project never changes here.
+   */
+  function setDraftProject(id: string, project: ProjectInfo | null) {
+    const hit = sessions.value.find((s) => s.id === id && s.draft)
+    if (!hit) return
+    Object.assign(hit, {
+      project_id: project?.project_id || null,
+      project_path: project?.project_path || null,
+      project_name: project?.project_name || null,
+    })
+    if (project) upsertProject(project)
+  }
+
   /** Promote a draft locally (slash commands create the session themselves). */
   function promoteDraft(draftId: string, session: SessionInfo) {
     sessions.value = promoteDraftSession(sessions.value, draftId, session)
@@ -310,6 +326,7 @@ export function useSession() {
     activate,
     applySessionCreatedEvent,
     updateDraft,
+    setDraftProject,
     promoteDraft,
     applySessionTitleUpdatedEvent,
     applySessionControlPending,

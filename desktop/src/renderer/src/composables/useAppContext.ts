@@ -59,6 +59,8 @@ export interface AppContext {
   refreshMemory: (shouldToast?: boolean) => Promise<void>
   /** Open the first-run guide (the hero's 开始接入, UI-S17). */
   openModelSetup: () => void
+  /** The first-run guide is open: the home's extras wait (MOD-03). */
+  firstRunOpen: Readonly<Ref<boolean>>
   startProfileInterview: () => Promise<void>
   skipProfileInterview: () => Promise<void>
   compactMemory: () => Promise<CompactResult>

@@ -44,6 +44,15 @@
  * The subagent status bar (UI-S14, SubagentDock, loaded on first use) sits
  * above the todo dock while the conversation's subagents are at work and
  * none of their rows is on screen (useSubagentDock).
+ *
+ * The home follows the mode of the session on screen (MOD-03,
+ * docs/design/modes.md § 首页): Chat greets by name and offers five
+ * starters under the composer (they only fill it); Build asks for a
+ * project — the gold project chip and the branch sit in the composer bar,
+ * the send button waits for a project, and the recent projects (and a
+ * dropped folder) are below (useBuildHome). The first-run guide comes
+ * first: the starters and projects wait while it is open or no model
+ * exists (heroHome.ts).
  */
 import {
   computed,
@@ -78,6 +87,8 @@ import { normalizeGoal } from '../../runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from '../../runtime/goalRender'
 import { activeGoalForSession, hasProjectedGoal } from '../../runtime/selectors'
 import { applyModelConfig } from '../../model/applyModelConfig'
+import { sessionAppMode, type AppMode } from '../../runtime/appMode'
+import { heroModelState } from '../onboarding/firstRunGate'
 import type { ChatSendPayload, QueuedPromptItem, TodoItem } from '../../types'
 import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
@@ -96,8 +107,18 @@ import type { SubagentRowView } from './subagentRows'
 import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
+import { heroPlaceholder } from './heroGreeting'
+import {
+  fillSuggestion,
+  heroExtrasShown,
+  homeSendBlockedReason,
+} from './heroHome'
 import HeroModelPrompt from './HeroModelPrompt.vue'
 import HeroProfilePrompt from './HeroProfilePrompt.vue'
+import HeroProjectChip from './HeroProjectChip.vue'
+import HeroRecentProjects from './HeroRecentProjects.vue'
+import HeroSuggestions from './HeroSuggestions.vue'
+import { useBuildHome } from './useBuildHome'
 import {
   conversationCrumbs,
   conversationPhase,
@@ -491,14 +512,56 @@ const composerUnavailableReason = computed(() =>
       ? '正在读取会话…'
       : '没有找到这个会话，请从侧栏打开其他会话',
 )
-const sendBlockedReason = computed(() => {
+const modelBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
   return availability?.usable === false
     ? availability.message || '还没有可用模型，请先配置模型。'
     : ''
 })
+/** The model's problem, else a Build home without a project (MOD-03). */
+const sendBlockedReason = computed(() =>
+  homeSendBlockedReason({
+    modelReason: modelBlockedReason.value,
+    home: phase.value === 'hero' && !child.value,
+    mode: heroMode.value,
+    projectPath: buildHome.project.value?.project_path,
+  }),
+)
 const pendingInteraction = computed(
   () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
+)
+// ── the home by mode (MOD-03) ─────────────────────────────────────────────
+/** The mode of the session on screen; its home follows it. */
+const heroMode = computed<AppMode>(() => {
+  const session = knownSession.value
+  return (session && sessionAppMode(session)) || 'chat'
+})
+/** The Build home: an empty Build session (a draft, mostly) on screen. */
+const buildHomeShown = computed(
+  () => phase.value === 'hero' && heroMode.value === 'build' && !child.value,
+)
+const buildHome = useBuildHome({
+  session: () => knownSession.value,
+  active: () => buildHomeShown.value,
+  isRunning: (id) => Boolean(ctx.sessionRuntimeStates[id]?.running),
+  openSession: (id) =>
+    router.push(sessionLocation(id)).then(
+      () => undefined,
+      () => undefined,
+    ),
+  notify: (message) => ctx.showToast(message),
+  fail: (error) => ctx.showError(error),
+})
+/** The starters and recent projects: after the first-run guide (UI-S17). */
+const heroExtras = computed(
+  () =>
+    phase.value === 'hero' &&
+    !child.value &&
+    !unknownSession.value &&
+    heroExtrasShown({
+      firstRunOpen: ctx.firstRunOpen.value,
+      modelState: heroModelState(ctx.boot.value),
+    }),
 )
 // On 「没有找到这个会话」 the takeover, goal and queue docks would act on the
 // session behind the page: they go, and the composer shows disabled (F1).
@@ -1201,7 +1264,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     <div v-if="tab === 'chat'" class="composer-seat">
       <EmptyHero
         v-if="phase === 'hero'"
-        :project-name="projectName"
+        :mode="heroMode"
         :address-name="ctx.boot.value?.profileOnboarding?.addressName ?? null"
       />
       <template v-if="child">
@@ -1255,6 +1318,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="composer"
           :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"
+          :hero-placeholder="heroPlaceholder(heroMode)"
           :busy="runningHere"
           :interaction-blocked="Boolean(pendingInteraction)"
           :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
@@ -1289,13 +1353,36 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @send="sendFromComposer"
           @stop="ctx.stopActive"
           @error="ctx.showToast"
-        />
+        >
+          <template v-if="buildHomeShown" #lead>
+            <HeroProjectChip
+              :project="buildHome.project.value"
+              :branch="buildHome.branch.value"
+              :projects="buildHome.menuProjects.value"
+              @pick="buildHome.pickProject"
+              @open-folder="buildHome.openFolder"
+            />
+          </template>
+        </ComposerCard>
       </div>
       <HeroModelPrompt v-if="phase === 'hero' && !child" />
       <HeroProfilePrompt
         v-if="phase === 'hero' && !child"
         :session-id="viewingId || ''"
         :blocked="Boolean(pendingInteraction)"
+      />
+      <HeroSuggestions
+        v-if="heroExtras && heroMode === 'chat'"
+        @pick="fillSuggestion(composer, $event)"
+      />
+      <HeroRecentProjects
+        v-if="heroExtras && buildHomeShown"
+        :projects="buildHome.recent.value"
+        :current-id="buildHome.project.value?.project_id ?? null"
+        @pick="buildHome.pickProject"
+        @open-folder="buildHome.openFolder"
+        @drop-folder="buildHome.dropFolder"
+        @drop-rejected="buildHome.rejectDrop"
       />
     </div>
   </section>

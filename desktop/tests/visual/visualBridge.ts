@@ -5938,6 +5938,12 @@ export async function installVisualCoreBridge(
               return project
             case 'projects.list':
               return [project]
+            // MOD-03: the Build home's branch tag, read by project.
+            case 'projects.branch':
+              return (args[0] as { projectId?: string } | undefined)
+                ?.projectId === project.project_id
+                ? { branch: 'main', detached: false }
+                : null
             case 'workspace.snapshot':
               return {
                 version: 1,

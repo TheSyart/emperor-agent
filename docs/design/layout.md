@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `b28fc6e6`）<br>
+> 最后核验：2026-10-27（对照 `4f569338`）<br>
 > 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`ModeSwitcher.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
@@ -28,7 +28,7 @@
 1. **顶行**（`SidebarTopRow`）：收起、后退、前进（`shell/navHistory`，各自在历史尽头禁用）。
 2. **品牌行**（`SidebarBrandRow`）：模式切换器（`ModeSwitcher`）——标 +「Emperor Chat ▾」，高 32、圆角 `--radius-row`，悬停和菜单打开时 `--surface-hover`；名字 16/600，▾ 14、三级色，打开时翻转。别的模式有人等你回答时，标的右上角有一个 `attention` 小圆点（Dot sm，描一圈侧栏底色）。右侧搜索、通知铃铛。
 3. **主按钮**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。文字随模式：新对话 / 新建项目会话 / 新建群聊。Build 旁边的 `+` 打开文件夹，Group 旁边的 `+` 是新建联系人；Group 的两个入口还没做好，图标和文字降到 45% 不透明度，悬停提示「即将推出」。
-4. **会话**（`data-sidebar-section`）：Chat 是置顶（只含 Chat 会话）+ 对话；Build 是置顶（只含 Build 会话）+ 项目；Group 现在是一段占位（EmptyState：「联系人和群聊在这里」）。总在最上方的「置顶」只在这个模式有置顶时出现。
+4. **会话**（`data-sidebar-section`）：Chat 是置顶（只含 Chat 会话）+ 按日期的分区（`chats.today` 等，日期就是分区标题）；Build 是置顶（只含 Build 会话）+ 项目；Group 现在是一段占位（EmptyState：「联系人和群聊在这里」）。总在最上方的「置顶」只在这个模式有置顶时出现。
 5. **底部**（`SidebarFooter`）：「设置」在左；右边是页面图标——Pull Request（只在 Build 模式、且 GitHub 插件启用时出现，`visibleSidebarPages`）、定时任务、能力——和明暗切换，都是 36 的圆形图标按钮，当前页 `--surface-selected` + 主文字。原「探索」是能力页顶部的「推荐」。
 
 节奏：
@@ -37,13 +37,13 @@
 - 区块之间靠 12px 留白分开，不画分隔线。
 - 项目行：文件夹图标、名称、会话数（说明文字色、等宽数字，悬停时换成「新建该项目会话」）。项目内的会话缩进一级，左侧一条引导线落在文件夹图标中线上。
 - 会话行（`SessionRow`）：16px 状态槽——运行中金色呼吸点（Dot `running`），等待回答或审批 `--attention` 点，有新进展 `ok` 点；标题 14/20；右侧紧凑相对时间（`sidebarRelativeTime`：刚刚 / N 分钟 / N 小时（今天）/ 昨天 / N 天（一周内）/ 9月10日（今年）/ 2025/12/31（更早），说明文字色、等宽数字、不加中英文间距），悬停时换成「⋯」。选中 `--surface-selected`、标题 500。行带 `data-session-id`。
-- 对话按 `updated_at` 分「今天 / 昨天 / 7 天内 / 30 天内 / 更早」；手动排序时不分组。
+- Chat 的会话按排序字段（`updated_at` 或 `created_at`）分「今天 / 昨天 / 7 天内 / 30 天内 / 更早」，每一天是一个可以单独收起的分区，排序菜单 `⋯` 在第一个日期标题上；手动排序时不分日期，只有一个「对话」分区（[三种模式](modes.md#侧栏)）。
 - 焦点在会话行上时，↑ / ↓ 把焦点移到相邻的行并打开那个会话。
 
 搜索：
 
-- 品牌行的放大镜（或 ⌘K）在主按钮下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。搜索不分模式，查全部会话。
-- 先列「会话」：标题、项目名、路径即时匹配（`searchSidebarSessions`，不含已归档）；停顿 250ms 后列「内容」：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch`，旧查询的结果丢弃）。
+- 品牌行的放大镜（或 ⌘K）在主按钮下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。搜索不分模式，查全部会话，按模式分段：当前模式的结果在前，标题是模式名；其余在「其他模式」下按时间排。每行标题右侧一个模式小标签（Badge neutral：Chat / Build / Group）（[三种模式](modes.md#侧栏)）。
+- 每段里先列标题、项目名、路径即时匹配的会话（`searchSidebarSessions`，不含已归档）；停顿 250ms 后接着列内容命中的：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch` → `searchContentResults`，旧查询的结果丢弃）。群成员会话的命中显示成它所在的群，试用台会话不出现。
 - ↑ / ↓ 选择、回车打开；Esc 先清空，再关闭。
 
 ## 内容宽度

@@ -74,6 +74,40 @@ export function isListedSession(
   )
 }
 
+/** A session to open from a search hit or a notification, and its mode. */
+export interface ShownSessionTarget {
+  id: string
+  /** Null for a session the list does not know. */
+  mode: AppMode | null
+}
+
+/**
+ * What a search hit or a notification in session `id` opens (MOD-04): the
+ * session itself while it is listed; for a group member's session, its
+ * group (the listed group session with the same `group_id`). Null when
+ * there is nothing to show: a trial session, a member whose group is not
+ * listed, an unknown surface, a draft or an archived session. A session
+ * the list does not know at all (a subagent's page, one archived since the
+ * list was read) is left as it is, without a mode.
+ */
+export function shownSessionTarget(
+  id: string,
+  sessions: SessionInfo[],
+): ShownSessionTarget | null {
+  const session = sessions.find((item) => item.id === id)
+  if (!session) return { id, mode: null }
+  if (isListedSession(session))
+    return { id: session.id, mode: sessionAppMode(session) }
+  if (session.surface !== 'group_member' || !session.group_id) return null
+  const group = sessions.find(
+    (item) =>
+      item.surface === 'group' &&
+      item.group_id === session.group_id &&
+      isListedSession(item),
+  )
+  return group ? { id: group.id, mode: 'group' } : null
+}
+
 /** The listed sessions of one mode, in list order. */
 export function sessionsInMode(
   sessions: SessionInfo[],

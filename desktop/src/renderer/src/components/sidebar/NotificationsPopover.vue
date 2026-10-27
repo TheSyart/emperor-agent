@@ -8,7 +8,13 @@
  * and 下载 (REL-02; 下载 opens 设置 › 常规, where the progress shows).
  * The shell is ui/Popover: anchored under the bell, dismissed on outside
  * click / focus and Escape (focus goes back to the bell).
+ *
+ * Across modes (MOD-04): a row of a session carries that session's mode
+ * as a small tag (Chat / Build / Group), and opening it goes to the
+ * session it belongs to — a group member's question opens its group — so
+ * the route leads and the mode follows (useAppMode).
  */
+import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
 import Popover from '../ui/Popover.vue'
 import {
@@ -29,7 +35,12 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotifications } from '../../composables/useNotifications'
+import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
+import {
+  shownSessionTarget,
+  type ShownSessionTarget,
+} from '../../runtime/appMode'
 import {
   notificationRelativeTime,
   type AppNotification,
@@ -38,6 +49,7 @@ import { requestWorkspace } from '../workspace/workspaceState'
 import { openLink } from '../../api/backend'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
 import { useUpdateStatus } from '../settings/updates/useUpdateStatus'
+import { modeEntry } from './modeEntries'
 
 defineProps<{ anchor: HTMLElement | null }>()
 const open = defineModel<boolean>('open', { default: false })
@@ -46,6 +58,7 @@ const router = useRouter()
 const settingsRoute = useSettingsRoute()
 const updates = useUpdateStatus()
 const { items, unreadCount, markRead, markAllRead, clear } = useNotifications()
+const sessionStore = useSession()
 const popover = ref<InstanceType<typeof Popover> | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
@@ -54,11 +67,31 @@ function close(): void {
   open.value = false
 }
 
+/**
+ * The session a notice opens and its mode (MOD-04): a group member's
+ * session opens its group; a session the list cannot show (a trial) opens
+ * as it is, untagged. Null for a notice without a session.
+ */
+function sessionTarget(item: AppNotification): ShownSessionTarget | null {
+  const target = item.target
+  if (target.type !== 'session' && target.type !== 'review') return null
+  return (
+    shownSessionTarget(target.sessionId, sessionStore.sessions.value) ?? {
+      id: target.sessionId,
+      mode: null,
+    }
+  )
+}
+
 const rows = computed(() =>
-  items.value.map((item) => ({
-    item,
-    time: notificationRelativeTime(item.createdAt, now.value),
-  })),
+  items.value.map((item) => {
+    const mode = sessionTarget(item)?.mode
+    return {
+      item,
+      time: notificationRelativeTime(item.createdAt, now.value),
+      mode: mode ? modeEntry(mode).name : '',
+    }
+  }),
 )
 
 function glyph(item: AppNotification): Component {
@@ -81,7 +114,8 @@ async function openItem(item: AppNotification): Promise<void> {
     await router.push({ name: 'scheduler' }).catch(() => undefined)
     return
   }
-  await router.push(sessionLocation(target.sessionId)).catch(() => undefined)
+  const session = sessionTarget(item)?.id ?? target.sessionId
+  await router.push(sessionLocation(session)).catch(() => undefined)
   if (target.type === 'review') requestWorkspace({ pane: 'review' })
 }
 
@@ -157,7 +191,7 @@ onBeforeUnmount(() => {
       </Button>
     </header>
     <ul v-if="rows.length" class="list">
-      <li v-for="{ item, time } in rows" :key="item.key">
+      <li v-for="{ item, time, mode } in rows" :key="item.key">
         <button
           type="button"
           class="row"
@@ -167,7 +201,10 @@ onBeforeUnmount(() => {
         >
           <component :is="glyph(item)" :size="16" class="glyph" />
           <span class="body">
-            <span class="title">{{ item.title }}</span>
+            <span class="title-line">
+              <span class="title">{{ item.title }}</span>
+              <Badge v-if="mode" class="mode" data-mode-tag :label="mode" />
+            </span>
             <span v-if="item.detail" class="detail">{{ item.detail }}</span>
           </span>
           <span class="meta">
@@ -278,8 +315,20 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.mode {
+  flex: none;
+}
+
 .title,
 .detail {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

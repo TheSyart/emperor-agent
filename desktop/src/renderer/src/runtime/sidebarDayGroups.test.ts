@@ -43,6 +43,32 @@ describe('sidebar day groups', () => {
     expect(groups[0]!.sessions.map((item) => item.id)).toEqual(['a', 'b'])
   })
 
+  it('MOD-03 · each bucket heads one section: a stray session joins its group', () => {
+    const groups = groupSessionsByDay(
+      [
+        session('a', '2026-09-22T10:00:00'),
+        session('old', '2024-01-01T09:00:00'),
+        session('b', '2026-09-22T09:00:00'),
+      ],
+      NOW,
+    )
+    expect(groups.map((group) => group.key)).toEqual(['today', 'older'])
+    expect(groups[0]!.sessions.map((item) => item.id)).toEqual(['a', 'b'])
+  })
+
+  it('MOD-03 · buckets by creation when the list is sorted by it', () => {
+    const made = {
+      ...session('made-today', '2024-01-01T09:00:00'),
+      created_at: '2026-09-22T09:00:00',
+    }
+    expect(
+      groupSessionsByDay([made], NOW, 'created_at').map((group) => group.key),
+    ).toEqual(['today'])
+    expect(groupSessionsByDay([made], NOW).map((group) => group.key)).toEqual([
+      'older',
+    ])
+  })
+
   it('formats compact relative times, never an ISO date (UI-S11 6)', () => {
     expect(sidebarRelativeTime('2026-09-22T14:59:40', NOW)).toBe('刚刚')
     expect(sidebarRelativeTime('2026-09-22T14:30:00', NOW)).toBe('30 分钟')

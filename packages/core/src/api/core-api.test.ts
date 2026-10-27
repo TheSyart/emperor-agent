@@ -225,6 +225,7 @@ const EXPECTED_OPERATIONS = [
   'processes.cancel',
   'processes.list',
   'processes.reparent',
+  'projects.branch',
   'projects.list',
   'projects.resolve',
   'pullRequests.diff',
@@ -1744,6 +1745,25 @@ describe('CoreApi sessions and kept services', () => {
     expect(
       api.sidebar.patch({ collapsed_sections: 'projects' }).collapsed_sections,
     ).toEqual([])
+    // MOD-03: Chat folds each day on its own (今天 … 更早).
+    expect(
+      api.sidebar.patch({
+        collapsed_sections: [
+          'chats.today',
+          'chats.yesterday',
+          'chats.week',
+          'chats.month',
+          'chats.older',
+          'chats.tomorrow',
+        ],
+      }).collapsed_sections,
+    ).toEqual([
+      'chats.today',
+      'chats.yesterday',
+      'chats.week',
+      'chats.month',
+      'chats.older',
+    ])
   })
 
   it('MOD-01 3 · fills app_mode from the most recent session while the file has none', async () => {

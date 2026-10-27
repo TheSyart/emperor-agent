@@ -1,4 +1,5 @@
 import { nextTick, ref } from 'vue'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
@@ -379,5 +380,83 @@ describe('⌘N per mode', () => {
     await createAppModeController(store, win.nav).newSession()
     expect(win.nav.openRoute).toHaveBeenCalledWith('contacts')
     expect(win.nav.createDraft).not.toHaveBeenCalled()
+  })
+})
+
+describe('back and forward (MOD-04 8)', () => {
+  /** Run a history step and wait for the navigation it starts. */
+  async function step(router: Router, move: () => void): Promise<void> {
+    const done = new Promise<void>((resolve) => {
+      const off = router.afterEach(() => {
+        off()
+        resolve()
+      })
+    })
+    move()
+    await done
+    await flush()
+  }
+
+  it('8 · lands back in the mode of the session the history step opens', async () => {
+    const sessions = [chat, build, group]
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/chat/:sessionId?', name: 'chat', component: {} },
+        { path: '/scheduler', name: 'scheduler', component: {} },
+      ],
+    })
+    const store = createAppModeStore()
+    await store.load(sessions)
+    store.followRoute(() =>
+      routeModeTarget(router.currentRoute.value, (id) =>
+        sessions.find((session) => session.id === id),
+      ),
+    )
+    await router.push('/chat/chat-1')
+    await flush()
+    expect(store.mode.value).toBe('chat')
+    await router.push('/chat/build-1')
+    await flush()
+    expect(store.mode.value).toBe('build')
+    // A page belongs to no mode: the mode stays.
+    await router.push('/scheduler')
+    await flush()
+    expect(store.mode.value).toBe('build')
+
+    await step(router, () => router.back())
+    expect(router.currentRoute.value.params.sessionId).toBe('build-1')
+    expect(store.mode.value).toBe('build')
+    await step(router, () => router.back())
+    expect(router.currentRoute.value.params.sessionId).toBe('chat-1')
+    expect(store.mode.value).toBe('chat')
+    await step(router, () => router.forward())
+    expect(store.mode.value).toBe('build')
+    // Only the route is kept; the mode is never written into the history.
+    expect(router.currentRoute.value.query).toEqual({})
+  })
+
+  it('8 · a switch made with ⌘3 on the same session is undone by going back past it', async () => {
+    const sessions = [chat, build, group]
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/chat/:sessionId?', name: 'chat', component: {} }],
+    })
+    const store = createAppModeStore()
+    await store.load(sessions)
+    store.followRoute(() =>
+      routeModeTarget(router.currentRoute.value, (id) =>
+        sessions.find((session) => session.id === id),
+      ),
+    )
+    await router.push('/chat/build-1')
+    await router.push('/chat/chat-1')
+    await flush()
+    // ⌘3 with no Group home yet: the mode changes, the route stays.
+    store.setMode('group')
+    await step(router, () => router.back())
+    expect(store.mode.value).toBe('build')
+    await step(router, () => router.forward())
+    expect(store.mode.value).toBe('chat')
   })
 })

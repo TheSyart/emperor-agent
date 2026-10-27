@@ -2439,6 +2439,10 @@ export const CORE_OPERATION_REGISTRY = {
   'projects.resolve': operation(z.tuple([z.string()]), (api, [path]) =>
     api.projects.resolve(path),
   ),
+  'projects.branch': operation(
+    z.tuple([z.object({ projectId: idSchema }).strict()]),
+    (api, [input]) => api.projects.branch(input),
+  ),
   'github.listIssues': operation(
     z.tuple([githubIssueListSchema]),
     (api, [input]) => api.github.listIssues(input),

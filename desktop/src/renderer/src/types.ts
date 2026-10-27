@@ -1530,7 +1530,20 @@ export interface RightWorkspaceState {
 }
 
 /** The sections of the sidebar's session list (置顶 / 项目 / 对话). */
-export type SidebarSectionKey = 'pinned' | 'projects' | 'chats'
+/**
+ * Foldable sidebar sections. Chat heads its sessions with the day buckets
+ * (MOD-03), each folding on its own; `chats` is the one section of a
+ * manually ordered Chat list.
+ */
+export type SidebarSectionKey =
+  | 'pinned'
+  | 'projects'
+  | 'chats'
+  | 'chats.today'
+  | 'chats.yesterday'
+  | 'chats.week'
+  | 'chats.month'
+  | 'chats.older'
 
 export interface SidebarState {
   section_order: Array<'projects' | 'chats'>

@@ -200,3 +200,46 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('fetchSessionLineage')
   })
 })
+
+describe('the home by mode (MOD-03)', () => {
+  const app = readFileSync(join(__dirname, '../../App.vue'), 'utf8')
+  const context = readFileSync(
+    join(__dirname, '../../composables/useAppContext.ts'),
+    'utf8',
+  )
+
+  it('1 · greets by the mode of the session on screen', () => {
+    expect(source).toContain('sessionAppMode(')
+    expect(source).toMatch(/<EmptyHero[^>]*:mode="heroMode"/)
+  })
+
+  it('2 · 3 · a Build home sends nothing before a project, and picks one in the composer', () => {
+    expect(source).toContain('homeSendBlockedReason({')
+    expect(source).toContain(':send-blocked-reason="sendBlockedReason"')
+    expect(source).toContain('<template v-if="buildHomeShown" #lead>')
+    expect(source).toContain('<HeroProjectChip')
+    expect(source).toContain(':hero-placeholder="heroPlaceholder(heroMode)"')
+  })
+
+  it('4 · 5 · 6 · the Build home lists recent projects and takes a dropped folder', () => {
+    expect(source).toMatch(
+      /<HeroRecentProjects\s+v-if="heroExtras && buildHomeShown"/,
+    )
+    expect(source).toContain('@drop-folder="buildHome.dropFolder"')
+    expect(source).toContain('@drop-rejected="buildHome.rejectDrop"')
+  })
+
+  it('7 · a starter only fills the composer', () => {
+    expect(source).toMatch(
+      /<HeroSuggestions\s+v-if="heroExtras && heroMode === 'chat'"/,
+    )
+    expect(source).toContain('@pick="fillSuggestion(composer, $event)"')
+  })
+
+  it('8 · the first-run guide comes before the home', () => {
+    expect(source).toContain('heroExtrasShown({')
+    expect(source).toContain('firstRunOpen: ctx.firstRunOpen.value')
+    expect(context).toContain('firstRunOpen: Readonly<Ref<boolean>>')
+    expect(app).toMatch(/provideAppContext\(\{[\s\S]*firstRunOpen,/)
+  })
+})

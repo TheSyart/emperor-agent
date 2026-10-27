@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-10-27（对照 `966ce225`）<br>
+> 最后核验：2026-10-27（对照 `8230fad1`）<br>
 > 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/modeEntries.ts`、`desktop/src/renderer/src/components/sidebar/SidebarFooter.vue`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -27,7 +27,7 @@
 - 收起按钮与后退 / 前进；
 - 模式切换「Emperor Chat ▾」（Chat、Build、Group 三种模式，⌘1 / ⌘2 / ⌘3），旁边是搜索和通知铃铛；
 - 当前模式的新建按钮（⌘N）：「新对话」「新建项目会话」（右侧的 `+` 打开项目文件夹）或「新建群聊」（暂时不可用）；
-- 当前模式的会话：Chat 是「置顶」「对话」，Build 是「置顶」「项目」；
+- 当前模式的会话：Chat 是「置顶」和按日期的分组（今天、昨天……），Build 是「置顶」「项目」；
 - 底部的「设置」、整页入口图标和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。整页入口：
 
 | 入口         | 用途                                                                                                                    | 详细说明                                         |

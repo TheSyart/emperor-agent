@@ -6,7 +6,8 @@ import type { AgentView } from '@emperor/core/api'
 import SidebarRoot from './SidebarRoot.vue'
 import { useAgentTree } from './agentTree'
 import { defaultSidebarState } from '../../runtime/sidebarModel'
-import type { AppMode } from '../../runtime/appMode'
+import { routeModeTarget, type AppMode } from '../../runtime/appMode'
+import { createAppModeStore } from '../../composables/useAppMode'
 
 const mock = vi.hoisted(() => ({
   core: vi.fn(),
@@ -59,7 +60,16 @@ function fakeAppMode(initial: AppMode = 'chat') {
 }
 let appMode: ReturnType<typeof fakeAppMode>
 
+/**
+ * The fixture sessions are dated now, so Chat lists them under 今天
+ * (MOD-03: the day buckets are Chat's section headings).
+ */
+let today = ''
+const daysAgo = (days: number) =>
+  new Date(Date.parse(today) - days * 24 * 60 * 60 * 1000).toISOString()
+
 beforeEach(() => {
+  today = new Date().toISOString()
   appMode = fakeAppMode()
   mock.context = {
     showToast: vi.fn(),
@@ -89,8 +99,8 @@ beforeEach(() => {
   ].map((session) => ({
     ...session,
     title: session.id,
-    created_at: '2026-10-17T01:00:00Z',
-    updated_at: '2026-10-17T01:00:00Z',
+    created_at: today,
+    updated_at: today,
   }))
   mock.session = {
     sessions: ref(sessions),
@@ -407,7 +417,7 @@ const rowTitles = () =>
 
 it('MOD-02 3 · each mode shows only its own sections', async () => {
   await mount('/chat/pinned')
-  expect(sections()).toEqual(['pinned', 'chats'])
+  expect(sections()).toEqual(['pinned', 'chats.today'])
   expect(rowTitles()).toEqual(['pinned', 'chat-root'])
 
   appMode.mode.value = 'build'
@@ -756,24 +766,24 @@ it('BUG-06 1–2 · each section header has a chevron that turns as the section 
     ).not.toBeNull()
   appMode.mode.value = 'chat'
   await settle()
-  for (const section of ['pinned', 'chats'])
+  for (const section of ['pinned', 'chats.today'])
     expect(
       sectionLabel(section).querySelector('.section-chevron'),
       section,
     ).not.toBeNull()
-  const chats = sectionLabel('chats')
+  const chats = sectionLabel('chats.today')
   expect(chats.getAttribute('aria-expanded')).toBe('true')
   expect(
     chats.querySelector('.section-chevron')!.hasAttribute('data-collapsed'),
   ).toBe(false)
-  expect(rowsIn('chats')).toEqual(['chat-root'])
+  expect(rowsIn('chats.today')).toEqual(['chat-root'])
   chats.click()
   await settle()
   expect(chats.getAttribute('aria-expanded')).toBe('false')
   expect(
     chats.querySelector('.section-chevron')!.hasAttribute('data-collapsed'),
   ).toBe(true)
-  expect(rowsIn('chats')).toEqual([])
+  expect(rowsIn('chats.today')).toEqual([])
 })
 
 it('BUG-06 3 · a folded section is written to Core and stays folded after a restart', async () => {
@@ -784,19 +794,23 @@ it('BUG-06 3 · a folded section is written to Core and stays folded after a res
   // The section of the open chat folds as well.
   appMode.mode.value = 'chat'
   await settle()
-  sectionLabel('chats').click()
+  sectionLabel('chats.today').click()
   await settle()
   expect(mock.core).toHaveBeenCalledWith(
     'sidebar.patch',
-    expect.objectContaining({ collapsed_sections: ['projects', 'chats'] }),
+    expect.objectContaining({
+      collapsed_sections: ['projects', 'chats.today'],
+    }),
   )
-  expect(saved().collapsed_sections).toEqual(['projects', 'chats'])
+  expect(saved().collapsed_sections).toEqual(['projects', 'chats.today'])
   app!.unmount()
   root.remove()
   app = undefined
   await mount('/chat/chat-root')
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
-  expect(rowsIn('chats')).toEqual([])
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe(
+    'false',
+  )
+  expect(rowsIn('chats.today')).toEqual([])
   appMode.mode.value = 'build'
   await settle()
   expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('false')
@@ -812,7 +826,7 @@ it('BUG-06 4 · a state saved before the field existed shows every section', asy
       : base(key, input),
   )
   await mount('/chat/pinned')
-  for (const section of ['pinned', 'chats'])
+  for (const section of ['pinned', 'chats.today'])
     expect(sectionLabel(section).getAttribute('aria-expanded'), section).toBe(
       'true',
     )
@@ -821,27 +835,31 @@ it('BUG-06 4 · a state saved before the field existed shows every section', asy
   expect(sectionLabel('projects').getAttribute('aria-expanded')).toBe('true')
 })
 
-it('BUG-06 6 · opening a chat of the folded 对话 unfolds it', async () => {
-  const saved = keepSidebarState({ collapsed_sections: ['chats'] })
+it('BUG-06 6 · opening a chat of a folded day unfolds it', async () => {
+  const saved = keepSidebarState({ collapsed_sections: ['chats.today'] })
   const router = await mount('/chat/pinned')
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe(
+    'false',
+  )
   await router.push('/chat/chat-root')
   await settle()
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('true')
-  expect(rowsIn('chats')).toEqual(['chat-root'])
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe('true')
+  expect(rowsIn('chats.today')).toEqual(['chat-root'])
   expect(saved().collapsed_sections).toEqual([])
-  // Opening a pinned chat reveals 置顶 only, never 对话 as well.
-  sectionLabel('chats').click()
+  // Opening a pinned chat reveals 置顶 only, never its day as well.
+  sectionLabel('chats.today').click()
   await settle()
   await router.push('/chat/pinned')
   await settle()
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe(
+    'false',
+  )
 })
 
 it('BUG-06 7 · folding the section of the open chat keeps it folded', async () => {
   const saved = keepSidebarState()
   await mount('/chat/chat-root')
-  sectionLabel('chats').click()
+  sectionLabel('chats.today').click()
   await settle()
   // The list changes meanwhile (a session added elsewhere): still folded.
   mock.session.sessions.value = [
@@ -850,22 +868,24 @@ it('BUG-06 7 · folding the section of the open chat keeps it folded', async () 
       id: 'later',
       mode: 'chat',
       title: 'later',
-      created_at: '2026-10-17T02:00:00Z',
-      updated_at: '2026-10-17T02:00:00Z',
+      created_at: today,
+      updated_at: today,
     },
   ]
   await settle()
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('false')
-  expect(rowsIn('chats')).toEqual([])
-  expect(saved().collapsed_sections).toEqual(['chats'])
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe(
+    'false',
+  )
+  expect(rowsIn('chats.today')).toEqual([])
+  expect(saved().collapsed_sections).toEqual(['chats.today'])
 })
 
 it('BUG-06 · ↑ and ↓ still reach the chats of a folded section, which unfolds', async () => {
-  keepSidebarState({ collapsed_sections: ['chats'] })
+  keepSidebarState({ collapsed_sections: ['chats.today'] })
   const router = await mount('/chat/pinned')
   const row = (id: string) =>
     root.querySelector<HTMLElement>(`.session-row[data-session-id="${id}"]`)
-  // Chat: 置顶 (pinned), then the folded 对话.
+  // Chat: 置顶 (pinned), then the folded 今天.
   const last = row('pinned')!
   last.focus()
   last.dispatchEvent(
@@ -875,6 +895,243 @@ it('BUG-06 · ↑ and ↓ still reach the chats of a folded section, which unfol
   await settle()
   await settle()
   expect(router.currentRoute.value.params.sessionId).toBe('chat-root')
-  expect(sectionLabel('chats').getAttribute('aria-expanded')).toBe('true')
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe('true')
   expect(document.activeElement).toBe(row('chat-root'))
+})
+
+// ── MOD-03: Chat's day buckets are its section headings (preview A) ──
+
+function chatsOnDays() {
+  const at = (id: string, iso: string) => ({
+    id,
+    mode: 'chat',
+    title: id,
+    created_at: iso,
+    updated_at: iso,
+  })
+  mock.session.sessions.value = [
+    at('pinned', today),
+    at('today-1', today),
+    at('yesterday-1', daysAgo(1)),
+    at('older-1', daysAgo(60)),
+  ]
+  mock.session.getSession = (id: string) =>
+    mock.session.sessions.value.find((s: { id: string }) => s.id === id)
+}
+
+const sectionHeadings = () =>
+  [
+    ...root.querySelectorAll<HTMLElement>(
+      '[data-sidebar-section] .section-label',
+    ),
+  ].map((el) => el.textContent?.trim())
+
+it('MOD-03 · Chat heads its sessions with 今天 / 昨天 / 更早, not 对话', async () => {
+  chatsOnDays()
+  keepSidebarState()
+  await mount('/chat/today-1')
+  expect(sections()).toEqual([
+    'pinned',
+    'chats.today',
+    'chats.yesterday',
+    'chats.older',
+  ])
+  expect(sectionHeadings()).toEqual(['置顶', '今天', '昨天', '更早'])
+  expect(rowsIn('chats.today')).toEqual(['today-1'])
+  expect(rowsIn('chats.older')).toEqual(['older-1'])
+  expect(root.querySelector('.day-label')).toBeNull()
+  expect(
+    root
+      .querySelector('[data-sidebar-section="chats.yesterday"]')!
+      .getAttribute('aria-label'),
+  ).toBe('昨天')
+})
+
+it('MOD-03 · the sort menu sits on the first day; manual order is one 对话 section', async () => {
+  chatsOnDays()
+  const saved = keepSidebarState()
+  await mount('/chat/today-1')
+  const sortButtons = () =>
+    [...root.querySelectorAll<HTMLElement>('[aria-label="对话排序"]')].map(
+      (el) =>
+        el.closest<HTMLElement>('[data-sidebar-section]')!.dataset
+          .sidebarSection,
+    )
+  expect(sortButtons()).toEqual(['chats.today'])
+  root.querySelector<HTMLButtonElement>('[aria-label="对话排序"]')!.click()
+  await settle()
+  const manual = [
+    ...document.querySelectorAll<HTMLElement>(
+      '[role="menu"] [role^="menuitem"]',
+    ),
+  ].find((el) => el.textContent?.includes('手动排序'))!
+  manual.click()
+  await settle()
+  expect(saved().chat_sort).toBe('manual')
+  expect(sections()).toEqual(['pinned', 'chats'])
+  expect(sectionHeadings()).toEqual(['置顶', '对话'])
+  expect(sortButtons()).toEqual(['chats'])
+  expect(rowsIn('chats')).toEqual(['today-1', 'yesterday-1', 'older-1'])
+})
+
+it('MOD-03 · each day folds on its own, kept in Core', async () => {
+  chatsOnDays()
+  const saved = keepSidebarState()
+  await mount('/chat/today-1')
+  sectionLabel('chats.yesterday').click()
+  await settle()
+  expect(saved().collapsed_sections).toEqual(['chats.yesterday'])
+  expect(rowsIn('chats.yesterday')).toEqual([])
+  expect(rowsIn('chats.today')).toEqual(['today-1'])
+  expect(sectionLabel('chats.today').getAttribute('aria-expanded')).toBe('true')
+})
+
+it('MOD-03 · no Chat session at all says so without a heading', async () => {
+  mock.session.sessions.value = [
+    {
+      id: 'project-root',
+      mode: 'build',
+      project_id: 'p1',
+      project_path: '/project',
+      project_name: '项目一',
+      title: 'project-root',
+      created_at: today,
+      updated_at: today,
+    },
+  ]
+  keepSidebarState({ pinned_session_ids: [] })
+  await mount('/chat/project-root')
+  expect(sections()).toEqual(['chats'])
+  expect(sectionHeadings()).toEqual([])
+  expect(
+    root.querySelector('[data-sidebar-section="chats"]')!.textContent,
+  ).toContain('暂无对话')
+})
+
+// ── MOD-04: one search over every mode ──
+
+async function search(query: string) {
+  root.querySelector<HTMLButtonElement>('[aria-label="搜索"]')!.click()
+  await settle()
+  const field = root.querySelector<HTMLInputElement>('.search input')!
+  field.value = query
+  field.dispatchEvent(new Event('input'))
+  await settle()
+}
+
+const searchRows = () =>
+  [...root.querySelectorAll<HTMLElement>('[data-search-result]')].map((el) => [
+    el.dataset.searchResult,
+    el.querySelector('[data-mode-tag]')?.textContent?.trim() ?? null,
+  ])
+
+it('MOD-04 1–4 · finds every mode, current first, and opening one switches to its mode', async () => {
+  // The mode as App.vue keeps it: a store that follows the route.
+  const store = createAppModeStore()
+  await store.load(mock.session.sessions.value)
+  store.setMode('build')
+  mock.context.appMode = {
+    mode: store.mode,
+    switchTo: vi.fn(),
+    newSession: vi.fn(async () => undefined),
+  }
+  const router = await mount('/chat/project-root')
+  const stop = store.followRoute(() =>
+    routeModeTarget(router.currentRoute.value, (id) =>
+      mock.session.getSession(id),
+    ),
+  )
+  await settle()
+  expect(store.mode.value).toBe('build')
+
+  await search('root')
+  expect(
+    [...root.querySelectorAll<HTMLElement>('.group-label')].map((el) =>
+      el.textContent?.trim(),
+    ),
+  ).toEqual(['Build', '其他模式'])
+  expect(searchRows()).toEqual([
+    ['project-root', 'Build'],
+    ['chat-root', 'Chat'],
+  ])
+
+  root
+    .querySelector<HTMLButtonElement>('[data-search-result="chat-root"]')!
+    .click()
+  await settle()
+  expect(router.currentRoute.value.params.sessionId).toBe('chat-root')
+  expect(store.mode.value).toBe('chat')
+  expect(sections()).toContain('chats.today')
+  stop()
+})
+
+it('MOD-04 5–6 · a member’s content hit shows its group; a trial’s never shows', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    mock.session.sessions.value = [
+      ...mock.session.sessions.value,
+      {
+        id: 'group-1',
+        mode: 'chat',
+        surface: 'group',
+        group_id: 'g1',
+        title: '设置页评审',
+        created_at: today,
+        updated_at: today,
+      },
+      {
+        id: 'member-1',
+        mode: 'chat',
+        surface: 'group_member',
+        group_id: 'g1',
+        title: '审稿人',
+        created_at: today,
+        updated_at: today,
+      },
+      {
+        id: 'trial-1',
+        mode: 'chat',
+        surface: 'trial',
+        title: '试用',
+        created_at: today,
+        updated_at: today,
+      },
+    ]
+    const original = mock.core.getMockImplementation()!
+    mock.core.mockImplementation(async (key: string, input: any) =>
+      key === 'sessions.search'
+        ? {
+            hits: [
+              {
+                sessionId: 'member-1',
+                title: '审稿人',
+                role: 'assistant',
+                snippet: '…这个方案还要再看…',
+              },
+              {
+                sessionId: 'trial-1',
+                title: '试用',
+                role: 'user',
+                snippet: '…方案…',
+              },
+            ],
+          }
+        : original(key, input),
+    )
+    const router = await mount('/chat/chat-root')
+    await search('方案')
+    vi.advanceTimersByTime(250)
+    await settle()
+    expect(searchRows()).toEqual([['group-1', 'Group']])
+    expect(
+      root.querySelector('[data-search-result="group-1"]')?.textContent,
+    ).toContain('这个方案还要再看')
+    root
+      .querySelector<HTMLButtonElement>('[data-search-result="group-1"]')!
+      .click()
+    await settle()
+    expect(router.currentRoute.value.params.sessionId).toBe('group-1')
+  } finally {
+    vi.useRealTimers()
+  }
 })
