@@ -1,5 +1,12 @@
 # Generated Asset Prompts
 
+## 2026-10-27 - 0.3 mascot: 小单 in the product (BRD-03)
+
+- Source: Codex built-in `image_gen` on a flat `#00ff00` backdrop, from the 0.3 rounds the user ran (prompts in the private 0.3 plan; raw output and the call log in `assets/incoming/v0.3/`, untracked). The mascot is 小单, the user's own Q-version likeness; it is not offered for fan works.
+- Picks (decisions D22, D27, D35 of the 0.3 plan): the robe outfit simplified (X-G2 c2) as the brand image, the throne scene simplified (X-H2 c2), the everyday look (X-A c1), the hoodie look (X-C c1), four sticker poses (准奏 X-F c1, 朕知道了 X-E c1, 嗯？ X-D c2, 交给朕 X-B c1; 加班中 is the hoodie look), the 「单」 name seal (L-L c1) and the portrait seal (L-J c1).
+- Post-processing: `assets/generated/mascot/process_mascot.py` keys the green by how much greener than red and blue a pixel is (soft edge, green unmixed from edge pixels), trims each figure to its own pixels, scales it to 480 px (figures and scene), 256 px (stickers, portrait seal) or 192 px (name seal) high, and saves WebP quality 88 with alpha into `desktop/src/renderer/src/assets/mascot/`. The Emperor contact's head is a 536 px square crop of the robe outfit (crown included), scaled to 192 px. Sticker words are not in the images: the app sets them in type.
+- The desktop pet's outfits are separate strips (`assets/desktop-pet/xiaodan-daily`, `xiaodan-robe`, their READMEs).
+
 ## 2026-10-27 - 0.3 mark: the crown seal (BRD-02)
 
 - Source: Codex built-in `image_gen`, one image, no reference image (`L-S-c1`, an app-logo exploration the user added to the 0.3 round): a three-point crown with a heavy band and a square notch at the centre of its foot, antique gold on a graphite rounded block, on a flat `#00ff00` background. Picked by the user over the round's four directions (geometric crown, the crown as an E, the crown in a block, the crown with glasses), which stay outside the repo with the raw output (`assets/incoming/v0.3/`).
