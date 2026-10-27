@@ -1,8 +1,8 @@
 // The three modes as the sidebar shows them (0.3 MOD-02,
 // docs/design/modes.md): the English name (D3) with one Chinese line, the
 // glyph, the ⌘1–⌘3 action, and each mode's primary row — the ⌘N button and
-// the + beside it. Group's 新建群聊 waits for GRP-08; 新建联系人 opens the
-// contact editor (GRP-04).
+// the + beside it. Group's 新建群聊 opens the Group home with the new-group
+// dialog (GRP-08); 新建联系人 opens the contact editor (GRP-04).
 import { CodeXml, MessageSquare, Users } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { AppMode } from '../../runtime/appMode'
@@ -55,7 +55,7 @@ export const MODE_ENTRIES: readonly ModeEntry[] = [
     description: '群聊：联系人与群聊，多个 agent 协作',
     icon: Users,
     shortcut: 'mode.group',
-    primary: { label: '新建群聊', icon: Users, ready: false },
+    primary: { label: '新建群聊', icon: Users, ready: true },
     secondary: { label: '新建联系人', icon: DsPlus, ready: true },
   },
 ]

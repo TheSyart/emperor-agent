@@ -13,7 +13,7 @@
  * Codex have no single chat yet: @ them with someone else for a group.
  *
  * A contact opens its profile; 新建 the contact editor; a group card the
- * group's page. 新建群聊 waits for GRP-08.
+ * group's page; 新建群聊 the new-group dialog (GRP-08).
  */
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -31,7 +31,7 @@ import EmptyHero from '../conversation/EmptyHero.vue'
 import { DsPlus } from '../icons/ds'
 import Avatar from '../ui/Avatar.vue'
 import Surface from '../ui/Surface.vue'
-import { COMING_SOON } from '../sidebar/modeEntries'
+import { openNewGroupDialog } from './newGroupDialog'
 import GroupHomeComposer from './GroupHomeComposer.vue'
 import { planHomeSend } from './groupHomeModel'
 
@@ -237,14 +237,15 @@ async function send() {
             }}</span>
           </Surface>
           <Surface
+            as="button"
             pad="sm"
+            interactive
             class="card"
-            aria-disabled="true"
-            :title="COMING_SOON"
             data-group-card="new"
+            @click="openNewGroupDialog"
           >
             <span class="card-title">新建群聊</span>
-            <span class="card-meta">从模板建群{{ COMING_SOON }}</span>
+            <span class="card-meta">模板：评审、正反方、调研写作</span>
           </Surface>
         </div>
         <p v-if="directory.loaded.value && !recentGroups.length" class="empty">
@@ -375,10 +376,6 @@ async function send() {
   gap: var(--space-1-5);
   min-width: 0;
   text-align: left;
-}
-
-.card[aria-disabled='true'] {
-  opacity: 0.55;
 }
 
 .card-title,

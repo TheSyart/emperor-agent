@@ -206,11 +206,17 @@ describe('the Group sidebar', () => {
       .click()
     await flush()
     expect(router.currentRoute.value.name).toBe('contact-new')
-    // 新建群聊 waits for GRP-08.
+    // 新建群聊 opens the dialog (GRP-08).
     const create = document.querySelector<HTMLElement>(
       '[data-sidebar-section="groups"] [aria-label="新建群聊"]',
     )!
-    expect(create.getAttribute('aria-disabled')).toBe('true')
+    expect(create.getAttribute('aria-disabled')).toBeNull()
+    const { newGroupDialog } = await import('../groups/newGroupDialog')
+    expect(newGroupDialog.open.value).toBe(false)
+    create.click()
+    await flush()
+    expect(newGroupDialog.open.value).toBe(true)
+    newGroupDialog.open.value = false
   })
 
   it('marks the contact on screen — its profile or its single chat — and the group on screen', async () => {

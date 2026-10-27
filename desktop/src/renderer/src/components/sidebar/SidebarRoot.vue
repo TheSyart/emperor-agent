@@ -74,10 +74,15 @@ import { useContentSearch } from './useContentSearch'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
+import { newGroupDialog } from '../groups/newGroupDialog'
 
 /** Group's contacts and groups: only Group loads them (the entry bundle stays). */
 const SidebarGroupSections = defineAsyncComponent(
   () => import('./SidebarGroupSections.vue'),
+)
+/** 新建群聊 (GRP-08): loaded the first time it opens. */
+const NewGroupDialog = defineAsyncComponent(
+  () => import('../groups/NewGroupDialog.vue'),
 )
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
@@ -830,6 +835,10 @@ defineExpose({ focusSearch })
       </MenuItem>
     </Menu>
   </aside>
+  <NewGroupDialog
+    v-if="newGroupDialog.open.value"
+    v-model:open="newGroupDialog.open.value"
+  />
 </template>
 
 <style scoped>

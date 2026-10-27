@@ -7,7 +7,8 @@
  *   (`landAtStartup`), so the mode survives a restart.
  * - ⌘1 / ⌘2 / ⌘3 switch it (`switchTo`): back to the mode's last session,
  *   or the mode's home when that session is gone. ⌘N starts the mode's own
- *   kind of session (`newSession`).
+ *   kind of session (`newSession`); in Group that is 新建群聊: the Group
+ *   home with the new-group dialog (GRP-08).
  * - The route leads (`followRoute`): opening a session of another mode —
  *   from a notification, search, a deep link, back / forward — or a binding
  *   change of the open session switches the mode with it. Pages belong to
@@ -44,6 +45,7 @@ import {
 } from '../runtime/appMode'
 import type { ProjectInfo, SessionInfo } from '../types'
 import type { CreateSessionDraftOptions } from './useSession'
+import { openNewGroupDialog } from '../components/groups/newGroupDialog'
 
 export type AppModeStatus = 'unloaded' | 'loaded' | 'failed'
 
@@ -223,7 +225,9 @@ export function createAppModeController(
 
   /** ⌘N: the current mode's new session. */
   async function newSession(): Promise<void> {
-    await startHome(store.mode.value, true)
+    const mode = store.mode.value
+    await startHome(mode, true)
+    if (mode === 'group') openNewGroupDialog()
   }
 
   /**
