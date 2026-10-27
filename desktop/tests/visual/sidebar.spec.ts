@@ -526,7 +526,7 @@ test('MOD-02 1–2, 6 · the mode switcher by keyboard and pointer', async ({
   await expect(root.locator('[data-sidebar-section="projects"]')).toHaveCount(0)
 })
 
-test('Group (⌘3): a placeholder, and the entries still to come', async ({
+test('Group (⌘3): a placeholder, 新建联系人, and 新建群聊 still to come', async ({
   page,
 }) => {
   await open(page, '/chat/build-ui')
@@ -546,10 +546,10 @@ test('Group (⌘3): a placeholder, and the entries still to come', async ({
   await create.click({ force: true })
   await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
   await expect(root.locator('.session-row')).toHaveCount(0)
-  await expect(nav.getByRole('button', { name: '新建联系人' })).toHaveAttribute(
-    'aria-disabled',
-    'true',
-  )
+  // 新建联系人 opens the contact editor (GRP-04).
+  await expect(
+    nav.getByRole('button', { name: '新建联系人' }),
+  ).not.toHaveAttribute('aria-disabled', 'true')
   // No Pull Request outside Build.
   await expect(
     root.locator('[data-sidebar-block="footer"]').getByRole('button', {
@@ -557,6 +557,10 @@ test('Group (⌘3): a placeholder, and the entries still to come', async ({
     }),
   ).toHaveCount(0)
   await shot(page, 'group-placeholder')
+  await nav.getByRole('button', { name: '新建联系人' }).click()
+  await expect(page).toHaveURL(/\/contacts\/new/)
+  await expect(page.locator('[data-contact-editor]')).toBeVisible()
+  await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
 })
 
 test('search icon toggles the capsule and Esc closes it', async ({ page }) => {

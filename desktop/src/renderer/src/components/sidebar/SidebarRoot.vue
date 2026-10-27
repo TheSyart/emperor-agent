@@ -6,7 +6,7 @@
  * search toggle, bell), SidebarNav (the mode's ⌘N primary row), the search
  * box while searching, then the current mode's sessions only — Chat: 置顶
  * (its pins) + 对话 by day; Build: 置顶 (its pins) + 项目 → sessions;
- * Group: a placeholder until contacts and groups arrive (GRP-05) — and
+ * Group: a placeholder until the contact list and groups arrive (GRP-05) — and
  * SidebarFooter (设置, the page icons, 明暗切换). The mode and its
  * controller come from the app context, so the switcher, the rail and the
  * primary row run what ⌘1–⌘3 and ⌘N run. Search finds titles at once and
@@ -305,9 +305,11 @@ function switchMode(next: AppMode): Promise<void> {
   return ctx.runSafely(() => ctx.appMode.switchTo(next))
 }
 
-/** The + of the primary row: Build opens a folder; Group's waits (GRP-04). */
+/** The + of the primary row: Build opens a folder; Group a new contact (GRP-04). */
 function runSecondary(): void {
   if (mode.value === 'build') void pickBuildProject()
+  else if (mode.value === 'group')
+    void router.push({ name: 'contact-new' }).catch(() => undefined)
 }
 
 async function newProjectSession(project: SidebarProjectGroup) {
@@ -717,7 +719,7 @@ defineExpose({ focusSearch })
           </template>
         </section>
 
-        <!-- Group: contacts and groups arrive with GRP-05. -->
+        <!-- Group: the contact list and groups arrive with GRP-05. -->
         <section
           v-if="mode === 'group'"
           class="section"
@@ -726,7 +728,7 @@ defineExpose({ focusSearch })
         >
           <EmptyState
             title="联系人和群聊在这里"
-            description="建联系人、拉群聊即将推出"
+            description="点 + 新建联系人；拉群聊即将推出"
           />
         </section>
       </div>

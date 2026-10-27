@@ -164,6 +164,7 @@ async function mount(
         component: {},
       },
       { path: '/chat/:sessionId?', name: 'chat', component: {} },
+      { path: '/contacts/new', name: 'contact-new', component: {} },
     ],
   })
   await router.push(path)
@@ -481,7 +482,7 @@ it('MOD-02 4 · 置顶 lists the pins of the mode on screen only', async () => {
 })
 
 it('MOD-02 7 · the primary row follows the mode and runs what ⌘N runs', async () => {
-  await mount('/chat/pinned')
+  const router = await mount('/chat/pinned')
   const nav = () => root.querySelector<HTMLElement>('.sidebar-nav')!
   const primary = () => nav().querySelector<HTMLButtonElement>('.new-chat')!
   expect(primary().getAttribute('aria-label')).toBe('新对话')
@@ -498,19 +499,22 @@ it('MOD-02 7 · the primary row follows the mode and runs what ⌘N runs', async
   await settle()
   expect(appMode.newSession).toHaveBeenCalledTimes(2)
 
-  // Group: 新建群聊 and 新建联系人 wait for GRP-04 / GRP-05 — present,
-  // marked unavailable, and doing nothing yet.
+  // Group: 新建群聊 waits for GRP-08 — present, marked unavailable, doing
+  // nothing yet; 新建联系人 opens the contact editor (GRP-04).
   appMode.mode.value = 'group'
   await settle()
   expect(primary().getAttribute('aria-label')).toBe('新建群聊')
   expect(primary().getAttribute('aria-disabled')).toBe('true')
+  primary().click()
+  await settle()
+  expect(appMode.newSession).toHaveBeenCalledTimes(2)
   const contact = nav().querySelector<HTMLButtonElement>(
     '[aria-label="新建联系人"]',
   )!
-  expect(contact.getAttribute('aria-disabled')).toBe('true')
-  primary().click()
+  expect(contact.getAttribute('aria-disabled')).toBeNull()
   contact.click()
   await settle()
+  expect(router.currentRoute.value.name).toBe('contact-new')
   expect(appMode.newSession).toHaveBeenCalledTimes(2)
   expect(mock.selectDirectory).not.toHaveBeenCalled()
 })
