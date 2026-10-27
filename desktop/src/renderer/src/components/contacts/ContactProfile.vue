@@ -40,6 +40,7 @@ import { confirm } from '../ui/confirm'
 import { COMING_SOON } from '../sidebar/modeEntries'
 import AvatarLibraryPicker from './AvatarLibraryPicker.vue'
 import { contactAvatarProps } from './contactAvatar'
+import { contactChatLocation, EXTERNAL_CHAT_NOTE } from './externalChat'
 import { useContactDirectory } from './contactDirectory'
 import { failureText } from './contactEditorModel'
 import {
@@ -146,21 +147,19 @@ const introLine = computed(() => {
   const domains = current.domains.map((domain) => DOMAIN_LABELS[domain])
   return [domains.join('、'), current.intro].filter(Boolean).join(' · ')
 })
-const chatTitle = computed(() =>
-  external.value ? `和「${contact.value?.name}」单聊${COMING_SOON}` : '',
-)
 const opening = ref(false)
 
 async function sendMessage() {
   const current = contact.value
-  if (!current || external.value || opening.value) return
+  if (!current || opening.value) return
   opening.value = true
   try {
     const session = (await core('contacts.openChat', {
       id: current.id,
     })) as SessionInfo
     sessionStore.adopt(session)
-    await router.push({ name: 'chat', params: { sessionId: session.id } })
+    // Claude Code and Codex: their chat's delegation, once it has one (GRP-11).
+    await router.push(await contactChatLocation(current, session.id))
   } catch (error) {
     ctx.showError(error, '没有打开单聊')
   } finally {
@@ -484,8 +483,6 @@ function backHome() {
               size="sm"
               variant="primary"
               :loading="opening"
-              :aria-disabled="external ? 'true' : undefined"
-              :title="chatTitle || undefined"
               @click="sendMessage"
               >发消息</Button
             >
@@ -499,10 +496,7 @@ function backHome() {
             <Button size="sm" @click="edit">编辑</Button>
           </div>
         </div>
-        <p v-if="external" class="note">
-          {{ chatTitle }}；现在可以在群聊首页和别的联系人一起 @
-          它，建一个临时群。
-        </p>
+        <p v-if="external" class="note">{{ EXTERNAL_CHAT_NOTE }}</p>
 
         <div class="stats">
           <Surface

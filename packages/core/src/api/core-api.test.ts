@@ -54,6 +54,8 @@ const EXPECTED_OPERATIONS = [
   'config.effective',
   'config.get',
   'config.save',
+  'contacts.chatDelegation',
+  'contacts.chatSend',
   'contacts.create',
   'contacts.delete',
   'contacts.draftFromBrief',

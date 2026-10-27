@@ -117,8 +117,9 @@ export class ExecutorConsentBridge {
 
   /** True when the task may go to the external executor. */
   async decide(request: ConsentRequest): Promise<boolean> {
-    // The user started it themselves: that is the consent.
-    if (request.owner.source === 'human') return true
+    // The user started it themselves (or opened a chat with it): that is the consent.
+    if (request.owner.source === 'human' || request.owner.source === 'contact')
+      return true
     if (this.store?.granted(request.profile.id)) return true
     const root = this.options.root(request.owner.rootSessionId)
     if (

@@ -635,3 +635,68 @@ it('serves repeated history and metadata reads from state callbacks rather than 
     await f.api.close()
   }
 })
+
+it('counts each message sent from a single chat with Claude Code or Codex as its own task (GRP-11)', async () => {
+  const f = await fixture()
+  try {
+    const send = vi
+      .spyOn(f.api.delegationRuntime, 'send')
+      .mockResolvedValue({ messageId: 'dgm-x', state: 'queued' } as never)
+    f.record.owner = { ...f.record.owner, source: 'contact' }
+    await f.api.delegations.send({
+      id: f.record.id,
+      sessionId: f.root,
+      messageId: 'dgm-chat-2',
+      text: 'next',
+      delivery: 'queue',
+    })
+    expect(send.mock.calls[0]![1]).toMatchObject({
+      taskScopeId: `contact-chat:${f.root}:dgm-chat-2`,
+    })
+    // Any other delegation keeps the task it was started in.
+    f.record.owner = { ...f.record.owner, source: 'human' }
+    await f.api.delegations.send({
+      id: f.record.id,
+      sessionId: f.root,
+      messageId: 'dgm-human-2',
+      text: 'next',
+      delivery: 'queue',
+    })
+    expect(send.mock.calls[1]![1]).not.toHaveProperty('taskScopeId')
+  } finally {
+    await f.api.close()
+  }
+})
+
+it('takes no message for the single chat of a deleted contact (GRP-11)', async () => {
+  const f = await fixture()
+  try {
+    const send = vi
+      .spyOn(f.api.delegationRuntime, 'send')
+      .mockResolvedValue({ messageId: 'dgm-x', state: 'queued' } as never)
+    const gone = await f.api.contacts.create({ name: '外部审稿' })
+    const store = f.api.host.kept.sessionStore
+    const chat = store.create('单聊', {
+      surface: 'contact',
+      contactId: gone.id,
+    })
+    f.record.owner = {
+      ...f.record.owner,
+      rootSessionId: chat.id,
+      source: 'contact',
+    }
+    await f.api.contacts.delete({ id: gone.id })
+    await expect(
+      f.api.delegations.send({
+        id: f.record.id,
+        sessionId: chat.id,
+        messageId: 'dgm-after-delete',
+        text: 'next',
+        delivery: 'queue',
+      }),
+    ).rejects.toMatchObject({ code: 'contact_deleted' })
+    expect(send).not.toHaveBeenCalled()
+  } finally {
+    await f.api.close()
+  }
+})

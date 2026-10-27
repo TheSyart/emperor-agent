@@ -29,6 +29,8 @@ export interface ContactChat {
   /** Null: the contact was deleted. */
   contact: Contact | null
   deleted: boolean
+  /** Claude Code or Codex: its messages go to the chat's delegation (GRP-11). */
+  external: boolean
   /** 👍 / 👎 under its replies (its personal memory is on). */
   feedback: boolean
   /** The avatar and name beside its replies; null once deleted. */
@@ -51,6 +53,7 @@ export function contactChatOf(
     contactId: session.contact_id,
     contact,
     deleted: directory.loaded && contact === null,
+    external: contact?.kind === 'external',
     feedback: Boolean(contact?.memory.enabled),
     speaker: contact
       ? {

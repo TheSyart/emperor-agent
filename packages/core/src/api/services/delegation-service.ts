@@ -4,6 +4,7 @@ import {
   type DelegationHistoryOptions,
 } from './delegation-history'
 import { agentTitle } from '../../runtime/agent-view'
+import { contactChatScope } from '../../contacts/external-chat'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DelegationService } from '../../harness/delegation/service'
@@ -23,6 +24,7 @@ import type {
 } from '../../workspace/delegation-integration'
 import {
   DelegationError,
+  type DelegationOwner,
   type DelegationRunRecord,
   TERMINAL_RUN_PHASES,
 } from '../../harness/delegation/types'
@@ -79,6 +81,8 @@ export class CoreDelegationService {
       integration: DelegationIntegration
       session: (id: string) => { archived_at?: string | null } | null
       assertMutation: (id: string, action: string) => void
+      /** Throws when no message may go to this delegation (a deleted contact's chat). */
+      refuseSend?: (owner: DelegationOwner) => void
     },
   ) {}
   private access(
@@ -177,9 +181,20 @@ export class CoreDelegationService {
     delivery: 'queue' | 'steer'
     expectedRunId?: string
   }) {
-    this.access(input.id, input.sessionId, true)
+    const owner = this.access(input.id, input.sessionId, true).record?.owner
     this.options.assertMutation(String(input.sessionId), 'send')
-    return this.options.service.send(input.id, input)
+    if (owner) this.options.refuseSend?.(owner)
+    // In a single chat with Claude Code or Codex every message is its own
+    // task (GRP-11), from the chat page as from its first message.
+    return this.options.service.send(
+      input.id,
+      owner?.source === 'contact'
+        ? {
+            ...input,
+            taskScopeId: contactChatScope(owner.rootSessionId, input.messageId),
+          }
+        : input,
+    )
   }
   async interrupt(input: {
     id: string

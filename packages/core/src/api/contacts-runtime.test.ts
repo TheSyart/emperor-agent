@@ -378,6 +378,37 @@ describe('a deleted contact', () => {
   })
 })
 
+describe('Claude Code and Codex', () => {
+  it('never take a local turn, even past the chat API (GRP-11)', async () => {
+    const { api, adapter } = await setup([{ text: 'never' }])
+    for (const contactId of ['ct-codex', 'ct-claude-code']) {
+      const id = contactSession(api, contactId)
+      // A group member's session or a background turn reaches the host
+      // without `chat.submit`: the step gate refuses it too.
+      await expect(
+        api.chatService.submit({
+          content: 'hi',
+          displayContent: null,
+          clientMessageId: null,
+          sessionId: id,
+          uiHidden: false,
+          delivery: 'queue',
+          clientDraftId: null,
+          draftSession: null,
+          attachmentIds: null,
+          requestedSkills: null,
+          references: null,
+          signal: null,
+          source: 'chat',
+          emit: null,
+          unconsumed: null,
+        }),
+      ).rejects.toMatchObject({ code: 'contact_chat_external' })
+    }
+    expect(adapter.requests).toHaveLength(0)
+  })
+})
+
 describe('model (card tests 5, 11)', () => {
   function addRoutes(api: CoreApi): void {
     api.host.llm.setRoutes(

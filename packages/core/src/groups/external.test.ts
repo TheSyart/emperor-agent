@@ -148,9 +148,12 @@ describe('ExternalSpeaker', () => {
     await external.speak(request({ turnId: 'gt-1' }))
     await external.speak(request({ turnId: 'gt-2' }))
     const owners = delegations.api.start.mock.calls.map((c) => c[0].taskScopeId)
-    // One delegation is continued; the first owner names the first turn.
+    // One delegation is continued; each speech counts toward its own turn.
     expect(owners).toEqual(['group-turn:gt-1'])
     expect(delegations.api.send).toHaveBeenCalledTimes(1)
+    expect(delegations.api.send.mock.calls[0]![1]).toMatchObject({
+      taskScopeId: 'group-turn:gt-2',
+    })
   })
 
   it('continues the same delegation for the next speech', async () => {

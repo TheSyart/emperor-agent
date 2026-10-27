@@ -134,17 +134,50 @@ describe('a single chat with a contact (GRP-05)', () => {
     ).rejects.toMatchObject({ code: 'contact_not_found' })
   })
 
-  it('has no single chat with Claude Code or Codex yet, nor with a contact that is gone', async () => {
+  it('opens a chat with Claude Code or Codex that never runs a local turn (GRP-11)', async () => {
     const { api } = await open()
-    for (const id of ['ct-claude-code', 'ct-codex'])
+    for (const id of ['ct-claude-code', 'ct-codex']) {
+      const chat = await invokeCoreOperation(api, 'contacts.openChat', [{ id }])
+      expect(chat).toMatchObject({ surface: 'contact', contact_id: id })
+      expect(
+        await invokeCoreOperation(api, 'contacts.chatDelegation', [
+          { sessionId: String(chat.id) },
+        ]),
+      ).toEqual({ delegationId: null })
+      // Its messages go to the executor, never to a local agent.
       await expect(
-        invokeCoreOperation(api, 'contacts.openChat', [{ id }]),
-      ).rejects.toMatchObject({ code: 'contact_chat_unavailable' })
+        api.chat.submit({ content: 'hi', sessionId: String(chat.id) }),
+      ).rejects.toMatchObject({ code: 'contact_chat_external' })
+    }
+  })
+
+  it('sends a message only in a chat with Claude Code or Codex, in words when it cannot (GRP-11)', async () => {
+    const { api } = await open()
+    const rev = await reviewer(api)
+    const local = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: rev },
+    ])
     await expect(
-      invokeCoreOperation(api, 'sessions.create', [
-        { contactId: 'ct-claude-code' },
+      invokeCoreOperation(api, 'contacts.chatSend', [
+        { sessionId: String(local.id), text: 'hi', clientMessageId: 'cm-1' },
       ]),
     ).rejects.toMatchObject({ code: 'contact_chat_unavailable' })
+    // Codex is off in a fresh config: the refusal says where to turn it on.
+    const codex = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    await expect(
+      invokeCoreOperation(api, 'contacts.chatSend', [
+        { sessionId: String(codex.id), text: 'hi', clientMessageId: 'cm-1' },
+      ]),
+    ).rejects.toMatchObject({
+      code: 'contact_chat_failed',
+      message: expect.stringMatching(/设置 › 子智能体/),
+    })
+  })
+
+  it('has no single chat with a contact that is gone', async () => {
+    const { api } = await open()
     await expect(
       invokeCoreOperation(api, 'contacts.openChat', [
         { id: 'ct-nobody0000001' },

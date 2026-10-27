@@ -2504,6 +2504,23 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.contacts.openChat(input),
   ),
+  // GRP-11: a single chat with Claude Code or Codex goes to the executor.
+  'contacts.chatSend': operation(
+    z.tuple([
+      z
+        .object({
+          sessionId: idSchema,
+          text: z.string().max(200_000),
+          clientMessageId: idSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.chatSend(input),
+  ),
+  'contacts.chatDelegation': operation(
+    z.tuple([z.object({ sessionId: idSchema }).strict()]),
+    (api, [input]) => api.contacts.chatDelegation(input),
+  ),
   'contacts.stats': operation(z.tuple([contactRefSchema]), (api, [input]) =>
     api.contacts.stats(input),
   ),

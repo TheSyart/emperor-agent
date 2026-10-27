@@ -196,3 +196,17 @@ it('GRP-09 · a group speech never wakes the member’s session: its notice goes
   expect(settlementNotice(record, run).recipient).toBe('collector')
   expect(settlementNotice(base, run).recipient).toBe('parent')
 })
+
+it('GRP-11 · a single chat’s run never wakes the chat session either', () => {
+  const base = fixtureDelegationRecord()
+  const record = {
+    ...base,
+    owner: { ...base.owner, source: 'contact' as const },
+  }
+  const run = {
+    ...fixtureDelegationRun(),
+    generation: 2,
+    phase: 'completed' as const,
+  }
+  expect(settlementNotice(record, run).recipient).toBe('collector')
+})

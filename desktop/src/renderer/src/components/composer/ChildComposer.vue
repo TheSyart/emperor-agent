@@ -9,7 +9,8 @@
  * Props: parentTitle?, running?, stopping?, sending?, steer? (a running
  * child takes the message now), error? (the last send failed), closed?
  * (why it takes no message — it ended, the main conversation is archived),
- * canStop (hide 停止 when there is nothing to stop).
+ * canStop (hide 停止 when there is nothing to stop), placeholder and
+ * idleHint (a single chat with Claude Code or Codex says its own, GRP-11).
  * Emits: send(text) — the parent clears the draft by calling `clear()`
  * once Core accepted it — and stop.
  */
@@ -27,6 +28,8 @@ const props = withDefaults(
     error?: string
     closed?: string
     canStop?: boolean
+    placeholder?: string
+    idleHint?: string
   }>(),
   {
     parentTitle: undefined,
@@ -37,6 +40,8 @@ const props = withDefaults(
     error: undefined,
     closed: undefined,
     canStop: true,
+    placeholder: '给子智能体发消息',
+    idleHint: '它会在下一轮读到这条消息',
   },
 )
 const emit = defineEmits<{
@@ -49,7 +54,7 @@ const canSend = computed(
   () => !props.closed && !props.sending && draft.value.trim().length > 0,
 )
 const hint = computed(() => {
-  if (!props.running) return '它会在下一轮读到这条消息'
+  if (!props.running) return props.idleHint
   return props.steer
     ? '它正在运行，消息会直接插进去'
     : '它正在运行，消息会在这一轮结束后送达'
@@ -80,8 +85,8 @@ defineExpose({
         v-model="draft"
         :min-rows="1"
         :max-rows="6"
-        placeholder="给子智能体发消息"
-        aria-label="给子智能体发消息"
+        :placeholder="placeholder"
+        :aria-label="placeholder"
         :disabled="!!closed"
         data-child-input
         @keydown="onKeydown"

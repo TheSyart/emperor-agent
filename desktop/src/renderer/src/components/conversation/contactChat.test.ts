@@ -69,6 +69,7 @@ describe('contactChatOf', () => {
       contactId: 'ct-reviewer00001',
       contact: contact(),
       deleted: false,
+      external: false,
       feedback: true,
       speaker: {
         name: '审稿人',
@@ -99,6 +100,28 @@ describe('contactChatOf', () => {
     // Not before the contacts are read.
     expect(
       contactChatOf(session(), { contacts: [], loaded: false })?.deleted,
+    ).toBe(false)
+  })
+
+  it('marks a chat with Claude Code or Codex, whose messages go to its delegation (GRP-11)', () => {
+    const codex = contact({
+      id: 'ct-codex',
+      kind: 'external',
+      backend: 'codex',
+      name: 'Codex',
+      avatar: { kind: 'logo', backend: 'codex' },
+    })
+    const chat = contactChatOf(session({ contact_id: 'ct-codex' }), {
+      contacts: [codex],
+      loaded: true,
+    })
+    expect(chat).toMatchObject({ external: true, speaker: { name: 'Codex' } })
+    // A deleted contact's kind is unknown: never taken for external.
+    expect(
+      contactChatOf(session({ contact_id: 'ct-codex' }), {
+        contacts: [],
+        loaded: true,
+      })?.external,
     ).toBe(false)
   })
 

@@ -137,6 +137,17 @@ it('a dispatch the user started themselves needs no card', async () => {
   expect(f.pending.forSession(f.agent.id)).toEqual([])
 })
 
+it('GRP-11 · a single chat the user opened with Claude Code or Codex needs no card', async () => {
+  const f = fixture()
+  expect(
+    await f.bridge.decide({
+      ...f.request,
+      owner: { ...f.request.owner, source: 'contact' },
+    }),
+  ).toBe(true)
+  expect(f.pending.forSession(f.agent.id)).toEqual([])
+})
+
 it('without anyone to ask (scheduler, no window), nothing is spent unless always allowed', async () => {
   const f = fixture(false)
   expect(await f.bridge.decide(f.request)).toBe(false)

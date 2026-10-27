@@ -12,6 +12,8 @@ import { makeApi, type ApiFixture } from './test-helpers'
 
 const VIEW = { sessionId: null }
 const CONTACT_OPERATIONS = [
+  'contacts.chatDelegation',
+  'contacts.chatSend',
   'contacts.create',
   'contacts.delete',
   'contacts.draftFromBrief',

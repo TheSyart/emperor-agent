@@ -77,6 +77,8 @@ export class ExternalSpeaker {
             text: request.prompt,
             delivery: 'queue',
             signal: request.signal,
+            // Each speech counts toward its own group turn.
+            taskScopeId: `group-turn:${request.turnId}`,
           })
         ).runId
       } else {
@@ -121,7 +123,7 @@ export class ExternalSpeaker {
       return {
         text: '',
         outcome: 'error',
-        detail: describe(error, name),
+        detail: describeExternalFailure(error, name),
         spend: none,
       }
     } finally {
@@ -164,15 +166,8 @@ export class ExternalSpeaker {
     request: ExternalSpeakRequest,
     contact: Contact,
   ): { instructions?: string } {
-    const role = contact.role
-    const wearsCard = Boolean(
-      role.mission.trim() ||
-      role.deliverable.trim() ||
-      role.playbook.trim() ||
-      role.boundaries.trim(),
-    )
     const text = [
-      wearsCard ? compileRolePrompt(contact) : '',
+      jobCardOf(contact),
       this.deps.charter(request.groupId, request.member),
     ]
       .filter((part) => part.trim())
@@ -213,12 +208,24 @@ export class ExternalSpeaker {
   }
 }
 
+/** An external contact's job card as its executor reads it; '' when it wears none. */
+export function jobCardOf(contact: Contact): string {
+  const role = contact.role
+  const wearsCard = Boolean(
+    role.mission.trim() ||
+    role.deliverable.trim() ||
+    role.playbook.trim() ||
+    role.boundaries.trim(),
+  )
+  return wearsCard ? compileRolePrompt(contact) : ''
+}
+
 function codeOf(error: unknown): string | undefined {
   return error instanceof DelegationError ? error.code : undefined
 }
 
-/** A refusal in words, with where to fix it. */
-function describe(error: unknown, name: string): string {
+/** A refusal in words, with where to fix it (also a single chat's, GRP-11). */
+export function describeExternalFailure(error: unknown, name: string): string {
   switch (codeOf(error)) {
     case 'AUTH_REQUIRED':
     case 'AUTH_EXPIRED':

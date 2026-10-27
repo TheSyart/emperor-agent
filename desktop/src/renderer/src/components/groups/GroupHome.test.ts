@@ -105,6 +105,11 @@ async function mount() {
       { path: '/contacts', name: 'contacts', component: GroupHome },
       { path: '/contacts/new', name: 'contact-new', component: stub },
       { path: '/contacts/:id', name: 'contact', component: stub },
+      {
+        path: '/chat/:sessionId/agents/:delegationId',
+        name: 'external-agent',
+        component: stub,
+      },
       { path: '/chat/:sessionId?', name: 'chat', component: stub },
       { path: '/groups/:groupId', name: 'group', component: stub },
     ],
@@ -174,6 +179,8 @@ beforeEach(() => {
           contact_id: arg?.id,
           mode: 'chat',
         }
+      case 'contacts.chatSend':
+        return { delegationId: 'dlg-chat1', runId: 'dgr-chat1' }
       case 'groups.create':
         return { id: 'grp-new', title: arg?.title, members: [] }
       case 'groups.send':
@@ -294,14 +301,31 @@ describe('the Group home', () => {
     expect(calls('groups.create')).toEqual([])
   })
 
-  it('says a single chat with Claude Code is still to come', async () => {
+  it('sends one @ of Claude Code straight to it, and opens their chat (GRP-11)', async () => {
     await mount()
     await type('@Claude Code 看看这个仓库')
-    // Said before sending too: no 「打开单聊」 promise.
-    expect(q('[data-send-plan]').textContent).toContain('即将推出')
+    // Said before sending: read-only, no local turn.
+    expect(q('[data-send-plan]').textContent).toContain('只读')
     await key('Enter')
-    expect(q('[data-home-hint]').textContent).toContain('即将推出')
-    expect(calls('contacts.openChat')).toEqual([])
+    await flush()
+    expect(calls('contacts.openChat')).toEqual([
+      ['contacts.openChat', { id: 'ct-claude-code' }],
+    ])
+    expect(calls('contacts.chatSend')).toEqual([
+      [
+        'contacts.chatSend',
+        {
+          sessionId: 'chat-reviewer',
+          text: '@Claude Code 看看这个仓库',
+          clientMessageId: expect.stringMatching(/^cm-/),
+        },
+      ],
+    ])
+    // Never handed to a local turn.
+    expect(draftHandoff.value).toBeNull()
+    expect(router.currentRoute.value.fullPath).toBe(
+      '/chat/chat-reviewer/agents/dlg-chat1',
+    )
   })
 
   it('completes a name after @ with ↓ and Enter, never listing a name that is no contact', async () => {

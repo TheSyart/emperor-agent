@@ -23,6 +23,7 @@ import { useSession } from '../../composables/useSession'
 import type { SessionInfo } from '../../types'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import { handDraftTo } from '../chat/draftHandoff'
+import { sendExternalChat } from '../contacts/externalChat'
 import type { Contact } from '@emperor/core/api'
 import { contactAvatarProps } from '../contacts/contactAvatar'
 import { DOMAIN_LABELS } from '../contacts/contactProfileModel'
@@ -56,17 +57,12 @@ const nameOf = (id: string) =>
   contacts.value.find((contact) => contact.id === id)?.name ?? id
 
 /** What sending will do, under the composer (单聊 / 建临时群). */
-/** Claude Code and Codex have no single chat yet (contact_chat_unavailable). */
-function externalChatHint(name: string): string {
-  return `和「${name}」单聊即将推出；再 @ 一位联系人，就会和它一起建一个临时群`
-}
-
 const planLine = computed(() => {
   const current = plan.value
   if (current.kind === 'chat') {
     const contact = contacts.value.find((item) => item.id === current.contactId)
     return contact?.kind === 'external'
-      ? externalChatHint(contact.name)
+      ? `发给「${contact.name}」，打开和它的单聊（它只读、不改文件）`
       : `发出后打开和「${nameOf(current.contactId)}」的单聊`
   }
   if (current.kind === 'group')
@@ -125,13 +121,6 @@ async function send() {
     default:
       break
   }
-  if (current.kind === 'chat') {
-    const contact = contacts.value.find((item) => item.id === current.contactId)
-    if (contact?.kind === 'external') {
-      hint.value = externalChatHint(contact.name)
-      return
-    }
-  }
   sending.value = true
   try {
     if (current.kind === 'chat') {
@@ -139,6 +128,16 @@ async function send() {
         id: current.contactId,
       })) as SessionInfo
       sessionStore.adopt(session)
+      const contact = contacts.value.find(
+        (item) => item.id === current.contactId,
+      )
+      // Claude Code and Codex: straight to the chat's delegation (GRP-11).
+      if (contact?.kind === 'external') {
+        const target = await sendExternalChat(session.id, message)
+        text.value = ''
+        await router.push(target)
+        return
+      }
       handDraftTo(session.id, message, { send: true })
       text.value = ''
       await router.push({ name: 'chat', params: { sessionId: session.id } })

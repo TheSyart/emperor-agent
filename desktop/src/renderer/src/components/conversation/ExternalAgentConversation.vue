@@ -203,19 +203,38 @@ async function navigate(id: string) {
     if (current === generation) fail(cause)
   }
 }
+/**
+ * A single chat with Claude Code or Codex (GRP-11): this page is the chat,
+ * so the way back is the contact's profile, never the chat session (which
+ * opens this page again).
+ */
+const chatContactId = computed(() => {
+  if (record.value?.owner.source !== 'contact') return null
+  return (
+    sessions.value.find((item) => item.id === rootId.value)?.contact_id ?? null
+  )
+})
+function openChatContact() {
+  if (!chatContactId.value) return
+  void router.push({ name: 'contact', params: { id: chatContactId.value } })
+}
 /** The header's ‹ (BUG-03): up one level, else to the main conversation. */
 const canGoBack = computed(
   () =>
+    chatContactId.value !== null ||
     (controlsAvailable.value && !!ancestry.value?.parentId) ||
     canOpenRoot.value,
 )
 const backLabel = computed(() =>
-  controlsAvailable.value && ancestry.value?.parentId
-    ? `返回「${ancestry.value.ancestors.at(-1)?.title ?? '主会话'}」`
-    : '返回「主会话」',
+  chatContactId.value
+    ? '返回联系人档案'
+    : controlsAvailable.value && ancestry.value?.parentId
+      ? `返回「${ancestry.value.ancestors.at(-1)?.title ?? '主会话'}」`
+      : '返回「主会话」',
 )
 function parent() {
-  if (controlsAvailable.value && ancestry.value?.parentId)
+  if (chatContactId.value) openChatContact()
+  else if (controlsAvailable.value && ancestry.value?.parentId)
     void navigate(ancestry.value.parentId)
   else if (canOpenRoot.value) root()
 }
@@ -266,7 +285,8 @@ async function send(text: string) {
   }
 }
 function root() {
-  void navigate(rootId.value)
+  if (chatContactId.value) openChatContact()
+  else void navigate(rootId.value)
 }
 const runLabels: Record<string, string> = {
   queued: '等待调度',
@@ -529,15 +549,23 @@ async function stop() {
   >
     <header class="child-header">
       <nav aria-label="子智能体路径">
-        <template v-if="ancestry && !ancestry.unavailable">
-          <button v-if="controlsAvailable" @click="root">主会话</button
+        <!-- A single chat with Claude Code or Codex: 联系人 / 单聊 (GRP-11). -->
+        <template v-if="chatContactId || (ancestry && !ancestry.unavailable)">
+          <button
+            v-if="controlsAvailable || chatContactId"
+            :data-chat-contact="chatContactId ? '' : undefined"
+            @click="root"
+          >
+            {{ chatContactId ? '联系人' : '主会话' }}</button
           ><span v-else>主会话</span>
-          <template v-for="ancestor in ancestry.ancestors" :key="ancestor.id">
-            <span>/</span
-            ><button v-if="controlsAvailable" @click="navigate(ancestor.id)">
-              {{ ancestor.title }}</button
-            ><span v-else>{{ ancestor.title }}</span> </template
-          ><span>/ 子智能体</span>
+          <template v-if="!chatContactId && ancestry">
+            <template v-for="ancestor in ancestry.ancestors" :key="ancestor.id">
+              <span>/</span
+              ><button v-if="controlsAvailable" @click="navigate(ancestor.id)">
+                {{ ancestor.title }}</button
+              ><span v-else>{{ ancestor.title }}</span>
+            </template> </template
+          ><span>{{ chatContactId ? '/ 单聊' : '/ 子智能体' }}</span>
         </template>
         <span v-else-if="ancestry?.unavailable" data-unavailable-parent>{{
           ancestry.text
@@ -730,6 +758,11 @@ async function stop() {
         v-else
         ref="childComposer"
         :parent-title="ancestry?.ancestors.at(-1)?.title"
+        :placeholder="
+          chatContactId && record
+            ? `给 ${agentSourceLabel(record.backend)} 发消息`
+            : undefined
+        "
         :running="live"
         :stopping="!!stopping || run?.phase === 'cancelling'"
         :can-stop="controlsAvailable"

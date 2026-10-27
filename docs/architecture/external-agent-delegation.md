@@ -227,7 +227,7 @@ Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / 
 
 Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留子智能体的错误文本（经秘密脱敏），不再是「Claude execution failed」，前面加上 FIX-16 的一句原因（JSON 错误读成状态、类型和原话；模型被拒为 `EXECUTOR_MODEL_UNSUPPORTED`）。任务详情按代码显示中文原因与下一步。
 
-委派可以带 `instructions`（最多 24 KiB，记在启动参数里，每次运行都追加在 Emperor 自己的说明之后：Claude Code 的 `systemPrompt.append`、Codex 的 developer instructions），群聊用它放外部成员的岗位说明书和群章程（GRP-09）。`owner.source` 为 `group` 的委派由群调度等待结果，结束通知不唤醒成员会话。
+委派可以带 `instructions`（最多 24 KiB，记在启动参数里，每次运行都追加在 Emperor 自己的说明之后：Claude Code 的 `systemPrompt.append`、Codex 的 developer instructions），群聊用它放外部成员的岗位说明书和群章程（GRP-09）。`owner.source` 为 `group` 的委派由群调度等待结果，结束通知不唤醒成员会话。`owner.source` 为 `contact` 的委派是和 Claude Code、Codex 的单聊（GRP-11）：用户发的消息就是同意，不再询问；结束通知同样不唤醒单聊会话；每条消息（第一条经 `contacts.chatSend`，之后的也包括对话页里 `delegations.send` 发的）各算一个任务（`taskScopeId: contact-chat:<会话>:<消息>`），续聊不累计「每个任务最多外部运行」；联系人删除后 `delegations.send` 报 `contact_deleted`。续聊的运行按发出它的那条消息计任务（`send` 带 `taskScopeId`，运行记录也记下它），不再沿用委派创建时的任务。
 
 0.3 起 Claude Code 每次运行不限制轮数（SET-01）：`limits.claudeMaxTurns` 没有设置时不传 SDK `maxTurns`。旧版本写下的值仍然生效，「设置 › 用量与费用 › 防失控」显示它并给出「轮数改为不限制」（删掉这个字段）。运行时长（`runTimeoutMs`，默认 30 分钟）、每个任务最多外部运行（`maxRunsPerTask`，1–32，默认 32）也在那一页设置。
 
