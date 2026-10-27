@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-27（对照 `4f569338`）<br>
-> 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
+> 最后核验：2026-10-27（对照 `5301bdd3`）<br>
+> 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/groups/`、`desktop/src/renderer/src/components/contacts/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
 
@@ -37,6 +37,16 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 - 当前 Build session 的历史。
 
 项目中的 `AGENTS.md` 等文件由你维护，Core 只读取，不会改写。全局私有项目记忆不在项目源码树中，Agent 可以通过 `memory_edit` 更新它。
+
+## Group：联系人与单聊
+
+Group 模式放联系人和群聊。按 ⌘3 或在侧栏左上角选 Group：
+
+- **群聊首页**：「今天找谁帮忙？」。在输入框里输入 @ 会列出联系人，选一个填入。@ 一位联系人后发送，会打开和它的单聊并把这条消息发过去；@ 两位及以上，会建一个临时群（被 @ 的人加上主持的 Emperor），群名取这条消息的第一句话，消息作为点名发进群里。@ 了不是联系人的名字时不会发送，先改一下名字。下面是联系人和最近的群。
+- **侧栏**：上面是「群聊」，下面是「联系人」，名字下面一行是人数和最近一条消息的时间，或者联系人的简介。「联系人」旁的 `+` 新建联系人。
+- **联系人档案**：点一位联系人打开。上面是头像、简介，「发消息」「编辑」，以及四个数字：参与的群、发言次数、你的评分（单聊里 👍 的比例）和岗位说明书的版本。标签页「记忆」里的每一条都可以改、可以删，也可以关掉它的个人记忆；「版本」里可以对比任意两个版本，退回到旧版本（退回会存成一个新版本，旧的都还在）。
+- **单聊**：「发消息」打开和这位联系人最近的单聊，没有就新建一个。单聊和普通对话一样能用计划模式、目标、工作台和斜杠命令，每段回答上方是它的头像和名字。指针移到回答下面会出现 👍 / 👎，点了可以写一句为什么，记进它的个人记忆（个人记忆关着时没有这两个按钮）。联系人被删除后，它的单聊只能查看。
+- 群聊页面还在做：现在点开一个群只列出群里的消息；在群里发消息、停止和群设置会在后续版本加入。Claude Code、Codex 的单聊也还没有开放，可以和别的联系人一起把它们 @ 进临时群。
 
 ## 对话视图
 
@@ -242,8 +252,8 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 | 后退 / 前进                 | ⌘[ / ⌘]      |
 | 听写（输入框内）            | ⇧⌘D          |
 
-- ⌘N 和侧栏的主按钮做同一件事：Chat 模式新建对话；Build 模式在当前项目新建会话；Group 模式暂时不新建（群聊和联系人在后续版本加入）。
-- ⌘1 / ⌘2 回到 Chat / Build 上次打开的会话，那个会话不在了就新建一个；⌘3 暂时只把侧栏切到 Group。
+- ⌘N 和侧栏的主按钮做同一件事：Chat 模式新建对话；Build 模式在当前项目新建会话；Group 模式打开群聊首页（「新建群聊」按钮还在做）。
+- ⌘1 / ⌘2 / ⌘3 回到 Chat / Build / Group 上次打开的会话（Group 是单聊或群），那个会话不在了就进那个模式的首页。
 - 有弹窗打开时快捷键不生效。
 - 工作台相关的四个面板和开关只在对话页生效，整页中不响应。
 - 听写快捷键只在光标位于输入框时生效，可在「设置 › 语音」修改，见[语音听写](#语音听写)。
@@ -330,8 +340,8 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 
 - 收起按钮与后退 / 前进（⌘[ / ⌘]）；
 - 模式切换：Emperor 标志和「Emperor Chat ▾」「Emperor Build ▾」或「Emperor Group ▾」，旁边是搜索和通知铃铛。点它（或按 Enter）打开菜单，选 Chat（对话：提问、写作、调研，不绑项目）、Build（构建：在项目里写代码、调试和发布）或 Group（群聊：联系人与群聊，多个 agent 协作），也可以直接按 ⌘1 / ⌘2 / ⌘3。菜单里每种模式旁会写「N 个在运行」或「等你回答」；别的模式有问题或审批等你时，标志右上角出现一个橙色小圆点。当前模式重启后保持；
-- 当前模式的新建按钮（⌘N）：Chat 是「新对话」；Build 是「新建项目会话」（在当前项目），右侧的 `+` 打开项目文件夹；Group 的「新建群聊」和 `+`（新建联系人）暂时不可用，指针移上去显示「即将推出」；
-- 当前模式的会话：Chat 是「置顶」和按日期的分组「今天」「昨天」「7 天内」「30 天内」「更早」（手动排序时是一个「对话」分组）；Build 是「置顶」和「项目」，按项目列出会话；Group 暂时只有一行说明。会话按现在有没有绑定项目归类：绑定了项目的在 Build，没绑定的在 Chat，所以对话中途绑定项目后会出现在 Build 的那个项目下。分组标题旁的 `+`、`…` 在指针移上去时出现；点分组标题（或旁边的箭头）收起、展开这一组，状态在重启后保留，切到收起分组里的会话时它自动展开；
+- 当前模式的新建按钮（⌘N）：Chat 是「新对话」；Build 是「新建项目会话」（在当前项目），右侧的 `+` 打开项目文件夹；Group 的「新建群聊」暂时不可用，指针移上去显示「即将推出」，右侧的 `+` 新建联系人；
+- 当前模式的会话：Chat 是「置顶」和按日期的分组「今天」「昨天」「7 天内」「30 天内」「更早」（手动排序时是一个「对话」分组）；Build 是「置顶」和「项目」，按项目列出会话；Group 是「群聊」和「联系人」（见 [Group：联系人与单聊](#group联系人与单聊)）。会话按现在有没有绑定项目归类：绑定了项目的在 Build，没绑定的在 Chat，所以对话中途绑定项目后会出现在 Build 的那个项目下。分组标题旁的 `+`、`…` 在指针移上去时出现；点分组标题（或旁边的箭头）收起、展开这一组，状态在重启后保留，切到收起分组里的会话时它自动展开；
 - 底部的「设置」，整页入口图标 Pull Request（只在 Build 模式、且 GitHub 插件启用时出现）、定时任务、能力，以及明暗切换。
 
 从通知、搜索或链接打开另一种模式的会话时，侧栏自动切到那种模式；打开定时任务、能力这些整页不改变模式。
