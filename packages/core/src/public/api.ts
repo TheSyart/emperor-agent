@@ -48,6 +48,21 @@ export type {
   RejectedModelEntryPayload,
 } from '../api/services/model-service'
 export type { ModelTestRecord } from '../api/services/model-test-log'
+// GRP-02: contacts as the renderer sees them (CoreOperationResult<'contacts.*'>).
+export type {
+  Capabilities as ContactCapabilities,
+  Contact,
+  ContactAvatar,
+  ContactPermission,
+  ContactTemplate,
+  ContactVersionEntry,
+  ContactsChange,
+  ContactsListing,
+  Domain as ContactDomain,
+  KnowledgeRef as ContactKnowledgeRef,
+  RoleCard as ContactRoleCard,
+  ToolPreset as ContactToolPreset,
+} from '../contacts/types'
 export type {
   ModelEntryDetected,
   ModelEntryLimits,

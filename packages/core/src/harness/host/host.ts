@@ -15,7 +15,6 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -99,6 +98,7 @@ import { createMemoryTool, memoryMiddleware } from '../memory/memory'
 import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
+import { readPersonaText } from '../prompt/persona'
 import { SessionProjector, type UiEvent } from '../projection/projector'
 import { createAskUserQuestionTool, UserQuestionService } from '../questions'
 import { UserQuestionDismissed } from '../questions/service'
@@ -1086,6 +1086,14 @@ export class HarnessHost {
     return this.tools.get(name)?.category
   }
 
+  /**
+   * Every tool name the kernel registered, shown or not (a switched-off
+   * network tool stays registered); contacts may allow or deny only these.
+   */
+  registeredToolNames(): string[] {
+    return this.tools.names()
+  }
+
   /** How many tools the kernel registered (health check). */
   toolCount(): number {
     return this.tools.schemas().length
@@ -1365,9 +1373,7 @@ export class HarnessHost {
   }
 
   private personaText(): string {
-    const path = join(this.kept.templatesDir, 'agent', 'persona.md')
-    if (existsSync(path)) return readFileSync(path, 'utf8').trim()
-    return 'You are Emperor Agent, a coding agent. The runtime context names the model you run on and your working directory.'
+    return readPersonaText(this.kept.templatesDir)
   }
 
   /** The route an agent's next request goes to; no agent: the active route. */

@@ -44,6 +44,24 @@ extraResources:
       - agent/persona.md
       - init/MEMORY.md
       - init/USER.md
+      - contacts/architect.md
+      - contacts/asset-designer.md
+      - contacts/code-reviewer.md
+      - contacts/copywriter.md
+      - contacts/data-analyst.md
+      - contacts/editor.md
+      - contacts/frontend-engineer.md
+      - contacts/moderator.md
+      - contacts/product-manager.md
+      - contacts/red-team.md
+      - contacts/release-engineer.md
+      - contacts/researcher.md
+      - contacts/security-auditor.md
+      - contacts/test-engineer.md
+      - contacts/translator.md
+      - contacts/ui-reviewer.md
+      - contacts/user-researcher.md
+      - contacts/writer.md
   - from: ../skills
     to: runtime-defaults/skills
   - from: ../packages/core/bundled-plugins
