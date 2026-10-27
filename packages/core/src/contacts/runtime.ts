@@ -57,7 +57,15 @@ declare module '../session-log/types' {
 
 // ── tools ─────────────────────────────────────────────────────────────
 
-const READ_ONLY_TOOLS = ['read', 'glob', 'grep', 'todo_write', 'skill']
+// Every preset may ask the user a structured question (D29).
+const READ_ONLY_TOOLS = [
+  'read',
+  'glob',
+  'grep',
+  'todo_write',
+  'skill',
+  'ask_user_question',
+]
 const RESEARCH_TOOLS = [...READ_ONLY_TOOLS, 'web_search', 'web_fetch']
 const WRITER_TOOLS = [...RESEARCH_TOOLS, 'write', 'edit']
 /** bash, with the job tools its background runs are read and stopped with. */
@@ -133,7 +141,13 @@ export function presetRank(preset: string): number {
   return rank < 0 ? 0 : rank
 }
 
-/** The lower of a contact's permission and the global preset (新会话的权限). */
+/** Where a contact's session tops out: workspace-write, whatever it inherits (D30). */
+const CONTACT_CEILING = presetRank('workspace-write')
+
+/**
+ * The lower of a contact's permission and the global preset (新会话的权限),
+ * never past workspace-write: full access stays with Emperor's own sessions.
+ */
 export function contactPermissionPreset(
   permission: ContactPermission,
   globalPreset: string,
@@ -141,7 +155,7 @@ export function contactPermissionPreset(
   const global = presetRank(globalPreset)
   const own =
     permission === 'inherit' ? global : permission === 'read_only' ? 0 : 1
-  return RANKED_PRESETS[Math.min(own, global)]!
+  return RANKED_PRESETS[Math.min(own, global, CONTACT_CEILING)]!
 }
 
 // ── knowledge ─────────────────────────────────────────────────────────

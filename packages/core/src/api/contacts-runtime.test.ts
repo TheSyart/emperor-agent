@@ -143,6 +143,7 @@ describe('tools (card tests 1, 2)', () => {
     for (const name of NEVER_PRESET_TOOLS) expect(registered).toContain(name)
     const table = toolPresetTable(registered)
     expect(table.read_only).toEqual([
+      'ask_user_question',
       'glob',
       'grep',
       'read',
@@ -191,6 +192,7 @@ describe('tools (card tests 1, 2)', () => {
       sessionId: contactSession(api, mixed.id),
     })
     expect(toolNames(adapter.requests.at(-1))).toEqual([
+      'ask_user_question',
       'bash',
       'glob',
       'grep',
@@ -239,9 +241,15 @@ describe('tools (card tests 1, 2)', () => {
     const child = adapter.requests[1]!
     expect(
       toolNames(child).every((name) =>
-        ['glob', 'grep', 'read', 'skill', 'subagent', 'todo_write'].includes(
-          name,
-        ),
+        [
+          'ask_user_question',
+          'glob',
+          'grep',
+          'read',
+          'skill',
+          'subagent',
+          'todo_write',
+        ].includes(name),
       ),
     ).toBe(true)
     expect(toolNames(child)).not.toContain('bash')
@@ -283,7 +291,7 @@ describe('permission (card test 3)', () => {
     )
   })
 
-  it('follows the global preset when the contact inherits it', async () => {
+  it('follows the global preset when the contact inherits it, never past workspace-write (D30)', async () => {
     const { api } = await setup()
     await api.sessions.setDefaults({ permission: 'danger-full-access' }, VIEW)
     const inherits = await contact(api, {
@@ -291,8 +299,14 @@ describe('permission (card test 3)', () => {
       capabilities: { permission: 'inherit' },
     })
     expect(api.control.get(contactSession(api, inherits.id)).preset).toBe(
-      'danger-full-access',
+      'workspace-write',
     )
+    expect(() =>
+      api.control.setPermissionMode(
+        'danger-full-access',
+        contactSession(api, inherits.id),
+      ),
+    ).toThrow(expect.objectContaining({ code: 'contact_permission' }))
   })
 })
 

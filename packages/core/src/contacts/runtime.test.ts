@@ -56,7 +56,15 @@ const REGISTRY = [
   'write',
 ]
 
-const READ_ONLY = ['glob', 'grep', 'read', 'skill', 'todo_write']
+// D29: every preset may ask the user a structured question.
+const READ_ONLY = [
+  'ask_user_question',
+  'glob',
+  'grep',
+  'read',
+  'skill',
+  'todo_write',
+]
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -68,6 +76,7 @@ describe('tool presets (card test 1)', () => {
       read_only: READ_ONLY,
       research: [...READ_ONLY, 'web_fetch', 'web_search'],
       writer: [
+        'ask_user_question',
         'edit',
         'glob',
         'grep',
@@ -79,6 +88,7 @@ describe('tool presets (card test 1)', () => {
         'write',
       ],
       engineer: [
+        'ask_user_question',
         'bash',
         'edit',
         'glob',
@@ -101,7 +111,13 @@ describe('tool presets (card test 1)', () => {
     const table = toolPresetTable(
       REGISTRY.filter((name) => name !== 'web_fetch' && name !== 'skill'),
     )
-    expect(table.read_only).toEqual(['glob', 'grep', 'read', 'todo_write'])
+    expect(table.read_only).toEqual([
+      'ask_user_question',
+      'glob',
+      'grep',
+      'read',
+      'todo_write',
+    ])
     expect(table.research).not.toContain('web_fetch')
   })
 
@@ -123,7 +139,15 @@ describe('allow and deny (card test 2)', () => {
         { preset: 'research', allow: ['bash'], deny: ['web_search', 'skill'] },
         REGISTRY,
       ),
-    ).toEqual(['bash', 'glob', 'grep', 'read', 'todo_write', 'web_fetch'])
+    ).toEqual([
+      'ask_user_question',
+      'bash',
+      'glob',
+      'grep',
+      'read',
+      'todo_write',
+      'web_fetch',
+    ])
   })
 
   it('takes custom as the allow list alone', () => {
@@ -147,7 +171,8 @@ describe('permission (card test 3)', () => {
   it.each([
     ['inherit', 'read-only', 'read-only'],
     ['inherit', 'workspace-write', 'workspace-write'],
-    ['inherit', 'danger-full-access', 'danger-full-access'],
+    // D30: a contact never goes past workspace-write, even when it inherits full access.
+    ['inherit', 'danger-full-access', 'workspace-write'],
     ['read_only', 'danger-full-access', 'read-only'],
     ['read_only', 'workspace-write', 'read-only'],
     ['workspace_write', 'read-only', 'read-only'],
