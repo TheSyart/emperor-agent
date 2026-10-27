@@ -9,7 +9,8 @@ import { installVisualCoreBridge } from './visualBridge'
 // a private message, a member speaking now, a task queued; the live bar
 // and 停止; the members column — and 群设置 (第 5 步). Baselines: the group
 // page and its settings, dark and light. Screenshots: 发给 ▾, a member's
-// question as chat (D29), 新建群聊, 设置 › 群聊 and a member's work
+// question as chat (D29) and the line the group log keeps once it is
+// answered (GRP-12), 新建群聊, 设置 › 群聊 and a member's work
 // (「过程 ›」). The contacts, the group and its messages are answered here,
 // over the shared bridge.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'group')
@@ -336,7 +337,36 @@ async function install(page: Page) {
             turn,
           }
         case 'groups.history':
-          return { messages, more: false }
+          // GRP-12: Core keeps the user's answer in the group log.
+          return {
+            messages: answered
+              ? [
+                  ...messages,
+                  message(
+                    'ga_1',
+                    'system',
+                    '你回答了 研究员 的提问：防打转',
+                    now - 5_000,
+                    {
+                      kind: 'system',
+                      audience: { kind: 'private', to: 'user' },
+                      private: true,
+                      note: {
+                        id: 'ga_1',
+                        turnId: 't1',
+                        contactId: 'ct-researcher001',
+                        outcome: 'answered',
+                        subject: 'question',
+                        asked: question.questions[0]!.question,
+                        reply: '防打转',
+                        at: now - 5_000,
+                      },
+                    },
+                  ),
+                ]
+              : messages,
+            more: false,
+          }
         case 'groups.files.list':
           return {
             files: [
@@ -451,7 +481,11 @@ for (const theme of ['dark', 'light'] as const) {
     ).toHaveText('等你回答')
     await shot(page, `ask-${theme}`)
     await ask.getByRole('button', { name: '防打转' }).click()
-    await expect(ask.locator('[data-your-reply]')).toContainText('防打转')
+    // GRP-12: the question leaves; the line the group log keeps shows.
+    await expect(page.locator('[data-group-ask]')).toHaveCount(0)
+    await expect(page.locator('[data-kind="note"]')).toHaveText(
+      '你回答了 研究员 的提问：防打转',
+    )
     await shot(page, `ask-answered-${theme}`)
   })
 }

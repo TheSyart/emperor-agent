@@ -87,3 +87,29 @@ export interface GroupMember {
    */
   speak?: 'mentioned' | 'relevant' | 'always'
 }
+
+/** What the user did with a member's question or approval (GRP-12). */
+export type GroupAnswerOutcome = 'answered' | 'approved' | 'denied' | 'skipped'
+
+/** What the member asked: a question, an approval, or a plan to review. */
+export type GroupAnswerSubject = 'question' | 'approval' | 'plan'
+
+/**
+ * The user's answer to a member who asked during its speech, kept in the
+ * group log for the user only (GRP-12): 「你回答了 架构师 的提问：…」.
+ */
+export interface GroupAnswerNote {
+  id: string
+  /** The group's latest turn when it was given (null before any). */
+  turnId: string | null
+  /** The member who asked. */
+  contactId: ContactId
+  outcome: GroupAnswerOutcome
+  subject: GroupAnswerSubject
+  /** What was asked: the question, what the approval is for, the plan's title. */
+  asked: string
+  /** The user's reply: the options and own words; an approval's button. */
+  reply: string
+  /** Epoch milliseconds. */
+  at: number
+}

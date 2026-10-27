@@ -7,7 +7,8 @@
  *   independent ask without @ goes to everyone but the moderator and those
  *   who speak only when @-mentioned (Claude Code and Codex by default).
  * - The message flow: each message's kind, the answers of one independent
- *   ask gathered into one card that waits until they are revealed.
+ *   ask gathered into one card that waits until they are revealed, and
+ *   the user's answers to members the group log keeps (GRP-12).
  * - The live bar and the members' status lines; the spend is shown, never
  *   capped (D6).
  */
@@ -33,12 +34,12 @@ export type MemberLiveStatus = 'idle' | 'thinking' | 'queued' | 'error'
 
 /**
  * A member's question or approval waiting in its own session, shown in
- * the room as its message (D29); `reply` once the user answered here.
+ * the room as its message (D29). Once answered it leaves the room; the
+ * group log keeps what the user answered (GRP-12).
  */
 export interface GroupAsk {
   contactId: string
   interaction: ControlInteraction
-  reply?: string
 }
 
 export interface SendWayOption {
@@ -219,6 +220,8 @@ export type RowKind =
   | 'summary'
   | 'system'
   | 'pass'
+  /** The user's answer to a member, for the user only (GRP-12). */
+  | 'note'
 
 export interface IndependentBatch {
   batchId: string
@@ -238,6 +241,7 @@ export type TimelineRow =
   | { key: string; kind: 'independent'; batch: IndependentBatch }
 
 function kindOf(message: GroupHistoryMessage): Exclude<RowKind, 'independent'> {
+  if (message.note) return 'note'
   if (message.from === 'system' || message.kind === 'system') return 'system'
   if (message.kind === 'task') return 'task'
   if (message.from === 'user') return 'user'

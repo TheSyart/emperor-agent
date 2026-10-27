@@ -10,10 +10,11 @@
  *   wants to do and the decisions as buttons;
  * - a plan or a computer-use grant: a pointer to the member's own work,
  *   where its full card is.
- * Answered here, it keeps the user's reply under it, chat-like.
+ * Once answered it leaves the room; the group log keeps a line of what the
+ * user answered (GRP-12).
  *
  * Props: ask; name; avatar.
- * Emits: answer({ answers, reply }), cancel, process.
+ * Emits: answer({ answers }), cancel, process.
  */
 import { computed, reactive, ref } from 'vue'
 import type { ControlQuestion } from '../../types'
@@ -45,13 +46,12 @@ const props = defineProps<{
   avatar: ContactAvatarProps | { kind: 'initials'; label: string }
 }>()
 const emit = defineEmits<{
-  answer: [payload: { answers: Record<string, unknown>; reply: string }]
+  answer: [payload: { answers: Record<string, unknown> }]
   cancel: []
   process: []
 }>()
 
 const interaction = computed(() => props.ask.interaction)
-const answered = computed(() => props.ask.reply !== undefined)
 const kind = computed<'approval' | 'question' | 'elsewhere'>(() => {
   const value = interaction.value
   if (isPermissionInteraction(value)) return 'approval'
@@ -75,10 +75,7 @@ const summary = computed(
 )
 
 function decide(action: ApprovalAction): void {
-  emit('answer', {
-    answers: approvalAnswer(interaction.value, action),
-    reply: action.label,
-  })
+  emit('answer', { answers: approvalAnswer(interaction.value, action) })
 }
 
 // ── question ────────────────────────────────────────────────────────────
@@ -96,23 +93,12 @@ function draft(question: ControlQuestion) {
   return ensureAskDraft(drafts, question.id)
 }
 
-function replyText(
-  answers: Record<string, { choice: string; freeform: string }>,
-): string {
-  return Object.values(answers)
-    .map((answer) =>
-      [answer.choice, answer.freeform].filter(Boolean).join(' · '),
-    )
-    .filter(Boolean)
-    .join('；')
-}
-
 function sendAnswers(): void {
   for (const question of questions.value)
     draft(question).freeform = freeform.value[question.id] ?? ''
   const answers = toPlainAskAnswers(questions.value, drafts)
   if (Object.keys(answers).length < questions.value.length) return
-  emit('answer', { answers, reply: replyText(answers) })
+  emit('answer', { answers })
 }
 
 function tap(
@@ -146,7 +132,6 @@ function setFreeform(id: string, value: string): void {
     class="ask"
     :data-group-ask="kind === 'question' ? '' : undefined"
     :data-group-approval="kind === 'approval' ? '' : undefined"
-    :data-answered="answered || undefined"
   >
     <Avatar v-bind="avatar" :size="28" />
     <div class="main">
@@ -164,7 +149,7 @@ function setFreeform(id: string, value: string): void {
       <template v-if="kind === 'approval'">
         <p class="text">{{ presentation.headline }}</p>
         <pre v-if="summary" class="summary">{{ summary }}</pre>
-        <div v-if="!answered" class="choices">
+        <div class="choices">
           <Button
             v-for="action in actions"
             :key="action.key"
@@ -198,12 +183,7 @@ function setFreeform(id: string, value: string): void {
             question.header
           }}</span>
           <p class="text">{{ question.question }}</p>
-          <div
-            v-if="!answered"
-            class="replies"
-            role="group"
-            :aria-label="question.question"
-          >
+          <div class="replies" role="group" :aria-label="question.question">
             <Chip
               v-for="option in question.options"
               :key="option.id || option.label"
@@ -216,7 +196,7 @@ function setFreeform(id: string, value: string): void {
               >{{ option.label }}</Chip
             >
           </div>
-          <div v-if="!answered" class="own">
+          <div class="own">
             <TextField
               size="sm"
               :model-value="freeform[question.id] ?? ''"
@@ -227,7 +207,7 @@ function setFreeform(id: string, value: string): void {
             />
           </div>
         </div>
-        <div v-if="!answered" class="choices">
+        <div class="choices">
           <Button
             size="sm"
             variant="secondary"
@@ -239,10 +219,6 @@ function setFreeform(id: string, value: string): void {
           <LinkButton class="skip" @click="emit('cancel')">不回答</LinkButton>
         </div>
       </template>
-
-      <div v-if="answered" class="your-reply" data-your-reply>
-        <span class="you">你</span>{{ ask.reply }}
-      </div>
     </div>
   </div>
 </template>
@@ -280,11 +256,6 @@ function setFreeform(id: string, value: string): void {
   color: rgb(var(--attention));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxs);
-}
-
-.ask[data-answered] .tag {
-  background: rgb(var(--surface-raised));
-  color: rgb(var(--text-3));
 }
 
 .question {
@@ -349,23 +320,6 @@ function setFreeform(id: string, value: string): void {
 
 .skip {
   margin-left: var(--space-1);
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-}
-
-.your-reply {
-  justify-self: end;
-  max-width: 80%;
-  padding: var(--space-2) var(--space-3-5);
-  border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
-  background: rgb(var(--bubble-user));
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  white-space: pre-wrap;
-}
-
-.you {
-  margin-right: var(--space-2);
   color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }

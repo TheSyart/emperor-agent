@@ -191,8 +191,10 @@ describe('the group page’s live view (GRP-08)', () => {
     const history = await invokeCoreOperation(fixture.api, 'groups.history', [
       { id: group.id },
     ])
+    // GRP-12: the answer stays in the group log, for the user only.
     expect(history.messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看'],
+      ['system', '你回答了 审稿人 的提问：登录'],
       [rev, '好，先看登录。'],
     ])
   })

@@ -14,6 +14,8 @@
  * - result: what was handed back, with the result card of an external run;
  * - summary: the moderator's conclusion on a light gold ground;
  * - system: one centred line (a 「设置 › …」 in it becomes a button);
+ * - note: what the user answered a member, as the group log keeps it for
+ *   the user only (GRP-12) — one centred line, the question on hover;
  * - pass: one faint line, 「架构师 没有补充」.
  * Members' tool steps never show here. A message past 12 lines folds. A
  * member's question or approval waiting in its own session shows as its
@@ -64,7 +66,6 @@ const emit = defineEmits<{
       contactId: string
       interaction: ControlInteraction
       answers: Record<string, unknown>
-      reply: string
     },
   ]
   cancelAsk: [payload: { contactId: string; interaction: ControlInteraction }]
@@ -143,6 +144,12 @@ function settingsLink(
   const label = match?.[1]?.trim()
   const section = SETTINGS_SECTIONS.find((item) => item.label === label)
   return section ? { section: section.key, label: section.label } : null
+}
+
+/** The question an answer answered, on hover (an approval's is in the line). */
+function noteTitle(message: GroupHistoryMessage): string | undefined {
+  const note = message.note
+  return note?.outcome === 'answered' && note.asked ? note.asked : undefined
 }
 
 const WARN =
@@ -272,6 +279,17 @@ function progress(batch: IndependentBatch): string {
             <Avatar v-bind="person(id).avatar" :size="20" />
           </span>
         </div>
+      </div>
+
+      <!-- What the user answered a member (GRP-12). -->
+      <div
+        v-else-if="item.row.kind === 'note'"
+        class="sys"
+        :title="noteTitle(item.row.message)"
+        data-group-row
+        data-kind="note"
+      >
+        <span>{{ item.row.message.text }}</span>
       </div>
 
       <!-- The system. -->

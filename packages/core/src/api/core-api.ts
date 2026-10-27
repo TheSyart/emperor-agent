@@ -127,6 +127,7 @@ import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { ContactStore } from '../contacts/store'
+import { groupAnswer, type InteractionSettle } from '../groups/answers'
 import type { GroupEventMap } from '../groups/events'
 import type { GroupScheduler } from '../groups/scheduler'
 import { installGroupRuntime } from './services/group-runtime'
@@ -2762,19 +2763,28 @@ export class CoreApi {
       answers: Dict,
       _opts: Dict = {},
     ): Promise<Dict> =>
-      this.settleInteraction(id, () =>
-        this.host.answerInteraction(id, answers as UiAnswers),
+      this.settleInteraction(
+        id,
+        () => this.host.answerInteraction(id, answers as UiAnswers),
+        { action: 'answer', answers },
       ),
     commentPlan: async (
       id: string,
       comment: string,
       _opts: Dict = {},
     ): Promise<Dict> =>
-      this.settleInteraction(id, () => this.host.commentPlan(id, comment)),
+      this.settleInteraction(id, () => this.host.commentPlan(id, comment), {
+        action: 'commentPlan',
+        comment,
+      }),
     approvePlan: async (id: string, _opts: Dict = {}): Promise<Dict> =>
-      this.settleInteraction(id, () => this.host.approvePlan(id)),
+      this.settleInteraction(id, () => this.host.approvePlan(id), {
+        action: 'approvePlan',
+      }),
     cancelInteraction: async (id: string): Promise<Dict> =>
-      this.settleInteraction(id, () => this.host.cancelInteraction(id)),
+      this.settleInteraction(id, () => this.host.cancelInteraction(id), {
+        action: 'cancel',
+      }),
   }
 
   /** Goals of a named session (KRN-01: never the one in view by default). */
@@ -4782,12 +4792,18 @@ export class CoreApi {
   }
 
   /** Resolve a pending interaction; the blocked turn continues on its own. */
-  private settleInteraction(id: string, action: () => void): Dict {
+  private settleInteraction(
+    id: string,
+    action: () => void,
+    settle: InteractionSettle,
+  ): Dict {
     const sessionId = this.host.pending.sessionOf(id) ?? null
     if (sessionId === null)
       throw new CoreMutationGuardError(409, `interaction ${id} is not pending`)
     const wasInterview = this.onboardingService.isInterviewInteraction(id)
+    const card = this.host.interactionCard(sessionId, id)
     action()
+    this.keepGroupAnswer(sessionId, id, card, settle)
     const result: Dict = {
       interactionId: id,
       sessionId,
@@ -4796,6 +4812,40 @@ export class CoreApi {
     if (wasInterview)
       result.profileOnboarding = this.onboardingService.payload()
     return result
+  }
+
+  /**
+   * The user answered a group member who asked during its speech (GRP-12):
+   * the group log keeps a line for the user only. Only the user's own
+   * answers come here (control.*); a stop cancels without one. Keeping it
+   * never fails the answer.
+   */
+  private keepGroupAnswer(
+    sessionId: string,
+    id: string,
+    card: Dict | null,
+    settle: InteractionSettle,
+  ): void {
+    const entry = this.host.kept.sessionStore.get(sessionId)
+    if (
+      entry?.surface !== 'group_member' ||
+      !entry.group_id ||
+      !entry.contact_id
+    )
+      return
+    try {
+      const draft = groupAnswer(id, card, settle)
+      if (draft)
+        this.groupService.recordAnswer(entry.group_id, {
+          contactId: entry.contact_id,
+          ...draft,
+        })
+    } catch (error) {
+      logger.warn('group answer not kept', {
+        groupId: entry.group_id,
+        error: String(error),
+      })
+    }
   }
 
   /** A chat with Claude Code or Codex never takes an ordinary turn (GRP-11). */

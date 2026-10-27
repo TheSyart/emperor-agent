@@ -11,6 +11,7 @@
  */
 import { EmperorError } from '../errors'
 import type { SessionSurface } from '../sessions/app-mode'
+import { answerText, clipLine, type GroupAnswerDraft } from './answers'
 import { buildUserMessage, type SendWay } from './envelope'
 import {
   foldGroupEvents,
@@ -21,6 +22,7 @@ import {
 import { planFor, type QueueItem } from './plan'
 import type {
   ContactId,
+  GroupAnswerNote,
   GroupMember,
   GroupMessage,
   GroupSettings,
@@ -150,6 +152,17 @@ export interface GroupHistoryMessage extends GroupMessage {
   private: boolean
   /** An independent answer not revealed to the other answerers yet. */
   hidden: boolean
+  /**
+   * The user's answer to a member (GRP-12): a system line for the user
+   * only (`private`, addressed to the user), never a member's message.
+   */
+  note?: GroupAnswerNote
+}
+
+/** The user's answer to a member who asked (GRP-12). */
+export interface GroupAnswerInput extends Omit<GroupAnswerDraft, 'reply'> {
+  contactId: ContactId
+  reply?: string
 }
 
 export interface GroupSendInput {
@@ -379,16 +392,56 @@ export class GroupService {
           )
     const limit = Math.max(1, Math.min(opts.limit ?? 200, 500))
     const start = Math.max(0, end - limit)
-    return {
-      messages: state.messages.slice(start, end).map((m) => ({
+    // The user's answers go where they were given: an answer given after
+    // n messages follows the n-th, on the page that holds it.
+    const answers = state.answers.filter(
+      ({ after }) => (start === 0 ? after >= 0 : after > start) && after <= end,
+    )
+    // The member as it is called now, one that left or was deleted too.
+    const name = (id: ContactId) =>
+      this.deps.contact(id)?.name ?? '已删除的联系人'
+    const messages: GroupHistoryMessage[] = []
+    let next = 0
+    const answersUpTo = (count: number) => {
+      while (next < answers.length && answers[next]!.after <= count) {
+        const { note } = answers[next++]!
+        messages.push(answerMessage(note, name(note.contactId)))
+      }
+    }
+    state.messages.slice(start, end).forEach((m, i) => {
+      answersUpTo(start + i)
+      messages.push({
         ...m,
         // A task message shows where its task is now (GRP-08).
         ...(m.task ? { task: state.tasks.get(m.task.taskId) ?? m.task } : {}),
         private: m.audience.kind === 'private',
         hidden: m.batchId !== undefined && !state.revealed.has(m.batchId),
-      })),
-      more: start > 0,
+      })
+    })
+    answersUpTo(end)
+    return { messages, more: start > 0 }
+  }
+
+  /**
+   * Keep the user's answer to a member who asked during its speech, for
+   * the user only (GRP-12): a `group/answer` event, never a message, so no
+   * member is delivered it and no count or digest sees it.
+   */
+  recordAnswer(groupId: string, input: GroupAnswerInput): GroupAnswerNote {
+    const state = this.state(groupId)
+    const note: GroupAnswerNote = {
+      id: this.newId('ga_'),
+      turnId: state.turn?.turnId ?? null,
+      contactId: input.contactId,
+      outcome: input.outcome,
+      subject: input.subject,
+      asked: clipLine(input.asked),
+      reply: clipLine(input.reply ?? ''),
+      at: this.now(),
     }
+    this.deps.log(groupId).append('group/answer', note)
+    this.changed('message', groupId)
+    return note
   }
 
   /** Write one event to a group's log (the scheduler's messages, turns, deliveries). */
@@ -514,6 +567,28 @@ function turnView(state: GroupState): GroupTurnView | null {
     startedAt: first ? first.at : null,
     speakers: [],
     queued: [],
+  }
+}
+
+/** The user's answer as a line in the user's history (GRP-12). */
+function answerMessage(
+  note: GroupAnswerNote,
+  name: string,
+): GroupHistoryMessage {
+  return {
+    id: note.id,
+    turnId: note.turnId ?? '',
+    from: 'system',
+    // Addressed to the user alone: no member has it in context.
+    audience: { kind: 'private', to: 'user' },
+    ask: [],
+    answerMode: 'relay',
+    kind: 'system',
+    text: answerText(note, name),
+    at: note.at,
+    private: true,
+    hidden: false,
+    note: { ...note },
   }
 }
 

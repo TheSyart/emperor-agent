@@ -3,6 +3,9 @@
 // 'group_member'). The store creates both, folds the log and turns the
 // user's five ways of sending into envelopes plus the speaking plan.
 import { describe, expect, it } from 'vitest'
+import { pendingDelivery } from './delivery'
+import { digestSource } from './digest'
+import { foldGroupEvents } from './events'
 import {
   GroupError,
   GroupService,
@@ -482,5 +485,150 @@ describe('GroupService for the group page (GRP-08)', () => {
       { reason: 'message', groupId: view.id },
       { reason: 'message', groupId: view.id },
     ])
+  })
+})
+
+describe('the user’s answers in the group log (GRP-12)', () => {
+  it('keeps an answer where it was given, for the user only', () => {
+    const { service, view, logs, changes } = group()
+    const asked = service.send(view.id, {
+      way: 'mention',
+      ask: ['ct-arch'],
+      text: '@架构师 看看',
+    })
+    service.append(view.id, 'group/turn', {
+      turnId: asked.message.turnId,
+      state: 'started',
+      spend: { usd: 0, tokens: 0 },
+    })
+    changes.length = 0
+    const note = service.recordAnswer(view.id, {
+      contactId: 'ct-arch',
+      outcome: 'answered',
+      subject: 'question',
+      asked: '先看哪一部分？',
+      reply: '登录',
+    })
+    expect(note).toMatchObject({
+      contactId: 'ct-arch',
+      turnId: asked.message.turnId,
+      outcome: 'answered',
+      reply: '登录',
+    })
+    expect(changes).toEqual([{ reason: 'message', groupId: view.id }])
+    expect(logs.get(view.id)!.at(-1)).toEqual({
+      type: 'group/answer',
+      data: note,
+    })
+    service.send(view.id, { way: 'broadcast', text: '好的，继续' })
+    const { messages } = service.history(view.id)
+    expect(messages.map((m) => [m.from, m.kind, m.text])).toEqual([
+      ['user', 'say', '@架构师 看看'],
+      ['system', 'system', '你回答了 架构师 的提问：登录'],
+      ['user', 'say', '好的，继续'],
+    ])
+    const shown = messages[1]!
+    expect(shown).toMatchObject({
+      id: note.id,
+      turnId: asked.message.turnId,
+      private: true,
+      hidden: false,
+      note: { contactId: 'ct-arch', asked: '先看哪一部分？' },
+    })
+    // It is not a message: no member is ever delivered it, the digest and
+    // the counts never see it.
+    const state = service.state(view.id)
+    expect(state.messages).toHaveLength(2)
+    for (const member of ['ct-emperor', 'ct-arch', 'ct-rev'])
+      expect(pendingDelivery(state, member).map((m) => m.text)).not.toContain(
+        '你回答了 架构师 的提问：登录',
+      )
+    expect(
+      digestSource(state, () => 1, 0)?.messages.map((m) => m.text),
+    ).toEqual(['@架构师 看看', '好的，继续'])
+    expect(service.get(view.id).messageCount).toBe(2)
+  })
+
+  it('names the member as it is called now, or as a deleted contact', () => {
+    const contacts = CONTACTS.map((c) => ({ ...c }))
+    const f = fixture(contacts)
+    const { service, view } = group(f)
+    service.recordAnswer(view.id, {
+      contactId: 'ct-rev',
+      outcome: 'denied',
+      subject: 'approval',
+      asked: 'npm test',
+    })
+    contacts.find((c) => c.id === 'ct-rev')!.name = '代码审稿人'
+    expect(service.history(view.id).messages[0]!.text).toBe(
+      '你拒绝了 代码审稿人 的请求：npm test',
+    )
+    contacts.splice(
+      contacts.findIndex((c) => c.id === 'ct-rev'),
+      1,
+    )
+    expect(service.history(view.id).messages[0]!.text).toBe(
+      '你拒绝了 已删除的联系人 的请求：npm test',
+    )
+  })
+
+  it('pages with the messages around it', () => {
+    const { service, view } = group()
+    service.send(view.id, { way: 'broadcast', text: '一' })
+    service.recordAnswer(view.id, {
+      contactId: 'ct-arch',
+      outcome: 'skipped',
+      subject: 'question',
+      asked: '甲',
+    })
+    service.send(view.id, { way: 'broadcast', text: '二' })
+    service.recordAnswer(view.id, {
+      contactId: 'ct-arch',
+      outcome: 'approved',
+      subject: 'approval',
+      asked: '乙',
+    })
+    service.send(view.id, { way: 'broadcast', text: '三' })
+    const last = service.history(view.id, { limit: 1 })
+    expect(last.messages.map((m) => m.text)).toEqual(['三'])
+    const middle = service.history(view.id, {
+      limit: 1,
+      before: last.messages[0]!.id,
+    })
+    expect(middle.messages.map((m) => m.text)).toEqual([
+      '二',
+      '你批准了 架构师 的请求：乙',
+    ])
+    const first = service.history(view.id, {
+      limit: 5,
+      before: middle.messages[0]!.id,
+    })
+    expect(first.messages.map((m) => m.text)).toEqual([
+      '一',
+      '你没有回答 架构师 的提问：甲',
+    ])
+    expect(first.more).toBe(false)
+  })
+
+  it('reads a log written before answers were kept, and skips what it does not know', () => {
+    const { service, view, logs } = group()
+    service.send(view.id, { way: 'broadcast', text: '旧消息' })
+    logs.get(view.id)!.push({ type: 'group/from-a-later-version', data: {} })
+    expect(service.history(view.id).messages.map((m) => m.text)).toEqual([
+      '旧消息',
+    ])
+    expect(foldGroupEvents(logs.get(view.id)!).answers).toEqual([])
+  })
+
+  it('refuses an answer for an unknown group', () => {
+    const { service } = group()
+    expect(() =>
+      service.recordAnswer('grp-none', {
+        contactId: 'ct-arch',
+        outcome: 'answered',
+        subject: 'question',
+        asked: '',
+      }),
+    ).toThrow(GroupError)
   })
 })

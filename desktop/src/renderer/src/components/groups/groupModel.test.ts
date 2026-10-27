@@ -294,6 +294,32 @@ describe('the message flow: eight kinds', () => {
     })
   })
 
+  it('keeps the user’s answers to members as lines of their own (GRP-12)', () => {
+    const note = message('ga_1', 'system', '你回答了 审稿人 的提问：登录', {
+      kind: 'system',
+      audience: { kind: 'private', to: 'user' },
+      private: true,
+      note: {
+        id: 'ga_1',
+        turnId: 't1',
+        contactId: 'ct-rev',
+        outcome: 'answered',
+        subject: 'question',
+        asked: '先看哪一部分？',
+        reply: '登录',
+        at: 1_750_000_000_100,
+      },
+    })
+    const rows = timelineRows([
+      message('m1', 'user', '@审稿人 看看'),
+      note,
+      message('m2', 'ct-rev', '好，先看登录。'),
+    ])
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'note', 'say'])
+    // Not a speech.
+    expect(speechCount([note], 't1')).toBe(0)
+  })
+
   it('keeps an independent card waiting until its answers are revealed', () => {
     const rows = timelineRows([
       message('m1', 'user', '各自说说', {

@@ -670,6 +670,17 @@ export class SessionProjector {
     }
   }
 
+  /** An interaction this session showed, by its wire id (`ask_…`, `approval_…`). */
+  interaction(id: string): InteractionPayload | null {
+    for (const interaction of [
+      ...this.approvals.values(),
+      ...this.questions.values(),
+      ...this.grants.values(),
+    ])
+      if (interaction.id === id) return interaction
+    return null
+  }
+
   /** Latest interaction still waiting for an answer (approval/question/plan). */
   pendingInteraction(): InteractionPayload | null {
     let latest: InteractionPayload | null = null
