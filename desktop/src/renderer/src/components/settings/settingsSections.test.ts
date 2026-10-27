@@ -19,12 +19,13 @@ describe('settings sections', () => {
     expect(keys[0]).toBe(DEFAULT_SETTINGS_SECTION)
   })
 
-  it('lists nine sections in four groups (UI-S07)', () => {
+  it('lists ten sections in four groups (UI-S07; 群聊 joined 智能 in GRP-08)', () => {
     const keys: string[] = SETTINGS_SECTIONS.map((section) => section.key)
     expect(keys).toEqual([
       'general',
       'model',
       'executors',
+      'groups',
       'memory',
       'computer',
       'browser',
@@ -36,7 +37,7 @@ describe('settings sections', () => {
       SETTINGS_NAV_GROUPS.map((group) => [group.label, group.sections]),
     ).toEqual([
       [null, ['general']],
-      ['智能', ['model', 'executors', 'memory']],
+      ['智能', ['model', 'executors', 'groups', 'memory']],
       ['操控', ['computer', 'browser', 'voice']],
       ['系统', ['tokens', 'advanced']],
     ])

@@ -71,6 +71,7 @@ const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   general: defineAsyncComponent(() => import('./GeneralSection.vue')),
   model: defineAsyncComponent(() => import('./ModelSection.vue')),
   executors: defineAsyncComponent(() => import('./ExecutorsSection.vue')),
+  groups: defineAsyncComponent(() => import('./GroupsSection.vue')),
   memory: defineAsyncComponent(() => import('./MemorySection.vue')),
   computer: defineAsyncComponent(() => import('./ComputerUseSection.vue')),
   browser: defineAsyncComponent(() => import('./BrowserSettingsSection.vue')),

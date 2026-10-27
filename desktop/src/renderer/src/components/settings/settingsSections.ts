@@ -10,7 +10,8 @@
  * `settingsPageRedirect`) sends such a link to its page, and the modal
  * itself never shows them.
  *
- * UI-S07: nine sections in four nav groups (SETTINGS_NAV_GROUPS). Hooks and
+ * UI-S07: nine sections in four nav groups (SETTINGS_NAV_GROUPS); 群聊
+ * joined 智能 in 0.3 (GRP-08), ten in all. Hooks and
  * 诊断 became sub pages of 高级 and 桌宠 a switch in 常规; their old keys
  * still open (settingsAlias, redirected by the same guard).
  */
@@ -18,6 +19,8 @@ export const SETTINGS_SECTIONS = [
   { key: 'general', label: '常规' },
   { key: 'model', label: '模型' },
   { key: 'executors', label: '子智能体' },
+  // GRP-08: what a new group starts with (D14), beside 子智能体.
+  { key: 'groups', label: '群聊' },
   { key: 'memory', label: '记忆' },
   { key: 'computer', label: '电脑操作' },
   { key: 'browser', label: '浏览器' },
@@ -48,14 +51,14 @@ export const DEFAULT_SETTINGS_SECTION: SettingsModalSection = 'general'
 
 /**
  * The nav (UI-S07): 常规 on its own, then 智能, 操控 and 系统 under their
- * labels — four groups, nine sections, in SETTINGS_SECTIONS order.
+ * labels — four groups, ten sections, in SETTINGS_SECTIONS order.
  */
 export const SETTINGS_NAV_GROUPS: readonly {
   label: string | null
   sections: readonly SettingsModalSection[]
 }[] = [
   { label: null, sections: ['general'] },
-  { label: '智能', sections: ['model', 'executors', 'memory'] },
+  { label: '智能', sections: ['model', 'executors', 'groups', 'memory'] },
   { label: '操控', sections: ['computer', 'browser', 'voice'] },
   { label: '系统', sections: ['tokens', 'advanced'] },
 ]
