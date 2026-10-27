@@ -625,7 +625,7 @@ const chatFeedback: ChatFeedback = {
     }
   },
 }
-// A group's own session opens on the group's page (GRP-08 fills it in).
+// A group's own session opens on the group's page (GRP-08).
 watch(
   () => groupPageOf(knownSession.value),
   (target) => {

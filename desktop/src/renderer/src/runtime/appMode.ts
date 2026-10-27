@@ -36,7 +36,7 @@ const SESSION_ROUTE_NAMES: readonly string[] = [
 /** The Group home: the contacts, the recent groups, @ to start (GRP-05). */
 export const GROUP_HOME_ROUTE = 'contacts'
 
-/** A group's page (GRP-05; GRP-08 fills it in): `/groups/:groupId`. */
+/** A group's page (GRP-05, GRP-08): `/groups/:groupId`. */
 export const GROUP_PAGE_ROUTE = 'group'
 /** A group's settings (GRP-08): the group's, like its page. */
 export const GROUP_SETTINGS_ROUTE = 'group-settings'
