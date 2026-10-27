@@ -109,8 +109,26 @@ export function createAppModeStore(): AppModeStore {
     )
   }
 
+  /**
+   * Follow the target when it changes (another session, or the open one's
+   * mode after a binding change), not on every re-run of `source`: a list
+   * update of the open session (its turn running) must not undo a switch
+   * made since — ⌘3 while that session stays on screen (MOD-02).
+   */
   function followRoute(source: () => RouteModeTarget): WatchStopHandle {
-    return watch(source, follow, { immediate: true })
+    return watch(
+      source,
+      (target, previous) => {
+        if (
+          previous &&
+          previous.mode === target.mode &&
+          previous.sessionId === target.sessionId
+        )
+          return
+        follow(target)
+      },
+      { immediate: true },
+    )
   }
 
   return {

@@ -233,6 +233,28 @@ describe('route invariant', () => {
     expect(store.mode.value).toBe('chat')
     stop()
   })
+
+  it('MOD-02 · a list update of the open session never undoes a switch made since', async () => {
+    const win = windowFixture([chat, build])
+    win.routeSessionId.value = 'build-1'
+    const { store, stop } = await follow(win)
+    await nextTick()
+    expect(store.mode.value).toBe('build')
+    // The switcher picks Group; Group has no home route yet, so the Build
+    // session stays on screen.
+    store.setMode('group')
+    // Its turn runs: the list entry changes, the route does not.
+    win.sessions.value = win.sessions.value.map((s) =>
+      s.id === 'build-1' ? { ...s, updated_at: '2026-10-27T09:00:00+0800' } : s,
+    )
+    await nextTick()
+    expect(store.mode.value).toBe('group')
+    // Opening another session still leads.
+    win.routeSessionId.value = 'chat-1'
+    await nextTick()
+    expect(store.mode.value).toBe('chat')
+    stop()
+  })
 })
 
 describe('switching (⌘1 / ⌘2 / ⌘3)', () => {
