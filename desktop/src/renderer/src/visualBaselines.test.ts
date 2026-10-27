@@ -39,10 +39,12 @@ describe('pixel baselines (DS-06)', () => {
   // and the card for the rest, BUG-12 the tree's options). Still a curated
   // set: a new screen earns a baseline only where a pixel slip would go
   // unnoticed otherwise.
-  it('has at most 110 key images, one dark and one light of each screen', async () => {
+  // 0.3 (D31): three modes and group chat brought new screens; 130 at most,
+  // still merging similar shots first.
+  it('has at most 130 key images, one dark and one light of each screen', async () => {
     const files = (await load()).committedBaselines()
     expect(files.length).toBeGreaterThanOrEqual(50)
-    expect(files.length).toBeLessThanOrEqual(110)
+    expect(files.length).toBeLessThanOrEqual(130)
     for (const file of files) {
       expect(file).toMatch(/^[a-z0-9-]+\/[a-z0-9-]+-(dark|light)\.png$/)
       const twin = file.endsWith('-dark.png')
