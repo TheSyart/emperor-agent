@@ -55,6 +55,7 @@ export type {
   ContactAvatar,
   ContactPermission,
   ContactTemplate,
+  ContactStats,
   ContactVersionEntry,
   ContactsChange,
   ContactsListing,

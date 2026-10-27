@@ -79,6 +79,19 @@ export class ContactDeletedError extends EmperorError {
   }
 }
 
+/**
+ * A single chat with Claude Code or Codex (GRP-05): not yet — an external
+ * contact speaks in groups (GRP-09); its own chat is a later change.
+ */
+export class ContactChatUnavailableError extends EmperorError {
+  constructor(readonly contactName: string) {
+    super(
+      `和「${contactName}」单聊即将推出；现在可以把它拉进群聊`,
+      'contact_chat_unavailable',
+    )
+  }
+}
+
 /** A contact's session asked for more permission than the contact has. */
 export class ContactPermissionError extends EmperorError {
   constructor(ceiling: string) {

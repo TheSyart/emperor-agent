@@ -327,6 +327,45 @@ describe('GroupService.history and list', () => {
     ])
   })
 
+  it('counts the groups a contact is in and what it said there (GRP-05 profile)', () => {
+    const f = fixture()
+    const first = f.service.create({
+      title: '甲',
+      members: ['ct-arch', 'ct-rev'],
+    }).id
+    const second = f.service.create({ title: '乙', members: ['ct-rev'] }).id
+    const left = f.service.create({ title: '丙', members: ['ct-rev'] }).id
+    f.service.create({ title: '丁', members: ['ct-arch'] })
+    const say = (
+      groupId: string,
+      from: string,
+      kind: 'say' | 'pass' | 'summary' | 'system',
+      text: string,
+    ) =>
+      f.service.append(groupId, 'group/message', {
+        id: `gm_${text}`,
+        turnId: 't1',
+        from,
+        audience: { kind: 'all' },
+        ask: [],
+        answerMode: 'relay',
+        kind,
+        text,
+        at: 1,
+      })
+    say(first, 'ct-rev', 'say', '一')
+    say(first, 'ct-rev', 'pass', '没有补充')
+    say(first, 'ct-arch', 'say', '二')
+    say(second, 'ct-rev', 'summary', '三')
+    say(second, 'system', 'system', '四')
+    say(left, 'ct-rev', 'say', '五')
+    f.service.removeMember(left, 'ct-rev')
+    // A group it left is not counted; what it said there still is.
+    expect(f.service.activity('ct-rev')).toEqual({ groups: 2, speeches: 3 })
+    expect(f.service.activity('ct-arch')).toEqual({ groups: 2, speeches: 1 })
+    expect(f.service.activity('ct-codex')).toEqual({ groups: 0, speeches: 0 })
+  })
+
   it('announces every change', () => {
     const { service, view, changes } = group()
     service.send(view.id, { way: 'broadcast', text: 'hi' })
