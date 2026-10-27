@@ -15,7 +15,9 @@
   - `emperor-mark.svg` (= `desktop/src/renderer/public/favicon.svg`, `BrandMark.vue`): one `evenodd` path, a 950-unit rounded block (radius 210) in `#D4AA5E` with the crown cut out at 62% scale; the user chose the cut-out block over the crown alone and a framed crown;
   - `emperor-app-icon.svg`: the 824 block of the macOS icon grid (radius 185) in a faint graphite gradient (`#2B2926` → `#1A1918`) wearing the same crown in `#D4AA5E` (64% of the block's width);
   - `desktop/build/icon.png` and `desktop/extension/icons/icon-{16,32,48,128}.png` are rendered from `emperor-app-icon.svg` by `desktop/scripts/render-brand-icons.mjs`, each size from the vector.
-- Still from the 0.2 set and carrying the 0.2 seal: the DMG background's faint emboss and the first-run illustrations' carved stone (below); they are regenerated with the new mark as reference.
+- The DMG background and the first-run illustrations were regenerated with the new mark as the reference image (Codex `image_gen`, the 0.2 prompts with the mark swapped and one added line: the mark is a gold rounded block with the crown cut out, showing the stone through it). Three candidates each; several were rejected by the log for drawing a solid crown instead of the cut-out one.
+  - `desktop/build/background.tiff`: DMG candidate 2 — its emboss sits lowest and clears the Applications icon; 1610×977 scaled straight to 1320×800 and 660×400 (Lanczos), merged with `tiffutil -cathidpicheck`.
+  - `model-setup-hero-dark.webp`, `model-setup-hero-light.webp`: dark candidate 2 (graphite stone, the clearest cut-out mark) and the light candidate drawn from it; scaled to cover 1600×1000 (×1.009) and centre-cropped, WebP quality 84 method 6 (45 KB / 36 KB).
 
 ## 2026-10-20 - 0.2 brand set (UI-S12)
 

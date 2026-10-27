@@ -29,12 +29,12 @@ Emperor 的标是一枚冠印（0.3，BRD-02）：一顶三尖王冠，冠带厚
 ## 安装窗口（DMG）
 
 - `desktop/build/background.tiff` 内含 660 × 400 与 1320 × 800 两张，Retina 下不糊。
-- 象牙纸底、居中一支细金色箭头，右下角极淡的印章浮雕。浮雕还是 0.2 的旧标（Codex 画进位图里的），0.3 用新标重出后替换。
+- 象牙纸底、居中一支细金色箭头，右下角极淡的冠印浮雕（金块镂空王冠的形状，约 4% 对比度），避开「应用程序」图标。
 - `electron-builder.yml` 的 `dmg`：窗口 660 × 400，图标 96；应用放在 (165, 185)，`/Applications` 链接放在 (495, 185)，与箭头同高。`release-config.test.ts` 检查这些值与 TIFF 的两种尺寸。
 
 ## 首启引导插图
 
-- `assets/generated/model-setup-hero-dark.webp`、`model-setup-hero-light.webp`：1600 × 1000，构图一致——右侧一块刻着标的石质印章、一枚钥匙和三张浮动卡片，左侧约 40% 留空。石印上刻的还是 0.2 的旧标，0.3 用新标重出后替换。
+- `assets/generated/model-setup-hero-dark.webp`、`model-setup-hero-light.webp`：1600 × 1000，构图一致——右侧一块石印，顶面嵌着冠印（金块镂空王冠，露出石面），一枚钥匙令牌和三张浮动卡片，左侧约 40% 留空。
 - 首启引导（UI-S17，`onboarding/FirstRunOnboarding.vue`）铺满窗口，插图放在右侧：
   - 宽度不超过 1040px。原图 1600 宽，这样在 Retina 上仍然清楚。
   - 左、上、下三边用两层渐变遮罩（`mask-composite: intersect`）淡入画布，右边贴着窗口。
