@@ -4,6 +4,7 @@
  * audience. The scheduler sends this as one relay message to the member's
  * session and then records a `group/delivery` event.
  */
+import { isPublic } from './digest'
 import type { GroupState } from './events'
 import type { ContactId, GroupMember, GroupMessage } from './types'
 import { visibleTo } from './visibility'
@@ -75,7 +76,9 @@ export interface DeliveryPlan {
 
 /**
  * Deliver everything pending while it fits in `limit` tokens; otherwise use
- * the latest 群纪要 and only what came after it, or say a digest is needed.
+ * the latest 群纪要 and what came after it, or say a digest is needed. The
+ * digest holds public messages only, so a member's own private messages
+ * (and its unrevealed answers) from before the cut are kept.
  */
 export function planDelivery(
   state: GroupState,
@@ -92,7 +95,9 @@ export function planDelivery(
   const cut = digest ? pending.findIndex((m) => m.id === digest.upTo) : -1
   if (!digest || cut < 0)
     return { digest: null, messages: pending, needsDigest: true }
-  const after = pending.slice(cut + 1)
+  const after = pending.filter(
+    (m, i) => i > cut || !isPublic(m, state.revealed),
+  )
   if (estimateTokens(digest.text) + size(after) > limit)
     return { digest: null, messages: pending, needsDigest: true }
   return { digest: digest.text, messages: after, needsDigest: false }
