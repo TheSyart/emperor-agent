@@ -431,6 +431,12 @@ export interface DelegationStart {
   outputSchema?: ObjectJsonSchema
   runInBackground: boolean
   clientRequestId: string
+  /**
+   * Added to the executor's own system prompt on every run (Claude's
+   * `systemPrompt.append`, Codex's developer instructions): a contact's
+   * job card and the group charter (GRP-09). At most 24 KiB.
+   */
+  instructions?: string
 }
 export interface DelegationRecord {
   dispatchPaused?: boolean
@@ -578,6 +584,8 @@ export interface ExecutorOpenInput {
   budgetUsd?: number
   /** Claude Code's turns per run (AGT-02). */
   maxTurns?: number
+  /** The start spec's instructions (GRP-09), after Emperor's own. */
+  instructions?: string
   /** The CLI's version as the run's probe read it (`claude --version`). */
   executableVersion?: string
   policy: SandboxExecutionPolicy

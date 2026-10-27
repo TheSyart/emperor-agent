@@ -1210,6 +1210,11 @@ export class DelegationService {
         'BRIEF_LIMIT',
         'delegation brief exceeds 32 KiB',
       )
+    if (spec.instructions && Buffer.byteLength(spec.instructions) > 24 * 1024)
+      throw new DelegationError(
+        'BRIEF_LIMIT',
+        'delegation instructions exceed 24 KiB',
+      )
     const config = this.options.config(),
       parent = this.options.parent(owner)
     const effective = this.policy.resolve(
@@ -1799,6 +1804,7 @@ export class DelegationService {
           defaultModel: spec.model ?? profile.defaultModel,
         },
         outputSchema: spec.outputSchema,
+        ...(spec.instructions ? { instructions: spec.instructions } : {}),
         usageBaseline,
         ...(record.backend === 'claude-code' &&
           this.options.config().limits.claudeMaxTurns !== undefined && {

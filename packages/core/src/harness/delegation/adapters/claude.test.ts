@@ -651,3 +651,26 @@ it('10 · the claude Emperor starts never updates itself: DISABLE_AUTOUPDATER=1 
     f.cleanup()
   }
 })
+
+it('appends the contact’s job card and the group charter to the system prompt (GRP-09)', async () => {
+  const f = fixture()
+  const session = await f.adapter.open({
+    ...f.input,
+    instructions: '# 身份\n你是「安全审计」。\n\n# 群聊：登录页',
+  })
+  const submit = session.submit({
+    runId: 'dgr-gc',
+    messageId: 'dgm-gc',
+    text: 'go',
+  })
+  for await (const event of session.events)
+    if (event.type === 'turn_finished') break
+  await submit
+  const append = (f.getOptions().systemPrompt as { append: string }).append
+  expect(append).toContain('你是「安全审计」')
+  expect(append).toContain('# 群聊：登录页')
+  // After Emperor's own identity and hand-off rules.
+  expect(append.indexOf('parent agent in Emperor Agent')).toBeLessThan(
+    append.indexOf('你是「安全审计」'),
+  )
+})
