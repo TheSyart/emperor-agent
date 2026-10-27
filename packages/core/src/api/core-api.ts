@@ -3491,6 +3491,20 @@ export class CoreApi {
   readonly projects = {
     list: () => this.host.kept.projectStore.list(),
     resolve: (path: string) => this.host.kept.projectStore.resolve(path),
+    /**
+     * The branch of a known project's folder (MOD-03: the Build home's
+     * branch tag, before a session exists). Null for an unknown project or
+     * a folder outside Git.
+     */
+    branch: async (input: {
+      projectId: string
+    }): Promise<{ branch: string | null; detached: boolean } | null> => {
+      const project = this.host.kept.projectStore
+        .list()
+        .find((entry) => entry.project_id === input.projectId)
+      if (!project) return null
+      return await this.workspaceGitService.projectBranch(project.project_path)
+    },
   }
 
   /**
@@ -5148,8 +5162,20 @@ function normalizeSidebarSectionOrder(value: unknown): string[] {
  * Folded sidebar sections (BUG-06): known keys only, each once; a state
  * written before the field existed has none folded.
  */
+/** Foldable sections; Chat folds each day on its own (MOD-03). */
+const SIDEBAR_SECTION_KEYS = new Set([
+  'pinned',
+  'projects',
+  'chats',
+  'chats.today',
+  'chats.yesterday',
+  'chats.week',
+  'chats.month',
+  'chats.older',
+])
+
 function normalizeCollapsedSections(value: unknown): string[] {
-  const known = new Set(['pinned', 'projects', 'chats'])
+  const known = SIDEBAR_SECTION_KEYS
   return [...new Set(stringList(value))].filter((key) => known.has(key))
 }
 

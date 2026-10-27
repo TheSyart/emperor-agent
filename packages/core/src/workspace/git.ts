@@ -178,6 +178,23 @@ export class WorkspaceGitService {
     return await this.resolver.resolve(scope.projectRoot)
   }
 
+  /**
+   * The branch checked out in a project folder, before any session runs
+   * there (the Build home, MOD-03). Null when the folder is not inside a
+   * Git work tree or Git cannot read it: the home then shows no branch.
+   * The caller passes a project Emperor already knows.
+   */
+  async projectBranch(
+    projectRoot: string,
+  ): Promise<{ branch: string | null; detached: boolean } | null> {
+    try {
+      const identity = await this.resolver.resolve(projectRoot)
+      return { branch: identity.branch, detached: identity.detached }
+    } catch {
+      return null
+    }
+  }
+
   async log(input: {
     sessionId: string
     baseRef?: string
