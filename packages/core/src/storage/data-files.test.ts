@@ -50,6 +50,7 @@ describe('the data file inventory', () => {
         'scheduler/jobs.json',
         'computer-use/vault.json',
         'sessions/index.json',
+        'contacts/contacts.json',
         'plugins/installed_plugins.json',
         'browser/profiles.json',
         'browser/site-permissions.json',
@@ -113,6 +114,8 @@ describe('the data file inventory', () => {
     )
     api.sessions.create({ title: 'scan' })
     api.sessions.list()
+    // GRP-02: the first read writes the three builtin contacts.
+    await api.contacts.list()
     api.host.delegationConsent.store!.grant('codex-default')
     const listed = api.executors.list()
     await api.executors.configure(

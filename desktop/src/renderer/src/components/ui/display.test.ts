@@ -165,6 +165,46 @@ describe('props snapshot (test 1)', () => {
     expect(AVATAR_SIZES).toEqual([16, 20, 24, 28, 40])
   })
 
+  it('Avatar draws a library portrait on its tint, a letter for an unknown id (BRD-07)', () => {
+    const root = mount(() =>
+      h('div', [
+        h(Avatar, {
+          kind: 'library',
+          id: 'AV-07-5',
+          label: '锦衣卫',
+          size: 40,
+        }),
+        h(Avatar, {
+          kind: 'library',
+          id: 'AV-01-1',
+          label: '架构师',
+          size: 16,
+        }),
+        h(Avatar, {
+          kind: 'library',
+          id: 'AV-99-1',
+          label: '研究员',
+          size: 28,
+        }),
+      ]),
+    )
+    const [guard, small, unknown] = [
+      ...root.querySelectorAll<HTMLElement>('.ds-avatar'),
+    ]
+    expect(guard!.dataset.shown).toBe('library')
+    expect(guard!.dataset.avatar).toBe('AV-07-5')
+    const art = guard!.querySelector<HTMLElement>('.library')!
+    // The fifth portrait is the middle cell of its sheet's 3x3 grid.
+    expect(art.style.backgroundPosition).toBe('50% 50%')
+    expect(art.style.backgroundImage).toContain('AV-07')
+    expect(guard!.style.getPropertyValue('--avatar-tint')).toMatch(/^#/)
+    expect(
+      small!.querySelector<HTMLElement>('.library')!.style.backgroundPosition,
+    ).toBe('0% 0%')
+    expect(unknown!.dataset.shown).toBe('color')
+    expect(unknown!.textContent?.trim()).toBe('研')
+  })
+
   it('ListRow, Surface, List, ListSection, EmptyState and Notice', () => {
     const root = mount(() =>
       h('div', [

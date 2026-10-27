@@ -9,6 +9,9 @@
  *         logo      a model provider's logo (`iconId`) or an image (`src`,
  *                   plugin logos); falls back to the colour tile
  *         initials  the first letter of `label` on a neutral tile
+ *         library   a contact's portrait from the avatar library (BRD-07),
+ *                   `id` AV-01-1 … AV-15-9, on a round tile in its tint;
+ *                   an unknown id falls back to the colour tile
  *   size: 16 | 20 | 24 (default) | 28 | 40 — off-scale sizes are refused in
  *         development and drawn at the nearest step
  * `status` puts a small state dot on a sprite (running / completed /
@@ -38,10 +41,11 @@ import {
   spriteSupported,
 } from './spriteAvatar'
 import { SUBAGENT_PORTRAITS, subagentPortrait } from './subagentPortraits'
+import { contactAvatarCell } from './contactAvatars'
 
 const props = withDefaults(
   defineProps<{
-    kind?: 'sprite' | 'color' | 'logo' | 'initials'
+    kind?: 'sprite' | 'color' | 'logo' | 'initials' | 'library'
     size?: AvatarSize
     id?: string | null
     frameId?: string
@@ -125,9 +129,25 @@ watch(
   () => (broken.value = false),
 )
 
+// ── library ──
+const cell = computed(() =>
+  props.kind === 'library' ? contactAvatarCell(props.id ?? '') : null,
+)
+/** The sheet is a 3x3 grid: draw it at 300% and move to the cell. */
+const libraryStyle = computed(() => {
+  const at = cell.value
+  if (!at) return {}
+  const step = (offset: number) => `${(offset / at.size) * 50}%`
+  return {
+    backgroundImage: `url("${at.sheet}")`,
+    backgroundPosition: `${step(at.x)} ${step(at.y)}`,
+  }
+})
+
 // ── letters ──
 const shown = computed(() => {
   if (props.kind === 'sprite') return 'sprite'
+  if (props.kind === 'library') return cell.value ? 'library' : 'color'
   if (props.kind === 'logo') {
     if (props.src && !broken.value) return 'image'
     if (asset.value) return monochrome.value ? 'mask' : 'asset'
@@ -148,11 +168,15 @@ const colorSlot = computed(() =>
     :data-kind="kind"
     :data-size="size"
     :data-shown="shown"
-    :data-avatar="kind === 'sprite' ? portrait.id : undefined"
+    :data-avatar="kind === 'sprite' ? portrait.id : cell ? cell.id : undefined"
     :data-agent-identity="kind === 'sprite' ? (id ?? undefined) : undefined"
     :data-status="kind === 'sprite' ? status : undefined"
     :data-color="shown === 'color' ? colorSlot : undefined"
-    :style="{ width: `${size}px`, height: `${size}px` }"
+    :style="{
+      width: `${size}px`,
+      height: `${size}px`,
+      ...(cell ? { '--avatar-tint': cell.tint } : {}),
+    }"
     :role="labelled ? 'img' : undefined"
     :aria-label="labelled ? label : undefined"
     :aria-hidden="labelled ? undefined : 'true'"
@@ -171,6 +195,11 @@ const colorSlot = computed(() =>
       alt=""
       draggable="false"
       @error="broken = true"
+    />
+    <span
+      v-else-if="shown === 'library'"
+      class="art library"
+      :style="libraryStyle"
     />
     <span v-else-if="shown === 'mask'" class="art mono" :style="maskStyle" />
     <img
@@ -244,6 +273,23 @@ const colorSlot = computed(() =>
   ) {
   background: transparent;
   box-shadow: none;
+}
+
+/*
+ * A contact's portrait (BRD-07): round, on its library tint, so it never
+ * reads as a subagent's square-cut plush head.
+ */
+.ds-avatar[data-shown='library'] {
+  border-radius: var(--r-full);
+  background: var(--avatar-tint);
+  overflow: hidden;
+}
+
+.library {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-size: 300% 300%;
 }
 
 /* Plugin art is a full-bleed rounded tile already: no frame. */

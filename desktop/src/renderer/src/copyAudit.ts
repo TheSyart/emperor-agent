@@ -90,6 +90,10 @@ const ALLOWED_PHRASES = [
  */
 const ALLOWED_WORDS = new Set([
   'Emperor',
+  // The three modes, by their product names (docs/design/modes.md).
+  'Chat',
+  'Build',
+  'Group',
   'Agent',
   'Claude',
   'Code',

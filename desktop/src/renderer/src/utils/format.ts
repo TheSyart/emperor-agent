@@ -34,6 +34,10 @@ export function compactJson(value: unknown, limit = 160) {
 export function usageTypeLabel(value: string) {
   if (value === 'main_agent') return '主 Agent'
   if (value === 'memory_compaction') return '记忆压缩'
+  if (value === 'compaction') return '上下文压缩'
+  if (value === 'watchlist_check') return 'Watchlist 检查'
+  // SET-01: a Claude Code or Codex run, written when it finished.
+  if (value === 'executor') return 'Claude Code、Codex'
   if (value.startsWith('subagent:'))
     return `子智能体 · ${value.split(':').slice(1).join(':')}`
   if (value === 'subagent') return '子智能体'

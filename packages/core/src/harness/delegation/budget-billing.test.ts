@@ -245,4 +245,52 @@ describe('DelegationService billing', () => {
     expect(refused.failureCode).toBe('BUDGET_LIMIT')
     f.cleanup()
   })
+
+  it('9 · hands every settled run’s usage to the ledger (SET-01)', async () => {
+    const spent = vi.fn()
+    const api = await settledRun(
+      'api',
+      [{ type: 'usage', inputTokens: 7, outputTokens: 3, estimatedUsd: 0.5 }],
+      (f) => {
+        f.options.usageLedger = spent
+      },
+    )
+    expect(spent).toHaveBeenCalledTimes(1)
+    expect(spent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: api.f.owner,
+        backend: api.record.backend,
+        usage: expect.objectContaining({
+          billing: 'api',
+          estimatedUsd: 0.5,
+          totalTokens: 10,
+        }),
+      }),
+    )
+    api.f.cleanup()
+
+    const sub = vi.fn()
+    const subscription = await settledRun(
+      'subscription',
+      [{ type: 'usage', inputTokens: 7, outputTokens: 3, estimatedUsd: 9 }],
+      (f) => {
+        f.options.usageLedger = sub
+      },
+    )
+    expect(sub.mock.calls[0]![0].usage).toMatchObject({
+      billing: 'subscription',
+      totalTokens: 10,
+    })
+    expect(sub.mock.calls[0]![0].usage.estimatedUsd).toBeUndefined()
+    subscription.f.cleanup()
+  })
+
+  it('9 · leaves a run that reported nothing out of the ledger', async () => {
+    const spent = vi.fn()
+    const { f } = await settledRun('api', [], (f) => {
+      f.options.usageLedger = spent
+    })
+    expect(spent).not.toHaveBeenCalled()
+    f.cleanup()
+  })
 })

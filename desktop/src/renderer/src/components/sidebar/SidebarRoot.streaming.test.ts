@@ -100,7 +100,10 @@ it('1 · renders the sidebar zero times while 1000 deltas stream', async () => {
     showToast: vi.fn(),
     showError: vi.fn(),
     sessionRuntimeStates: runtime.sessionRuntimeStates,
+    pendingInteractionsBySession: runtime.pendingInteractionsBySession,
     boot: ref({ plugins: [] }),
+    // The mode switcher counts running sessions per mode (MOD-02).
+    appMode: { mode: ref('chat'), switchTo: vi.fn(), newSession: vi.fn() },
   }
 
   const router = createRouter({

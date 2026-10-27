@@ -149,6 +149,17 @@ export interface DelegationServiceOptions {
     exhausted(owner: DelegationOwner): boolean
     charge(owner: DelegationOwner, usd: number): void
   }
+  /**
+   * Every settled run that reported usage, for the token ledger: 用量与费用
+   * counts Claude Code and Codex by backend under the root session (SET-01).
+   */
+  usageLedger?: (spend: {
+    owner: DelegationOwner
+    backend: ExternalBackend
+    usage: ExecutorRunUsage
+    /** The model the run switched to, when it did (FIX-16). */
+    model?: string
+  }) => void
   notices?: {
     parent: (
       owner: DelegationOwner,
@@ -2238,6 +2249,17 @@ export class DelegationService {
           usage.estimatedUsd > 0
         )
           this.options.taskBudget?.charge(record.owner, usage.estimatedUsd)
+        if (sent && usage && reportedSpend(usage))
+          try {
+            this.options.usageLedger?.({
+              owner: record.owner,
+              backend: record.backend,
+              usage,
+              ...(modelChoice ? { model: modelChoice.used } : {}),
+            })
+          } catch {
+            // accounting never breaks a run
+          }
         if (quiescent && settledPhase !== 'outcome_unknown')
           workspace?.release()
         else e.held = { workspace, quiescent }
@@ -2965,6 +2987,16 @@ export class DelegationService {
     )
   }
 }
+/** Whether a run reported any tokens or cost worth a ledger row. */
+function reportedSpend(usage: ExecutorRunUsage): boolean {
+  return (
+    (usage.totalTokens ?? 0) > 0 ||
+    (usage.inputTokens ?? 0) > 0 ||
+    (usage.outputTokens ?? 0) > 0 ||
+    (usage.estimatedUsd ?? 0) > 0
+  )
+}
+
 /** The usage fields of a normalized usage event. */
 function withoutRunFields(event: Record<string, unknown>): ExecutorRunUsage {
   const { delegationId: _d, runId: _r, generation: _g, ...rest } = event

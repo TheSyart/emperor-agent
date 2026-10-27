@@ -1,26 +1,46 @@
 <script setup lang="ts">
 /**
- * Sidebar foot: the 设置 row (settings modal) and the light / dark theme
- * toggle. `rail` renders both as 36px circles at the bottom of the
- * collapsed rail, with right-side tooltips. The toggle pins an explicit
- * theme; 跟随系统 is chosen in Settings › 常规.
+ * Sidebar foot: the 设置 row (settings modal), the page icons — Pull
+ * Request (Build only, with the GitHub plugin on), 定时任务, 能力 (D4 of
+ * 0.3, MOD-02) — and the light / dark theme toggle. `rail` renders 设置 and
+ * the toggle as 36px circles at the bottom of the collapsed rail, with
+ * right-side tooltips; the rail lists the pages itself. The toggle pins an
+ * explicit theme; 跟随系统 is chosen in Settings › 常规.
  */
 import IconButton from '../ui/IconButton.vue'
 import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useAppContext } from '../../composables/useAppContext'
 import { useTheme } from '../../composables/useTheme'
 import { DsDark, DsLight, DsSettings } from '../icons/ds'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
 import Tooltip from '../ui/Tooltip.vue'
+import {
+  activeSidebarPage,
+  visibleSidebarPages,
+  type SidebarPageEntry,
+} from './sidebarNav'
 
 withDefaults(defineProps<{ rail?: boolean }>(), { rail: false })
 
+const ctx = useAppContext()
+const route = useRoute()
+const router = useRouter()
 const settings = useSettingsRoute()
 const { theme, toggle } = useTheme()
 
+const pages = computed(() =>
+  visibleSidebarPages(ctx.boot.value?.plugins ?? [], ctx.appMode.mode.value),
+)
+const active = computed(() => activeSidebarPage(route.name))
 const themeLabel = computed(() =>
   theme.value === 'dark' ? '切换浅色' : '切换深色',
 )
 const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
+
+function go(entry: SidebarPageEntry): void {
+  void router.push(entry.to).catch(() => undefined)
+}
 </script>
 
 <template>
@@ -36,6 +56,20 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
         <span v-if="!rail" class="label">设置</span>
       </button>
     </Tooltip>
+    <template v-if="!rail">
+      <IconButton
+        v-for="entry in pages"
+        :key="entry.name"
+        class="page"
+        :label="entry.label"
+        :selected="active === entry.name"
+        :aria-current="active === entry.name ? 'page' : undefined"
+        :data-sidebar-page="entry.name"
+        @click="go(entry)"
+      >
+        <component :is="entry.icon" :size="16" />
+      </IconButton>
+    </template>
     <IconButton
       class="theme"
       :label="themeLabel"
@@ -90,7 +124,8 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
 }
 
 .settings:hover,
-.theme:hover {
+.theme:hover,
+.page:hover {
   background: var(--surface-hover);
 }
 
@@ -107,6 +142,8 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   white-space: nowrap;
 }
 
+/* The page icons and the theme toggle: one row of 36px circles. */
+.page,
 .theme {
   display: inline-grid;
   place-items: center;
@@ -121,8 +158,14 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   cursor: pointer;
 }
 
+.page[aria-current='page'] {
+  background: rgb(var(--surface-selected));
+  color: rgb(var(--text-1));
+}
+
 .settings:focus-visible,
-.theme:focus-visible {
+.theme:focus-visible,
+.page:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }

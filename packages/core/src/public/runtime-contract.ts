@@ -10,6 +10,23 @@ export type {
   RuntimeGoalView,
 } from '../runtime/types'
 export { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+// MOD-01: the three modes and which one a session belongs to.
+export {
+  APP_MODES,
+  SESSION_SURFACES,
+  defaultAppMode,
+  isAppMode,
+  isKnownSessionSurface,
+  isModeRouteId,
+  normalizeModeRoutes,
+  sessionAppMode,
+} from '../sessions/app-mode'
+export type {
+  AppMode,
+  AppModeSessionFacts,
+  ModeRoutes,
+  SessionSurface,
+} from '../sessions/app-mode'
 // REL-02: the update status the settings page and the bell read.
 export type {
   UpdateAttestation,

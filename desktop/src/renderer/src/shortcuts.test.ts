@@ -50,8 +50,25 @@ describe('matchShortcut on macOS', () => {
     ['⌘K', key('k', { metaKey: true }), 'search'],
     ['⌘[', key('[', { metaKey: true }), 'nav.back'],
     ['⌘]', key(']', { metaKey: true }), 'nav.forward'],
+    // MOD-01: the three modes (docs/design/modes.md).
+    ['⌘1', key('1', { metaKey: true }), 'mode.chat'],
+    ['⌘2', key('2', { metaKey: true }), 'mode.build'],
+    ['⌘3', key('3', { metaKey: true }), 'mode.group'],
   ])('%s', (_label, event, action) => {
     expect(matchShortcut(event, MAC)).toBe(action)
+  })
+
+  it('binds only ⌘1–⌘3 among the digits', () => {
+    expect(matchShortcut(key('4', { metaKey: true }), MAC)).toBeNull()
+    expect(
+      matchShortcut(
+        key('!', { metaKey: true, shiftKey: true, code: 'Digit1' }),
+        MAC,
+      ),
+    ).toBeNull()
+    expect(matchShortcut(key('1', { ctrlKey: true }), MAC)).toBeNull()
+    expect(shortcutLabel('mode.build', 'mac')).toBe('⌘2')
+    expect(shortcutLabel('mode.group', 'other')).toBe('Ctrl+3')
   })
 
   it('no longer binds the retired 电脑 pane shortcut', () => {
@@ -122,6 +139,7 @@ describe('matchShortcut on Windows / Linux', () => {
     ],
     ['Ctrl+B', key('b', { ctrlKey: true }), 'sidebar.toggle'],
     ['Ctrl+[', key('[', { ctrlKey: true }), 'nav.back'],
+    ['Ctrl+1', key('1', { ctrlKey: true }), 'mode.chat'],
   ])('%s', (_label, event, action) => {
     expect(matchShortcut(event, WIN)).toBe(action)
   })

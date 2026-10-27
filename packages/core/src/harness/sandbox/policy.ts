@@ -190,17 +190,25 @@ export interface SandboxPolicyOptions {
   defaultMode: SandboxMode
   /** Fallback root for sessions without a cwd. */
   workspaceRoot?: string
+  /**
+   * Paths a session may read but never write, whatever its mode (a
+   * contact's knowledge outside the workspace, GRP-03). Empty: none.
+   */
+  readOnlyRoots?: (session: Session) => readonly string[]
 }
 
 export class SandboxPolicyService {
   readonly defaultMode: SandboxMode
   readonly workspaceRoot: string
+  private readonly readOnlyRootsOf:
+    ((session: Session) => readonly string[]) | undefined
 
   constructor(options: SandboxPolicyOptions) {
     this.defaultMode = options.defaultMode
     this.workspaceRoot = resolvePath(
       canonicalPath(options.workspaceRoot ?? process.cwd()),
     )
+    this.readOnlyRootsOf = options.readOnlyRoots
   }
 
   /** Contribute the `sandbox:policy` runtime context (order 110). */
@@ -215,11 +223,16 @@ export class SandboxPolicyService {
     })
   }
 
-  /** Approved escalation > session override > host default; root = session cwd. */
+  /**
+   * Approved escalation > session override > host default; root = session
+   * cwd. The session's read-only roots hold in every mode.
+   */
   resolve(
     request: { session?: Session; mode?: SandboxMode } = {},
   ): SandboxExecutionPolicy {
     const { session } = request
+    const readOnly =
+      session === undefined ? [] : (this.readOnlyRootsOf?.(session) ?? [])
     return {
       mode:
         request.mode ??
@@ -229,6 +242,7 @@ export class SandboxPolicyService {
         canonicalPath(session?.cwd ?? this.workspaceRoot),
       ),
       ...(session === undefined ? {} : { sessionId: session.id }),
+      ...(readOnly.length === 0 ? {} : { readOnlyRoots: [...readOnly] }),
     }
   }
 

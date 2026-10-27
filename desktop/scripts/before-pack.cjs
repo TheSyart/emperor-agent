@@ -20,10 +20,20 @@ const {
 
 const OS_METADATA_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
+/** The contacts' role templates (GRP-02): every `templates/contacts/*.md`. */
+function contactTemplateFiles() {
+  const dir = resolve(__dirname, '..', '..', 'templates', 'contacts')
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => `contacts/${name}`)
+}
+
 const TEMPLATE_RUNTIME_FILES = [
   'agent/persona.md',
   'init/MEMORY.md',
   'init/USER.md',
+  ...contactTemplateFiles(),
 ]
 
 const SOURCE_MAPPINGS = [

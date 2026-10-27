@@ -35,4 +35,41 @@ describe('runInitialStartup', () => {
     expect(restoreRuntimeState).not.toHaveBeenCalled()
     expect(connectSocket).not.toHaveBeenCalled()
   })
+
+  it('MOD-01 10 · lands in the saved mode before the first session opens', async () => {
+    const order: string[] = []
+    const activeId = ref('')
+    const switchSession = vi.fn((id: string) => order.push(`switch:${id}`))
+    await runInitialStartup({
+      sessionStore: {
+        activeId,
+        load: vi.fn(async () => {
+          order.push('sessions')
+          activeId.value = 'chat-recent'
+        }),
+        backendSessionId: () => activeId.value,
+        isDraftSessionId: () => false,
+      },
+      bootstrap: {
+        boot: ref(null),
+        error: ref(''),
+        loadBootstrap: vi.fn(async (_loading?: boolean, id?: string) => {
+          order.push(`bootstrap:${id}`)
+        }),
+      },
+      switchSession,
+      restoreRuntimeState: vi.fn(),
+      connectSocket: vi.fn(),
+      landInAppMode: vi.fn(async () => {
+        order.push('land')
+        activeId.value = 'build-last'
+      }),
+    })
+    expect(order).toEqual([
+      'sessions',
+      'land',
+      'switch:build-last',
+      'bootstrap:build-last',
+    ])
+  })
 })

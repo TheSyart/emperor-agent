@@ -22,7 +22,8 @@ export const SETTINGS_SECTIONS = [
   { key: 'computer', label: '电脑操作' },
   { key: 'browser', label: '浏览器' },
   { key: 'voice', label: '语音' },
-  { key: 'tokens', label: '用量' },
+  // SET-01: the cost caps and runaway limits moved here (用量与费用).
+  { key: 'tokens', label: '用量与费用' },
   { key: 'advanced', label: '高级' },
 ] as const
 

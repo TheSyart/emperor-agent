@@ -1,17 +1,24 @@
 <script setup lang="ts">
 /**
  * Collapsed sidebar (56px rail): the brand mark doubles as the expand
- * toggle (hover swaps in the panel icon), then back / forward, new chat,
- * search and the bell, the full pages, and settings at the foot.
- * Every control is a 36px circle with a right-side tooltip.
+ * toggle (hover swaps in the panel icon), then the three modes (MOD-02:
+ * the current one highlighted, a click switches, a dot on a mode where a
+ * question waits), back / forward, the mode's new-session entry, search
+ * and the bell, the pages (Pull Request in Build only), and settings at
+ * the foot. Every control is a 36px circle with a right-side tooltip.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppContext } from '../../composables/useAppContext'
+import type { AppMode, ModeActivity } from '../../runtime/appMode'
+import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
 import BrandMark from '../brand/BrandMark.vue'
 import { goBack, goForward, useNavHistory } from '../shell/navHistory'
-import { DsNewChat, DsPanelLeft, DsSearch } from '../icons/ds'
+import { DsPanelLeft, DsSearch } from '../icons/ds'
+import Dot from '../ui/Dot.vue'
+import IconButton from '../ui/IconButton.vue'
 import Tooltip from '../ui/Tooltip.vue'
+import { COMING_SOON, MODE_ENTRIES, modeEntry } from './modeEntries'
 import SidebarBell from './SidebarBell.vue'
 import SidebarFooter from './SidebarFooter.vue'
 import {
@@ -21,14 +28,31 @@ import {
   type SidebarPageEntry,
 } from './sidebarNav'
 
-const emit = defineEmits<{ toggle: []; 'new-chat': []; search: [] }>()
+const props = defineProps<{
+  mode: AppMode
+  activity: Record<AppMode, ModeActivity>
+}>()
+const emit = defineEmits<{
+  toggle: []
+  'new-session': []
+  search: []
+  'select-mode': [mode: AppMode]
+}>()
 
 const ctx = useAppContext()
 const route = useRoute()
 const router = useRouter()
 const nav = useNavHistory()
+const platform = detectShortcutPlatform()
 const active = computed(() => activeSidebarPage(route.name))
-const pages = computed(() => visibleSidebarPages(ctx.boot.value?.plugins ?? []))
+const pages = computed(() =>
+  visibleSidebarPages(ctx.boot.value?.plugins ?? [], props.mode),
+)
+const primary = computed(() => modeEntry(props.mode).primary)
+
+function newSession(): void {
+  if (primary.value.ready) emit('new-session')
+}
 
 function go(entry: SidebarPageEntry): void {
   void router.push(entry.to).catch(() => undefined)
@@ -48,6 +72,30 @@ function go(entry: SidebarPageEntry): void {
         <DsPanelLeft :size="18" class="panel" />
       </button>
     </Tooltip>
+    <div class="modes" role="group" aria-label="模式">
+      <IconButton
+        v-for="entry in MODE_ENTRIES"
+        :key="entry.mode"
+        class="mode"
+        size="lg"
+        shape="circle"
+        side="right"
+        :label="entry.name"
+        :shortcut="shortcutLabel(entry.shortcut, platform)"
+        :selected="entry.mode === mode"
+        :aria-pressed="String(entry.mode === mode)"
+        :data-rail-mode="entry.mode"
+        @click="emit('select-mode', entry.mode)"
+      >
+        <component :is="entry.icon" :size="16" />
+        <Dot
+          v-if="entry.mode !== mode && activity[entry.mode].waiting"
+          class="mode-dot"
+          state="attention"
+          size="sm"
+        />
+      </IconButton>
+    </div>
     <div class="group">
       <Tooltip label="后退" side="right" :delay-ms="500">
         <button
@@ -73,14 +121,19 @@ function go(entry: SidebarPageEntry): void {
       </Tooltip>
     </div>
     <div class="group">
-      <Tooltip label="新对话" side="right" :delay-ms="500">
+      <Tooltip
+        :label="primary.ready ? primary.label : COMING_SOON"
+        side="right"
+        :delay-ms="500"
+      >
         <button
           type="button"
           class="rail-button"
-          aria-label="新对话"
-          @click="emit('new-chat')"
+          :aria-label="primary.label"
+          :aria-disabled="primary.ready ? undefined : 'true'"
+          @click="newSession"
         >
-          <DsNewChat :size="18" />
+          <component :is="primary.icon" :size="18" />
         </button>
       </Tooltip>
       <Tooltip label="搜索对话" side="right" :delay-ms="500">
@@ -165,9 +218,31 @@ function go(entry: SidebarPageEntry): void {
   background: var(--surface-active);
 }
 
-.rail-button:disabled {
+.rail-button:disabled,
+.rail-button[aria-disabled='true'] {
   opacity: 0.35;
   cursor: default;
+}
+
+/* The three modes, right under the mark (MOD-02). */
+.modes {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.mode {
+  position: relative;
+  color: rgb(var(--text-2));
+}
+
+.mode-dot {
+  position: absolute;
+  top: var(--space-1-5);
+  right: var(--space-1-5);
+  box-shadow: 0 0 0 2px rgb(var(--sidebar-fill));
 }
 
 .rail-button:focus-visible {

@@ -16,6 +16,12 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+import {
+  defaultAppMode,
+  isAppMode,
+  normalizeModeRoutes,
+  type AppMode,
+} from '../sessions/app-mode'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
 import {
@@ -119,6 +125,19 @@ import { ghProcessEnvironment } from '../workspace/git-pull-requests'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
+import { ContactStore } from '../contacts/store'
+import { ContactMemoryStore } from '../contacts/memory'
+import { ContactRuntime } from '../contacts/runtime'
+import { readPersonaText } from '../harness/prompt/persona'
+import {
+  CoreContactMemoryService,
+  type ContactFeedbackInput,
+} from './services/contact-memory-service'
+import type {
+  ContactInput,
+  ContactPatch,
+  FromTemplateInput,
+} from '../contacts/types'
 import {
   CoreModelService,
   type ModelConnectionInput,
@@ -289,6 +308,14 @@ import type { WorkspaceSnapshot } from '../workspace/snapshot'
 import { CommandPlatform, type CommandOwner } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
 import { startSkillFork } from '../harness/subagent/skill-fork'
+import { recordExecutorSpend } from '../usage/executor-ledger'
+import {
+  localDay,
+  sessionUsageSource,
+  summarizeUsage,
+  type UsageRange,
+  type UsageSummary,
+} from '../usage/summary'
 import type {
   CommandCompletion,
   CommandInvocationResult,
@@ -432,6 +459,10 @@ export class CoreApi {
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
   readonly memoryService: CoreMemoryService
+  /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
+  readonly contactStore: ContactStore
+  /** Contacts' personal memory: feedback and its lines (GRP-03). */
+  readonly contactMemoryService: CoreContactMemoryService
   readonly modelService: CoreModelService
   readonly skillService: CoreSkillService
   readonly pluginService: PluginApplicationService
@@ -594,6 +625,47 @@ export class CoreApi {
           ? []
           : (host.sessionLog(sessionId)?.events ?? [])
       },
+    })
+    this.contactStore = new ContactStore({
+      stateRoot: this.paths.stateRoot,
+      templatesDir: kept.templatesDir,
+      toolNames: () => host.registeredToolNames(),
+      globalPermission: () => host.defaultPreset,
+      onChange: (change) =>
+        host.emitHost({
+          event: 'contacts_changed',
+          reason: change.reason,
+          contact_id: change.contactId,
+          version: change.version,
+        }),
+    })
+    // A session with `contact_id` runs as that contact (GRP-03).
+    const contactMemory = new ContactMemoryStore(this.paths.stateRoot)
+    const persona = readPersonaText(kept.templatesDir)
+    host.setContactRuntime(
+      new ContactRuntime({
+        contact: (id) => this.contactStore.peek(id),
+        ready: () => this.contactStore.ready(),
+        memory: contactMemory,
+        toolNames: () => host.registeredToolNames(),
+        globalPreset: () => host.defaultPreset,
+        route: (id) => host.llm.listRoutes().find((route) => route.id === id),
+        defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
+        persona: () => persona,
+      }),
+    )
+    this.contactMemoryService = new CoreContactMemoryService({
+      contacts: this.contactStore,
+      memory: contactMemory,
+      session: (id) => kept.sessionStore.get(id),
+      sessionLog: (id) => host.sessionLog(id),
+      changed: (contact) =>
+        host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: contact.id,
+          version: contact.version,
+        }),
     })
     this.memoryService = new CoreMemoryService({
       stateRoot: this.paths.stateRoot,
@@ -1117,6 +1189,9 @@ export class CoreApi {
         exhausted: (owner) => host.delegationTaskSpent(owner),
         charge: (owner, usd) => host.chargeDelegation(owner, usd),
       },
+      // SET-01: external runs in the token ledger, under their root session.
+      usageLedger: (spend) =>
+        recordExecutorSpend(host.kept.tokenTracker, spend),
       notices: {
         parent: (owner) => host.delegationNoticeParent(owner),
         canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
@@ -1802,6 +1877,12 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      // Contact sessions look their contact up without waiting (GRP-03).
+      await api.contactStore
+        .ready()
+        .catch((error: unknown) =>
+          logger.warn('reading contacts failed', { error: String(error) }),
+        )
       await api.claudeKeysMigrated
       await api.delegationRuntime.reconcile()
       api.agentService.rebuild()
@@ -3391,9 +3472,61 @@ export class CoreApi {
     }) => this.memoryService.explainContext(opts),
   }
 
+  /**
+   * 用量与费用 (SET-01): one range's spend by source, from the token ledger;
+   * a session's model calls go under the mode it is listed in now.
+   */
+  readonly usage = {
+    summary: (input: { range: UsageRange }): UsageSummary => {
+      const sessions = this.host.kept.sessionStore
+      return summarizeUsage({
+        byDateSession: this.host.kept.tokenTracker.statsByDateSession(),
+        sourceOf: (id) => sessionUsageSource(sessions.get(id)),
+        range: input.range,
+        today: localDay(),
+      })
+    },
+  }
+
   readonly projects = {
     list: () => this.host.kept.projectStore.list(),
     resolve: (path: string) => this.host.kept.projectStore.resolve(path),
+  }
+
+  /**
+   * Contacts (GRP-02): global, like settings — no session in view involved.
+   * Every saved change is announced as `contacts_changed`.
+   */
+  readonly contacts = {
+    list: () => this.contactStore.list(),
+    get: (input: { id: string }) => this.contactStore.get(input.id),
+    create: (input: ContactInput) => this.contactStore.create(input),
+    update: (input: { id: string; patch: ContactPatch }) =>
+      this.contactStore.update(input.id, input.patch),
+    delete: (input: { id: string }) => this.contactStore.delete(input.id),
+    duplicate: (input: { id: string; name?: string }) =>
+      this.contactStore.duplicate(
+        input.id,
+        input.name === undefined ? {} : { name: input.name },
+      ),
+    versions: (input: { id: string }) => this.contactStore.versions(input.id),
+    restoreVersion: (input: { id: string; version: number }) =>
+      this.contactStore.restoreVersion(input.id, input.version),
+    templates: () => this.contactStore.templates(),
+    fromTemplate: (input: FromTemplateInput) =>
+      this.contactStore.fromTemplate(input),
+    /** 👍 / 👎 on a reply, with the user's words: one line of memory (GRP-03). */
+    feedback: (input: ContactFeedbackInput) =>
+      this.contactMemoryService.feedback(input),
+    /** A contact's personal memory, line by line. */
+    memory: {
+      list: (input: { contactId: string }) =>
+        this.contactMemoryService.list(input),
+      update: (input: { contactId: string; entryId: string; text: string }) =>
+        this.contactMemoryService.update(input),
+      delete: (input: { contactId: string; entryId: string }) =>
+        this.contactMemoryService.delete(input),
+    },
   }
 
   /**
@@ -3569,6 +3702,11 @@ export class CoreApi {
     ) => this.environmentService.getInstallLog(input),
   }
 
+  /**
+   * The persisted sidebar layout, and the app mode with the last session of
+   * each mode (MOD-01). A file without `app_mode` (before 0.3, or never
+   * switched) reads as the mode of the most recently updated session.
+   */
   readonly sidebar = {
     get: (): Dict =>
       normalizeSidebarState(
@@ -3576,13 +3714,22 @@ export class CoreApi {
           join(this.paths.memoryRoot, 'sidebar_state.json'),
           readJson(join(this.root, 'memory', 'sidebar_state.json'), {}),
         ),
+        () => this.recentSessionAppMode(),
       ),
     patch: (patch: Dict): Dict => {
       const path = join(this.paths.memoryRoot, 'sidebar_state.json')
-      const next = normalizeSidebarState({ ...readJson(path, {}), ...patch })
+      const next = normalizeSidebarState(
+        { ...readJson(path, {}), ...patch },
+        () => this.recentSessionAppMode(),
+      )
       atomicWriteText(path, JSON.stringify(next, null, 2) + '\n')
       return next
     },
+  }
+
+  /** The mode of the most recently updated listed session, else Chat. */
+  private recentSessionAppMode(): AppMode {
+    return defaultAppMode(this.sessionApplicationService.list())
   }
 
   /**
@@ -4882,9 +5029,18 @@ const DEFAULT_SIDEBAR_STATE: Dict = {
     filesTreeWidth: 280,
     pane: 'launcher',
   },
+  app_mode: 'chat',
+  mode_routes: {},
 }
 
-function normalizeSidebarState(value: unknown): Dict {
+/**
+ * `fallbackMode` answers a missing or unknown `app_mode` (MOD-01); it is
+ * only called then, since it lists the sessions.
+ */
+function normalizeSidebarState(
+  value: unknown,
+  fallbackMode: () => AppMode = () => 'chat',
+): Dict {
   const raw = isRecord(value) ? value : {}
   return {
     section_order: normalizeSidebarSectionOrder(raw.section_order),
@@ -4899,6 +5055,8 @@ function normalizeSidebarState(value: unknown): Dict {
     collapsed_sections: normalizeCollapsedSections(raw.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(raw.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(raw.right_workspace),
+    app_mode: isAppMode(raw.app_mode) ? raw.app_mode : fallbackMode(),
+    mode_routes: normalizeModeRoutes(raw.mode_routes),
   }
 }
 

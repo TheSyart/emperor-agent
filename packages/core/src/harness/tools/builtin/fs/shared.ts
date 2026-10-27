@@ -149,19 +149,40 @@ function sandboxDenied(
 }
 
 /**
+ * A path under one of the policy's read-only roots (a contact's knowledge,
+ * GRP-03): refused in every mode, and no escalation is offered.
+ */
+async function refuseReadOnly(
+  target: FsTarget,
+  policy: SandboxExecutionPolicy,
+  toolName: 'write' | 'edit',
+): Promise<void> {
+  for (const root of policy.readOnlyRoots ?? []) {
+    if (await isPathUnder(target.targetKey, canonicalPath(root)))
+      throw new FsError(
+        `cannot ${toolName} "${target.displayPath}": it is read-only reference material in this session (a contact's knowledge); read it, but write somewhere else`,
+        'FS_READ_ONLY_PATH',
+      )
+  }
+}
+
+/**
  * Enforce the per-call policy on `target` and return the exact target the
- * mutation must use: `read-only` denies; `workspace-write` re-canonicalizes
- * now (a swapped symlink ancestor is seen) and requires containment under a
- * writable root; `danger-full-access` is unfenced.
+ * mutation must use: a read-only root denies in every mode; `read-only`
+ * denies; `workspace-write` re-canonicalizes now (a swapped symlink ancestor
+ * is seen) and requires containment under a writable root;
+ * `danger-full-access` is otherwise unfenced.
  */
 export async function fenceTarget(
   target: FsTarget,
   policy: SandboxExecutionPolicy,
   toolName: 'write' | 'edit',
 ): Promise<FsTarget> {
+  await refuseReadOnly(target, policy, toolName)
   if (policy.mode === 'danger-full-access') return target
   if (policy.mode === 'read-only') throw sandboxDenied(policy, toolName, target)
   const fresh = await resolveTarget(policy.workspaceRoot, target.displayPath)
+  await refuseReadOnly(fresh, policy, toolName)
   // Git config and hooks can make the user's own git run programs: changing
   // one is an escalation even inside the workspace.
   if (isGitControlPath(fresh.targetKey))

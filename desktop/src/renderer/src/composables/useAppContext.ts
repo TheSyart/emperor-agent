@@ -27,6 +27,7 @@ import type { GoalCardAction } from '../runtime/goalRender'
 import type { GoalCaptureProjection } from './goalCapture'
 import type { LifecycleTransitionResult } from './composerLifecycle'
 import type { ToastOptions } from '../components/ui/toasts'
+import type { AppModeAccess } from './useAppMode'
 
 export interface AppContext {
   boot: Ref<BootstrapPayload | null>
@@ -118,6 +119,9 @@ export interface AppContext {
   tokens: Ref<TokensPayload | null>
   tokensLoading: Ref<boolean>
   loadTokens: (silent?: boolean) => Promise<void>
+
+  /** Chat / Build / Group: the current mode, switching and ⌘N (MOD-02). */
+  appMode: AppModeAccess
 }
 
 export const APP_CONTEXT_KEY: InjectionKey<AppContext> = Symbol(

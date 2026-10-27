@@ -6,8 +6,9 @@
  *   Codex — status, model, on/off; a missing sign-in fills the row with its
  *   reason and 登录 Claude Code, AGT-12, which Core runs and the user
  *   finishes in the browser, FIX-11) and one card with the three task
- *   settings (同时运行, 改代码的位置, 费用上限), then 高级.
- * - Sub pages: 高级 (turns, run time, 开发环境, 排查) and each external
+ *   settings (同时运行, 改代码的位置), a link to 用量与费用 (the cost cap
+ *   and run limits moved there, SET-01), then 高级.
+ * - Sub pages: 高级 (开发环境, 排查) and each external
  *   subagent's 详情 (status, sign-in, model, specialties, capabilities in
  *   plain words).
  *
@@ -49,6 +50,7 @@ import {
   useSettingsHeader,
 } from './ui'
 import { useSettingsPages } from './settingsHeader'
+import { useSettingsRoute } from './useSettingsRoute'
 import ClaudeSignInNotice from './executors/ClaudeSignInNotice.vue'
 import ExecutorAdvancedPage from './executors/ExecutorAdvancedPage.vue'
 import ExecutorDetailPage from './executors/ExecutorDetailPage.vue'
@@ -84,6 +86,7 @@ const ClaudeApiKeyDialog = defineAsyncComponent(
 
 const s = provideExecutorSettings()
 const { config, rows, models, busy, loading, apiKeyDialog } = s
+const { openSettings } = useSettingsRoute()
 const { page, open: openPage } = useSettingsPages({
   advanced: '高级',
   'claude-code': 'Claude Code',
@@ -243,30 +246,6 @@ const workspaceDescription = computed(() =>
     ? 'Claude Code、Codex 直接改当前工作区；改完之前，主会话不能同时修改文件'
     : 'Claude Code、Codex 在独立的 Git 工作树里改，你看过差异后再应用到项目',
 )
-// No cap is the default since 0.3 (SET-01).
-const budgetOptions = computed(() => {
-  const current = config.value?.limits.estimatedBudgetUsd ?? null
-  const caps = [
-    1,
-    2,
-    5,
-    10,
-    20,
-    50,
-    100,
-    ...(current === null ? [] : [current]),
-  ]
-  return [
-    { value: 'none', label: '不限制（默认）' },
-    ...[...new Set(caps)]
-      .sort((a, b) => a - b)
-      .map((n) => ({ value: String(n), label: `$${n}` })),
-  ]
-})
-const budgetValue = computed(() => {
-  const current = config.value?.limits.estimatedBudgetUsd ?? null
-  return current === null ? 'none' : String(current)
-})
 function setConcurrency(value: string | null | undefined) {
   const n = Number(value)
   if (!Number.isInteger(n) || n < 1 || n > 4) return
@@ -280,20 +259,6 @@ function setWorkspace(value: string | null | undefined) {
     else delete draft.defaultWorkspace
   })
 }
-function setBudget(value: string | null | undefined) {
-  if (value === 'none') {
-    void s.change((draft) => {
-      draft.limits.estimatedBudgetUsd = null
-    })
-    return
-  }
-  const n = Number(value)
-  if (!(n > 0 && n <= 1000)) return
-  void s.change((draft) => {
-    draft.limits.estimatedBudgetUsd = n
-  })
-}
-
 /** Acknowledge the upgrade notice: any save clears it (AGT-05). */
 function dismissNotice() {
   void s.change((draft) => {
@@ -548,23 +513,15 @@ useSettingsHeader({
           @update:model-value="setWorkspace"
         />
       </SettingsRow>
-      <SettingsRow
-        title="单个任务的费用上限"
-        description="按 API 计费时的估算费用；订阅额度不计费用"
-      >
-        <Select
-          :model-value="budgetValue"
-          :options="budgetOptions"
-          size="sm"
-          data-task-budget
-          aria-label="单个任务的费用上限"
-          :disabled="busy"
-          @update:model-value="setBudget"
-        />
-      </SettingsRow>
+      <SettingsLinkRow
+        title="费用和限制"
+        description="费用和限制在「用量与费用」里统一设置"
+        data-usage-link
+        @click="openSettings('tokens')"
+      />
       <SettingsLinkRow
         title="高级"
-        description="最多轮数、运行时长、开发环境与排查"
+        description="开发环境与排查"
         data-executor-advanced-link
         @click="openPage('advanced')"
       />

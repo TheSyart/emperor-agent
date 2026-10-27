@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSession } from './useSession'
+import { useAppMode } from './useAppMode'
 
 const g = globalThis as unknown as { window?: any; fetch?: unknown }
 
@@ -396,5 +397,69 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
       preset: 'read-only',
     })
     expect(session.getSession('s1')?.plan).toBeUndefined()
+  })
+})
+
+describe('the session a load lands on (MOD-02)', () => {
+  const listed = [
+    {
+      id: 'member',
+      title: 'Member',
+      surface: 'group_member',
+      updated_at: '2026-10-27T03:00:00Z',
+    },
+    {
+      id: 'build',
+      title: 'Build',
+      mode: 'build',
+      project_path: '/tmp/alpha',
+      updated_at: '2026-10-27T02:00:00Z',
+    },
+    {
+      id: 'chat',
+      title: 'Chat',
+      mode: 'chat',
+      updated_at: '2026-10-27T01:00:00Z',
+    },
+  ]
+
+  function bridge(items: unknown[]) {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list') return items
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+  }
+
+  afterEach(() => useAppMode().setMode('chat'))
+
+  it('skips sessions nobody lists and prefers the current mode', async () => {
+    bridge(listed)
+    const session = useSession()
+    useAppMode().setMode('chat')
+    await session.load()
+    expect(session.activeId.value).toBe('chat')
+
+    session.activeId.value = ''
+    useAppMode().setMode('build')
+    await session.load()
+    expect(session.activeId.value).toBe('build')
+
+    // Group has nothing listed yet: the most recent listed session.
+    session.activeId.value = ''
+    useAppMode().setMode('group')
+    await session.load()
+    expect(session.activeId.value).toBe('build')
+  })
+
+  it('starts a draft when nothing in the list can be shown', async () => {
+    bridge([listed[0]])
+    const session = useSession()
+    await session.load()
+    expect(session.activeId.value.startsWith('draft:')).toBe(true)
   })
 })

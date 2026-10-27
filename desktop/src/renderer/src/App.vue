@@ -68,6 +68,7 @@ import {
   routeOwnerFromLineage,
 } from './runtime/routeOwner'
 import { useBootstrap } from './composables/useBootstrap'
+import { createAppModeController, useAppMode } from './composables/useAppMode'
 import { useNotifications } from './composables/useNotifications'
 import { useRuntime } from './composables/useRuntime'
 import { useSession } from './composables/useSession'
@@ -84,6 +85,11 @@ import {
   isStaleDraftRoute,
   shouldFollowActiveSession,
 } from './runtime/routeFollow'
+import {
+  nextListedSession,
+  NO_ROUTE_MODE,
+  routeModeTarget,
+} from './runtime/appMode'
 import { draftSessionOf } from './runtime/sessionDrafts'
 import {
   notificationFromNotice,
@@ -270,14 +276,17 @@ async function onSessionActivate(id: string) {
 
 /**
  * The session was archived or deleted elsewhere (its bootstrap failed and a
- * plain one worked): go to the most recent session and say so (FIX-03).
+ * plain one worked): go to the most recent session and say so (FIX-03) —
+ * one of the current mode when there is one, never one nobody lists.
  */
 async function leaveUnavailableSession(sessionId: string): Promise<void> {
   showToast('这个会话已归档或不存在，已回到最近的会话')
   await sessionStore.load().catch(() => undefined)
-  const next = sessionStore.sessions.value.find(
-    (item) => !item.draft && item.id !== sessionId,
-  )
+  const next = nextListedSession(sessionStore.sessions.value, {
+    mode: appMode.mode.value,
+    exclude: sessionId,
+    anyMode: true,
+  })
   await router
     .push(next ? sessionLocation(next.id) : { name: 'chat' })
     .catch(() => undefined)
@@ -321,6 +330,7 @@ onMounted(async () => {
     switchSession,
     restoreRuntimeState,
     connectSocket,
+    landInAppMode,
   })
   startupDone.value = true
   // REL-03: an older Emperor than last time, or a restore just applied.
@@ -629,6 +639,51 @@ watch(
   },
 )
 
+// ── app mode (Chat / Build / Group, MOD-01) ─────────────────────────────
+// The mode lives in Core's sidebar state. Start-up lands in a session of
+// the saved mode unless a deep link names one; from then on the route
+// leads: the session on screen always belongs to the current mode, so
+// opening one of another mode (notification, search, deep link, back /
+// forward) or binding the open session to a project switches the mode.
+// Pages have no mode and leave it alone. ⌘1 / ⌘2 / ⌘3 and ⌘N go through
+// the controller (composables/useAppMode.ts).
+const appMode = useAppMode()
+const appModeController = createAppModeController(appMode, {
+  sessions: () => sessionStore.sessions.value,
+  projects: () => sessionStore.projects.value,
+  currentSessionId: () =>
+    isConversationRoute(route.name) ? routeSessionId.value : '',
+  selectSession: (id) => {
+    sessionStore.activeId.value = id
+  },
+  openSession: async (id) => {
+    await router.push(sessionLocation(id)).catch(() => undefined)
+  },
+  createDraft: (options) => sessionStore.create(options),
+  openRoute: async (name) => {
+    if (!router.hasRoute(name)) return false
+    await router.push({ name }).catch(() => undefined)
+    return true
+  },
+})
+
+async function landInAppMode(): Promise<void> {
+  try {
+    await appMode.load(sessionStore.sessions.value)
+    // A deep link decides: the mode follows the session it names.
+    if (routeSessionId.value) return
+    await appModeController.landAtStartup(sessionStore.activeId.value)
+  } catch (err) {
+    console.warn('Unable to land in the saved app mode', err)
+  }
+}
+
+appMode.followRoute(() =>
+  startupDone.value
+    ? routeModeTarget(route, sessionStore.getSession)
+    : NO_ROUTE_MODE,
+)
+
 // ── notifications (sidebar bell) ────────────────────────────────────────
 // The session on screen: the routed one on Chat / Trajectory, none on full
 // pages or while the window is hidden. Its questions and finished turns are
@@ -710,11 +765,6 @@ const sidebar = ref<{ focusSearch: () => void } | null>(null)
 const stopNavHistory = installNavHistory(router)
 onBeforeUnmount(stopNavHistory)
 
-async function newChatFromShortcut(): Promise<void> {
-  const session = await sessionStore.create({ mode: 'chat', title: '新会话' })
-  await router.push(sessionLocation(session.id)).catch(() => undefined)
-}
-
 function workspaceShortcut(pane?: WorkspacePane): () => void {
   return () => {
     if (workspaceAvailable.value) toggleWorkspacePane(pane)
@@ -729,7 +779,10 @@ useShortcuts({
   'workspace.toggle': workspaceShortcut(),
   'envCard.toggle': () => frameActions.toggleEnvCard(frame),
   'sidebar.toggle': () => frameActions.toggleSidebar(frame),
-  'session.new': () => runSafely(newChatFromShortcut),
+  'session.new': () => runSafely(appModeController.newSession),
+  'mode.chat': () => runSafely(() => appModeController.switchTo('chat')),
+  'mode.build': () => runSafely(() => appModeController.switchTo('build')),
+  'mode.group': () => runSafely(() => appModeController.switchTo('group')),
   search: () => sidebar.value?.focusSearch(),
   'nav.back': () => goBack(router),
   'nav.forward': () => goForward(router),
@@ -816,6 +869,11 @@ provideAppContext({
   tokens: tokensData,
   tokensLoading,
   loadTokens,
+  appMode: {
+    mode: appMode.mode,
+    switchTo: appModeController.switchTo,
+    newSession: appModeController.newSession,
+  },
 })
 </script>
 

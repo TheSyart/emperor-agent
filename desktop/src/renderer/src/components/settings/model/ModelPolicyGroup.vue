@@ -1,27 +1,27 @@
 <script setup lang="ts">
 /**
- * ModelPolicyGroup — Settings › 模型 › 执行与成本策略: the explicit, default-off
- * fallback model (switch, target, trigger conditions) and the per-Agent-turn
- * cost cap, as SettingsRows under one group. Every change saves at once
- * (`model.savePolicy`; MOD-05): a switch or a choice when it changes, the
- * cap when the field is left (or Enter). A backup switched on without a
- * target waits for one. A model without prices is not covered by the cap:
- * the group names it instead of stopping turns. The group resets from the
- * payload after a save or a refresh.
+ * ModelPolicyGroup — Settings › 模型 › 执行策略: the explicit, default-off
+ * fallback model (switch, target, trigger conditions) as SettingsRows under
+ * one group. Every change saves at once (`model.savePolicy`; MOD-05). A
+ * backup switched on without a target waits for one. The per-task cost cap
+ * moved to 设置 › 用量与费用 (SET-01); a link row leads there, and saving
+ * here keeps the cap as it is. The group resets from the payload after a
+ * save or a refresh.
  *
  * Props: payload (the model config payload).
  * Emits: updated(payload) after a successful save.
  */
 import { computed, ref, watch } from 'vue'
 import { saveModelPolicy } from '../../../api/model'
+import { useSettingsRoute } from '../useSettingsRoute'
 import type { ModelConfigPayload } from '../../../types'
 import {
   Select,
   SettingsGroup,
+  SettingsLinkRow,
   SettingsRow,
   Badge,
   Switch,
-  TextField,
   settingsId,
   type SelectOption,
 } from '../ui'
@@ -32,7 +32,6 @@ import {
   policyDraftsEqual,
   type ModelPolicyDraft,
 } from './modelFormModel'
-import { unpricedUnderCap } from './modelListModel'
 
 const props = defineProps<{ payload: ModelConfigPayload }>()
 const emit = defineEmits<{ updated: [payload: ModelConfigPayload] }>()
@@ -46,12 +45,7 @@ const saved = ref(false)
 const baseline = computed(() => policyDraftFrom(props.payload.policy))
 const dirty = computed(() => !policyDraftsEqual(draft.value, baseline.value))
 
-const costCap = computed({
-  get: () => String(draft.value.costCapUsd ?? ''),
-  set: (value: string | number) => {
-    draft.value.costCapUsd = value
-  },
-})
+const { openSettings } = useSettingsRoute()
 
 const targetOptions = computed<SelectOption[]>(() =>
   props.payload.models
@@ -67,9 +61,6 @@ watch(
   { deep: true },
 )
 
-const unpriced = computed(() =>
-  unpricedUnderCap(props.payload).map(modelEntryLabel),
-)
 const waitingForTarget = computed(
   () => draft.value.fallbackEnabled && !draft.value.fallbackEntryId,
 )
@@ -121,7 +112,7 @@ async function save(): Promise<void> {
 
 <template>
   <SettingsGroup
-    title="执行与成本策略"
+    title="执行策略"
     description="默认不会自动切换模型；改动立即生效。"
     data-testid="model-policy"
   >
@@ -161,56 +152,17 @@ async function save(): Promise<void> {
         <Switch :id="`${uid}-transient`" v-model="draft.onTransient" />
       </SettingsRow>
     </template>
-    <SettingsRow title="每个任务的费用上限" :label-for="`${uid}-cap`">
-      <template #description>
-        <span
-          >从你发出一条消息起，主对话、子智能体与失败的请求都计入；按模型单价累计，未知成本不会按
-          0 计算，账本会标记为不完整。</span
-        >
-        <span
-          v-for="name in unpriced"
-          :key="name"
-          class="unpriced"
-          data-unpriced
-          >「{{ name }}」没有单价，成本上限对它不生效</span
-        >
-      </template>
-      <TextField
-        :id="`${uid}-cap`"
-        v-model="costCap"
-        class="cap"
-        type="number"
-        min="0.000001"
-        step="0.001"
-        inputmode="decimal"
-        placeholder="不限制"
-        size="sm"
-        @change="save"
-        @keydown.enter="save"
-      >
-        <template #trailing><span class="unit">USD</span></template>
-      </TextField>
-    </SettingsRow>
+    <SettingsLinkRow
+      title="费用和限制"
+      description="费用和限制在「用量与费用」里统一设置"
+      data-usage-link
+      @click="openSettings('tokens')"
+    />
     <p v-if="error" class="policy-error" role="alert">{{ error }}</p>
   </SettingsGroup>
 </template>
 
 <style scoped>
-.cap {
-  width: calc(var(--space-8) * 4);
-}
-
-.unit {
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--text-3));
-}
-
-.unpriced {
-  display: block;
-  color: rgb(var(--state-warn-label));
-}
-
 .policy-error {
   margin: 0;
   padding-top: var(--space-2);

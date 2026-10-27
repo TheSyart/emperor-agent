@@ -48,6 +48,30 @@ export type {
   RejectedModelEntryPayload,
 } from '../api/services/model-service'
 export type { ModelTestRecord } from '../api/services/model-test-log'
+// GRP-02: contacts as the renderer sees them (CoreOperationResult<'contacts.*'>).
+export type {
+  Capabilities as ContactCapabilities,
+  Contact,
+  ContactAvatar,
+  ContactPermission,
+  ContactTemplate,
+  ContactVersionEntry,
+  ContactsChange,
+  ContactsListing,
+  Domain as ContactDomain,
+  KnowledgeRef as ContactKnowledgeRef,
+  RoleCard as ContactRoleCard,
+  ToolPreset as ContactToolPreset,
+} from '../contacts/types'
+// GRP-03: a contact's personal memory (contacts.feedback, contacts.memory.*).
+export type {
+  ContactMemoryEntry,
+  ContactMemoryListing,
+} from '../contacts/memory'
+export type {
+  ContactFeedbackInput,
+  ContactFeedbackResult,
+} from '../api/services/contact-memory-service'
 export type {
   ModelEntryDetected,
   ModelEntryLimits,

@@ -23,8 +23,11 @@ import type {
   RejectedModelEntryPayload,
 } from '@emperor/core/api'
 import type {
+  AppMode,
+  ModeRoutes,
   RuntimeEvent as CoreRuntimeEvent,
   RuntimeGoalView as CoreRuntimeGoalView,
+  SessionSurface,
   UpdateDiagnostics,
 } from '@emperor/core/runtime-contract'
 
@@ -1498,6 +1501,14 @@ export interface SessionInfo {
    */
   plan?: boolean
   preset?: PermissionPreset
+  /**
+   * Group chat (0.3, set by Core from GRP-05; absent on Chat and Build
+   * sessions): where the session lives and its contact or group. Which mode
+   * lists it: runtime/appMode.ts `sessionAppMode`.
+   */
+  surface?: SessionSurface
+  contact_id?: string
+  group_id?: string
 }
 
 export interface SessionControlPending {
@@ -1534,4 +1545,8 @@ export interface SidebarState {
   /** Pinned sessions in pin order (Core keeps ≤ 50, drops deleted/archived). */
   pinned_session_ids: string[]
   right_workspace: RightWorkspaceState
+  /** The current mode, kept across restarts (MOD-01; composables/useAppMode). */
+  app_mode: AppMode
+  /** The last session opened in each mode; never a draft. */
+  mode_routes: ModeRoutes
 }

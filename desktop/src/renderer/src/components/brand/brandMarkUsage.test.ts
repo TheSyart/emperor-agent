@@ -54,7 +54,8 @@ describe('brand mark usage', () => {
 
   it('keeps key brand surfaces on BrandMark instead of brandIcon', () => {
     const files = [
-      'components/sidebar/SidebarBrandRow.vue',
+      // The brand row's mark lives in the mode switcher (MOD-02).
+      'components/sidebar/ModeSwitcher.vue',
       'components/sidebar/SidebarRail.vue',
       'components/conversation/EmptyHero.vue',
       'components/onboarding/FirstRunOnboarding.vue',

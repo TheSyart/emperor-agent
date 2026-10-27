@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ProjectInfo, SessionInfo, SidebarState } from '../types'
 
 function session(overrides: Partial<SessionInfo>): SessionInfo {
@@ -32,6 +32,8 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
       filesTreeWidth: 280,
       pane: 'launcher',
     },
+    app_mode: 'chat',
+    mode_routes: {},
     ...overrides,
   }
 }
@@ -98,6 +100,7 @@ describe('sidebar model', () => {
           mode: 'build',
           project_id: 'project-a',
           project_name: 'A',
+          project_path: '/tmp/a',
           updated_at: '2026-01-04T00:00:00+0800',
         }),
         session({
@@ -105,6 +108,7 @@ describe('sidebar model', () => {
           mode: 'build',
           project_id: 'project-b',
           project_name: 'B',
+          project_path: '/tmp/b',
           updated_at: '2026-01-05T00:00:00+0800',
         }),
       ],
@@ -334,6 +338,7 @@ describe('sidebar project registry projection (P1-8)', () => {
           mode: 'build',
           project_id: 'project-b',
           project_name: 'B',
+          project_path: '/tmp/b',
           updated_at: '2026-01-05T00:00:00+0800',
         }),
       ],
@@ -482,5 +487,162 @@ describe('pinned sessions', () => {
     expect(unpinSessionId(['a', 'b'], 'a')).toEqual(['b'])
     const untouched = ['a']
     expect(unpinSessionId(untouched, 'z')).toBe(untouched)
+  })
+})
+
+describe('the three modes in the sidebar state and lists (MOD-01)', () => {
+  it('4–5 · normalizes app_mode and mode_routes like Core', async () => {
+    const { normalizeSidebarState, defaultSidebarState } =
+      await import('./sidebarModel')
+    expect(defaultSidebarState).toMatchObject({
+      app_mode: 'chat',
+      mode_routes: {},
+    })
+    expect(normalizeSidebarState({})).toMatchObject({
+      app_mode: 'chat',
+      mode_routes: {},
+    })
+    expect(
+      normalizeSidebarState({
+        app_mode: 'team' as never,
+        mode_routes: {
+          chat: 'draft:abc',
+          build: ' s-build ',
+          group: 'x'.repeat(129),
+          team: 's',
+        } as never,
+      }),
+    ).toMatchObject({ app_mode: 'chat', mode_routes: { build: 's-build' } })
+    expect(normalizeSidebarState({ app_mode: 'group' }).app_mode).toBe('group')
+  })
+
+  it('11 · never lists group member, trial or unknown-surface sessions, nor Group ones in 置顶 / 项目 / 对话', async () => {
+    const { buildSidebarGroups, searchSidebarSessions } =
+      await import('./sidebarModel')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const sessions = [
+      session({ id: 'chat-1', title: '方案 chat' }),
+      session({
+        id: 'build-1',
+        title: '方案 build',
+        mode: 'build',
+        project_id: 'p1',
+        project_name: 'Alpha',
+        project_path: '/tmp/alpha',
+      }),
+      session({ id: 'group-1', title: '方案 group', surface: 'group' }),
+      session({ id: 'contact-1', title: '方案 contact', surface: 'contact' }),
+      session({
+        id: 'member-1',
+        title: '方案 member',
+        surface: 'group_member',
+      }),
+      session({ id: 'trial-1', title: '方案 trial', surface: 'trial' }),
+      session({
+        id: 'future-1',
+        title: '方案 future',
+        surface: 'workspace' as SessionInfo['surface'],
+      }),
+    ]
+    const grouped = buildSidebarGroups(
+      sessions,
+      state({ pinned_session_ids: ['group-1', 'member-1', 'chat-1'] }),
+    )
+    expect(grouped.pinned.map((item) => item.id)).toEqual(['chat-1'])
+    expect(grouped.chats.map((item) => item.id)).toEqual([])
+    expect(
+      grouped.projects.flatMap((project) =>
+        project.sessions.map((item) => item.id),
+      ),
+    ).toEqual(['build-1'])
+    // Search spans every mode (MOD-04) but never a session nobody lists.
+    expect(
+      searchSidebarSessions(sessions, '方案').map((result) => result.id),
+    ).toEqual(['chat-1', 'build-1', 'group-1', 'contact-1'])
+    warn.mockRestore()
+  })
+})
+
+describe('the sidebar by mode (MOD-02)', () => {
+  it('splits 项目 / 对话 by the current project binding (D2), not by `mode`', async () => {
+    const { buildSidebarGroups } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups(
+      [
+        session({ id: 'chat-plain' }),
+        // A Chat session bound to a project mid-way: Build (D2).
+        session({
+          id: 'chat-bound',
+          project_id: 'p1',
+          project_name: 'Alpha',
+          project_path: '/tmp/alpha',
+        }),
+        // An old Build session with no project path: Chat (D2).
+        session({ id: 'build-unbound', mode: 'build', project_path: '  ' }),
+        session({
+          id: 'build-1',
+          mode: 'build',
+          project_id: 'p1',
+          project_name: 'Alpha',
+          project_path: '/tmp/alpha',
+        }),
+      ],
+      state(),
+    )
+    expect(grouped.chats.map((item) => item.id)).toEqual([
+      'chat-plain',
+      'build-unbound',
+    ])
+    expect(grouped.projects).toHaveLength(1)
+    expect(grouped.projects[0]!.sessions.map((item) => item.id)).toEqual([
+      'chat-bound',
+      'build-1',
+    ])
+  })
+
+  it('4 · filters 置顶 by mode, keeping pin order', async () => {
+    const { buildSidebarGroups, pinnedInMode } = await import('./sidebarModel')
+    const grouped = buildSidebarGroups(
+      [
+        session({ id: 'chat-1' }),
+        session({ id: 'chat-2' }),
+        session({
+          id: 'build-1',
+          mode: 'build',
+          project_id: 'p1',
+          project_path: '/tmp/alpha',
+        }),
+      ],
+      state({ pinned_session_ids: ['chat-2', 'build-1', 'chat-1'] }),
+    )
+    expect(pinnedInMode(grouped.pinned, 'chat').map((s) => s.id)).toEqual([
+      'chat-2',
+      'chat-1',
+    ])
+    expect(pinnedInMode(grouped.pinned, 'build').map((s) => s.id)).toEqual([
+      'build-1',
+    ])
+    expect(pinnedInMode(grouped.pinned, 'group')).toEqual([])
+  })
+
+  it('moves a pin among the pins on screen; pins of other modes keep their places', async () => {
+    const { moveIdAmong } = await import('./sidebarModel')
+    const all = ['c1', 'b1', 'c2', 'b2', 'c3']
+    const chats = ['c1', 'c2', 'c3']
+    expect(moveIdAmong(all, chats, 'c2', -1)).toEqual([
+      'c2',
+      'b1',
+      'c1',
+      'b2',
+      'c3',
+    ])
+    expect(moveIdAmong(all, chats, 'c2', 1)).toEqual([
+      'c1',
+      'b1',
+      'c3',
+      'b2',
+      'c2',
+    ])
+    expect(moveIdAmong(all, chats, 'c1', -1)).toBe(all)
+    expect(moveIdAmong(all, chats, 'zz', 1)).toBe(all)
   })
 })

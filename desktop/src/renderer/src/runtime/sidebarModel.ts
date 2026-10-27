@@ -5,6 +5,13 @@ import type {
   SidebarSectionKey,
   SidebarState,
 } from '../types'
+import {
+  isAppMode,
+  isListedSession,
+  normalizeModeRoutes,
+  sessionAppMode,
+  type AppMode,
+} from './appMode'
 
 export interface SidebarProjectGroup {
   id: string
@@ -72,6 +79,8 @@ export const defaultSidebarState: SidebarState = {
     filesTreeWidth: 280,
     pane: 'launcher',
   },
+  app_mode: 'chat',
+  mode_routes: {},
 }
 
 export function normalizeSidebarState(
@@ -90,6 +99,9 @@ export function normalizeSidebarState(
     collapsed_sections: normalizeCollapsedSections(value?.collapsed_sections),
     pinned_session_ids: normalizePinnedSessionIds(value?.pinned_session_ids),
     right_workspace: normalizeRightWorkspace(value?.right_workspace),
+    // Core fills a missing mode from the sessions; Chat is the last resort.
+    app_mode: normalizeAppMode(value?.app_mode),
+    mode_routes: normalizeModeRoutes(value?.mode_routes),
   }
 }
 
@@ -219,10 +231,16 @@ export function buildSidebarGroups(
   projectsInput: ProjectInfo[] = [],
 ): SidebarGroups {
   const state = normalizeSidebarState(stateInput)
-  // P1-6：draft 会话未发首条消息前不出现在侧边栏
-  const listed = sessions.filter(
-    (session) => !session.archived_at && !session.draft,
-  )
+  // P1-6：draft 会话未发首条消息前不出现在侧边栏. MOD-01: only Chat and
+  // Build sessions (by `sessionAppMode`) — a group member's or a trial
+  // session is listed nowhere, and Group sessions get their own sections.
+  // MOD-02: 项目 / 对话 split by the current project binding (D2), not by
+  // `mode`: a Chat session bound mid-way sits under its project, an old
+  // Build session with no project path under 对话.
+  const listed = sessions.filter((session) => {
+    if (!isListedSession(session)) return false
+    return sessionAppMode(session) !== 'group'
+  })
   // Pinned sessions only show in the 置顶 section (pin order); ids that no
   // longer match a listed session are stale and ignored.
   const byId = new Map(listed.map((session) => [session.id, session]))
@@ -232,7 +250,7 @@ export function buildSidebarGroups(
   const pinnedIds = new Set(pinned.map((session) => session.id))
   const visible = listed.filter((session) => !pinnedIds.has(session.id))
   const chats = sortSessions(
-    visible.filter((session) => session.mode !== 'build'),
+    visible.filter((session) => sessionAppMode(session) === 'chat'),
     state.chat_sort,
     state.chat_order,
   )
@@ -243,7 +261,7 @@ export function buildSidebarGroups(
     projectMap.set(group.id, group)
   }
   for (const session of visible) {
-    if (session.mode !== 'build') continue
+    if (sessionAppMode(session) !== 'build') continue
     const id = session.project_id || session.project_path || 'missing-project'
     const existing = projectMap.get(id)
     if (existing) {
@@ -280,6 +298,14 @@ export function buildSidebarGroups(
   }
 }
 
+/** The pinned sessions of one mode, in pin order (MOD-02: 置顶 per mode). */
+export function pinnedInMode(
+  pinned: SessionInfo[],
+  mode: AppMode,
+): SessionInfo[] {
+  return pinned.filter((session) => sessionAppMode(session) === mode)
+}
+
 function projectGroupFromProject(
   project: ProjectInfo,
 ): SidebarProjectGroup | null {
@@ -301,8 +327,9 @@ export function searchSidebarSessions(
 ): SidebarSearchResult[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
+  // Every mode (MOD-04 tags them), never a session nobody lists (MOD-01).
   return sessions
-    .filter((session) => !session.archived_at && !session.draft)
+    .filter(isListedSession)
     .filter((session) => searchableText(session).includes(needle))
     .slice(0, 12)
     .map((session) => ({
@@ -395,6 +422,10 @@ function searchableText(session: SessionInfo): string {
     .toLowerCase()
 }
 
+function normalizeAppMode(value: unknown): AppMode {
+  return isAppMode(value) ? value : 'chat'
+}
+
 function normalizeSort(value: unknown): SidebarSortMode {
   return value === 'manual' || value === 'created_at' || value === 'updated_at'
     ? value
@@ -467,6 +498,29 @@ export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
 }
 
 // ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早） ──
+
+/**
+ * Move `id` one step among `visible` (the rows on screen, a subset of `ids`
+ * in the same order) and return the whole list: the ids of other modes keep
+ * their places. Unchanged (same array) at an edge or for an unknown id.
+ */
+export function moveIdAmong(
+  ids: string[],
+  visible: string[],
+  id: string,
+  delta: -1 | 1,
+): string[] {
+  const at = visible.indexOf(id)
+  const neighbour = at < 0 ? undefined : visible[at + delta]
+  if (!neighbour) return ids
+  const from = ids.indexOf(id)
+  const to = ids.indexOf(neighbour)
+  if (from < 0 || to < 0) return ids
+  const next = [...ids]
+  next[from] = neighbour
+  next[to] = id
+  return next
+}
 
 export interface SidebarDayGroup {
   key: 'today' | 'yesterday' | 'week' | 'month' | 'older'

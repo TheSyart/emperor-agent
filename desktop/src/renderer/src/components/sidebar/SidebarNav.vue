@@ -1,45 +1,45 @@
 <script setup lang="ts">
 /**
- * Sidebar nav (UI-S11): the 新对话 primary row — a raised, hairline-edged
- * 36px button that shows ⌘N on hover, with the + beside it starting a Build
- * project session — then the full pages one step quieter: Pull Request
- * (while the GitHub plugin is on), 定时任务, 能力, highlighted by the
- * current route name.
+ * Sidebar primary row (UI-S11, per mode since MOD-02): the raised 36px ⌘N
+ * button — 新对话 / 新建项目会话 / 新建群聊 — showing ⌘N on hover, and in
+ * Build and Group a + beside it (打开文件夹 / 新建联系人). The button runs
+ * what ⌘N runs (`new-session`); the pages moved to the footer (D4).
+ *
+ * Group's two entries wait for GRP-04 / GRP-05: they stay in place, marked
+ * unavailable (`aria-disabled`, not `disabled`, so the hover still says
+ * 「即将推出」) and do nothing.
  */
-import { elementOf } from '../ui/elementOf'
+import { computed, ref } from 'vue'
+import type { AppMode } from '../../runtime/appMode'
+import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
 import Kbd from '../ui/Kbd.vue'
-import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useAppContext } from '../../composables/useAppContext'
-import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
-import { DsNewChat, DsPlus } from '../icons/ds'
-import {
-  activeSidebarPage,
-  visibleSidebarPages,
-  type SidebarPageEntry,
-} from './sidebarNav'
+import TooltipBubble from '../ui/TooltipBubble.vue'
+import { useTooltip } from '../ui/useTooltip'
+import { COMING_SOON, modeEntry } from './modeEntries'
 
-defineProps<{ projectMenuOpen?: boolean }>()
-const emit = defineEmits<{
-  'new-chat': []
-  'new-project': [anchor: HTMLElement]
-}>()
+const props = defineProps<{ mode: AppMode }>()
+const emit = defineEmits<{ 'new-session': []; secondary: [] }>()
 
-const ctx = useAppContext()
-const route = useRoute()
-const router = useRouter()
-const active = computed(() => activeSidebarPage(route.name))
-const pages = computed(() => visibleSidebarPages(ctx.boot.value?.plugins ?? []))
-const newChatShortcut = shortcutLabel('session.new', detectShortcutPlatform())
-const addButton = ref<HTMLElement | null>(null)
+const entry = computed(() => modeEntry(props.mode))
+const primary = computed(() => entry.value.primary)
+const secondary = computed(() => entry.value.secondary)
+const newShortcut = shortcutLabel('session.new', detectShortcutPlatform())
 
-function go(entry: SidebarPageEntry): void {
-  void router.push(entry.to).catch(() => undefined)
+const primaryButton = ref<HTMLButtonElement | null>(null)
+const soon = useTooltip({
+  anchor: primaryButton,
+  side: () => 'bottom',
+  delayMs: () => 400,
+  enabled: () => !primary.value.ready,
+})
+
+function runPrimary(): void {
+  if (primary.value.ready) emit('new-session')
 }
 
-function newProject(): void {
-  if (addButton.value) emit('new-project', addButton.value)
+function runSecondary(): void {
+  if (secondary.value?.ready) emit('secondary')
 }
 </script>
 
@@ -47,40 +47,37 @@ function newProject(): void {
   <nav class="sidebar-nav" aria-label="侧栏导航">
     <div class="new-chat-row" data-sidebar-block="new">
       <button
+        ref="primaryButton"
         type="button"
         class="new-chat"
-        aria-label="新对话"
-        @click="emit('new-chat')"
+        :aria-label="primary.label"
+        :aria-disabled="primary.ready ? undefined : 'true'"
+        @click="runPrimary"
+        v-on="soon.listeners"
       >
-        <DsNewChat :size="16" class="new-chat-icon" />
-        <span class="new-chat-label">新对话</span>
-        <Kbd v-if="newChatShortcut" class="new-chat-key">{{
-          newChatShortcut
+        <component :is="primary.icon" :size="16" class="new-chat-icon" />
+        <span class="new-chat-label">{{ primary.label }}</span>
+        <Kbd v-if="newShortcut && primary.ready" class="new-chat-key">{{
+          newShortcut
         }}</Kbd>
+        <TooltipBubble
+          v-if="soon.visible.value"
+          :label="COMING_SOON"
+          :side="soon.side.value"
+          :position="soon.position.value"
+        />
       </button>
       <IconButton
-        :ref="(c) => (addButton = elementOf(c))"
+        v-if="secondary"
         class="nav-add"
-        label="新建项目会话"
+        :label="secondary.label"
+        :tooltip="secondary.ready ? secondary.label : COMING_SOON"
+        :aria-disabled="secondary.ready ? undefined : 'true'"
         size="sm"
-        :aria-expanded="projectMenuOpen"
-        @click="newProject"
+        @click="runSecondary"
       >
-        <DsPlus :size="16" />
+        <component :is="secondary.icon" :size="16" />
       </IconButton>
-    </div>
-    <div class="pages" data-sidebar-block="pages">
-      <button
-        v-for="entry in pages"
-        :key="entry.name"
-        type="button"
-        class="nav-item"
-        :aria-current="active === entry.name ? 'page' : undefined"
-        @click="go(entry)"
-      >
-        <component :is="entry.icon" :size="16" class="nav-icon" />
-        <span class="nav-label">{{ entry.label }}</span>
-      </button>
     </div>
   </nav>
 </template>
@@ -90,11 +87,10 @@ function newProject(): void {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
 
-/* 新对话: the one raised object in the sidebar. */
+/* The ⌘N button: the one raised object in the sidebar. */
 .new-chat-row {
   display: flex;
   align-items: center;
@@ -102,6 +98,7 @@ function newProject(): void {
 }
 
 .new-chat {
+  position: relative;
   display: flex;
   flex: 1;
   align-items: center;
@@ -122,14 +119,25 @@ function newProject(): void {
   transition: box-shadow var(--motion-base) var(--ease-standard);
 }
 
-.new-chat:hover {
+.new-chat:hover:not([aria-disabled='true']) {
   box-shadow: var(--elev-2);
 }
 
-.new-chat:focus-visible,
-.nav-item:focus-visible {
+.new-chat:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+/* Not built yet (Group): still there, quieter, nothing happens. */
+.new-chat[aria-disabled='true'],
+.nav-add[aria-disabled='true'] {
+  cursor: default;
+}
+
+.new-chat[aria-disabled='true'] .new-chat-icon,
+.new-chat[aria-disabled='true'] .new-chat-label,
+.nav-add[aria-disabled='true'] {
+  opacity: 0.45;
 }
 
 .new-chat-icon {
@@ -162,56 +170,5 @@ function newProject(): void {
 .nav-add {
   flex: none;
   color: rgb(var(--text-3));
-}
-
-/* The full pages, one step quieter than the sessions below. */
-.pages {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-0-5);
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  height: var(--space-8);
-  padding: 0 var(--space-2);
-  border: none;
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: rgb(var(--text-2));
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  text-align: left;
-  cursor: pointer;
-}
-
-.nav-item:hover {
-  background: var(--surface-hover);
-  color: rgb(var(--text-1));
-}
-
-.nav-item[aria-current='page'] {
-  background: rgb(var(--surface-selected));
-  color: rgb(var(--text-1));
-  font-weight: var(--weight-medium);
-}
-
-.nav-icon {
-  flex: none;
-  color: rgb(var(--text-3));
-}
-
-.nav-item:hover .nav-icon,
-.nav-item[aria-current='page'] .nav-icon {
-  color: rgb(var(--text-1));
-}
-
-.nav-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

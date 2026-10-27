@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-25（对照 `e3fb36f2`）<br>
-> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
+> 最后核验：2026-10-27（对照 `3a55b24f`）<br>
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`
 
 ## 两个根的区分
 
@@ -87,7 +87,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     media/<month>/
     desktop/window.json
     desktop_pet/window.json
-    sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）和文件树宽度等工作台偏好
+    sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）、当前模式（Chat / Build / Group）与每种模式上次打开的会话、文件树宽度等工作台偏好
   sessions/
     .harness-kernel-v1     # 当前内核的会话目录标记
     index.json             # 会话索引（标题、模式、项目绑定、归档）；启动时建一次，之后常驻内存
@@ -98,6 +98,10 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
       meta.jsonl           # 会话索引元数据，用于重建 index.json；超过 1000 行时压缩为最新一条快照
       log.jsonl            # append-only session log：会话全部事实
   sessions.legacy-<ts>/    # 首次启动新内核时移走的旧会话目录（如存在）
+  contacts/                # 联系人（GRP-02，见下文「联系人」）
+    contacts.json          # schemaVersion 2；内置的 Emperor、Claude Code、Codex 只读回头像、简介和版本号
+    <contact-id>/versions/<n>.json  # 每次改动前的旧版本，只留最近 20 个；删除联系人时整个目录一起删
+    <contact-id>/memory/   # 个人记忆（GRP-03）：MEMORY.local.md 一行一条反馈，versions/ 是改动前的快照
   projects/
     index.json
     <project-id>/
@@ -285,6 +289,19 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 4. 内置 Skills：`runtimeRoot/skills`（只读，目前只有 `skill-creator`；`computer-use` 由 Computer Use 插件提供，从旧运行时迁移 Skill 时不会把它复制成个人 Skill）
 
 同名时高优先级覆盖低优先级。`SkillLoaders` 为每个项目根缓存一个 `FileSkillsLoader`（Chat 会话使用无项目的 loader），同一 session 的 Skill 目录注入、`skill` 工具、`skill_manage` 与 `skills.*` 共用该 session 的 loader。只读来源可以通过 `skills.copyToUser` 或“复制为个人 Skill”得到个人副本。
+
+## 联系人（GRP-02）
+
+联系人是长期存在的 agent，设计见[联系人与群聊](../design/agent-contacts.md)。`packages/core/src/contacts/store.ts` 的 `ContactStore` 管理 `contacts/`：
+
+- `contacts.json` 用原子快照写（同目录临时文件 → rename → 同步目录），`schemaVersion: 2`；更新版本写的文件只读（见下文「数据版本与只读降级」），`contacts/contacts.json` 在数据文件清单里。
+- 第一次读取时写入三个内置联系人：`ct-emperor`（岗位说明书就是随包的 `templates/agent/persona.md`）、`ct-claude-code`、`ct-codex`（模型和权限跟随「设置 › 子智能体」，联系人上不存）。内置联系人不能删除，只能改头像和简介；文件里只读回这几项和版本号，其余每次按随包定义生成。
+- 版本：名字、简介、领域、岗位说明书、能力、群聊习惯或个人记忆开关有变化时版本号加 1，改动前的完整联系人写到 `contacts/<id>/versions/<旧版本号>.json`，只留最近 20 个；只换头像不加版本。退回旧版本（`contacts.restoreVersion`）本身产生一个新版本，不改历史。
+- 校验：名字去掉首尾空白后 1–24 字，忽略大小写不重名，不含 `@` 和换行；简介一行、最多 60 字；领域最多 3 个；职责、交付、边界各 2000 字，工作方法 4000 字，样例任务 1000 字；参考资料最多 20 条，文件和文件夹必须是存在的绝对路径，网址只收 https；工具的允许、禁止只能是工具注册表里的名字；权限不能高于「设置 › 常规 › 会话 › 新会话的权限」。违反时报 `contact_invalid`，消息写明哪一项。
+- 损坏：读不出或不合规则的文件改名为 `contacts.json.corrupt-<时间>-<随机>` 保留，本次运行只读：`contacts.list` 返回 `readOnly`（「联系人文件损坏，已备份到 …」），三个内置联系人照常可用，任何修改报 `contacts_read_only`。
+- 并发：Core 内单写者队列，改动一个接一个执行。每次保存后发 host 事件 `contacts_changed`。
+- 个人记忆（GRP-03）：`contacts/<id>/memory/MEMORY.local.md`，经 `MemoryStore` 写（改动前的内容留在同目录 `versions/`）。只记用户的明确反馈：`contacts.feedback` 把 👍 / 👎 和用户的一句话（最多 200 字）写成一行，带日期和来源（哪个会话、哪条回答的开头），不从对话里自动提炼；`contacts.memory.list | update | delete` 逐条查看、修改、删除。第一条反馈之前不建目录；提示词只放最新的 4 KB，超出时 `contacts.memory.list` 返回 `truncated` 和整理提示。每次改动发 `contacts_changed`（`reason: 'memory'`）。
+- 岗位模板：`templates/contacts/<id>.md`，18 个，frontmatter 加「职责、交付、工作方法、边界、样例任务」五节；随应用打包到 `runtime-defaults/templates/contacts/`，`contacts.templates` 读取，`contacts.fromTemplate` 照模板新建（模板要的权限高于全局预设时从只读开始）。
 
 ## 迁移策略
 

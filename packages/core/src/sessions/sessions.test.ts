@@ -488,3 +488,100 @@ describe('SessionStore trash (FIX-01)', () => {
     )
   })
 })
+
+describe('SessionStore group-chat fields (MOD-01)', () => {
+  /** One session written straight to disk, as GRP-05 will write them. */
+  function seedSession(root: string, session: Record<string, unknown>): void {
+    const dir = join(root, 'sessions', String(session.id))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'meta.jsonl'),
+      `${JSON.stringify({
+        type: 'session_snapshot',
+        ts: '2026-10-27T10:00:00+0800',
+        session: {
+          title: '会话',
+          created_at: '2026-10-27T10:00:00+0800',
+          updated_at: '2026-10-27T10:00:00+0800',
+          preview: '',
+          message_count: 0,
+          title_status: 'manual',
+          mode: 'chat',
+          version: 1,
+          ...session,
+        },
+      })}\n`,
+      'utf8',
+    )
+  }
+
+  it('passes surface, contact_id and group_id through unchanged and keeps them on writes', () => {
+    const root = tmp('emperor-session-surface-')
+    seedSession(root, {
+      id: 'contact-1',
+      surface: 'contact',
+      contact_id: 'ct-claude-code',
+    })
+    seedSession(root, {
+      id: 'member-1',
+      surface: 'group_member',
+      contact_id: 'ct-codex',
+      group_id: 'grp-1',
+    })
+    // A newer Emperor's surface stays as it is: the session is then listed
+    // nowhere instead of turning into a Chat.
+    seedSession(root, { id: 'future-1', surface: 'workspace' })
+    seedSession(root, { id: 'plain-1' })
+
+    const store = new SessionStore(root)
+    const byId = new Map(store.list().map((item) => [item.id, item]))
+    expect(byId.get('contact-1')).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-claude-code',
+    })
+    expect(byId.get('contact-1')).not.toHaveProperty('group_id')
+    expect(byId.get('member-1')).toMatchObject({
+      surface: 'group_member',
+      contact_id: 'ct-codex',
+      group_id: 'grp-1',
+    })
+    expect(byId.get('future-1')?.surface).toBe('workspace')
+    // Today's sessions carry none of the three keys (disk compatible).
+    const plain = byId.get('plain-1')!
+    for (const key of ['surface', 'contact_id', 'group_id'])
+      expect(plain).not.toHaveProperty(key)
+
+    expect(store.rename('member-1', '改名')).toBe(true)
+    expect(new SessionStore(root).get('member-1')).toMatchObject({
+      title: '改名',
+      surface: 'group_member',
+      contact_id: 'ct-codex',
+      group_id: 'grp-1',
+    })
+    // The cached index reads back as written: no entry counts as repaired.
+    const reloaded = new SessionStore(root)
+    reloaded.list()
+    expect(reloaded.diagnostics().rebuildReasons).toEqual([])
+  })
+
+  it('creates a session with them, and without them as today (GRP-03)', () => {
+    const root = tmp('emperor-session-create-surface-')
+    const store = new SessionStore(root)
+    const single = store.create('单聊', {
+      surface: 'contact',
+      contactId: 'ct-abcdefghijkl',
+    })
+    expect(single).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-abcdefghijkl',
+    })
+    expect(single).not.toHaveProperty('group_id')
+    const plain = store.create('Chat', { contactId: '  ' })
+    for (const key of ['surface', 'contact_id', 'group_id'])
+      expect(plain).not.toHaveProperty(key)
+    expect(new SessionStore(root).get(single.id)).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-abcdefghijkl',
+    })
+  })
+})

@@ -50,6 +50,10 @@ vi.mock('./AddModelDialog.vue', async () => {
 })
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../../api/http', () => ({ core }))
+// SET-01: the link row to 用量与费用 opens it through the route.
+vi.mock('../useSettingsRoute', () => ({
+  useSettingsRoute: () => ({ openSettings: vi.fn() }),
+}))
 
 const profile = {
   toolCall: true,
@@ -153,17 +157,6 @@ function button(name: string): HTMLButtonElement {
   )
   if (!match) throw new Error(`button ${name} not found`)
   return match
-}
-
-function input(label: string): HTMLInputElement {
-  const target = [...container!.querySelectorAll('label')].find(
-    (candidate) => candidate.textContent?.trim() === label,
-  )
-  const id = target?.getAttribute('for')
-  const control = id ? document.getElementById(id) : null
-  if (!(control instanceof HTMLInputElement))
-    throw new Error(`input ${label} not found`)
-  return control
 }
 
 /** Pick `item` from the 「⋯」 menu named `label` (it opens on body). */
@@ -431,36 +424,35 @@ describe('ModelSection', () => {
     expect(container!.querySelector('[data-entry-id="b"]')).toBeNull()
   })
 
-  it('saves the execution policy as soon as a row changes (MOD-05 7)', async () => {
+  it('saves the execution policy as soon as a row changes, keeping the cost cap (MOD-05 7)', async () => {
     const config = payload([
       entry({}),
       entry({ entryId: 'b', displayName: 'B' }),
     ])
+    config.policy = {
+      fallback: { enabled: true, entryId: 'b', triggerOn: ['rate_limit'] },
+      cost: { maxUsdPerAgentTurn: 0.25 },
+    }
     api.saveModelPolicy.mockResolvedValue(config)
     await mount(config)
     const policy = container!.querySelector('[data-testid="model-policy"]')!
     expect(policy.textContent).toContain('默认不会自动切换模型')
-    expect(policy.textContent).toContain('每个任务的费用上限')
+    // SET-01: the cap is set in 用量与费用; a link row leads there.
+    expect(policy.textContent).not.toContain('每个任务的费用上限')
+    expect(policy.querySelector('[data-usage-link]')).toBeTruthy()
     expect(() => button('保存策略')).toThrow()
 
-    const cap = input('每个任务的费用上限')
-    cap.value = '0.25'
-    cap.dispatchEvent(new Event('input'))
-    await flush()
-    expect(api.saveModelPolicy).not.toHaveBeenCalled()
-    cap.dispatchEvent(new Event('change'))
+    labelled('服务或网络暂时失败时切换').click()
     await flush()
     expect(api.saveModelPolicy).toHaveBeenCalledOnce()
     expect(api.saveModelPolicy).toHaveBeenLastCalledWith({
-      fallback: { enabled: false, entryId: null, triggerOn: ['rate_limit'] },
+      fallback: {
+        enabled: true,
+        entryId: 'b',
+        triggerOn: ['rate_limit', 'transient'],
+      },
       cost: { maxUsdPerAgentTurn: 0.25 },
     })
-
-    labelled('备用模型').click()
-    await flush()
-    // Switching the backup on needs a target first: nothing to save yet.
-    expect(api.saveModelPolicy).toHaveBeenCalledOnce()
-    expect(policy.textContent).toContain('选好备用模型后生效')
   })
 })
 
@@ -782,7 +774,7 @@ describe('ModelSection (MOD-05)', () => {
     expect(sent).not.toHaveProperty('apiBase')
   })
 
-  it('says the cost cap does not apply to a model without prices (8)', async () => {
+  it('leaves the note on models without prices to 用量与费用 (8, SET-01)', async () => {
     const config = payload(three())
     config.policy = {
       ...config.policy,
@@ -790,7 +782,7 @@ describe('ModelSection (MOD-05)', () => {
     }
     await mount(config)
     const policy = container!.querySelector('[data-testid="model-policy"]')!
-    expect(policy.textContent).toContain('「Main」没有单价，成本上限对它不生效')
+    expect(policy.textContent).not.toContain('没有单价')
   })
 })
 

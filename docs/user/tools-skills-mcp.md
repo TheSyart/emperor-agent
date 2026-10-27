@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-27（对照 `966ce225`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/harness/delegation/tools.ts`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
@@ -30,7 +30,7 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 - **搜索**：`grep` 优先使用受管执行环境中的 ripgrep，找不到时使用内置的纯 JS 实现；`glob` 与 `grep` 的超大结果会把完整结果保存到本地。
 - **命令**：`bash` 在 macOS 的系统沙箱（Seatbelt）中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。工具说明要求模型先写一句命令用途（`description`）再写命令，界面因此能在命令生成时就显示它要做什么；删除或移动文件前，模型会被要求先核对解析后的绝对路径，变量写成 `${VAR:?}`，避免空变量把路径变成上级目录。
 - **子智能体**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子智能体继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子智能体最多嵌套 3 层，不能请求提权。在「设置 › 子智能体」打开 Claude Code 或 Codex 后，`subagent` 多一个 `backend` 参数（`internal`、`claude-code`、`codex`），第一次交给它们时先弹确认卡；它们不能继承当前对话（不能 fork），用 `send_message` 继续（`delivery: steer` 可以给正在运行的 Codex 插话，Claude Code 不支持），用 `inspect_agent` 查看、用 `collect_agent` 收取结果。`collect_agent` 的 `apply` 请求把成果应用到项目、`abandon` 请求把卡住的任务标记为已结束，两者都先弹审批卡由你决定。你也可以在子智能体的页面直接给它发消息。详见[子智能体](automation-collaboration.md#子智能体)。
-- **任务预算**：「设置 › 高级 › 任务预算」限制一个任务（你发出的一条消息和它引出的全部工作）能用多少：每轮最多步数（对话 400 步，定时任务与目标每轮 120 步），同时运行的子智能体（8 个，多出的排队等空位），每个任务最多启动的子智能体（64 个，再启动会被拒绝），子智能体结果最多唤醒对话几次（32 次，之后结果留到下一步再读）。达到步数上限时本轮停止，对话里显示「已达到单轮步数上限」，Agent 也会知道为什么停下，可以让它继续。设置保存在 `~/.emperor/settings.json` 的 `taskBudget`；费用上限在「设置 › 模型」。
+- **任务预算**：「设置 › 用量与费用 › 防失控」限制一个任务（你发出的一条消息和它引出的全部工作）能用多少：每轮最多步数（对话 400 步，定时任务与目标每轮 120 步），同时运行的子智能体（8 个，多出的排队等空位），每个任务最多启动的子智能体（64 个，再启动会被拒绝），子智能体结果最多唤醒对话几次（32 次，之后结果留到下一步再读）。达到步数上限时本轮停止，对话里显示「已达到单轮步数上限」，Agent 也会知道为什么停下，可以让它继续。设置保存在 `~/.emperor/settings.json` 的 `taskBudget`；费用上限在同一页的「费用上限」里。
 - **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子智能体（在对话的工具卡片下流式显示）；`ralph` 以同一目标反复启动全新子智能体，每轮只传递一份有界的结构化交接，默认最多 64 轮。默认在前台运行，调用返回时整个运行已结束；`workflow` 也可以后台运行（`run_in_background`），调用立即返回任务编号，运行结束后以通知告诉模型，结果用 `job_output` 读取。脚本在一个受限的独立进程里运行：读不到你的项目文件和 Emperor 数据、不能联网、最多用 512 MB 内存，超过 30 分钟会停止；运行期间环境信息卡的「后台任务」行显示运行数量，展开后可以查看运行记录或单独停止它（会先确认）；停止当前 turn 也会同时取消运行。
 - **记忆**：`memory_edit` 修改用户档案、全局长期记忆或当前项目的私有记忆，不需要审批。
 - **扩展管理**：`skill_manage` 管理 Skills，`mcp_config` 管理 MCP server，见下文。查看、校验和重新连接不需要审批；修改 Skill 文件或 MCP 配置的动作跟随当前权限预设，除 `danger-full-access` 外每次写入都会先请求你批准。

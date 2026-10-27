@@ -63,7 +63,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['computer', '电脑操作'],
   ['browser', '浏览器'],
   ['voice', '语音'],
-  ['tokens', '用量'],
+  ['tokens', '用量与费用'],
   ['advanced', '高级'],
 ]
 
@@ -93,6 +93,14 @@ const SUB_PAGES: ReadonlyArray<
   ['advanced', '[data-advanced-page="hooks"]', 'hooks', 'Hooks'],
   ['advanced', '[data-advanced-page="diagnostics"]', 'diagnostics', '诊断'],
   ['advanced', '[data-advanced-page="storage"]', 'storage', '存储'],
+  // SET-01: the former 用量 page is a sub page of 用量与费用.
+  ['tokens', '[data-testid="usage-tokens-link"]', 'tokens', 'Token 明细'],
+  [
+    'tokens',
+    '[data-testid="usage-sessions-link"]',
+    'sessions',
+    '按会话和群查看花费',
+  ],
   ['general', '[data-testid="open-archived"]', 'archived', '已归档对话'],
 ]
 
@@ -726,7 +734,7 @@ async function settings(page: Page, home: string): Promise<void> {
           await dialogOf(page).waitFor({ state: 'hidden' })
         }
         await page
-          .getByRole('navigation', { name: '侧栏导航' })
+          .locator('[data-sidebar-block="footer"]') // page icons (MOD-02)
           .getByRole('button', { name: '能力', exact: true })
           .click()
         const back = page.getByRole('button', { name: '全部插件' })
@@ -816,7 +824,7 @@ async function settings(page: Page, home: string): Promise<void> {
           await dialogOf(page).waitFor({ state: 'hidden' })
         }
         await page
-          .getByRole('navigation', { name: '侧栏导航' })
+          .locator('[data-sidebar-block="footer"]') // page icons (MOD-02)
           .getByRole('button', { name: '能力', exact: true })
           .click()
         await page.getByRole('tab', { name: '工具', exact: true }).click()
