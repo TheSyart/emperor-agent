@@ -42,6 +42,10 @@ const {
 })
 vi.mock('../../api/backend', () => ({ openExternal, onCoreEvent }))
 vi.mock('../../api/http', () => ({ core }))
+// SET-01: the link rows to 用量与费用 open it through the route.
+vi.mock('./useSettingsRoute', () => ({
+  useSettingsRoute: () => ({ openSettings: vi.fn() }),
+}))
 vi.mock('../../api/delegations', () => ({
   listExecutors,
   configureExecutors,
@@ -231,7 +235,9 @@ it('1 · lists the three subagents in one card, then the task settings and 高�
   )!
   expect(settings.textContent).toContain('同时运行')
   expect(settings.textContent).toContain('改代码的位置')
-  expect(settings.textContent).toContain('单个任务的费用上限')
+  // SET-01: the cost cap moved to 用量与费用; a link row leads there.
+  expect(settings.textContent).not.toContain('单个任务的费用上限')
+  expect(settings.querySelector('[data-usage-link]')).toBeTruthy()
   expect(settings.querySelector('[data-executor-advanced-link]')).toBeTruthy()
   expect(root.textContent).toContain('主任务、权限和验证始终由 Emperor 负责')
   // The engineering facts live on each subagent's 详情 page.
@@ -334,7 +340,7 @@ it('4 · a chosen model that was deleted says so and the subagent follows the co
   ).toContain('entry-gone（已删除）')
 })
 
-it('saves 同时运行, 改代码的位置 and the cost cap at once, each only as it changes', async () => {
+it('saves 同时运行 and 改代码的位置 at once, each only as it changes', async () => {
   await mount()
   await choose(
     root.querySelector<HTMLElement>('[data-global-concurrency]')!,
@@ -352,15 +358,10 @@ it('saves 同时运行, 改代码的位置 and the cost cap at once, each only a
     'isolated-worktree',
   )
   expect(lastSaved().config).not.toHaveProperty('defaultWorkspace')
-  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, '2')
-  expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(2)
-  // SET-01: 不限制 is null, and caps above the old $10 ceiling exist.
-  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, 'none')
-  expect(lastSaved().config.limits.estimatedBudgetUsd).toBeNull()
-  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, '50')
-  expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(50)
-  // Every other limit is kept as it was.
+  // Every limit is kept as it was (they are set in 用量与费用, SET-01).
+  expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(10)
   expect(lastSaved().config.limits.maxRunsPerTask).toBe(32)
+  expect(root.querySelector('[data-task-budget]')).toBeNull()
 })
 
 it('a failed save puts the switch back and says why', async () => {
@@ -904,37 +905,14 @@ it('7 · 高级 no longer switches between a bundled and the installed claude', 
   expect(page.textContent).not.toContain('使用本机安装的 claude')
 })
 
-it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only when changed', async () => {
+it('8 · 高级 leaves turns and run time to 用量与费用, with a link there (SET-01)', async () => {
   await mount()
   const page = await openAdvanced()
-  const select = page.querySelector<HTMLElement>('[data-claude-max-turns]')!
-  // SET-01: no turn cap unless the user sets one.
-  expect(select.textContent).toContain('不限制')
-  select.click()
-  await settle()
-  const values = [
-    ...document.querySelectorAll<HTMLElement>('[data-value]'),
-  ].map((o) => o.dataset.value)
-  expect(values).toEqual(
-    expect.arrayContaining(['none', '50', '100', '200', '500', '1000']),
+  expect(page.querySelector('[data-claude-max-turns]')).toBeNull()
+  expect(page.querySelector('[data-run-timeout]')).toBeNull()
+  expect(page.querySelector('[data-usage-link]')?.textContent).toContain(
+    '用量与费用',
   )
-  document.querySelector<HTMLElement>('[data-value="500"]')!.click()
-  await settle()
-  expect(lastSaved().config.limits.claudeMaxTurns).toBe(500)
-  await choose(
-    page.querySelector<HTMLElement>('[data-claude-max-turns]')!,
-    'none',
-  )
-  expect(lastSaved().config.limits).not.toHaveProperty('claudeMaxTurns')
-})
-
-it('高级 sets how long one run may take, up to 120 minutes', async () => {
-  await mount()
-  const page = await openAdvanced()
-  const select = page.querySelector<HTMLElement>('[data-run-timeout]')!
-  expect(select.textContent).toContain('30 分钟')
-  await choose(select, '60')
-  expect(lastSaved().config.limits.runTimeoutMs).toBe(3_600_000)
 })
 
 it('高级 offers 开发环境: git identity and proxies on, the rest off; saves only a change (AGT-08)', async () => {

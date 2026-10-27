@@ -141,6 +141,26 @@ describe('summarizeUsage', () => {
     expect(s.topSessions).toEqual([])
   })
 
+  it('gives the cache hit rate of the range, null with no input', () => {
+    const days = {
+      '2026-10-27': {
+        's-chat': {
+          model: bucket(1, 1000, 0, {
+            input: 200,
+            cache_read: 600,
+            cache_create: 200,
+          }),
+        },
+      },
+    }
+    const s = summarizeUsage({ ...base, byDateSession: days, range: 'today' })
+    expect(s.cacheHitRate).toBeCloseTo(0.6)
+    expect(
+      summarizeUsage({ ...base, byDateSession: {}, range: 'today' })
+        .cacheHitRate,
+    ).toBeNull()
+  })
+
   it('ignores days after today (a clock set back)', () => {
     const days = { '2026-10-30': { 's-chat': { model: bucket(1, 10, 1) } } }
     const s = summarizeUsage({ ...base, byDateSession: days, range: 'all' })

@@ -75,7 +75,7 @@ const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   computer: defineAsyncComponent(() => import('./ComputerUseSection.vue')),
   browser: defineAsyncComponent(() => import('./BrowserSettingsSection.vue')),
   voice: defineAsyncComponent(() => import('./VoiceSettingsSection.vue')),
-  tokens: defineAsyncComponent(() => import('./TokensSection.vue')),
+  tokens: defineAsyncComponent(() => import('./UsageCostSection.vue')),
   advanced: defineAsyncComponent(() => import('./AdvancedSection.vue')),
 }
 

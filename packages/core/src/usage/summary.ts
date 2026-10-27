@@ -58,6 +58,8 @@ export interface UsageSummary {
   tokens: number
   /** Tokens of subscription runs: counted above, never priced. */
   subscriptionTokens: number
+  /** Cache reads ÷ all input (as the provider counts it); null: no input. */
+  cacheHitRate: number | null
   partial: boolean
   bySource: Record<UsageSource, UsageBucket>
   /** Sessions by spend, most first; rows without a session are left out. */
@@ -86,6 +88,8 @@ export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
   const sessions = new Map<string, UsageSessionSpend>()
   let nanos = 0
   let subscriptionTokens = 0
+  let cacheRead = 0
+  let allInput = 0
 
   for (const [day, rows] of Object.entries(input.byDateSession)) {
     if ((from !== null && day < from) || day > input.today) continue
@@ -105,6 +109,10 @@ export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
         bucket.calls += Number(row.calls) || 0
         if ((Number(row.cost_incomplete_calls) || 0) > 0) bucket.partial = true
         subscriptionTokens += Number(row.subscription_tokens) || 0
+        const read = Number(row.cache_read) || 0
+        cacheRead += read
+        allInput +=
+          read + (Number(row.input) || 0) + (Number(row.cache_create) || 0)
         if (!sessionId) continue
         const spend = sessions.get(sessionId) ?? {
           sessionId,
@@ -129,6 +137,7 @@ export function summarizeUsage(input: SummarizeUsageInput): UsageSummary {
     totalUsd: round(nanos / 1e9),
     tokens: Object.values(bySource).reduce((n, b) => n + b.tokens, 0),
     subscriptionTokens,
+    cacheHitRate: allInput > 0 ? cacheRead / allInput : null,
     partial: Object.values(bySource).some((b) => b.partial),
     bySource,
     topSessions,

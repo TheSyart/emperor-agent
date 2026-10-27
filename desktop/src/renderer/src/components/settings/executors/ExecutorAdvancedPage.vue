@@ -1,67 +1,26 @@
 <script setup lang="ts">
 /**
- * 设置 › 子智能体 › 高级 (AGT-10): what most people never change — Claude
- * Code's turns per run, how long one run may take, the development
- * environment a task may use (AGT-08), and the switches for tracking
- * problems down (验证后再应用, 诊断模式). Saved at once. (Claude Code is
- * always the installed one since AGT-12: there is no binary to choose.)
+ * 设置 › 子智能体 › 高级 (AGT-10): what most people never change — the
+ * development environment a task may use (AGT-08) and the switches for
+ * tracking problems down (验证后再应用, 诊断模式). Saved at once. A run's
+ * longest time and Claude Code's turns moved to 设置 › 用量与费用 (SET-01);
+ * a link row leads there. (Claude Code is always the installed one since
+ * AGT-12: there is no binary to choose.)
  */
-import { computed } from 'vue'
 import type { ExecutorConfig } from '@emperor/core/runtime-contract'
 import {
-  Select,
   SettingsGroup,
+  SettingsLinkRow,
   SettingsRow,
   SettingsSection,
   Switch,
 } from '../ui'
+import { useSettingsRoute } from '../useSettingsRoute'
 import { useExecutorSettings } from './useExecutorSettings'
 
 const s = useExecutorSettings()
 const { config, busy } = s
-
-// 每次运行最多轮数: absent means no cap, the default since 0.3 (SET-01).
-const turnOptions = computed(() => {
-  const current = config.value?.limits.claudeMaxTurns
-  const caps = [50, 100, 200, 300, 500, 1000, ...(current ? [current] : [])]
-  return [
-    { value: 'none', label: '不限制（默认）' },
-    ...[...new Set(caps)]
-      .sort((a, b) => a - b)
-      .map((n) => ({ value: String(n), label: `${n} 轮` })),
-  ]
-})
-const turnValue = computed(() =>
-  String(config.value?.limits.claudeMaxTurns ?? 'none'),
-)
-function setMaxTurns(value: string | null | undefined) {
-  if (value === 'none') {
-    void s.change((draft) => {
-      delete draft.limits.claudeMaxTurns
-    })
-    return
-  }
-  const turns = Number(value)
-  if (!Number.isInteger(turns)) return
-  void s.change((draft) => {
-    draft.limits.claudeMaxTurns = turns
-  })
-}
-
-// 单次运行时长上限: Core allows up to 120 minutes.
-const timeoutOptions = computed(() => {
-  const current = Math.round((config.value?.limits.runTimeoutMs ?? 0) / 60_000)
-  return [...new Set([10, 30, 60, 120, ...(current > 0 ? [current] : [])])]
-    .sort((a, b) => a - b)
-    .map((n) => ({ value: String(n), label: `${n} 分钟` }))
-})
-function setRunTimeout(value: string | null | undefined) {
-  const minutes = Number(value)
-  if (!(minutes >= 1 && minutes <= 120)) return
-  void s.change((draft) => {
-    draft.limits.runTimeoutMs = minutes * 60_000
-  })
-}
+const { openSettings } = useSettingsRoute()
 
 // 开发环境 (AGT-08): what a task's environment passes through.
 type DevEnvKey = keyof NonNullable<ExecutorConfig['developmentEnvironment']>
@@ -143,37 +102,13 @@ function setDiagnostics(on: boolean) {
 <template>
   <SettingsSection data-executor-advanced>
     <template v-if="config">
-      <SettingsGroup title="运行">
-        <SettingsRow
-          title="每次运行最多轮数"
-          description="Claude Code 一次运行里最多调用模型的轮数。用完时这次运行以「达到最多轮数」结束，主会话可以发消息让它继续。"
-        >
-          <Select
-            :model-value="turnValue"
-            :options="turnOptions"
-            size="sm"
-            data-claude-max-turns
-            aria-label="Claude Code 每次运行最多轮数"
-            :disabled="busy"
-            @update:model-value="setMaxTurns"
-          />
-        </SettingsRow>
-        <SettingsRow
-          title="单次运行时长上限"
-          description="Claude Code 或 Codex 一次运行超过这个时长就停止，结果里写明是超时。"
-        >
-          <Select
-            :model-value="
-              String(Math.round(config.limits.runTimeoutMs / 60_000))
-            "
-            :options="timeoutOptions"
-            size="sm"
-            data-run-timeout
-            aria-label="单次运行时长上限"
-            :disabled="busy"
-            @update:model-value="setRunTimeout"
-          />
-        </SettingsRow>
+      <SettingsGroup>
+        <SettingsLinkRow
+          title="运行时长与次数"
+          description="费用和限制在「用量与费用」里统一设置"
+          data-usage-link
+          @click="openSettings('tokens')"
+        />
       </SettingsGroup>
       <SettingsGroup
         title="开发环境"

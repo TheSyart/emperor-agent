@@ -68,9 +68,13 @@ describe('settings paths in the docs (test 2)', () => {
       '电脑操作',
       '浏览器',
       '语音',
-      '用量',
+      '用量与费用',
       '高级',
     ])
+    // SET-01: the cost caps and runaway limits live in 用量与费用.
+    const usage = navigation.sections.get('用量与费用')!
+    for (const name of ['费用上限', '防失控', 'Token 明细'])
+      expect(usage.names.has(name), name).toBe(true)
     const advanced = navigation.sections.get('高级')!
     for (const name of ['网络工具', '任务预算', '诊断', '存储', '备份与恢复'])
       expect(advanced.names.has(name), name).toBe(true)

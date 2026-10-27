@@ -438,7 +438,7 @@ describe('SettingsModal', () => {
           [
             ...(header()?.querySelectorAll('[data-action="refresh"]') ?? []),
           ].map((button) => button.getAttribute('aria-label')),
-        ).toEqual(['刷新 Token 统计']),
+        ).toEqual(['刷新用量与费用']),
       SECTION_LOAD,
     )
 

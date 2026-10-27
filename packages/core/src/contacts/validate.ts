@@ -349,9 +349,9 @@ export function normalizeContact(value: unknown): Contact {
   const kind = oneOf(value.kind, ['local', 'external'] as const, 'kind', '类型')
   let backend: Contact['backend']
   if (kind === 'external')
-    backend = oneOf(value.backend, EXTERNAL_BACKENDS, 'backend', '执行器')
+    backend = oneOf(value.backend, EXTERNAL_BACKENDS, 'backend', '外部子智能体')
   else if (value.backend !== undefined)
-    fail('backend', '只有外部联系人才有执行器')
+    fail('backend', '只有外部联系人才对应 Claude Code 或 Codex')
   const capabilities = normalizeCapabilities(value.capabilities)
   if (kind === 'external' && !sameValue(capabilities, EXTERNAL_CAPABILITIES))
     fail(
