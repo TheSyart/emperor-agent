@@ -8,5 +8,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Main reads the theme files as text for skins (BRD-05,
+    // main/skins/theme-sources.ts); every other stylesheet stays empty.
+    css: { include: [/\.css\?raw$/] },
   },
 })

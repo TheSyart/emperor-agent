@@ -58,6 +58,8 @@ describe('trusted renderer policy wiring', () => {
       'registerAppVersionIpc',
       // BUG-05: 「用默认应用打开」 for a granted video.
       'registerWorkspaceMediaIpc',
+      // BRD-05: 设置 › 常规 › 外观 › 皮肤.
+      'registerSkinIpc',
     ])
       expect(source).toMatch(
         new RegExp(

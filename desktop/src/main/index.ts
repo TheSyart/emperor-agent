@@ -47,6 +47,10 @@ import {
 } from './diagnostics-bundle-ipc'
 import { electronFrameworkBinary, readFuseStates } from './fuse-state'
 import { registerHomeBackupIpc, type HomeBackupStore } from './home-backup-ipc'
+import { registerSkinIpc } from './skins/skin-ipc'
+import { skinAssetResponse } from './skins/skin-protocol'
+import { SkinStore } from './skins/skin-store'
+import { themeTokens } from './skins/theme-sources'
 
 import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
@@ -600,6 +604,14 @@ registerHomeBackupIpc({
   homeDir: os.homedir(),
 })
 
+// BRD-05: 设置 › 常规 › 外观 › 皮肤 — the official skins and imported ones.
+registerSkinIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  store: skinStore,
+  chooseFolder: chooseSkinFolder,
+})
+
 // UI-38: a remote markdown image the user clicked, fetched here.
 registerRemoteImageIpc({
   ipcMain,
@@ -1094,6 +1106,34 @@ async function chooseBundleTarget(
 }
 
 /** Main's own save / open dialog for a `.emperor-backup.zip` (REL-03). */
+let skins: SkinStore | null = null
+
+/** Official skins in the app's resources, imported ones in the Home (BRD-05). */
+function skinStore(): SkinStore {
+  skins ??= new SkinStore({
+    officialRoot: app.isPackaged
+      ? path.join(process.resourcesPath, 'skins')
+      : path.resolve(mainDir, '..', '..', 'resources', 'skins'),
+    userRoot: path.join(config.stateRoot, 'skins'),
+    tokens: themeTokens,
+  })
+  return skins
+}
+
+async function chooseSkinFolder(): Promise<string | null> {
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+  const options: OpenDialogOptions = {
+    title: '导入皮肤',
+    message: '选一个含有 skin.json 的文件夹',
+    buttonLabel: '导入',
+    properties: ['openDirectory'],
+  }
+  const result = owner
+    ? await dialog.showOpenDialog(owner, options)
+    : await dialog.showOpenDialog(options)
+  return result.canceled ? null : (result.filePaths[0] ?? null)
+}
+
 async function chooseHomeBackupFile(
   name: string,
   kind: 'save' | 'open',
@@ -1219,6 +1259,10 @@ function registerAppProtocol(): void {
     )
     if (!access.allowed)
       return new Response('asset origin forbidden', { status: 403 })
+    if (url.host === 'skin')
+      return skinAssetResponse(request, (id, file) =>
+        skinStore().asset(id, file),
+      )
     if (url.host === 'attachments') {
       const attachmentPath = resolveAttachmentRawPath(request.url, {
         stateRoot: config.stateRoot,

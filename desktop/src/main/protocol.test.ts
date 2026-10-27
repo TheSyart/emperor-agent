@@ -94,6 +94,21 @@ describe('app protocol cross-origin access', () => {
       allowOrigin: null,
     })
   })
+
+  it('lets only the main window ask for skin pictures (BRD-05)', () => {
+    expect(appAssetRequestAccess('skin', 'app://bundle')).toEqual({
+      allowed: true,
+      allowOrigin: 'app://bundle',
+    })
+    expect(appAssetRequestAccess('skin', 'app://pet')).toEqual({
+      allowed: false,
+      allowOrigin: null,
+    })
+    expect(appAssetRequestAccess('skin', 'https://evil.test')).toEqual({
+      allowed: false,
+      allowOrigin: null,
+    })
+  })
 })
 
 describe('resolveAttachmentRawPath', () => {

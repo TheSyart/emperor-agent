@@ -46,6 +46,11 @@ import {
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  SKIN_GET_CHANNEL,
+  SKIN_IMPORT_CHANNEL,
+  SKIN_IMPORT_PICK_CHANNEL,
+  SKIN_LIST_CHANNEL,
+  SKIN_REMOVE_CHANNEL,
   VAULT_EXPORT_CHANNEL,
   VAULT_IMPORT_CHANNEL,
   VAULT_IMPORT_PICK_CHANNEL,
@@ -171,6 +176,11 @@ describe('desktop capability preload bridge', () => {
       'revokeBrowserPairing',
       'runBrowserImport',
       'selectFile',
+      'skinGet',
+      'skinImport',
+      'skinImportPick',
+      'skinList',
+      'skinRemove',
       'vaultExport',
       'vaultImport',
       'vaultImportPick',
@@ -229,6 +239,24 @@ describe('desktop capability preload bridge', () => {
       HOME_BACKUP_DISCARD_CHANNEL,
       { id: 'r_0123456789ab' },
     ])
+  })
+
+  it('asks main for skins by id, never by path (BRD-05)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.skinList()
+    expect(ipc.invoked.at(-1)).toEqual([SKIN_LIST_CHANNEL, undefined])
+    await bridge.skinGet('zhupi')
+    expect(ipc.invoked.at(-1)).toEqual([SKIN_GET_CHANNEL, { id: 'zhupi' }])
+    await bridge.skinImportPick()
+    expect(ipc.invoked.at(-1)).toEqual([SKIN_IMPORT_PICK_CHANNEL, undefined])
+    await bridge.skinImport('s_0123456789ab')
+    expect(ipc.invoked.at(-1)).toEqual([
+      SKIN_IMPORT_CHANNEL,
+      { stageId: 's_0123456789ab' },
+    ])
+    await bridge.skinRemove('paper')
+    expect(ipc.invoked.at(-1)).toEqual([SKIN_REMOVE_CHANNEL, { id: 'paper' }])
   })
 
   it('sends clicked links to main for routing and relays reveals', async () => {
