@@ -13,6 +13,11 @@ export interface DelegationMessage {
   text: string
   status: 'queued' | 'sending' | 'accepted' | 'delivery_unknown' | 'cancelled'
   seq?: number
+  /**
+   * The task this message was sent in when it is not the delegation's own
+   * (a later user message, a group turn): its run counts toward that task.
+   */
+  taskScopeId?: string
   /** Durable send-intent linkage, reconstructed for old journals as well. */
   runId?: string
   sendIntentSeq?: number

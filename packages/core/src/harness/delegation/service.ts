@@ -384,7 +384,10 @@ export class DelegationService {
         this.entries.set(id, e)
         for (const run of Object.values(original.runs)) {
           if (run.quotaReserved || run.startedAt !== undefined)
-            this.budget.restore(record.owner.taskScopeId, run.usage)
+            this.budget.restore(
+              run.taskScopeId ?? record.owner.taskScopeId,
+              run.usage,
+            )
           if (run.phase === 'queued') {
             // Never dispatched: the queue waits for the user.
             await this.append(e, { type: 'dispatch-paused', paused: true })
@@ -1329,6 +1332,11 @@ export class DelegationService {
       delivery: 'queue' | 'steer'
       expectedRunId?: string
       signal?: AbortSignal
+      /**
+       * The task this message belongs to, when it is not the one that
+       * started the delegation: its run counts toward that task's limits.
+       */
+      taskScopeId?: string
     },
   ): Promise<{
     messageId: string
@@ -1479,7 +1487,12 @@ export class DelegationService {
       await this.append(e, { type: 'dispatch-paused', paused: false })
       await this.append(e, {
         type: 'message-enqueued',
-        message: { id: input.messageId, text: input.text, status: 'queued' },
+        message: {
+          id: input.messageId,
+          text: input.text,
+          status: 'queued',
+          ...(input.taskScopeId ? { taskScopeId: input.taskScopeId } : {}),
+        },
       })
       return { messageId: input.messageId, state: 'queued' as const }
     })
@@ -1552,6 +1565,7 @@ export class DelegationService {
       runId = 'dgr-' + randomUUID()
       const generation =
         Math.max(0, ...Object.values(state.runs).map((r) => r.generation)) + 1
+      const scope = state.messages[messageId]?.taskScopeId
       const run: DelegationRunRecord = {
         id: runId,
         delegationId: id,
@@ -1560,6 +1574,7 @@ export class DelegationService {
         messageId,
         phase: 'queued',
         acceptance: 'unverified',
+        ...(scope ? { taskScopeId: scope } : {}),
       }
       await this.serial(e, () => this.append(e, { type: 'run-created', run }))
     }
@@ -1605,13 +1620,17 @@ export class DelegationService {
       )
       const config = this.options.config()
       this.budget.reconfigure(config)
+      // A later message's run counts toward its own task (GRP-09, GRP-11).
+      const runScope =
+        e.journal.load().runs[activeRunId]?.taskScopeId ??
+        record.owner.taskScopeId
       if (this.options.taskBudget?.exhausted(record.owner))
         throw new DelegationError(
           'BUDGET_LIMIT',
           'the root task has spent its cost cap',
         )
       budget = await this.budget.reserve(
-        record.owner.taskScopeId,
+        runScope,
         record.profileId,
         controller.signal,
       )
@@ -1815,8 +1834,8 @@ export class DelegationService {
           : {}),
         // API billing with a cap only; no cap leaves the SDK budget open.
         ...(billing === 'api' &&
-        Number.isFinite(this.budget.remainingUsd(record.owner.taskScopeId))
-          ? { budgetUsd: this.budget.remainingUsd(record.owner.taskScopeId) }
+        Number.isFinite(this.budget.remainingUsd(runScope))
+          ? { budgetUsd: this.budget.remainingUsd(runScope) }
           : {}),
         cwd: record.cwd,
         environment: runtime.environment,
@@ -1987,7 +2006,7 @@ export class DelegationService {
             'estimatedUsd' in event,
           )
           // A run that takes its task past a cap stops now (AGT-07).
-          const over = this.budget.exceeds(record.owner.taskScopeId, usage)
+          const over = this.budget.exceeds(runScope, usage)
           if (over) throw over
         }
         if (event.type === 'transport_error')

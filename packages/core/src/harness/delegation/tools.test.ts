@@ -242,7 +242,12 @@ it('external backend resolves trusted owner and profile; queue returns original 
   expect(sent.isError).toBe(false)
   expect(f.service.send).toHaveBeenCalledWith(
     'dlg-test',
-    expect.objectContaining({ text: 'continue', delivery: 'queue' }),
+    expect.objectContaining({
+      text: 'continue',
+      delivery: 'queue',
+      // The run counts toward the task the parent works on now.
+      taskScopeId: expect.any(String),
+    }),
   )
 })
 it('external fork fails explicitly before any external call', async () => {

@@ -524,6 +524,8 @@ export interface DelegationRunRecord {
   startedAt?: number
   finishedAt?: number
   acceptance: 'unverified' | 'passed' | 'failed' | 'needs_user'
+  /** The task the run counts toward when it is not the delegation's own (its message's). */
+  taskScopeId?: string
   integrationPreviewId?: string
   acceptanceId?: string
   receiptId?: string

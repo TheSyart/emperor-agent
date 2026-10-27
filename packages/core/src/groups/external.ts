@@ -77,6 +77,8 @@ export class ExternalSpeaker {
             text: request.prompt,
             delivery: 'queue',
             signal: request.signal,
+            // Each speech counts toward its own group turn.
+            taskScopeId: `group-turn:${request.turnId}`,
           })
         ).runId
       } else {

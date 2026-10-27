@@ -526,6 +526,9 @@ export function createDelegationTools(
           delivery: args.delivery ?? 'queue',
           expectedRunId: args.expected_run_id,
           signal: ctx.signal,
+          // A later message's run counts toward the task the parent works
+          // on now, not the one that started the delegation.
+          taskScopeId: owner.taskScopeId,
         })
         return {
           content: 'message ' + result.state + ' for ' + state.record!.id,
