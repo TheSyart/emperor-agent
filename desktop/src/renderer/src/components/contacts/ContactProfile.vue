@@ -14,6 +14,10 @@
  * Claude Code and Codex have no single chat yet; a deleted contact says it
  * is gone. Everything is read again on `contacts_changed` for this contact
  * and the numbers on `groups_changed`.
+ *
+ * 「⋯」 › 删除联系人 (GRP-16, not on the builtins): asks first, then
+ * `contacts.delete` — its single chats stay readable, it leaves its groups
+ * — and opens the Group home with the lists read again.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -39,8 +43,9 @@ import Surface from '../ui/Surface.vue'
 import Switch from '../ui/Switch.vue'
 import Tabs from '../ui/Tabs.vue'
 import TextField from '../ui/TextField.vue'
+import IconButton from '../ui/IconButton.vue'
 import { confirm } from '../ui/confirm'
-import { COMING_SOON } from '../sidebar/modeEntries'
+import { DsMore } from '../icons/ds'
 import AvatarLibraryPicker from './AvatarLibraryPicker.vue'
 import { contactAvatarProps } from './contactAvatar'
 import { contactChatLocation, EXTERNAL_CHAT_NOTE } from './externalChat'
@@ -188,6 +193,39 @@ async function pullInto(groupId: string, title: string): Promise<void> {
     await router.push({ name: 'group', params: { groupId } })
   } catch (error) {
     ctx.showError(error, '没有拉进群')
+  }
+}
+
+// ── 删除联系人 (GRP-16) ────────────────────────────────────────────────
+const moreAnchor = ref<HTMLElement | null>(null)
+const moreOpen = ref(false)
+const deleting = ref(false)
+
+function openMore(event: MouseEvent): void {
+  moreAnchor.value = event.currentTarget as HTMLElement
+  moreOpen.value = true
+}
+
+async function deleteContact(): Promise<void> {
+  const current = contact.value
+  if (!current || current.builtin || deleting.value) return
+  const confirmed = await confirm({
+    title: `删除「${current.name}」？`,
+    body: '它的单聊留着，可以查看，不能再发消息；它会退出所在的群，说过的话还留在群里。岗位说明书的历史版本和个人记忆一起删除，不能恢复。',
+    confirmLabel: '删除',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  deleting.value = true
+  try {
+    await core('contacts.delete', { id: current.id })
+    ctx.showToast(`已删除「${current.name}」`)
+    await router.push({ name: 'contacts' }).catch(() => undefined)
+    await directory.refresh()
+  } catch (error) {
+    ctx.showError(error, '没有删除联系人')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -537,6 +575,33 @@ function backHome() {
               >
             </Menu>
             <Button size="sm" @click="edit">编辑</Button>
+            <template v-if="!contact.builtin">
+              <IconButton
+                label="更多操作"
+                :active="moreOpen"
+                aria-haspopup="menu"
+                :aria-expanded="moreOpen"
+                data-contact-more
+                @click="openMore"
+              >
+                <DsMore :size="16" />
+              </IconButton>
+              <Menu
+                v-model:open="moreOpen"
+                :anchor="moreAnchor"
+                placement="bottom"
+                label="更多操作"
+                dense
+              >
+                <MenuItem
+                  danger
+                  :disabled="deleting"
+                  data-delete-contact
+                  @select="deleteContact"
+                  >删除联系人</MenuItem
+                >
+              </Menu>
+            </template>
           </div>
         </div>
         <p v-if="external" class="note">{{ EXTERNAL_CHAT_NOTE }}</p>

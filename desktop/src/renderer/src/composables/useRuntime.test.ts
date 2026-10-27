@@ -70,6 +70,27 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(refreshSessions).toHaveBeenCalledTimes(1)
   })
 
+  it('GRP-16 · reads the session list again when a group is deleted or restored', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const refreshSessions = vi.fn(async () => undefined)
+    const runtime = useRuntime({ ...testOptions(), refreshSessions })
+    runtime.connectSocket()
+    for (const reason of ['deleted', 'restored'])
+      emitCoreEvent(listener, {
+        event: 'groups_changed',
+        reason,
+        group_id: 'grp-1',
+      })
+    expect(refreshSessions).toHaveBeenCalledTimes(2)
+  })
+
   it('shows a toast for a session log health report of any session', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({

@@ -326,4 +326,30 @@ describe('GeneralSection 最近删除 (FIX-01 2)', () => {
     await rowMenu(group, '永久删除')
     expect(session.purgeDeleted).toHaveBeenCalledWith('s-gone')
   })
+
+  it('GRP-16 · names a deleted group as a group, and says what purging it takes', async () => {
+    session.listDeleted.mockResolvedValue([
+      {
+        ...trashed,
+        id: 'grp-review0001',
+        title: '登录页评审',
+        surface: 'group',
+        deleted_at: '2026-10-28T09:00:00.000Z',
+      },
+    ])
+    const responder = vi.fn((): boolean => false)
+    answerConfirmsForTest(responder)
+    const root = await mount()
+    await openArchive(root)
+    const group = root.querySelector('[data-group="deleted"]')!
+    expect(group.textContent).toContain('登录页评审')
+    expect(group.textContent).toContain('群聊 · 2026-10-28 删除')
+    await rowMenu(group, '永久删除')
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '永久删除「登录页评审」？',
+        body: expect.stringContaining('成员的工作过程'),
+      }),
+    )
+  })
 })

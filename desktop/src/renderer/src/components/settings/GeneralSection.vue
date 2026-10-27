@@ -15,7 +15,8 @@
  * - 对话: one row into the 已归档对话 sub page (`page=archived`): the
  *   archived conversations (restore / delete through useSession) and
  *   最近删除 (FIX-01: deleted sessions kept 30 days, restore or delete for
- *   good after a confirmation). A list that failed to load says so with
+ *   good after a confirmation; a deleted group is one row, GRP-16, its
+ *   members come and go with it). A list that failed to load says so with
  *   重试 instead of looking empty.
  * - 关于 (BRD-04, AboutGroup): 小单, the name, one line and the 「单」 seal;
  * - 更新 (REL-02, updates/UpdateGroup): 检查更新 and 当前版本; while a newer
@@ -260,7 +261,10 @@ async function purgeDeleted(item: DeletedSessionInfo) {
   if (
     !(await confirm({
       title: `永久删除「${item.title}」？`,
-      body: '对话记录、附件和回合快照都会删除，无法恢复。',
+      body:
+        item.surface === 'group'
+          ? '群聊记录、成员的工作过程和群文件都会删除，无法恢复。'
+          : '对话记录、附件和回合快照都会删除，无法恢复。',
       confirmLabel: '永久删除',
       tone: 'danger',
     }))
@@ -275,6 +279,8 @@ async function purgeDeleted(item: DeletedSessionInfo) {
 
 function deletedMeta(item: DeletedSessionInfo) {
   const day = item.deleted_at.slice(0, 10)
+  // A group comes back with its members (GRP-16).
+  if (item.surface === 'group') return `群聊 · ${day} 删除`
   return item.project_name
     ? `${item.project_name} · ${day} 删除`
     : `${day} 删除`
