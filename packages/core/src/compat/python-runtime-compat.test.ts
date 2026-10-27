@@ -27,6 +27,7 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
     expect(Object.keys(settings).sort()).toEqual([
       'browser',
       'desktopPet',
+      'groups',
       'prompt',
       'sessions',
       'taskBudget',
@@ -36,6 +37,11 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
     ])
     // …and both network tool switches on.
     expect(settings.webTools).toEqual({ webFetch: true, webSearch: true })
+    // Settings from before 设置 › 群聊 get its defaults (GRP-08).
+    expect(settings.groups).toEqual({
+      collaboration: 'autonomous',
+      loopGuard: true,
+    })
     // Settings from before the 浏览器 section get its defaults.
     expect(settings.browser).toEqual({
       linkTarget: 'system',
