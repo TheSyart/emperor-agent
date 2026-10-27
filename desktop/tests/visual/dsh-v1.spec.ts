@@ -133,6 +133,39 @@ for (const theme of ['dark', 'light'] as const) {
     await expectBaseline(page, 'conversation', `home-build-${theme}`)
   })
 
+  // BRD-04: the first Build home, before any project — 小单 on his throne
+  // above the words; 显示吉祥物 off takes him away.
+  test(`first build home (${theme}) @baseline`, async ({ page }) => {
+    await page.addInitScript(() => {
+      const bridge = (
+        window as unknown as {
+          emperor: {
+            invokeCore: (op: string, ...args: unknown[]) => Promise<unknown>
+          }
+        }
+      ).emperor
+      const original = bridge.invokeCore
+      bridge.invokeCore = async (op: string, ...args: unknown[]) => {
+        if (op === 'projects.list') return []
+        if (op === 'sessions.list') {
+          const listed = (await original(op, ...args)) as Array<{
+            project_path?: string | null
+          }>
+          return listed.filter((session) => !session.project_path)
+        }
+        return original(op, ...args)
+      }
+    })
+    await open(page, '/chat/chat-main', { theme })
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(page.getByTestId('sidebar-brand')).toHaveText('Emperor Build')
+    await expect(page.locator('[data-hero-scene]')).toBeVisible()
+    await expect(page.locator('.empty-hero .brand-mark')).toHaveCount(0)
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `home-build-first-${theme}`)
+    await expectBaseline(page, 'conversation', `home-build-first-${theme}`)
+  })
+
   test(`active conversation with docks (${theme}) @baseline`, async ({
     page,
   }) => {

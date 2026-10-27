@@ -161,6 +161,21 @@ describe('GeneralSection main page (UI-S07)', () => {
     expect(setDesktopPetOutfit).toHaveBeenCalledWith('robe')
   })
 
+  it('has 显示吉祥物 under 外观, on by default (BRD-04)', async () => {
+    const root = await mount()
+    const appearance = root.querySelector('[data-group="appearance"]')!
+    const mascot = appearance.querySelector<HTMLButtonElement>(
+      '#general-show-mascot',
+    )!
+    expect(mascot.getAttribute('aria-checked')).toBe('true')
+    mascot.click()
+    await settle()
+    expect(mascot.getAttribute('aria-checked')).toBe('false')
+    expect(
+      JSON.parse(localStorage.getItem(UI_PREFERENCES_STORAGE_KEY)!).showMascot,
+    ).toBe(false)
+  })
+
   it('has 显示轨迹 and 显示系统步骤 under 开发者, both off by default', async () => {
     const root = await mount()
     const developer = root.querySelector('[data-group="developer"]')!

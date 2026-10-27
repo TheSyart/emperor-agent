@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * GeneralSection — Settings › 常规 (UI-S07), one card per group:
- * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme) and 桌宠 (the desktop
+ * - 外观: 主题 (跟随系统 / 浅色 / 深色, useTheme), 显示吉祥物 (BRD-04, a
+ *   per-Mac UI preference), 桌宠的衣服 and 桌宠 (the desktop
  *   companion's switch, ctx.setDesktopPetEnabled; its last error under it);
  * - 会话: 新会话的权限 (Core `sessions.defaults`; choosing 完全访问 asks
  *   first), 处理过程 (how a finished turn's steps show), 网页链接 (where a
@@ -420,6 +421,19 @@ onMounted(() => void loadPermission())
             aria-label="主题"
             @update:model-value="
               (value?: ThemePreference) => value && theme.set(value)
+            "
+          />
+        </SettingsRow>
+        <SettingsRow
+          title="显示吉祥物"
+          description="在构建的第一次首页、皮肤的装饰里显示小单；关了这些地方都不放图"
+          label-for="general-show-mascot"
+        >
+          <Switch
+            id="general-show-mascot"
+            :model-value="uiPrefs.showMascot"
+            @update:model-value="
+              (on: boolean) => setUiPreference('showMascot', on)
             "
           />
         </SettingsRow>

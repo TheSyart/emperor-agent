@@ -27,6 +27,11 @@ export interface UiPreferences {
   showHiddenFiles: boolean
   /** The 文件 tree lists what Git ignores (`dist/`; BUG-12). */
   showIgnoredFiles: boolean
+  /**
+   * 小单 appears where the mascot has a place (BRD-04): the first Build
+   * home, the skins' decorations. Off: every such place has no picture.
+   */
+  showMascot: boolean
 }
 
 export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
@@ -36,6 +41,7 @@ export const DEFAULT_UI_PREFERENCES: Readonly<UiPreferences> = Object.freeze({
   siteIconService: true,
   showHiddenFiles: false,
   showIgnoredFiles: false,
+  showMascot: true,
 })
 
 const PROCESS_DISPLAYS: readonly ProcessDisplay[] = [
@@ -62,6 +68,7 @@ export function parseUiPreferences(raw: unknown): UiPreferences {
     siteIconService: flag('siteIconService'),
     showHiddenFiles: flag('showHiddenFiles'),
     showIgnoredFiles: flag('showIgnoredFiles'),
+    showMascot: flag('showMascot'),
   }
 }
 

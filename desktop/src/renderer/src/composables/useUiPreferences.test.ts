@@ -77,3 +77,9 @@ describe('ui preferences', () => {
     expect(uiPreferences().siteIconService).toBe(false)
   })
 })
+
+it('shows the mascot by default (BRD-04), and keeps a stored no', () => {
+  expect(DEFAULT_UI_PREFERENCES.showMascot).toBe(true)
+  expect(parseUiPreferences({ showMascot: false }).showMascot).toBe(false)
+  expect(parseUiPreferences({ showMascot: 'no' }).showMascot).toBe(true)
+})
