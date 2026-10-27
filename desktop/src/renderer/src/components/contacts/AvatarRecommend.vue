@@ -12,8 +12,13 @@
  * epoch (a new start: the row forgets what it offered); name (for a
  * non-library avatar's letter); disabled?.
  * Emits: picked — the user chose one from the library (a new start keeps it).
+ *
+ * The avatars' names load with the row (GRP-05), so it says 「推荐：安全审计」
+ * from the start; the editor is a chunk of its own, and so are the names,
+ * so none of it is in the entry bundle. Until they are in (or when they
+ * cannot be read) the row names the theme.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { ContactAvatar } from '@emperor/core/api'
 import { core } from '../../api/http'
 import Avatar from '../ui/Avatar.vue'
@@ -21,6 +26,7 @@ import Button from '../ui/Button.vue'
 import {
   CONTACT_AVATAR_THEME_LABELS,
   contactAvatarTheme,
+  loadContactAvatarManifest,
   type ContactAvatarEntry,
 } from '../ui/contactAvatars'
 import AvatarLibraryPicker from './AvatarLibraryPicker.vue'
@@ -145,6 +151,10 @@ function remember(entries: readonly ContactAvatarEntry[]) {
     entries.map((entry) => [entry.id, entry.label]),
   )
 }
+
+onMounted(() => {
+  loadContactAvatarManifest().then(remember, () => undefined)
+})
 
 function picked(id: string) {
   avatar.value = { kind: 'library', id }

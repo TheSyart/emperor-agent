@@ -50,6 +50,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   contact_memory_entry_not_found: '这条记忆已经不在了，刷新后再试。',
   contact_memory_disabled: '这个联系人的个人记忆已关闭，先在档案里打开。',
   contact_deleted: '这个联系人已删除，这个会话只能查看。',
+  contact_chat_unavailable:
+    '和 Claude Code、Codex 单聊即将推出；现在可以把它们拉进群聊。',
   contact_permission: '这个联系人的权限有上限，不能在会话里调高。',
   contact_model_unavailable: '这个联系人的模型不可用。',
   // Groups (GRP-06).

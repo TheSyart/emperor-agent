@@ -33,13 +33,20 @@ const SESSION_ROUTE_NAMES: readonly string[] = [
   'external-agent',
 ]
 
-/** The Group home (contacts and groups); the route arrives with GRP-05. */
+/** The Group home: the contacts, the recent groups, @ to start (GRP-05). */
 export const GROUP_HOME_ROUTE = 'contacts'
 
-/** The contact editor's routes (GRP-04): Group, like the Group home. */
+/** A group's page (GRP-05; GRP-08 fills it in): `/groups/:groupId`. */
+export const GROUP_PAGE_ROUTE = 'group'
+
+/**
+ * The contacts' own pages, Group like the Group home: the editor (GRP-04)
+ * and the profile (GRP-05).
+ */
 export const CONTACT_EDITOR_ROUTES: readonly string[] = [
   'contact-new',
   'contact-edit',
+  'contact',
 ]
 
 type ModeFacts = Pick<
@@ -134,10 +141,11 @@ export const NO_ROUTE_MODE: RouteModeTarget = { mode: null, sessionId: '' }
 
 /**
  * What the route on screen belongs to. A conversation route has its
- * session's mode (drafts included); the Group home is Group. Pages
- * (定时任务, 能力, Pull Request, …) belong to no mode, nor does a session
- * nobody lists (a subagent's log, a group member's session): null, and the
- * current mode stays.
+ * session's mode (drafts included); the Group home and a contact's pages
+ * are Group, and so is a group's page — remembered as Group's last session
+ * (a group's id is its session's). Pages (定时任务, 能力, Pull Request, …)
+ * belong to no mode, nor does a session nobody lists (a subagent's log, a
+ * group member's session): null, and the current mode stays.
  */
 export function routeModeTarget(
   route: { name?: unknown; params: Record<string, unknown> },
@@ -146,6 +154,10 @@ export function routeModeTarget(
   const name = typeof route.name === 'string' ? route.name : ''
   if (name === GROUP_HOME_ROUTE || CONTACT_EDITOR_ROUTES.includes(name))
     return { mode: 'group', sessionId: '' }
+  if (name === GROUP_PAGE_ROUTE) {
+    const raw = route.params.groupId
+    return { mode: 'group', sessionId: typeof raw === 'string' ? raw : '' }
+  }
   if (!SESSION_ROUTE_NAMES.includes(name)) return NO_ROUTE_MODE
   const raw = route.params.sessionId
   const id = typeof raw === 'string' ? raw : ''

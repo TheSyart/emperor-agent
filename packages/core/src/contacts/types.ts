@@ -315,6 +315,17 @@ export interface ContactVersionEntry {
   contact: Contact
 }
 
+/** The profile's four numbers (GRP-05, `contacts.stats`). */
+export interface ContactStats {
+  /** Groups it is a member of now. */
+  groups: number
+  /** What it said in groups, plus the replies of its single chats. */
+  speeches: number
+  /** The user's 👍 / 👎 still in its personal memory. */
+  ratings: { up: number; down: number }
+  version: number
+}
+
 export interface ContactsChange {
   reason: 'created' | 'updated' | 'deleted' | 'restored'
   contactId: ContactId

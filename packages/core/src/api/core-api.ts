@@ -152,6 +152,7 @@ import type {
   ContactDraftInput,
   ContactInput,
   ContactPatch,
+  ContactStats,
   FromTemplateInput,
 } from '../contacts/types'
 import type { DraftFromBriefInput } from '../contacts/draft'
@@ -1720,6 +1721,7 @@ export class CoreApi {
         this.terminalService.closeSession(sessionId),
       activateSession: (sessionId) => this.activateSession(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
+      contact: (id) => this.contactStore.peek(id),
     })
     // 试用台 (GRP-04): hidden sessions that run as the editor's draft.
     this.contactTrials = new ContactTrials({
@@ -2910,6 +2912,8 @@ export class CoreApi {
         project_path?: string | null
         plan?: boolean
         preset?: string
+        /** A single chat with this contact (GRP-05). */
+        contactId?: string
       } = {},
     ) => {
       const { plan, preset, ...rest } = opts
@@ -3768,6 +3772,43 @@ export class CoreApi {
     }) => this.contactEditorService.trial(input),
     stopTrial: (input: { trialId: string }) =>
       this.contactEditorService.stopTrial(input),
+    /**
+     * The contact's most recent single chat, or a new one (GRP-05): what
+     * 发消息 on its profile and an @ on the Group home open.
+     */
+    openChat: async (input: { id: string; fresh?: boolean }) => {
+      const contact = await this.contactStore.get(input.id)
+      return this.sessionApplicationService.openContactChat(contact.id, {
+        fresh: input.fresh === true,
+      })
+    },
+    /**
+     * The profile's four numbers (GRP-05): the groups it is in, how often
+     * it spoke (in groups, and the replies of its single chats), the user's
+     * 👍 / 👎 still in its memory, and its version.
+     */
+    stats: async (input: { id: string }): Promise<ContactStats> => {
+      const contact = await this.contactStore.get(input.id)
+      const activity = this.groupService.activity(contact.id)
+      const replies = this.host.kept.sessionStore
+        .list({ includeArchived: true })
+        .filter(
+          (session) =>
+            session.surface === 'contact' && session.contact_id === contact.id,
+        )
+        .reduce((sum, session) => sum + (session.message_count || 0), 0)
+      const memory = await this.contactMemoryService.list({
+        contactId: contact.id,
+      })
+      const rated = (rating: 'up' | 'down') =>
+        memory.entries.filter((entry) => entry.rating === rating).length
+      return {
+        groups: activity.groups,
+        speeches: activity.speeches + replies,
+        ratings: { up: rated('up'), down: rated('down') },
+        version: contact.version,
+      }
+    },
     /** 👍 / 👎 on a reply, with the user's words: one line of memory (GRP-03). */
     feedback: (input: ContactFeedbackInput) =>
       this.contactMemoryService.feedback(input),

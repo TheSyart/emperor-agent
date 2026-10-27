@@ -2496,6 +2496,17 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([z.object({ trialId: contactTrialIdSchema }).strict()]),
     (api, [input]) => api.contacts.stopTrial(input),
   ),
+  // GRP-05: a contact's single chat (its most recent one, or a new one)
+  // and its profile's four numbers.
+  'contacts.openChat': operation(
+    z.tuple([
+      z.object({ id: contactIdSchema, fresh: z.boolean().optional() }).strict(),
+    ]),
+    (api, [input]) => api.contacts.openChat(input),
+  ),
+  'contacts.stats': operation(z.tuple([contactRefSchema]), (api, [input]) =>
+    api.contacts.stats(input),
+  ),
   'contacts.feedback': operation(
     z.tuple([contactFeedbackSchema]),
     (api, [input]) => api.contacts.feedback(input),
@@ -2606,6 +2617,8 @@ export const CORE_OPERATION_REGISTRY = {
           project_path: nullableStringSchema,
           plan: z.boolean().optional(),
           preset: permissionPresetSchema.optional(),
+          // A single chat with this contact (GRP-05).
+          contactId: contactIdSchema.optional(),
         })
         .strict()
         .optional(),

@@ -159,6 +159,14 @@ async function settle() {
   for (let i = 0; i < 30; i++) await Promise.resolve()
   await nextTick()
 }
+/** Also waits for a component loaded on demand (Group's sections). */
+async function settleAsync() {
+  await import('./SidebarGroupSections.vue')
+  for (let i = 0; i < 20; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await settle()
+  }
+}
 async function mount(
   path: string,
   props = { collapsed: false, width: 280 },
@@ -432,15 +440,14 @@ it('MOD-02 3 · each mode shows only its own sections', async () => {
   await settle()
   expect(rowTitles()).toEqual(['project-root'])
 
-  // Group: contacts and groups arrive with GRP-05; a plain placeholder,
-  // no rows and no fake data.
+  // Group (GRP-05): 群聊 and 联系人, loaded with the mode; no session rows.
   appMode.mode.value = 'group'
-  await settle()
-  expect(sections()).toEqual(['group'])
+  await settleAsync()
+  expect(sections()).toEqual(['groups', 'contacts'])
   expect(rowTitles()).toEqual([])
   expect(
-    root.querySelector('[data-sidebar-section="group"]')?.textContent,
-  ).toContain('联系人和群聊')
+    root.querySelector('[data-sidebar-section="contacts"]')?.textContent,
+  ).toContain('联系人')
 })
 
 it('MOD-02 3 · an old Build session with no project shows under Chat (D2)', async () => {

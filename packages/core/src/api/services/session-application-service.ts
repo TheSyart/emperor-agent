@@ -1,3 +1,7 @@
+import {
+  ContactChatUnavailableError,
+  ContactNotFoundError,
+} from '../../contacts/errors'
 import { CoreMutationGuardError } from '../mutation-guard'
 import type {
   SessionEntry,
@@ -38,6 +42,18 @@ export interface SessionApplicationServiceDeps {
   stopSession?(sessionId: string, reason: string): void
   /** Optional: the session was deleted or archived and left the sidebar list. */
   sessionLeftList?(sessionId: string): void
+  /**
+   * A contact as last read (single chats, GRP-05; Core reads the contacts
+   * at start-up); null: no such contact.
+   */
+  contact?(contactId: string): ContactFacts | null
+}
+
+/** What a single chat needs to know about its contact. */
+export interface ContactFacts {
+  id: string
+  name: string
+  kind: 'local' | 'external'
 }
 
 export class CoreSessionApplicationService {
@@ -60,8 +76,12 @@ export class CoreSessionApplicationService {
       mode?: string
       project?: Dict | null
       project_path?: string | null
+      /** A single chat with this contact (GRP-05): Chat, no project. */
+      contactId?: string | null
     } = {},
   ): SessionEntry {
+    const contactId = String(opts.contactId ?? '').trim()
+    if (contactId) return this.createContactChat(contactId, opts.title)
     let project = opts.project ?? null
     const mode = opts.mode === 'build' ? 'build' : 'chat'
     if (mode === 'build' && !project) {
@@ -73,6 +93,48 @@ export class CoreSessionApplicationService {
       mode,
       project,
     })
+  }
+
+  /**
+   * The contact's most recent single chat, or a new one (GRP-05; `fresh`:
+   * always a new one). Only `surface: 'contact'` sessions count — a trial
+   * or a group member's session carries the contact too — and never one
+   * `/clear` moved on from.
+   */
+  openContactChat(
+    contactId: string,
+    opts: { fresh?: boolean } = {},
+  ): SessionEntry {
+    const contact = this.chatContact(contactId)
+    if (!opts.fresh) {
+      const recent = this.deps.sessions
+        .list({ includeArchived: false })
+        .find(
+          (session) =>
+            session.surface === 'contact' &&
+            session.contact_id === contact.id &&
+            !session.transitioned_to_session_id,
+        )
+      if (recent) return recent
+    }
+    return this.createContactChat(contact.id)
+  }
+
+  /** A contact one can chat with alone: it exists and is not Claude Code or Codex. */
+  private chatContact(contactId: string): ContactFacts {
+    const contact = this.deps.contact?.(contactId) ?? null
+    if (!contact) throw new ContactNotFoundError(contactId)
+    if (contact.kind === 'external')
+      throw new ContactChatUnavailableError(contact.name)
+    return contact
+  }
+
+  private createContactChat(contactId: string, title?: string): SessionEntry {
+    const contact = this.chatContact(contactId)
+    return this.deps.sessions.create(
+      title?.trim() || `${contact.name} · 单聊`,
+      { mode: 'chat', surface: 'contact', contactId: contact.id },
+    )
   }
 
   async rename(

@@ -23,6 +23,8 @@ interface SessionTransitionRecord {
   > & {
     /** Permission preset of the source session (absent in older records). */
     permissionPreset?: string | null
+    /** A single chat's contact (GRP-05): the new session stays its chat. */
+    contactId?: string | null
   }
   createdAt: string
   updatedAt: string
@@ -93,6 +95,9 @@ export class SessionTransitionService {
         project_name: source.project_name,
         lineage_root_id: source.lineage_root_id,
         ...(permissionPreset ? { permissionPreset } : {}),
+        ...(source.surface === 'contact' && source.contact_id
+          ? { contactId: source.contact_id }
+          : {}),
       },
       createdAt: now,
       updatedAt: now,
@@ -138,6 +143,9 @@ export class SessionTransitionService {
         parentSessionId: record.sourceSessionId,
         lineageRootId: record.source.lineage_root_id || record.sourceSessionId,
         transitionReason: 'clear',
+        ...(record.source.contactId
+          ? { surface: 'contact' as const, contactId: record.source.contactId }
+          : {}),
       })
     }
     if (record.state === 'ended') record = this.advance(record, 'created')

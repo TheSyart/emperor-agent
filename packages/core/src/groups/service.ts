@@ -28,6 +28,13 @@ const TITLE_LIMIT = 40
 const CHARTER_LIMIT = 4000
 const TEXT_LIMIT = 20_000
 const BUILTIN_MODERATOR = 'ct-emperor'
+/** What counts as speaking on a contact's profile: not a pass, not the system. */
+const SPOKEN_KINDS: ReadonlySet<string> = new Set([
+  'say',
+  'task',
+  'result',
+  'summary',
+])
 
 export class GroupError extends EmperorError {
   constructor(message: string, code: 'group_invalid' | 'group_not_found') {
@@ -226,6 +233,24 @@ export class GroupService {
           lastMessageAt: state.messages.at(-1)?.at ?? null,
         }
       })
+  }
+
+  /**
+   * The groups a contact is in now, and how often it spoke in any group,
+   * one it has left included (its profile, GRP-05).
+   */
+  activity(contactId: ContactId): { groups: number; speeches: number } {
+    let groups = 0
+    let speeches = 0
+    for (const session of this.deps.sessions.list()) {
+      if (session.surface !== 'group') continue
+      const state = this.fold(session.id)
+      if (state.members.includes(contactId)) groups += 1
+      for (const message of state.messages)
+        if (message.from === contactId && SPOKEN_KINDS.has(message.kind))
+          speeches += 1
+    }
+    return { groups, speeches }
   }
 
   update(groupId: string, patch: GroupUpdateInput): GroupView {

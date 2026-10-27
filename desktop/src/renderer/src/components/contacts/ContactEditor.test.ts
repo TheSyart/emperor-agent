@@ -190,6 +190,11 @@ async function mount(path: string) {
       { path: '/chat', component: { render: () => h('div', 'chat') } },
       { path: '/contacts/new', name: 'contact-new', component: ContactEditor },
       {
+        path: '/contacts/:id',
+        name: 'contact',
+        component: { render: () => h('div', 'profile') },
+      },
+      {
         path: '/contacts/:id/edit',
         name: 'contact-edit',
         component: ContactEditor,
@@ -561,7 +566,7 @@ describe('a new contact', () => {
     expect(q('[data-completeness]').textContent).toContain('4 / 5')
   })
 
-  it('saves with the avatar shown and moves to the saved contact', async () => {
+  it('saves with the avatar shown and moves to the saved contact’s profile (GRP-05)', async () => {
     await mount('/contacts/new')
     q('[data-template="security-auditor"] button').click()
     await flush()
@@ -578,9 +583,7 @@ describe('a new contact', () => {
     expect(ctx.showToast).toHaveBeenCalledWith(
       expect.stringContaining('已保存'),
     )
-    expect(router.currentRoute.value.fullPath).toBe(
-      '/contacts/ct-new000000001/edit',
-    )
+    expect(router.currentRoute.value.fullPath).toBe('/contacts/ct-new000000001')
   })
 
   it('recommends a person, an animal or a robot for a blank contact', async () => {

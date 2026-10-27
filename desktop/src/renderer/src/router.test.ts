@@ -71,6 +71,25 @@ describe('renderer routes', () => {
     expect(edited.params.id).toBe('ct-reviewer00001')
   }, 20_000)
 
+  it('serves the Group home, a contact’s profile and a group’s page (GRP-05)', async () => {
+    expect((await resolve('/contacts')).name).toBe('contacts')
+    const profile = await resolve('/contacts/ct-reviewer00001')
+    expect(profile.name).toBe('contact')
+    expect(profile.params.id).toBe('ct-reviewer00001')
+    // 新建 stays the editor, not a contact named 「new」.
+    expect((await resolve('/contacts/new')).name).toBe('contact-new')
+    const group = await resolve('/groups/grp-1')
+    expect(group.name).toBe('group')
+    expect(group.params.groupId).toBe('grp-1')
+    const { routeRecords } = await import('./router')
+    for (const name of ['contacts', 'contact', 'group']) {
+      const record = routeRecords.find((item) => item.name === name)
+      // Each a chunk of its own, out of the entry bundle (D23).
+      expect(typeof record?.component).toBe('function')
+      expect(record?.meta?.page).toBe(true)
+    }
+  }, 20_000)
+
   it('serves the full pages', async () => {
     expect((await resolve('/scheduler')).name).toBe('scheduler')
     const capabilities = await resolve('/capabilities')

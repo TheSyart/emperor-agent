@@ -100,6 +100,31 @@ describe('SessionTransitionService', () => {
     )
   })
 
+  it('keeps a single chat with its contact after /clear (GRP-05)', async () => {
+    const ctx = setup()
+    const chat = ctx.sessions.create('审稿人 · 单聊', {
+      surface: 'contact',
+      contactId: 'ct-reviewer00001',
+    })
+    const result = await ctx.service.clear({
+      sessionId: chat.id,
+      invocationId: 'clear-contact',
+    })
+    expect(result.session).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-reviewer00001',
+      parent_session_id: chat.id,
+      transition_reason: 'clear',
+    })
+    // A plain session stays plain.
+    const plain = await ctx.service.clear({
+      sessionId: ctx.parent.id,
+      invocationId: 'clear-plain',
+    })
+    expect(plain.session.surface).toBeUndefined()
+    expect(plain.session.contact_id).toBeUndefined()
+  })
+
   it('checks pending interactions and queued prompts before preparing a transition', async () => {
     const ctx = setup()
     vi.mocked(ctx.service.deps.assertBoundary).mockImplementation(() => {

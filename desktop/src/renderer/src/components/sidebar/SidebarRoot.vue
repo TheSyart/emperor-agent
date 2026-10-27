@@ -9,7 +9,8 @@
  * MOD-03: the buckets are the headings, the first carries the sort menu; a
  * manual order is one 对话 section); Build: 置顶 (its pins) + 项目 →
  * sessions;
- * Group: a placeholder until contacts and groups arrive (GRP-05) — and
+ * Group: 群聊 and 联系人 (GRP-05, SidebarGroupSections, loaded with the
+ * mode) — and
  * SidebarFooter (设置, the page icons, 明暗切换). The mode and its
  * controller come from the app context, so the switcher, the rail and the
  * primary row run what ⌘1–⌘3 and ⌘N run. Search finds titles at once and
@@ -28,7 +29,14 @@
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
 import SearchField from '../ui/SearchField.vue'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
@@ -51,7 +59,6 @@ import {
 } from '../../runtime/appMode'
 import type { ProjectInfo, SessionInfo, SidebarSectionKey } from '../../types'
 import { DsMore, DsPlus } from '../icons/ds'
-import EmptyState from '../ui/EmptyState.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
@@ -67,6 +74,11 @@ import { useContentSearch } from './useContentSearch'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
+
+/** Group's contacts and groups: only Group loads them (the entry bundle stays). */
+const SidebarGroupSections = defineAsyncComponent(
+  () => import('./SidebarGroupSections.vue'),
+)
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
@@ -750,18 +762,8 @@ defineExpose({ focusSearch })
           </section>
         </template>
 
-        <!-- Group: the contact list and groups arrive with GRP-05. -->
-        <section
-          v-if="mode === 'group'"
-          class="section"
-          aria-label="群聊"
-          data-sidebar-section="group"
-        >
-          <EmptyState
-            title="联系人和群聊在这里"
-            description="点 + 新建联系人；拉群聊即将推出"
-          />
-        </section>
+        <!-- Group: 群聊 and 联系人 (GRP-05). -->
+        <SidebarGroupSections v-if="mode === 'group'" />
       </div>
     </div>
 

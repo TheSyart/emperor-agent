@@ -53,6 +53,14 @@
  * dropped folder) are below (useBuildHome). The first-run guide comes
  * first: the starters and projects wait while it is open or no model
  * exists (heroHome.ts).
+ *
+ * A single chat with a contact (GRP-05, contactChat.ts) is this same view:
+ * the contact's avatar and name head each reply, 👍 / 👎 with one line go
+ * to `contacts.feedback` while its personal memory is on, the home greets
+ * as the contact, and the composer goes read-only once the contact is
+ * deleted. A group's own session moves to the group's page. A message the
+ * Group home hands over to be sent (its @ of one contact) is sent once the
+ * chat is the active one.
  */
 import {
   computed,
@@ -63,6 +71,7 @@ import {
   onBeforeUnmount,
   onMounted,
   provide,
+  reactive,
   ref,
   shallowRef,
   watch,
@@ -94,7 +103,14 @@ import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
-import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
+import { draftHandoff, takeHandoff } from '../chat/draftHandoff'
+import { useContactDirectory } from '../contacts/contactDirectory'
+import type { ChatFeedback } from './chatContext'
+import {
+  CONTACT_DELETED_REASON,
+  contactChatOf,
+  groupPageOf,
+} from './contactChat'
 import ChildComposer from '../composer/ChildComposer.vue'
 import { useProvisionalPrompts } from './provisionalPrompts'
 import TodoDock from '../composer/TodoDock.vue'
@@ -107,7 +123,7 @@ import type { SubagentRowView } from './subagentRows'
 import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
-import { heroPlaceholder } from './heroGreeting'
+import { contactHeroPlaceholder, heroPlaceholder } from './heroGreeting'
 import {
   fillSuggestion,
   heroExtrasShown,
@@ -506,11 +522,13 @@ const providerOptions = computed(
 )
 /** The composer's placeholder while there is no session here to act on (F1). */
 const composerUnavailableReason = computed(() =>
-  !unknownSession.value
-    ? ''
-    : lineageLoading.value
-      ? '正在读取会话…'
-      : '没有找到这个会话，请从侧栏打开其他会话',
+  contactChat.value?.deleted
+    ? CONTACT_DELETED_REASON
+    : !unknownSession.value
+      ? ''
+      : lineageLoading.value
+        ? '正在读取会话…'
+        : '没有找到这个会话，请从侧栏打开其他会话',
 )
 const modelBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
@@ -536,6 +554,63 @@ const heroMode = computed<AppMode>(() => {
   const session = knownSession.value
   return (session && sessionAppMode(session)) || 'chat'
 })
+
+// ── a single chat with a contact (GRP-05) ─────────────────────────────────
+const contactDirectory = useContactDirectory({ lazy: true })
+/** The contact of the session on screen; null unless a single chat. */
+const contactChat = computed(() =>
+  contactChatOf(knownSession.value, {
+    contacts: contactDirectory.contacts.value,
+    loaded: contactDirectory.loaded.value,
+  }),
+)
+watch(
+  () => knownSession.value?.surface === 'contact',
+  (single) => {
+    if (single) contactDirectory.ensure()
+  },
+  { immediate: true },
+)
+/** The composer's placeholder on the home: the mode's, or the contact's. */
+const composerHeroPlaceholder = computed(() =>
+  contactChat.value?.speaker
+    ? contactHeroPlaceholder(contactChat.value.speaker.name)
+    : heroPlaceholder(heroMode.value),
+)
+/** The ratings given in this window, by `session:turn`. */
+const ratings = reactive(new Map<string, 'up' | 'down'>())
+const chatFeedback: ChatFeedback = {
+  enabled: () => contactChat.value?.feedback === true,
+  rated: (turn) => ratings.get(`${viewingId.value}:${turn}`) ?? null,
+  submit: async ({ turn, rating, note, messageId }) => {
+    const chat = contactChat.value
+    const sessionId = viewingId.value
+    if (!chat?.feedback || !chat.contact || !sessionId) return false
+    try {
+      await core('contacts.feedback', {
+        contactId: chat.contactId,
+        messageRef: { sessionId, ...(messageId ? { messageId } : {}) },
+        rating,
+        ...(note ? { note } : {}),
+      })
+      ratings.set(`${sessionId}:${turn}`, rating)
+      ctx.showToast(`已记进「${chat.contact.name}」的个人记忆`)
+      return true
+    } catch (error) {
+      ctx.showError(error, '没有记下')
+      return false
+    }
+  },
+}
+// A group's own session opens on the group's page (GRP-08 fills it in).
+watch(
+  () => groupPageOf(knownSession.value),
+  (target) => {
+    if (target && routeSessionId.value)
+      void router.replace(target).catch(() => undefined)
+  },
+  { immediate: true },
+)
 /** The Build home: an empty Build session (a draft, mostly) on screen. */
 const buildHomeShown = computed(
   () => phase.value === 'hero' && heroMode.value === 'build' && !child.value,
@@ -835,14 +910,17 @@ watch(
   },
 )
 
-// A draft another page handed over (plugin 「立即试用」): fill it, never send it.
+// A draft another page handed over (plugin 「立即试用」): fill it, never
+// send it — unless it came to be sent (the Group home's @, GRP-05).
 watch(
   [() => draftHandoff.value, () => ctx.sessionId.value],
-  ([handoff, ownerSessionId]) => {
-    if (!handoff || handoff.sessionId !== ownerSessionId) return
+  ([pending, ownerSessionId]) => {
+    if (!pending || pending.sessionId !== ownerSessionId) return
     void nextTick(() => {
-      const text = takeDraftHandoff(ownerSessionId)
-      if (text) composer.value?.setDraft(text)
+      const handoff = takeHandoff(ownerSessionId)
+      if (!handoff) return
+      if (handoff.send) void sendFromComposer({ content: handoff.text })
+      else composer.value?.setDraft(handoff.text)
     })
   },
   { flush: 'post', immediate: true },
@@ -1209,6 +1287,8 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :provisional="
             viewingId === ctx.sessionId.value ? provisional.shown.value : []
           "
+          :speaker="contactChat?.speaker ?? undefined"
+          :feedback="contactChat?.speaker ? chatFeedback : undefined"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
@@ -1266,6 +1346,8 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         v-if="phase === 'hero'"
         :mode="heroMode"
         :address-name="ctx.boot.value?.profileOnboarding?.addressName ?? null"
+        :speaker="contactChat?.speaker ?? null"
+        :speaker-intro="contactChat?.contact?.intro ?? ''"
       />
       <template v-if="child">
         <TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />
@@ -1318,7 +1400,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="composer"
           :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"
-          :hero-placeholder="heroPlaceholder(heroMode)"
+          :hero-placeholder="composerHeroPlaceholder"
           :busy="runningHere"
           :interaction-blocked="Boolean(pendingInteraction)"
           :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"

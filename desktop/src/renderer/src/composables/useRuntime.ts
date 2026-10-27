@@ -1180,6 +1180,14 @@ export function useRuntime(options: {
       return
     }
 
+    // A new group is a new session (GRP-05): the list learns it, so search,
+    // ⌘3 and the Group sidebar find it without a reload.
+    if (data.event === 'groups_changed') {
+      if (origin === 'live' && data.reason === 'created')
+        void options.refreshSessions?.().catch(() => undefined)
+      return
+    }
+
     if (data.event === 'prompt_queued' || data.event === 'prompt_dequeued') {
       // The queue tray lists the host inbox; re-read it on every change.
       if (origin === 'live')

@@ -438,6 +438,45 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
       project_name: null,
     })
   })
+
+  it('GRP-05 · takes in a single chat Core made, once, keeping the draft being written', async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [{ id: 's1', title: 'Main', updated_at: '2026-01-01' }]
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    const draft = await session.create({ title: '新会话' })
+    const chat = {
+      id: 'chat-reviewer',
+      title: '审稿人 · 单聊',
+      created_at: '2026-10-27T00:00:00Z',
+      updated_at: '2026-10-27T00:00:00Z',
+      preview: '',
+      version: 1,
+      mode: 'chat' as const,
+      surface: 'contact' as const,
+      contact_id: 'ct-reviewer00001',
+    }
+    session.adopt(chat)
+    session.adopt({ ...chat, title: '审稿人 · 单聊（新）' })
+    expect(session.sessions.value.map((item) => item.id)).toEqual([
+      draft.id,
+      'chat-reviewer',
+      's1',
+    ])
+    expect(session.getSession('chat-reviewer')).toMatchObject({
+      surface: 'contact',
+      contact_id: 'ct-reviewer00001',
+      title: '审稿人 · 单聊（新）',
+    })
+  })
 })
 
 describe('the session a load lands on (MOD-02)', () => {

@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-27（对照 `4f569338`）<br>
-> 事实源：本文是 0.3 的设计稿，已实现的部分以 `desktop/src/renderer/src/runtime/appMode.ts`、`desktop/src/renderer/src/components/sidebar/`（`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarRoot.vue`、`SidebarNav.vue`、`SidebarFooter.vue`、`SidebarRail.vue`、`SidebarSearchResults.vue`、`NotificationsPopover.vue`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`（搜索：`searchSidebarSessions`、`searchContentResults`、`arrangeSearchResults`）、`desktop/src/renderer/src/components/conversation/`（首页：`EmptyHero.vue`、`heroGreeting.ts`、`heroSuggestions.ts`、`HeroSuggestions.vue`、`heroHome.ts`、`heroProjects.ts`、`HeroRecentProjects.vue`、`HeroProjectChip.vue`、`useBuildHome.ts`）、`packages/core/src/api/core-api.ts`（侧栏状态的 `app_mode`、`mode_routes`、`collapsed_sections`，`projects.branch`）和 `desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/dsh-v1.spec.ts`（首页）为准
+> 最后核验：2026-10-27（对照 `5301bdd3`）<br>
+> 事实源：本文是 0.3 的设计稿，已实现的部分以 `desktop/src/renderer/src/runtime/appMode.ts`、`desktop/src/renderer/src/components/sidebar/`（`ModeSwitcher.vue`、`modeEntries.ts`、`SidebarRoot.vue`、`SidebarNav.vue`、`SidebarFooter.vue`、`SidebarRail.vue`、`SidebarSearchResults.vue`、`NotificationsPopover.vue`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`（搜索：`searchSidebarSessions`、`searchContentResults`、`arrangeSearchResults`）、`desktop/src/renderer/src/components/conversation/`（首页：`EmptyHero.vue`、`heroGreeting.ts`、`heroSuggestions.ts`、`HeroSuggestions.vue`、`heroHome.ts`、`heroProjects.ts`、`HeroRecentProjects.vue`、`HeroProjectChip.vue`、`useBuildHome.ts`）、Group 的侧栏和首页（`components/sidebar/SidebarGroupSections.vue`、`components/groups/GroupHome.vue`、`GroupHomeComposer.vue`、`groupHomeModel.ts`、`components/contacts/contactDirectory.ts`）、`packages/core/src/api/core-api.ts`（侧栏状态的 `app_mode`、`mode_routes`、`collapsed_sections`，`projects.branch`）和 `desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/dsh-v1.spec.ts`（首页）、`desktop/tests/visual/group.spec.ts`（Group）为准
 
 Emperor 有三种模式：**Chat**（对话）、**Build**（构建）、**Group**（群聊）。模式是界面层的概念，决定侧栏放什么、首页长什么样、⌘N 新建什么；会话本身仍然只有 `mode: chat | build`，群聊相关的会话用 `surface` 字段标记。
 
@@ -29,16 +29,17 @@ Emperor 有三种模式：**Chat**（对话）、**Build**（构建）、**Group
 
 ## 侧栏
 
-| 模式  | 主按钮（⌘N）                                  | 分区                                                                          |
-| ----- | --------------------------------------------- | ----------------------------------------------------------------------------- |
-| Chat  | 新对话                                        | 置顶（只含 Chat 会话）、按日期分区：今天、昨天、7 天内、30 天内、更早         |
-| Build | 新建项目会话（当前项目），旁边「+」打开文件夹 | 置顶（只含 Build 会话）、项目 → 会话（可折叠）                                |
-| Group | 新建群聊，旁边「+」新建联系人                 | 群聊、联系人（GRP-05 接入之前是一行占位：「联系人和群聊在这里」，没有假数据） |
+| 模式  | 主按钮（⌘N）                                  | 分区                                                                  |
+| ----- | --------------------------------------------- | --------------------------------------------------------------------- |
+| Chat  | 新对话                                        | 置顶（只含 Chat 会话）、按日期分区：今天、昨天、7 天内、30 天内、更早 |
+| Build | 新建项目会话（当前项目），旁边「+」打开文件夹 | 置顶（只含 Build 会话）、项目 → 会话（可折叠）                        |
+| Group | 新建群聊，旁边「+」新建联系人                 | 群聊、联系人                                                          |
 
 - 同一时刻侧栏只渲染一种模式的分区。某种模式没有置顶时，不显示「置顶」标题；置顶的上移、下移只在本模式的置顶之间换位，别的模式的置顶顺序不动。
 - Chat 的日期就是分区标题（预览 A），没有单独的「对话」标题：每一天各自收起、展开（侧栏状态里记成 `chats.today`、`chats.yesterday` 等），打开的会话移到收起的那一天时它自动展开。排序菜单（`⋯`）在第一个日期标题上，指针移上去时出现。日期按排序的字段算（更新时间或创建时间），每一天只出现一次。手动排序没有日期，只有一个「对话」分区，排序菜单在它上面。一个 Chat 会话都没有时只写「暂无对话」，不出标题。
 - 主按钮和 ⌘N 走同一段代码（App 里的模式控制器，经 app context 交给侧栏），所以永远一致；窄轨上的新建按钮也一样。Build 的「+」直接打开文件夹选择框（以前那个列出项目的小菜单去掉了，在某个项目里新建用项目行上的按钮）；「项目」标题旁的「+」照旧有新建空白项目、使用现有文件夹和排序。
-- Group 的「新建群聊」「新建联系人」在 GRP-04 / GRP-05 之前显示为不可用（`aria-disabled`，悬停提示「即将推出」），点了什么都不做；Group 下的 ⌘N 同样不动。
+- Group 的「新建群聊」在 GRP-08 之前显示为不可用（`aria-disabled`，悬停提示「即将推出」），点了什么都不做，「群聊」标题旁的「+」也一样；「+」新建联系人打开联系人编辑器（`/contacts/new`）。Group 下的 ⌘N 打开 Group 首页（`/contacts`）。
+- Group 的两个分区（GRP-05）：「群聊」在上，每行是群标志、群名和「4 人 · 12 分钟」（最后一条消息的时间，没有消息写「还没有消息」），按最后一条消息排；一个群都没有时写「还没有群聊：在群聊首页 @ 几位联系人就会建一个」。「联系人」在下，每行是头像、名字和简介（Claude Code、Codex 没有简介时写「外部」）。点联系人进档案（`/contacts/:id`），点群进群页面（`/groups/:groupId`）。屏幕上的那一行有选中底色：档案、编辑器或单聊所属的联系人，打开的群。两个分区可以收起，只在这次打开的窗口里记得。分区只在 Group 模式加载（异步组件，不进入口包），跟着 `contacts_changed`、`groups_changed` 刷新；新建的群也会马上进会话列表（搜索、⌘3 能找到它）。
 - 页面入口：「定时任务」「能力」是侧栏底栏的图标（在「设置」右边，明暗切换左边），「Pull Request」只在 Build 模式、且 GitHub 插件启用时出现。当前页的图标用选中底色。不加常驻的左侧图标栏。
 - 别的模式有事不会漏：菜单里每种模式旁显示「N 个在运行」和「等你回答」；**只有「等你回答」**（待批准、待回答的问题）会在标的右上角点亮一个小圆点，运行中不打扰。通知铃铛照旧汇总全部。按钮的 `aria-label` 这时加上「，其他模式等你回答」。
 - 删除或归档正在看的会话后，打开本模式的下一个会话；本模式没有别的会话了，就进本模式的首页（新草稿），不会跳到别的模式。会话在别处被删、启动时找不到当前会话这类情况，也是先找本模式的，再找最近的；群成员、试用台会话永远不会被选中。
@@ -56,7 +57,7 @@ Emperor 有三种模式：**Chat**（对话）、**Build**（构建）、**Group
 | ----- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Chat  | 「{称呼}，今天想聊点什么？」（没有称呼就去掉前缀） | 不提项目；提示「问任何问题，或者让我写点什么；/ 调用技能，@ 引用插件」                              | 5 个常用起手式，点了只填入输入框，不自动发送                  |
 | Build | 「今天推进哪个项目？」，下面一行说明会话在哪里运行 | 金色项目标签 + 分支；没选项目时标签写「选择项目」、金色描边加重，发送按钮禁用，提示「先选一个项目」 | 最近的项目（最多 3 个）+「打开文件夹…」，也可以把文件夹拖进来 |
-| Group | 「今天找谁帮忙？」                                 | 输入 @ 提到联系人                                                                                   | 联系人、最近的群（GRP-05）                                    |
+| Group | 「今天找谁帮忙？」，下面一行说明 @ 的用法          | 输入 @ 提到联系人（补全列出联系人），「@ 提到联系人」按钮                                           | 联系人（含「新建」）、最近的群（最多 5 个）+「新建群聊」      |
 
 Chat 首页：
 
@@ -75,4 +76,9 @@ Build 首页：
 
 首次启动的引导优先于首页：引导开着时，以及一个模型都没有（首页显示「开始接入」那一行）时，起手式和最近的项目都不出现；有模型但用不了（「去处理」）不影响它们。
 
-Group 首页的输入框：@ 一位联系人 → 打开和他的单聊并发出这条消息；@ 两位及以上 → 自动建一个临时群（成员是被 @ 的人，Emperor 作为主持人加入），这条消息作为点名消息发进新群。群名取第一句话：去掉 @，截到第一个「。！？.!?」或换行，最长 20 字；取出来是空的就用「临时群 · 成员名」。
+Group 首页（`/contacts`，GRP-05）：
+
+- 输入框：@ 一位联系人 → 打开和他最近的单聊（没有就新建），这条消息在那里发出；@ 两位及以上 → 自动建一个临时群（成员是被 @ 的人，Emperor 作为主持人加入），这条消息作为点名消息发进新群，然后打开这个群。群名取第一句话：去掉 @，截到第一个「。！？」或换行，「.!?」只在后面是空格或结尾时才算句末（「0.3」里的点不算），最长 20 字（再加「…」）；取出来是空的就用「临时群 · 成员名」。
+- @ 只在词首算（前面是开头、空格或标点），所以 `a@b.com` 不算；名字从长到短匹配，「@Claude Code」不会被读成「@Claude」；「@所有人」在首页不点任何人。输入 @ 列出名字里有后面这几个字的联系人（↑ ↓ 选，Enter 或 Tab 填入，Esc 收起），不是联系人的名字永远不会出现。Enter 发送，Shift+Enter 换行。
+- 发送前：没有 @ 提示「先 @ 一位联系人」；@ 了不是联系人的名字，提示「没有叫「小王」的联系人」，什么都不发。只 @ 了 Claude Code 或 Codex 时提示它们的单聊即将推出，和别的联系人一起 @ 就会建群。输入框下面一行写发出后会做什么（「发出后打开和「审稿人」的单聊」「发出后建临时群「…」：架构师、审稿人，Emperor 主持」）。
+- 联系人一行：头像、名字和一行小字（Emperor 写「主持人」，外部的写「外部」，其他写第一个领域），点了进档案；最后是「新建 联系人」。最近的群是卡片（群名、「4 人 · 12 分钟」），点了进群页面；最后一张「新建群聊」不可用，写「从模板建群即将推出」。
