@@ -42,7 +42,7 @@ function plan(vault: { state: string; entries: number }) {
       },
       {
         id: 'extensions',
-        title: 'Skills、插件与智能体',
+        title: 'Skills、插件、联系人与皮肤',
         description: '',
         files: 9,
         bytes: 4 * MB,

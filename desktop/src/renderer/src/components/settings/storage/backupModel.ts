@@ -34,7 +34,7 @@ export function newerFilesNotice(files: readonly DataFileState[]): {
 export const BACKUP_CATEGORY_TITLES: Record<string, string> = {
   config: '设置与配置',
   memory: '记忆',
-  extensions: 'Skills、插件与智能体',
+  extensions: 'Skills、插件、联系人与皮肤',
   projects: '项目与定时任务',
   sessions: '会话',
 }

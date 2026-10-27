@@ -180,6 +180,22 @@ describe('stageHomeBackup', () => {
     })
   })
 
+  it('takes contacts and imported skins, never a skin import half done (0.3)', async () => {
+    const { home } = await populated()
+    mkdirSync(join(home, 'contacts', 'memory'), { recursive: true })
+    writeFileSync(join(home, 'contacts', 'contacts.json'), '{"schemaVersion":2}')
+    writeFileSync(join(home, 'contacts', 'memory', 'ct-a.jsonl'), '{}\n')
+    mkdirSync(join(home, 'skins', 'my-skin'), { recursive: true })
+    writeFileSync(join(home, 'skins', 'my-skin', 'skin.json'), '{}')
+    mkdirSync(join(home, 'skins', '.staging-x'), { recursive: true })
+    writeFileSync(join(home, 'skins', '.staging-x', 'skin.json'), '{}')
+    const files = relativeFiles(await stage(home))
+    expect(files).toContain('home/contacts/contacts.json')
+    expect(files).toContain('home/contacts/memory/ct-a.jsonl')
+    expect(files).toContain('home/skins/my-skin/skin.json')
+    expect(files.some((file) => file.includes('.staging-'))).toBe(false)
+  })
+
   it('leaves conversations out when asked to', async () => {
     const { home } = await populated()
     const folder = await stage(home, false)
