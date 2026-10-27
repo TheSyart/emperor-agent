@@ -24,6 +24,17 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause)
 
+function isSummary(value: unknown): value is UsageSummary {
+  const bySource = (value as { bySource?: unknown } | null)?.bySource
+  return (
+    typeof bySource === 'object' &&
+    bySource !== null &&
+    ['chat', 'build', 'group', 'claude-code', 'codex'].every(
+      (key) => typeof (bySource as Record<string, unknown>)[key] === 'object',
+    )
+  )
+}
+
 export function createUsageCost() {
   const range = ref<UsageRange>('today')
   const summary = ref<UsageSummary | null>(null)
@@ -42,6 +53,8 @@ export function createUsageCost() {
     try {
       const next = await core('usage.summary', { range: range.value })
       if (request !== summaryRequest) return
+      // An answer of another shape (an older Core) must not break the page.
+      if (!isSummary(next)) throw new Error('返回的内容不是用量汇总')
       summary.value = next
       generatedAt.value = new Date()
     } catch (cause) {

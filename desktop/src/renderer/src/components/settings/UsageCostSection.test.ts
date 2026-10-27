@@ -333,4 +333,16 @@ describe('设置 › 用量与费用', () => {
       ['已删除的会话', 'Chat · 3K Token', '$1.50'],
     ])
   })
+
+  it('shows an error instead of crashing on an answer that is not a summary', async () => {
+    const fallback = core.getMockImplementation()!
+    core.mockImplementation(async (operation: string, input?: unknown) =>
+      operation === 'usage.summary' ? [] : fallback(operation, input),
+    )
+    await mount()
+    expect(root.querySelector('[data-metric="spend"]')).toBeNull()
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      '读取花费失败',
+    )
+  })
 })
