@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-28（对照 `3dc1af4a`）<br>
+> 最后核验：2026-10-27（对照 `3dc1af4a`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/contacts/runtime.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`、`packages/core/src/memory/token-tracker.ts`、`packages/core/src/usage/`、`packages/core/src/groups/scheduler.ts`、`packages/core/src/api/services/group-runtime.ts`、`packages/core/src/groups/external.ts`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
