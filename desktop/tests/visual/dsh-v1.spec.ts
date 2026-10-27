@@ -357,20 +357,26 @@ for (const theme of ['dark', 'light'] as const) {
 }
 
 // BRD-06: 宫廷用语 on — 准奏 / 驳回 with the plain words, and 小单 asking.
-test(`takeover permission, courtly (light) @baseline`, async ({ page }) => {
-  await uiPreferences(page, { courtlyCopy: true })
-  await open(page, '/chat/build-ui?visualControl=permission', {
-    theme: 'light',
+for (const theme of ['dark', 'light'] as const) {
+  test(`takeover permission, courtly (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await uiPreferences(page, { courtlyCopy: true })
+    await open(page, '/chat/build-ui?visualControl=permission', { theme })
+    const card = page.locator('[data-takeover="approval"]')
+    await expect(card).toBeVisible()
+    await expect(card.getByRole('button', { name: '拒绝' })).toHaveText(
+      '驳回（拒绝）',
+    )
+    await expect(card.locator('[data-courtly-sticker]')).toBeVisible()
+    await shot(page, `takeover-permission-courtly-${theme}`)
+    await expectBaseline(
+      page,
+      'conversation',
+      `takeover-approval-courtly-${theme}`,
+    )
   })
-  const card = page.locator('[data-takeover="approval"]')
-  await expect(card).toBeVisible()
-  await expect(card.getByRole('button', { name: '拒绝' })).toHaveText(
-    '驳回（拒绝）',
-  )
-  await expect(card.locator('[data-courtly-sticker]')).toBeVisible()
-  await shot(page, 'takeover-permission-courtly-light')
-  await expectBaseline(page, 'conversation', 'takeover-approval-courtly-light')
-})
+}
 
 const settingsSections = [
   'general',
