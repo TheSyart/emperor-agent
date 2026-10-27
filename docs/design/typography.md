@@ -2,17 +2,18 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22<br>
+> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
 > 事实源：`desktop/src/renderer/src/theme/primitives.css`（字体、`--fs-*`/`--lh-*`、`--type-*`、`--md-h*`、`--weight-*`）、`theme/base.css`、`styles.css`、`desktop/src/renderer/index.html`、`components/pages/PageShell.vue`、`components/settings/SettingsModal.vue`、`components/settings/ui/`、`components/ui/`（`PaneHeader.vue`、`Button.vue`、`Tabs.vue`、`Badge.vue`、`ListRow.vue`、`ListSection.vue`、`Field.vue`、`TooltipBubble.vue`、`MenuItem.vue`、`CodeBlock.vue`）、`components/conversation/parts/ConversationMarkdown.vue`、`components/conversation/nodes/UserBubble.vue`、`components/sidebar/`；测试 `style-audit.test.ts`、`styleAuditRules.ts`、`theme/tokens.test.ts`、`desktop/tests/visual/process.spec.ts`、`pages.spec.ts`、`settings-groups.spec.ts`
 
 界面是中文为主、夹杂英文与代码的桌面应用。排版的目标是：字号少而稳，层级主要靠颜色和字重而不是靠放大；中英混排自然；数字对齐。字号、行高和字重都来自[设计令牌](tokens.md)，颜色层级见[颜色使用规范](color.md)。
 
 ## 字体
 
-| 令牌          | 字体栈（按顺序回退）                                                                                                                | 用在哪                                        |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `--font-sans` | `-apple-system`、`BlinkMacSystemFont`、`Segoe UI`、`PingFang SC`、`Hiragino Sans GB`、`Microsoft YaHei`、`Helvetica Neue`、`Arial`… | 全部界面文字（`body`、表单控件继承）          |
-| `--font-mono` | `SF Mono`、`JetBrains Mono`、`ui-monospace`、`Fira Code`、`Consolas`、`Menlo`，最后回退 `PingFang SC`、`Microsoft YaHei`            | 代码、路径、命令、ID、`code`/`kbd`/`pre` 元素 |
+| 令牌             | 字体栈（按顺序回退）                                                                                                                | 用在哪                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `--font-sans`    | `-apple-system`、`BlinkMacSystemFont`、`Segoe UI`、`PingFang SC`、`Hiragino Sans GB`、`Microsoft YaHei`、`Helvetica Neue`、`Arial`… | 全部界面文字（`body`、表单控件继承）          |
+| `--font-heading` | 默认等于 `--font-sans`；皮肤可以换成宋体、楷体或圆体（`fonts.heading`，见[皮肤](skins.md)），由 SkinHost 写在根元素上               | 空白首页的问候语                              |
+| `--font-mono`    | `SF Mono`、`JetBrains Mono`、`ui-monospace`、`Fira Code`、`Consolas`、`Menlo`，最后回退 `PingFang SC`、`Microsoft YaHei`            | 代码、路径、命令、ID、`code`/`kbd`/`pre` 元素 |
 
 - 不加载网页字体。macOS 上英文是 SF，中文是苹方；等宽字体里的中文落到苹方，所以代码注释里的中文和正文字形一致。
 - 页面声明 `<html lang="zh-CN">`（`index.html`），浏览器按简体中文选择字形和标点。

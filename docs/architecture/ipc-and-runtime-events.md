@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-27（对照 `76a61ad1`）<br>
-> 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`、`packages/core/src/contacts/`
+> 最后核验：2026-10-27（对照 `66fa8ef8`）<br>
+> 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`desktop/src/main/skins/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`、`packages/core/src/contacts/`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
 
@@ -318,6 +318,18 @@ main 在 `index.ts` 顶部、任何模块写日志之前（REL-01）：
 
 Core 的只读 operation `storage.versions` 返回运行版本（`appVersion`、`lastRunVersion`、`previousRunVersion`、`downgradedFrom`）、数据版本、清单中每个文件的状态与最近一次恢复；界面在启动时读取它显示降级提示与恢复结果。版本更高的文件被写入时，Core 抛 `data_file_newer`（「这个文件来自更新版本的 Emperor，当前版本只读：<文件名>」），经 `toSafe()` 原样到达界面。
 
+### 皮肤
+
+「设置 › 常规 › 外观 › 皮肤」（BRD-05）的通道只对受信主窗口开放（`desktop/src/main/skins/skin-ipc.ts`），路径不过 IPC；格式与检查规则见[皮肤](../design/skins.md)。
+
+- `skinList()` → `emperor:skin:list`：`{ ok: true, skins }`，官方皮肤在前（御书房、朱批、日常），导入的按 id 排在后面；每项 `{ ok: true, id, view }`，导入目录里通不过检查的为 `{ ok: false, id, name, official: false, problems }`；
+- `skinGet(id)` → `emperor:skin:get`：重新检查后返回 `{ ok: true, skin }`；文件夹不在了或通不过检查时 `{ ok: false, missing: true }`，渲染端换回御书房；
+- `skinImportPick()` → `emperor:skin:import-pick`：main 弹选文件夹的对话框并检查，通过时把文件夹记在 `s_` + 12 位十六进制的 `stageId` 下（最多记 8 个），返回 `{ ok: true, staged: { stageId, skin, replaces } }`；没通过时 `{ ok: false, problems }`，取消时 `{ ok: false, canceled: true }`；
+- `skinImport(stageId)` → `emperor:skin:import`：再检查一次，复制 `skin.json` 和装饰位用到的图片到 `<stateRoot>/skins/<id>/`（先写进暂存目录、复制后再查，再换上），返回 `{ ok: true, skin }`；`stageId` 只能用一次；
+- `skinRemove(id)` → `emperor:skin:remove`：删除导入的皮肤；官方皮肤报错。
+
+`view` 是渲染端要用的全部：允许的令牌与值、禁区的基础值（每种明暗一份：皮肤改的令牌和建在它们上面的令牌）、标题字体、装饰位地址（`app://skin/<id>/<文件名>?v=<版本>`）和预览颜色。
+
 ### 检查更新
 
 「设置 › 常规 › 更新」与侧栏通知（REL-02）。检查、下载与校验都在 Core（`packages/core/src/updates/`），main 只经 `CoreApiCreateOptions.updates`（`desktop/src/main/update-host.ts`）提供：Electron `net` 传输（`credentials: 'omit'`、不用会话 Cookie、跳转交回 Core 逐跳检查）、`shell.showItemInFolder`、「下载」文件夹、`com.apple.quarantine` 标记、架构与 Electron 版本，以及能否检查（打包版可以；打包冒烟不可以；开发版只在设了测试更新源时可以）。没有新的 preload 接口，界面走 Core operation 与 runtime event。
@@ -342,7 +354,7 @@ Core 的只读 operation `storage.versions` 返回运行版本（`appVersion`、
 
 ## 本地资源协议
 
-附件与 media 通过受限的 `app://` URL 读取。Main 根据受管 ID 解析 `stateRoot` 中的文件，校验目录和类型，不接受 renderer 提供任意绝对路径。`bundle`、`attachments`、`media`、`pet`、`pet-assets` 与 `plugin-assets` 按 host 分流；静态资源 resolver 拒绝 traversal、畸形编码和 extensionless fallback。`workspace-media`（BUG-05、BUG-10，文件面板的视频、音频、图片与文档第一页）的地址只含 Core 发的 128 位随机 token：`files.mediaUrl` 按 `files.preview` 的同一套检查解析出文件、记下绝对路径，有效 10 分钟，同一会话同一文件复用未过期的 token；Main 调 Core 的 `files.mediaGrant(token)`（只供 Main 使用，不是 renderer operation）查到授权：`absPath` 是要读的内容（文件本身，或 Core 生成在 `<stateRoot>/cache/previews/` 的 PNG／第一页），`filePath` 是文件本身，`streamable` 为假的授权只指认文件、不提供内容；地址里 token 之后的部分一律忽略，token 未知或过期、文件已删、路径不再是同一个文件（换成了符号链接）都返回 404；正文从磁盘流式读出，支持 `Range`（无 Range 返回 200，单段返回 206，起点超出文件返回 416 并带 `Content-Range: bytes */<大小>`，多段只取第一段），带 `Accept-Ranges`、`Content-Length`、`nosniff` 与 `no-store`。为此 `app` scheme 注册时带 `stream: true`。`plugin-assets` 的地址只含范围和插件 ID：Main 调 Core 的 `plugins.logo`（只供 Main 使用，不是 renderer operation），由 Core 找到插件包、只读 `./assets/` 下的普通文件并按文件头确认是不超过 1 MiB 的 PNG、JPEG 或 WebP，再返回字节，响应带 `nosniff`。Main 只允许 `app://bundle` 读取 attachment、media、plugin-assets 与 workspace-media，`app://pet` 读取 pet-assets，其他显式 Origin 返回 403。
+附件与 media 通过受限的 `app://` URL 读取。Main 根据受管 ID 解析 `stateRoot` 中的文件，校验目录和类型，不接受 renderer 提供任意绝对路径。`bundle`、`attachments`、`media`、`pet`、`pet-assets`、`plugin-assets` 与 `skin` 按 host 分流；静态资源 resolver 拒绝 traversal、畸形编码和 extensionless fallback。`workspace-media`（BUG-05、BUG-10，文件面板的视频、音频、图片与文档第一页）的地址只含 Core 发的 128 位随机 token：`files.mediaUrl` 按 `files.preview` 的同一套检查解析出文件、记下绝对路径，有效 10 分钟，同一会话同一文件复用未过期的 token；Main 调 Core 的 `files.mediaGrant(token)`（只供 Main 使用，不是 renderer operation）查到授权：`absPath` 是要读的内容（文件本身，或 Core 生成在 `<stateRoot>/cache/previews/` 的 PNG／第一页），`filePath` 是文件本身，`streamable` 为假的授权只指认文件、不提供内容；地址里 token 之后的部分一律忽略，token 未知或过期、文件已删、路径不再是同一个文件（换成了符号链接）都返回 404；正文从磁盘流式读出，支持 `Range`（无 Range 返回 200，单段返回 206，起点超出文件返回 416 并带 `Content-Range: bytes */<大小>`，多段只取第一段），带 `Accept-Ranges`、`Content-Length`、`nosniff` 与 `no-store`。为此 `app` scheme 注册时带 `stream: true`。`plugin-assets` 的地址只含范围和插件 ID：Main 调 Core 的 `plugins.logo`（只供 Main 使用，不是 renderer operation），由 Core 找到插件包、只读 `./assets/` 下的普通文件并按文件头确认是不超过 1 MiB 的 PNG、JPEG 或 WebP，再返回字节，响应带 `nosniff`。`skin`（BRD-05）的地址只含皮肤 id 和图片文件名：`SkinStore.asset` 重新检查皮肤包，只交出它某个装饰位用到的 PNG / WebP（读取时再核对文件头、不超过 512 KB），响应带 `nosniff`，只接受 GET（`HEAD` 也行）；`..`、编码过的斜杠、子目录和其他文件一律 404。Main 只允许 `app://bundle` 读取 attachment、media、plugin-assets、workspace-media 与 skin，`app://pet` 读取 pet-assets，其他显式 Origin 返回 403。
 
 Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app://bundle/index.html`，证明 Node globals 不存在、preload 报告 sandboxed、Core bootstrap 可调用、临时附件字节可精确读取；并检查渲染层防护（回执 `operations.renderer.security`）：响应头与 meta 都是生产 CSP、`eval` 抛 `EvalError`、`getUserMedia` 被拒、打开 DevTools 无效、应用菜单没有重新载入和开发者工具，主窗口载入的地址固定为 `app://bundle`（`rendererUrlPinned`：runner 把 `ELECTRON_RENDERER_URL` 指向一个本地诱饵服务器，它必须收不到任何请求）。
 
