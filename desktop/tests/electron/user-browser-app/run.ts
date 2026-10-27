@@ -32,6 +32,7 @@ import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
 import { startFixtureSite, type FixtureSite } from '../fixtures/site'
 import { startFakeModel, type FakeModel } from '../fullstack/fake-model'
+import { isolateAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'user-browser-app')
@@ -146,6 +147,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  isolateAgents(env, home)
   const app = await _electron.launch({
     args: ['.'],
     cwd: desktop,

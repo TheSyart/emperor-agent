@@ -21,7 +21,6 @@
 
 import { execFileSync } from 'node:child_process'
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -44,6 +43,11 @@ import {
   type FakeModel,
   type Step,
 } from '../fullstack/fake-model'
+import {
+  agentsOnPath,
+  isolateAgents,
+  pathWithoutAgents,
+} from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'modes')
@@ -177,20 +181,6 @@ function prepareProject(): string {
   return root
 }
 
-const AGENT_COMMANDS = ['claude', 'codex']
-
-/** PATH without the folders that hold a claude or codex command. */
-function pathWithoutAgents(path: string): string {
-  return path
-    .split(':')
-    .filter(
-      (dir) =>
-        dir !== '' &&
-        !AGENT_COMMANDS.some((name) => existsSync(join(dir, name))),
-    )
-    .join(':')
-}
-
 async function launch(
   home: string,
 ): Promise<{ app: ElectronApplication; page: Page }> {
@@ -202,9 +192,7 @@ async function launch(
   // Claude Code and Codex never run: not on PATH, sign-ins read from an
   // empty folder, and the login shell (which would bring PATH back) is not
   // read (AGT-02).
-  env.PATH = pathWithoutAgents(env.PATH ?? '')
-  env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
-  mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
+  isolateAgents(env, home)
   // Its own Chromium profile: the default one is the installed app's, and
   // EMPEROR_CONFIG_DIR does not move it (FIX-17).
   const app = await _electron.launch({
@@ -706,11 +694,7 @@ async function main(): Promise<void> {
   try {
     prepareHome(home, model)
     const isolatedPath = pathWithoutAgents(process.env.PATH ?? '')
-    const leaked = isolatedPath
-      .split(':')
-      .filter((dir) =>
-        AGENT_COMMANDS.some((name) => existsSync(join(dir, name))),
-      )
+    const leaked = agentsOnPath(isolatedPath)
     if (leaked.length) throw new Error(`claude/codex on PATH: ${leaked}`)
 
     const launched = await launch(home)

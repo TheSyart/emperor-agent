@@ -69,6 +69,7 @@ import {
   type ChatRequest,
   type FakeModel,
 } from '../fullstack/fake-model'
+import { isolateAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'references')
@@ -333,6 +334,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  isolateAgents(env, home)
   const app = await _electron.launch({
     args: ['.', `--user-data-dir=${join(home, 'electron-profile')}`],
     cwd: desktop,

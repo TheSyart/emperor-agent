@@ -34,6 +34,7 @@ import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
 import { startFakeModel, type FakeModel } from '../fullstack/fake-model'
 import { rendererContentSecurityPolicy } from '../../../src/shared/content-security-policy'
+import { isolateAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'renderer-security')
@@ -194,6 +195,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  isolateAgents(env, home)
   const app = await _electron.launch({
     args: ['.', `--user-data-dir=${join(home, 'electron-profile')}`],
     cwd: desktop,
@@ -356,7 +358,9 @@ async function main(): Promise<void> {
             filePaths: [dir],
           })) as typeof dialog.showOpenDialog
         }, project)
-        // UI-S01: projects are opened from the 项目 header's 「+」 menu.
+        // UI-S01: projects are opened from the 项目 header's 「+」 menu, a
+        // Build section (MOD-02); a fresh home starts in Chat.
+        await page.keyboard.press('ControlOrMeta+2')
         await page.getByRole('button', { name: '项目操作' }).click()
         await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
         await page.getByLabel('消息输入框').first().waitFor({ timeout: 10_000 })

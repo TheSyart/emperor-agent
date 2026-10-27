@@ -49,6 +49,7 @@ import {
   type Page,
 } from 'playwright-core'
 import { startFakeModel, type FakeModel } from '../fullstack/fake-model'
+import { isolateAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'settings')
@@ -327,8 +328,7 @@ async function launch(
   // Claude/Codex sign-ins come from an empty folder, never ~/.claude, and
   // the login shell does not run (AGT-02). A fake claude comes first on
   // PATH: the real one never runs (AGT-12).
-  env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
-  mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
+  isolateAgents(env, home)
   const prefix = join(home, 'executor-prefix')
   env.PATH = `${existsSync(join(prefix, 'bin', 'claude')) ? join(prefix, 'bin') : fakeClaude(prefix)}:${env.PATH ?? ''}`
   // 子智能体 › 版本 asks the test registry, never npm's (AGT-13).

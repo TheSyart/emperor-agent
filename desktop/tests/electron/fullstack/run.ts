@@ -42,6 +42,7 @@ import {
   type Step,
   type StepReply,
 } from './fake-model'
+import { isolateAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'fullstack')
@@ -382,6 +383,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  isolateAgents(env, home)
   // Its own Chromium profile: the default one is the installed app's, and
   // EMPEROR_CONFIG_DIR does not move it (FIX-17, as the references suite).
   const app = await _electron.launch({

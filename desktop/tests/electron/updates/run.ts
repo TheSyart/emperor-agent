@@ -33,6 +33,7 @@ import {
 } from 'playwright-core'
 import { startTestUpdateFeed } from '../../../../scripts/test-update-feed.mjs'
 import { startFakeModel, type FakeModel } from '../fullstack/fake-model'
+import { isolateAgents } from '../harness/agents'
 
 interface FeedRequest {
   path: string
@@ -178,8 +179,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
-  env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
-  mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
+  isolateAgents(env, home)
   env.EMPEROR_UPDATE_FEED_URL = feed.url
   env.EMPEROR_E2E_DOWNLOADS_DIR = downloads
   const startedAt = Date.now()

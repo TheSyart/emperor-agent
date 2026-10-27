@@ -46,6 +46,7 @@ import {
   type FakeModel,
   type Step,
 } from '../fullstack/fake-model'
+import { isolateAgents, pathWithoutAgents } from '../harness/agents'
 
 const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'plugins')
@@ -311,6 +312,7 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  isolateAgents(env, home)
   Object.assign(env, extraEnv)
   const app = await _electron.launch({
     args: ['.'],
@@ -961,7 +963,7 @@ async function main(): Promise<void> {
   const emptyGh = mkdtempSync(join(tmpdir(), 'emperor-e2e-gh-'))
   const ghRoot = mkdtempSync(join(tmpdir(), 'emperor-e2e-fake-gh-'))
   const gh = fakeGh(ghRoot)
-  const ghPath = `${gh.bin}:${process.env.PATH ?? ''}`
+  const ghPath = `${gh.bin}:${pathWithoutAgents(process.env.PATH ?? '')}`
   let app: ElectronApplication | null = null
   try {
     prepareHome(home, model)
