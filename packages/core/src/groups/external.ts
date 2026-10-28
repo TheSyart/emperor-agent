@@ -224,7 +224,7 @@ function codeOf(error: unknown): string | undefined {
   return error instanceof DelegationError ? error.code : undefined
 }
 
-/** A refusal in words, with where to fix it (also a single chat's, GRP-11). */
+/** A refusal in words, with where to fix it. */
 export function describeExternalFailure(error: unknown, name: string): string {
   switch (codeOf(error)) {
     case 'AUTH_REQUIRED':

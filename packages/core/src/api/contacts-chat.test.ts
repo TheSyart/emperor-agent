@@ -341,6 +341,19 @@ describe('a single chat with a contact (GRP-05)', () => {
     })
   })
 
+  it('takes only a message id a delegation can keep (GRP-19)', async () => {
+    const { api } = await open()
+    const codex = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    for (const clientMessageId of ['a/b', 'x'.repeat(200), 'cm 1'])
+      await expect(
+        invokeCoreOperation(api, 'contacts.chatSend', [
+          { sessionId: String(codex.id), text: 'hi', clientMessageId },
+        ]),
+      ).rejects.toMatchObject({ code: 'invalid_core_arguments' })
+  })
+
   it('has no single chat with a contact that is gone', async () => {
     const { api } = await open()
     await expect(

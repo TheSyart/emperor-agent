@@ -2534,8 +2534,10 @@ export const CORE_OPERATION_REGISTRY = {
       z
         .object({
           sessionId: idSchema,
+          // The chat refuses more than a delegation takes (32 KiB) in words.
           text: z.string().max(200_000),
-          clientMessageId: idSchema,
+          // It becomes the delegation message `dgm-<id>` (GRP-19).
+          clientMessageId: z.string().regex(/^[A-Za-z0-9-]{1,128}$/),
         })
         .strict(),
     ]),
