@@ -537,4 +537,32 @@ describe('what members ask of the user, as chat (D29)', () => {
       [{ taskId: 'gt_9', approve: false }],
     ])
   })
+
+  it('a task held because its member handed out tasks again and again waits for 同意 or 继续 (GRP-15)', async () => {
+    props.messages = [
+      message('m1', 'ct-rev', 'v0.3.4', {
+        kind: 'task',
+        ask: ['ct-arch'],
+        task: {
+          taskId: 'gt_4',
+          to: 'ct-arch',
+          title: 'v0.3.4',
+          deliverable: '改好的需求稿',
+          access: 'group_files',
+          state: 'waiting_user',
+          hold: 'task_relay',
+        },
+      }),
+    ]
+    await mount()
+    const card = document.querySelector<HTMLElement>('[data-task-card]')!
+    const note = card.querySelector('[data-task-confirm] .note')?.textContent
+    expect(note).toContain('「继续」')
+    expect(note).not.toContain('改项目代码')
+    const buttons = [...card.querySelectorAll<HTMLElement>('button')]
+    buttons.find((button) => button.textContent?.trim() === '同意')!.click()
+    expect(emitted.confirmTask.mock.calls).toEqual([
+      [{ taskId: 'gt_4', approve: true }],
+    ])
+  })
 })

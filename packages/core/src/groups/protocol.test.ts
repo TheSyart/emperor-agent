@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { groupCharter } from './charter'
 import { formatDelivery, pendingDelivery, planDelivery } from './delivery'
-import { buildUserMessage, parseMentions } from './envelope'
+import { buildUserMessage, parseMentions, resolveMentions } from './envelope'
 import { foldGroupEvents, type GroupLogEvent } from './events'
 import type { GroupMember, GroupMessage } from './types'
 import { visibleTo } from './visibility'
@@ -70,6 +70,60 @@ describe('parseMentions', () => {
 
   it('treats @所有人 as no individual mention', () => {
     expect(parseMentions('@所有人 说说看', ROSTER)).toEqual([])
+  })
+})
+
+// GRP-15 · the real debate group (GRP-10): the contact is 「反方（红队）」,
+// the moderator wrote 「@反方」 and 「`@反方`」, and every one went nowhere.
+describe('parseMentions · names written short (GRP-15)', () => {
+  const DEBATE: GroupMember[] = [
+    { id: 'ct-emperor', name: 'Emperor', intro: '主持人' },
+    { id: 'ct-pm', name: '产品经理', intro: '需求' },
+    { id: 'ct-red', name: '反方（红队）', intro: '专挑毛病' },
+    { id: 'ct-cc', name: 'Claude Code', intro: '外部', external: true },
+  ]
+
+  it('reads a prefix that fits exactly one member as that member', () => {
+    expect(parseMentions('等产品经理交稿后，@反方 再签字检查', DEBATE)).toEqual(
+      ['ct-red'],
+    )
+    expect(parseMentions('@产品 改一下第 3 节', DEBATE)).toEqual(['ct-pm'])
+    expect(parseMentions('@claude 看一下', DEBATE)).toEqual(['ct-cc'])
+  })
+
+  it('still reads the full name, full-width brackets and all', () => {
+    expect(parseMentions('@反方（红队） 两边都打', DEBATE)).toEqual(['ct-red'])
+  })
+
+  it('leaves trailing punctuation, backticks and quotes off the name', () => {
+    for (const text of [
+      '第一次我写 `@反方`，没有送达',
+      '请「@反方」看看',
+      '"@反方" 你来',
+      '@反方。',
+      '@反方，你看',
+      '@产品经理：请改',
+    ])
+      expect(parseMentions(text, DEBATE), text).toHaveLength(1)
+    expect(parseMentions('第一次我写 `@反方`', DEBATE)).toEqual(['ct-red'])
+  })
+
+  it('does not guess when a prefix fits several members', () => {
+    const two: GroupMember[] = [
+      ...DEBATE,
+      { id: 'ct-blue', name: '反方（蓝队）', intro: '另一组' },
+    ]
+    expect(parseMentions('@反方 看看', two)).toEqual([])
+    expect(resolveMentions('@反方 看看', two)).toEqual([
+      { kind: 'ambiguous', token: '反方', ids: ['ct-red', 'ct-blue'] },
+    ])
+    expect(parseMentions('@反方（蓝队） 看看', two)).toEqual(['ct-blue'])
+  })
+
+  it('reports a name that fits nobody, and skips addresses and paths', () => {
+    expect(
+      resolveMentions('@界面设计评审，未过。a@b.com @types/node', DEBATE),
+    ).toEqual([{ kind: 'unknown', token: '界面设计评审' }])
   })
 })
 
@@ -303,14 +357,25 @@ describe('groupCharter', () => {
     const text = groupCharter(state, ROSTER, 'ct-arch')
     expect(text).toContain('# 群聊：0.3 方案评审')
     expect(text).toContain('目标：评审 0.3 的群聊方案。')
-    expect(text).toContain('- 审稿人：代码与方案评审')
-    expect(text).toContain('- Emperor（主持人）：主持人')
+    // GRP-15: each name as it is written after @, the role apart from it.
+    expect(text).toContain('- @审稿人：代码与方案评审')
+    expect(text).toContain('- @Emperor · 主持人：主持人')
+    expect(text).toContain('- @Claude Code · 外部：外部')
+    expect(text).toContain('点名时在 @ 后面照抄全名，比如「@Emperor」')
     expect(text).toContain('你是「架构师」')
-    expect(text).toMatch(/写「@名字」/)
+    expect(text).toMatch(/写「@全名」/)
     expect(text).toMatch(/不点名/)
     expect(text).toMatch(/只会收到公开的消息和发给你的私信/)
     // Deterministic: the same state gives the same text.
     expect(groupCharter(state, ROSTER, 'ct-arch')).toBe(text)
+  })
+
+  it('tells the moderator it can end the turn whenever it speaks (GRP-15)', () => {
+    const state = foldGroupEvents([created()])
+    const moderator = groupCharter(state, ROSTER, 'ct-emperor')
+    expect(moderator).toMatch(/你是主持人.*随时.*group_close/)
+    expect(moderator).toMatch(/group_next/)
+    expect(groupCharter(state, ROSTER, 'ct-arch')).not.toMatch(/group_close/)
   })
 
   it('describes the collaboration mode in force', () => {

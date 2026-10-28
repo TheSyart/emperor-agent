@@ -424,6 +424,29 @@ describe('the live bar and the members’ status', () => {
     })
   })
 
+  it('says a turn ended on a task relay or a run of 没有补充 (GRP-15)', () => {
+    const ended = (state: 'paused' | 'finished', reason: string) =>
+      liveBarParts({
+        turn: {
+          turnId: 't1',
+          state,
+          reason,
+          spend: { usd: 0, tokens: 0 },
+          startedAt: 1_000,
+          speakers: [],
+          queued: [],
+        },
+        names: (id) => id,
+        tasks: new Set(),
+        speeches: 9,
+        now: 61_000,
+      }).speaking
+    expect(ended('paused', 'task_relay')).toBe(
+      '本轮已暂停：同一位成员交办的次数多了，回复「继续」接着做',
+    )
+    expect(ended('finished', 'pass_streak')).toBe('本轮已结束：大家都没有补充')
+  })
+
   it('gives each member one status line', () => {
     const base = {
       moderator: 'ct-emperor',

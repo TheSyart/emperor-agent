@@ -8,7 +8,26 @@ import { GroupScheduler } from './scheduler'
 import { createGroupTools, GROUP_TOOL_NAMES } from './tools'
 import { memoryGroups } from './test-fixture'
 
-function setup() {
+type Use = (name: string, args: unknown) => Promise<void>
+
+/** What ct-arch does in its speech (the default) — or each member, by a script. */
+async function archSpeech(member: string, use: Use) {
+  if (member !== 'ct-arch') return
+  await use('group_whisper', { to: '审稿人', text: '私下说' })
+  await use('group_whisper', { to: '产品经理', text: '?' })
+  await use('group_assign', {
+    to: '@审稿人',
+    title: '查溢出',
+    deliverable: '原因',
+    access: 'readonly',
+  })
+  await use('group_next', { speakers: ['审稿人'], mode: 'relay' })
+  await use('group_pass', { reason: '先这样' })
+}
+
+function setup(
+  speech: (member: string, use: Use) => Promise<void> = archSpeech,
+) {
   const groups = memoryGroups()
   const calls: string[] = []
   const tools: ReturnType<typeof createGroupTools> = []
@@ -39,18 +58,7 @@ function setup() {
           calls.push(`error:${(error as Error).message}`)
         }
       }
-      if (req.member === 'ct-arch') {
-        await use('group_whisper', { to: '审稿人', text: '私下说' })
-        await use('group_whisper', { to: '产品经理', text: '?' })
-        await use('group_assign', {
-          to: '@审稿人',
-          title: '查溢出',
-          deliverable: '原因',
-          access: 'readonly',
-        })
-        await use('group_next', { speakers: ['审稿人'], mode: 'relay' })
-        await use('group_pass', { reason: '先这样' })
-      }
+      await speech(req.member, use)
       return { text: '', outcome: 'completed', spend: { usd: 0, tokens: 0 } }
     },
     poll: async () => ({ raise: false, score: 0, reason: '' }),
@@ -115,9 +123,9 @@ describe('group tools', () => {
     await scheduler.start(view.id, message, plan)
     expect(calls).toEqual([
       '已私信「审稿人」。',
-      'error:「产品经理」不在这个群里',
+      'error:「产品经理」不在这个群里。群里的成员：Emperor、架构师、审稿人。',
       '已交办给「审稿人」：查溢出',
-      'error:只有主持人安排发言时才能用 group_next',
+      'error:只有主持人能用 group_next',
       'conclude:group_pass',
       '已表示没有补充。',
     ])
@@ -136,5 +144,41 @@ describe('group tools', () => {
         agent: { id: sessionOf('ct-arch') } as Agent,
       } as unknown as ToolRunContext),
     ).rejects.toThrow(/轮到你发言/)
+  })
+
+  it('GRP-15 · names a member by a prefix that fits one, or by its name in 「」', async () => {
+    const { groups, view, scheduler, calls } = setup(async (member, use) => {
+      if (member !== 'ct-arch') return
+      await use('group_whisper', { to: '审稿', text: '私下说' })
+      await use('group_whisper', { to: '「审稿人」', text: '再说一句' })
+    })
+    const { message, plan } = groups.service.send(view.id, {
+      way: 'mention',
+      text: '@架构师 说说',
+    })
+    await scheduler.start(view.id, message, plan)
+    expect(calls).toEqual(['已私信「审稿人」。', '已私信「审稿人」。'])
+  })
+
+  it('GRP-15 · the moderator closes from any speech; group_next outside planning says what to do', async () => {
+    const { groups, view, scheduler, calls } = setup(async (member, use) => {
+      if (member !== 'ct-emperor') return
+      await use('group_next', { speakers: ['审稿人'], mode: 'relay' })
+      await use('group_close', { summary: '结论：先修溢出。' })
+    })
+    const { message, plan } = groups.service.send(view.id, {
+      way: 'mention',
+      text: '@Emperor 收个尾',
+    })
+    await scheduler.start(view.id, message, plan)
+    expect(calls[0]).toMatch(
+      /^error:group_next 只在请你安排谁发言时能用.*「@全名」.*group_close/,
+    )
+    expect(calls.slice(1)).toEqual(['conclude:group_close', '已收尾。'])
+    const said = groups.service
+      .state(view.id)
+      .messages.filter((m) => m.from === 'ct-emperor')
+      .map((m) => [m.kind, m.text])
+    expect(said).toEqual([['summary', '结论：先修溢出。']])
   })
 })

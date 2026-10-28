@@ -14,21 +14,111 @@ import type {
 const EVERYONE = '所有人'
 
 /**
- * The members @-mentioned in `text`, in order of first mention. Names are
- * matched longest first, so `@Claude Code` is not read as `@Claude`.
+ * GRP-15: the shortest name start that may stand for a whole name
+ * (「@反方」 for 「反方（红队）」). One character is too easy to hit by chance.
  */
+export const MENTION_PREFIX_MIN = 2
+
+/**
+ * What follows an @ up to the end of the word: a space, another @, or
+ * punctuation that never sits inside a name (full-width brackets and
+ * hyphens do: 「反方（红队）」, 「code-reviewer」).
+ */
+const MENTION_WORD = /^[^\s@，。！？、；：,!?;:「」『』【】《》<>"“”‘’]+/u
+/** Trailing marks that end a sentence or close a quote, not the name. */
+const TRAILING = /[`'"“”‘’.,;:!?。，；：！？、…~*_)）\]】》>」』]$/u
+const OPENER: Record<string, string> = {
+  ')': '(',
+  '）': '（',
+  ']': '[',
+  '】': '【',
+  '》': '《',
+  '>': '<',
+}
+
+/** One @ in a text: whom it reaches, or why it reaches nobody. */
+export type MentionHit =
+  | { kind: 'member'; token: string; id: ContactId }
+  /** A name start that fits several members: they are not guessed. */
+  | { kind: 'ambiguous'; token: string; ids: ContactId[] }
+  | { kind: 'unknown'; token: string }
+
+/** `raw` without the punctuation, backticks and quotes after the name. */
+function trimToken(raw: string): string {
+  let token = raw
+  while (token && TRAILING.test(token)) {
+    const last = token.at(-1)!
+    // A closing bracket whose opener is in the word belongs to it.
+    if (OPENER[last] && token.includes(OPENER[last])) break
+    token = token.slice(0, -1)
+  }
+  return token
+}
+
+/**
+ * Who `name` is: the member with that id or name (any case), else the one
+ * member whose name starts with it (at least MENTION_PREFIX_MIN characters).
+ * A leading @, 「」 and trailing punctuation are not part of it.
+ */
+export function resolveName(
+  name: string,
+  roster: readonly GroupMember[],
+): MentionHit {
+  const token = trimToken(name.trim().replace(/^[@「『]+/u, ''))
+  const wanted = token.toLowerCase()
+  const exact = roster.find(
+    (m) => m.id === token || (m.name && m.name.toLowerCase() === wanted),
+  )
+  if (exact) return { kind: 'member', token, id: exact.id }
+  if (Array.from(token).length < MENTION_PREFIX_MIN)
+    return { kind: 'unknown', token }
+  const fits = roster.filter((m) => m.name.toLowerCase().startsWith(wanted))
+  if (fits.length === 1) return { kind: 'member', token, id: fits[0]!.id }
+  if (fits.length > 1)
+    return { kind: 'ambiguous', token, ids: fits.map((m) => m.id) }
+  return { kind: 'unknown', token }
+}
+
+/**
+ * Every @ in `text`, in order. A full name is matched first, longest
+ * first, so `@Claude Code` is not read as `@Claude` and 「@反方（红队）」
+ * keeps its brackets; otherwise the word after the @, without trailing
+ * punctuation, backticks or quotes, is read as the start of a name (GRP-15).
+ * `@所有人`, a bare @, and words with a dot or a slash inside (an email
+ * address, `@types/node`) are skipped.
+ */
+export function resolveMentions(
+  text: string,
+  roster: readonly GroupMember[],
+): MentionHit[] {
+  const names = [...roster].sort((a, b) => b.name.length - a.name.length)
+  const hits: MentionHit[] = []
+  for (let i = text.indexOf('@'); i >= 0; i = text.indexOf('@', i + 1)) {
+    const rest = text.slice(i + 1)
+    if (rest.startsWith(EVERYONE)) continue
+    const lower = rest.toLowerCase()
+    const member = names.find(
+      (m) => m.name && lower.startsWith(m.name.toLowerCase()),
+    )
+    if (member) {
+      hits.push({ kind: 'member', token: member.name, id: member.id })
+      continue
+    }
+    const token = trimToken(rest.match(MENTION_WORD)?.[0] ?? '')
+    if (!token || /[./]/.test(token)) continue
+    hits.push(resolveName(token, roster))
+  }
+  return hits
+}
+
+/** The members @-mentioned in `text`, in order of first mention. */
 export function parseMentions(
   text: string,
   roster: readonly GroupMember[],
 ): ContactId[] {
-  const names = [...roster].sort((a, b) => b.name.length - a.name.length)
   const found: ContactId[] = []
-  for (let i = text.indexOf('@'); i >= 0; i = text.indexOf('@', i + 1)) {
-    const rest = text.slice(i + 1)
-    if (rest.startsWith(EVERYONE)) continue
-    const member = names.find((m) => m.name && rest.startsWith(m.name))
-    if (member && !found.includes(member.id)) found.push(member.id)
-  }
+  for (const hit of resolveMentions(text, roster))
+    if (hit.kind === 'member' && !found.includes(hit.id)) found.push(hit.id)
   return found
 }
 

@@ -9,7 +9,8 @@ import {
   type SpeakRequest,
   type SpeakResult,
 } from './scheduler'
-import { memoryGroups } from './test-fixture'
+import type { GroupContact } from './service'
+import { memoryGroups, TEST_CONTACTS } from './test-fixture'
 
 type Script = (
   req: SpeakRequest,
@@ -18,6 +19,7 @@ type Script = (
 
 function room(
   opts: {
+    contacts?: GroupContact[]
     members?: string[]
     settings?: Record<string, unknown>
     moderator?: string | null
@@ -30,7 +32,7 @@ function room(
     }
   } = {},
 ) {
-  const groups = memoryGroups()
+  const groups = memoryGroups(opts.contacts)
   const speeches: SpeakRequest[] = []
   const polls: string[] = []
   const reviews: GroupMessage[] = []
@@ -679,5 +681,391 @@ describe('external members and code changes (GRP-09)', () => {
     })
     const result = r.messages().find((m) => m.kind === 'result')!
     expect(result.delegation).toEqual({ id: 'dlg-1', runId: 'dgr-1' })
+  })
+})
+
+// GRP-15 · how a group turn ends, from the real GRP-10 run: 「@反方」 never
+// reached 「反方（红队）」, the moderator could not close outside planning,
+// nine spec revisions went round as tasks, and thirteen 「没有补充」 in a row.
+const DEBATE: GroupContact[] = [
+  ...TEST_CONTACTS,
+  ...[
+    ['ct-pm', '产品经理', '需求'],
+    ['ct-red', '反方（红队）', '专挑毛病'],
+    ['ct-blue', '反方（蓝队）', '另一组'],
+  ].map(([id, name, intro]) => ({
+    id: id!,
+    name: name!,
+    intro: intro!,
+    kind: 'local' as const,
+    speak: 'relevant' as const,
+    version: 1,
+  })),
+]
+const notices = (r: ReturnType<typeof room>) =>
+  r.messages().filter((m) => m.from === 'system')
+
+describe('GRP-15 · mentions by a name written short', () => {
+  it('「@反方」 reaches 「反方（红队）」, and so does 「`@反方`」', async () => {
+    const r = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-pm', 'ct-red'],
+      settings: { summarizeAtEnd: false },
+      script: (req) =>
+        req.member === 'ct-emperor'
+          ? {
+              text: '等产品经理交稿后，@反方 再做签字检查；`@反方` 重点查两处。',
+            }
+          : {},
+    })
+    await r.send({ way: 'mention', text: '@Emperor 安排一下' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-emperor', 'ct-red'])
+    expect(notices(r)).toEqual([])
+  })
+
+  it('the full name 「@反方（红队）」 gets no 「不在这个群里」 notice', async () => {
+    const r = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-pm', 'ct-red'],
+      settings: { summarizeAtEnd: false },
+      script: (req) =>
+        req.member === 'ct-emperor' ? { text: '@反方（红队） 两边都打' } : {},
+    })
+    await r.send({ way: 'mention', text: '@Emperor 开始' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-emperor', 'ct-red'])
+    expect(notices(r)).toEqual([])
+  })
+
+  it('a prefix two members share is not guessed: the speaker is asked for the full name', async () => {
+    const r = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-red', 'ct-blue'],
+      settings: { summarizeAtEnd: false },
+      script: (req) =>
+        req.member === 'ct-emperor' ? { text: '@反方 你们看看' } : {},
+    })
+    await r.send({ way: 'mention', text: '@Emperor 开始' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-emperor'])
+    const [note] = notices(r)
+    expect(note!.audience).toEqual({ kind: 'private', to: 'ct-emperor' })
+    expect(note!.text).toBe(
+      '「反方」能对上好几位成员：反方（红队）、反方（蓝队），请写全名；这次点名没有送达。',
+    )
+  })
+
+  it('a name nobody has gets one notice that lists who is in the group', async () => {
+    const r = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-pm', 'ct-red'],
+      settings: { summarizeAtEnd: false },
+      script: (req) =>
+        req.member === 'ct-pm'
+          ? { text: '@界面设计评审，未过。@界面设计评审 再看看' }
+          : {},
+    })
+    await r.send({ way: 'mention', text: '@产品经理 交稿' })
+    expect(notices(r).map((m) => m.text)).toEqual([
+      '「界面设计评审」不在这个群里，这次点名没有送达。群里的成员：Emperor、反方（红队）。',
+    ])
+  })
+})
+
+describe('GRP-15 · the moderator closes the turn whenever it speaks', () => {
+  it('asked by an @, not planning: group_close posts the summary and ends the turn', async () => {
+    const r = room({
+      script: (req, s) => {
+        if (req.member === 'ct-rev') return { text: '@架构师 你也看看' }
+        if (req.member === 'ct-emperor' && req.reason !== 'summary') {
+          s.close(r.view.id, 'ct-emperor', '结论：先修溢出，不用再讨论。')
+          return { text: '' }
+        }
+        return {}
+      },
+    })
+    await r.send({ way: 'mention', text: '@审稿人 @Emperor 看看' })
+    expect(r.speeches.map((s) => [s.member, s.reason, s.planning])).toEqual([
+      ['ct-rev', 'asked', false],
+      ['ct-emperor', 'asked', false],
+    ])
+    // Its prompt says it may end the turn.
+    expect(r.speeches[1]!.prompt).toMatch(/group_close/)
+    expect(r.said()).toEqual([
+      'ct-rev:say:@架构师 你也看看',
+      'ct-emperor:summary:结论：先修溢出，不用再讨论。',
+    ])
+    expect(r.turns().at(-1)).toMatchObject({ state: 'finished' })
+  })
+
+  it('while it works on a task too: the result, then the summary', async () => {
+    const r = room({
+      script: (req, s) => {
+        if (req.reason === 'task') {
+          s.close(r.view.id, 'ct-emperor', '交付了，本轮到此为止。')
+          return { text: '报告在群文件里' }
+        }
+        return {}
+      },
+    })
+    await r.send({
+      way: 'task',
+      to: 'ct-emperor',
+      text: '写报告',
+      task: { title: '写报告', deliverable: '报告', access: 'group_files' },
+    })
+    expect(r.said()).toEqual([
+      'ct-emperor:result:报告在群文件里',
+      'ct-emperor:summary:交付了，本轮到此为止。',
+    ])
+    expect(
+      [...r.groups.service.state(r.view.id).tasks.values()][0]!.state,
+    ).toBe('done')
+  })
+
+  it('group_next stays a planning tool, and its refusal says what to do instead', async () => {
+    const errors: string[] = []
+    const r = room({
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        try {
+          s.next(r.view.id, req.member, {
+            speakers: ['ct-arch'],
+            mode: 'relay',
+          })
+        } catch (error) {
+          errors.push((error as Error).message)
+        }
+        return { text: '' }
+      },
+    })
+    await r.send({ way: 'mention', text: '@Emperor @审稿人 看看' })
+    expect(r.speeches.map((s) => s.member)).toEqual(['ct-emperor', 'ct-rev'])
+    expect(errors).toHaveLength(2)
+    expect(errors[0]).toMatch(/group_next 只在请你安排谁发言时能用/)
+    expect(errors[0]).toMatch(/「@全名」/)
+    expect(errors[0]).toMatch(/group_close/)
+    expect(errors[1]).toBe('只有主持人能用 group_next')
+  })
+
+  it('only the moderator may close', async () => {
+    let error = ''
+    const r = room({
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        try {
+          s.close(r.view.id, req.member, '我说完了')
+        } catch (e) {
+          error = (e as Error).message
+        }
+        return {}
+      },
+    })
+    await r.send({ way: 'mention', text: '@审稿人 看看' })
+    expect(error).toBe('只有主持人能用 group_close')
+  })
+})
+
+describe('GRP-15 · the loop guard counts task relays and pass streaks', () => {
+  const polite = [
+    '我觉得方案可以，就这么定吧',
+    '同意，我觉得方案可以，就这么定',
+    '好的，方案可以，就这么定吧',
+    '同意，方案可以，就这么定吧',
+    '嗯，方案可以，就这么定吧',
+  ]
+
+  /** The debate group's moderator: one spec revision per speech, five at most. */
+  function relay(settings: Record<string, unknown> = {}) {
+    let n = 0
+    const r: ReturnType<typeof room> = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-pm', 'ct-red'],
+      settings: { summarizeAtEnd: false, ...settings },
+      script: (req, s) => {
+        if (req.member === 'ct-emperor') {
+          if (n >= 5) return { text: '定稿了，不用再改。' }
+          n += 1
+          s.assign(r.view.id, 'ct-emperor', {
+            to: 'ct-pm',
+            title: `v0.3.${n}`,
+            deliverable: '改好的需求稿',
+            access: 'group_files',
+          })
+          return { text: '' }
+        }
+        if (req.reason === 'task')
+          return { text: `@Emperor ${req.task!.title} 已交付` }
+        return {}
+      },
+    })
+    const tasks = () =>
+      [...r.groups.service.state(r.view.id).tasks.values()].map((t) => [
+        t.title,
+        t.state,
+      ])
+    return { r, tasks }
+  }
+
+  it('a fourth task from one member in a turn is held and the turn pauses until 继续', async () => {
+    const { r, tasks } = relay()
+    await r.send({ way: 'mention', text: '@Emperor 把需求稿定下来' })
+    expect(
+      r.speeches.filter((s) => s.reason === 'task').map((s) => s.task!.title),
+    ).toEqual(['v0.3.1', 'v0.3.2', 'v0.3.3'])
+    expect(tasks()).toEqual([
+      ['v0.3.1', 'done'],
+      ['v0.3.2', 'done'],
+      ['v0.3.3', 'done'],
+      ['v0.3.4', 'waiting_user'],
+    ])
+    const held = [...r.groups.service.state(r.view.id).tasks.values()][3]!
+    expect(held).toMatchObject({ hold: 'task_relay' })
+    expect(r.turns().at(-1)).toMatchObject({
+      state: 'paused',
+      reason: 'task_relay',
+    })
+    const notice = r.messages().at(-1)!
+    expect(notice).toMatchObject({ from: 'system', audience: { kind: 'all' } })
+    expect(notice.text).toMatch(/「Emperor」这一轮已经交办了 3 次任务/)
+    expect(notice.text).toMatch(/「v0\.3\.4」/)
+    expect(notice.text).toMatch(/「继续」/)
+
+    // 继续: the held task runs, and the count starts again in the new turn.
+    await r.send({ way: 'broadcast', text: '继续' })
+    expect(tasks()).toEqual([
+      ['v0.3.1', 'done'],
+      ['v0.3.2', 'done'],
+      ['v0.3.3', 'done'],
+      ['v0.3.4', 'done'],
+      ['v0.3.5', 'done'],
+    ])
+    expect(r.turns().at(-1)).toMatchObject({ state: 'finished' })
+  })
+
+  it('同意 on the held task card runs it too, without counting as a code-change yes', async () => {
+    const { r, tasks } = relay()
+    await r.send({ way: 'mention', text: '@Emperor 把需求稿定下来' })
+    const held = [...r.groups.service.state(r.view.id).tasks.values()][3]!
+    await r.scheduler.confirmTask(r.view.id, held.taskId, true)
+    const run = r.speeches.find((s) => s.task?.title === 'v0.3.4')!
+    expect(run.task).not.toHaveProperty('confirmed')
+    expect(run.task).not.toHaveProperty('hold')
+    expect(tasks()[3]).toEqual(['v0.3.4', 'done'])
+  })
+
+  it('several tasks handed out in one speech count once', async () => {
+    const r = room({
+      contacts: DEBATE,
+      members: ['ct-emperor', 'ct-arch', 'ct-rev', 'ct-res', 'ct-pm'],
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.member === 'ct-emperor')
+          for (const to of ['ct-arch', 'ct-rev', 'ct-res', 'ct-pm'])
+            s.assign(r.view.id, 'ct-emperor', {
+              to,
+              title: `分给 ${to}`,
+              deliverable: '一节',
+              access: 'readonly',
+            })
+        return { text: req.reason === 'task' ? '交了' : '' }
+      },
+    })
+    await r.send({ way: 'mention', text: '@Emperor 分一下工' })
+    expect(r.speeches.filter((s) => s.reason === 'task')).toHaveLength(4)
+    expect(r.turns().at(-1)).toMatchObject({ state: 'finished' })
+  })
+
+  it('with 防打转 off, a relay is never held', async () => {
+    const { r, tasks } = relay({ loopGuard: false })
+    await r.send({ way: 'mention', text: '@Emperor 把需求稿定下来' })
+    expect(tasks().every(([, state]) => state === 'done')).toBe(true)
+    expect(tasks()).toHaveLength(5)
+  })
+
+  /**
+   * Three members @-ing the other two in each of the first six speeches,
+   * which leaves a backlog of asks; after that everyone passes (the real
+   * research group: thirteen 没有补充 in a row).
+   */
+  function chatter(settings: Record<string, unknown> = {}) {
+    const lines = [
+      '停止规则要覆盖没人点名的情况',
+      '还要考虑用户中途插话时怎么重排队列',
+      '主持人结论应当列出分歧和各自的理由',
+      '外部成员续聊时复用同一个委派',
+      '重启后要把进行中的轮次标记停止',
+      '交办链不能绕回，要写进群公告',
+    ]
+    const others: Record<string, string> = {
+      'ct-arch': '@审稿人 @研究员',
+      'ct-rev': '@架构师 @研究员',
+      'ct-res': '@架构师 @审稿人',
+    }
+    let said = 0
+    const r: ReturnType<typeof room> = room({
+      members: ['ct-emperor', 'ct-arch', 'ct-rev', 'ct-res'],
+      settings,
+      script: (req, s) => {
+        if (req.reason === 'summary') return { text: '结论：终稿已定。' }
+        if (said < lines.length)
+          return { text: `${others[req.member]} ${lines[said++]}` }
+        s.pass(r.view.id, req.member, '终稿已核，没有补充')
+        return { text: '' }
+      },
+    })
+    const passers = () =>
+      r
+        .messages()
+        .filter((m) => m.kind === 'pass')
+        .map((m) => m.from)
+    return { r, passers }
+  }
+
+  it('once everyone asked has said 没有补充 the turn ends: nobody passes twice, the summary runs once', async () => {
+    const { r, passers } = chatter()
+    await r.send({ way: 'mention', text: '@架构师 起个头' })
+    expect(passers()).toHaveLength(3)
+    expect(new Set(passers()).size).toBe(3)
+    expect(r.speeches.filter((s) => s.reason === 'summary')).toHaveLength(1)
+    expect(r.said().at(-1)).toBe('ct-emperor:summary:结论：终稿已定。')
+    expect(r.turns().at(-1)).toMatchObject({
+      state: 'finished',
+      reason: 'pass_streak',
+    })
+  })
+
+  it('with 防打转 off, every queued ask is still answered', async () => {
+    const { r, passers } = chatter({ loopGuard: false })
+    await r.send({ way: 'mention', text: '@架构师 起个头' })
+    expect(passers()).toHaveLength(7)
+  })
+
+  it('the novelty guard is unchanged, and its intervention may re-plan with group_next', async () => {
+    let i = 0
+    const r = room({
+      members: ['ct-emperor', 'ct-arch', 'ct-rev', 'ct-res'],
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.reason === 'intervene') {
+          s.next(r.view.id, 'ct-emperor', {
+            speakers: ['ct-res'],
+            mode: 'relay',
+            note: '换个角度',
+          })
+          return { text: '' }
+        }
+        if (req.member === 'ct-res')
+          return { text: '从测试的角度看，还缺回归用例' }
+        const next = req.member === 'ct-arch' ? '审稿人' : '架构师'
+        return { text: `@${next} ${polite[Math.min(i++, polite.length - 1)]}` }
+      },
+    })
+    await r.send({ way: 'mention', text: '@架构师 定一下' })
+    expect(
+      r.speeches.filter((s) => s.member === 'ct-arch' || s.member === 'ct-rev'),
+    ).toHaveLength(4)
+    const intervene = r.speeches.find((s) => s.reason === 'intervene')!
+    expect(intervene.planning).toBe(true)
+    expect(intervene.prompt).toMatch(/来回没有新进展/)
+    expect(r.speeches.at(-1)!.member).toBe('ct-res')
   })
 })

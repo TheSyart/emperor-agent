@@ -19,6 +19,7 @@ import {
   type GroupState,
   type GroupTurnState,
 } from './events'
+import { saysGoOn } from './loop-guard'
 import { planFor, type QueueItem } from './plan'
 import type {
   ContactId,
@@ -26,6 +27,7 @@ import type {
   GroupMember,
   GroupMessage,
   GroupSettings,
+  GroupTask,
   GroupTaskAccess,
 } from './types'
 
@@ -371,10 +373,33 @@ export class GroupService {
     }
     this.deps.log(groupId).append('group/message', message)
     this.changed('message', groupId)
+    // 「继续」 after the relay guard held tasks: they run now (GRP-15).
+    const held =
+      input.way === 'broadcast' && saysGoOn(text) ? this.release(groupId) : []
     return {
       message,
-      plan: planFor(message, this.state(groupId), roster),
+      plan: held.length ? held : planFor(message, this.state(groupId), roster),
     }
+  }
+
+  /** The tasks the relay guard held, queued again, as a turn's plan. */
+  private release(groupId: string): QueueItem[] {
+    const state = this.state(groupId)
+    const items: QueueItem[] = []
+    for (const task of state.tasks.values()) {
+      if (task.state !== 'waiting_user' || task.hold !== 'task_relay') continue
+      const queued: GroupTask = { ...task, state: 'queued' }
+      delete queued.hold
+      this.deps.log(groupId).append('group/task', queued)
+      const source = state.messages.find((m) => m.task?.taskId === task.taskId)
+      items.push({
+        kind: 'task',
+        task: queued,
+        source: source?.id ?? task.taskId,
+      })
+    }
+    if (items.length) this.changed('message', groupId)
+    return items
   }
 
   /** The whole log as the user sees it, newest last; `before` pages back. */

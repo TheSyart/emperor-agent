@@ -4,9 +4,12 @@
  * speaks at a time, an independent ask runs up to three members together.
  * Whatever a speech produces — its reply, a whisper, a task, a pass — is
  * planned in turn. There is no quota: no count of speeches, rounds or money
- * stops a turn. It ends when the queue runs dry, the moderator closes it,
- * the user stops it, or the loop guard steps in (the moderator intervenes;
- * without one the turn pauses for the user).
+ * stops a turn. It ends when the queue runs dry (a member's 没有补充
+ * withdraws the asks still queued for it, GRP-15), the moderator closes it
+ * (from any of its speeches, GRP-15), the user stops it, or the loop guard
+ * steps in: two members going round in circles (the moderator intervenes;
+ * without one the turn pauses for the user), or a member handing out tasks
+ * in more than TASK_RELAY_LIMIT speeches (the turn pauses until 「继续」).
  *
  * Speeches, hand polls, the moderator's reviews and digests are injected:
  * Core runs a speech as a background turn in the member's own session.
@@ -16,13 +19,13 @@
  */
 import { digestPrompt, digestSource } from './digest'
 import { formatDelivery, planDelivery } from './delivery'
-import { parseMentions } from './envelope'
+import { parseMentions, resolveMentions } from './envelope'
 import {
   GROUP_TURN_ENDED,
   type GroupState,
   type GroupTurnState,
 } from './events'
-import { loopStall } from './loop-guard'
+import { loopStall, PASS_WITHDRAWS, TASK_RELAY_LIMIT } from './loop-guard'
 import { assignTask, planFor, type QueueItem } from './plan'
 import type { GroupService } from './service'
 import type {
@@ -52,7 +55,11 @@ export interface SpeakRequest {
   /** What was delivered to it, and why it is asked now. */
   prompt: string
   reason: SpeakReason
-  /** The moderator deciding who answers: group_next and group_close apply. */
+  /**
+   * The moderator deciding who answers (its plan, or the loop guard's
+   * intervention): group_next applies. group_close applies to any speech
+   * of the moderator (GRP-15).
+   */
   planning: boolean
   /** reason 'task': the task it works on. */
   task?: GroupTask
@@ -149,6 +156,12 @@ interface Run {
   spend: { usd: number; tokens: number }
   spoke: Set<ContactId>
   speaking: Map<ContactId, SpeechContext>
+  /** Per member, its speeches this turn that handed out tasks (GRP-15). */
+  relays: Map<ContactId, number>
+  /** Tasks just held by the relay guard: the turn pauses for the user. */
+  held: GroupTask[]
+  /** Asks withdrawn by passes since the last message with content. */
+  withdrawn: number
   /** The state last announced (the group page reads it, GRP-08). */
   state: GroupTurnState
   done: Promise<void>
@@ -162,8 +175,6 @@ export interface GroupLiveTurn {
   queued: ContactId[]
   spend: { usd: number; tokens: number }
 }
-
-const MENTION_TOKEN = /@([^\s@，。！？、；：,.!?;:（）()「」"'“”]+)/gu
 
 function randomId(prefix: string): string {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
@@ -250,6 +261,9 @@ export class GroupScheduler {
       spend: { usd: 0, tokens: 0 },
       spoke: new Set(),
       speaking: new Map(),
+      relays: new Map(),
+      held: [],
+      withdrawn: 0,
       state: 'started',
       done: Promise.resolve(),
     }
@@ -286,8 +300,10 @@ export class GroupScheduler {
   }
 
   /**
-   * The user's answer to a task waiting for them (a member asked Claude
-   * Code or Codex to change code): yes runs it now, confirmed; no cancels it.
+   * The user's answer to a task waiting for them: yes runs it now, no
+   * cancels it. A member asked Claude Code or Codex to change code: yes
+   * confirms it. A task the relay guard held (GRP-15): yes only lets it go
+   * on — a code change still asks on its own.
    */
   async confirmTask(
     groupId: string,
@@ -327,7 +343,9 @@ export class GroupScheduler {
       )
       return
     }
-    const confirmed: GroupTask = { ...task, confirmed: true, state: 'queued' }
+    const confirmed: GroupTask = task.hold
+      ? { ...release(task), state: 'queued' }
+      : { ...task, confirmed: true, state: 'queued' }
     this.deps.groups.append(groupId, 'group/task', confirmed)
     const item: QueueItem = { kind: 'task', task: confirmed, source }
     if (running && !running.stopped) {
@@ -437,8 +455,8 @@ export class GroupScheduler {
     },
   ): void {
     const { state, context } = this.speaking(groupId, from)
-    if (!context.planning || state.moderator !== from)
-      throw new Error('只有主持人安排发言时才能用 group_next')
+    if (state.moderator !== from) throw new Error('只有主持人能用 group_next')
+    if (!context.planning) throw new Error(NEXT_OUTSIDE_PLANNING)
     const speakers = input.speakers.filter(
       (id, i) => state.members.includes(id) && input.speakers.indexOf(id) === i,
     )
@@ -450,11 +468,13 @@ export class GroupScheduler {
     }
   }
 
-  /** group_close (moderator): end the turn with this summary. */
+  /**
+   * group_close (moderator): end the turn with this summary, from any of
+   * its speeches (GRP-15) — planning, answering, a task, the summary.
+   */
   close(groupId: string, from: ContactId, summary: string): void {
     const { state, context } = this.speaking(groupId, from)
-    if (!context.planning || state.moderator !== from)
-      throw new Error('只有主持人安排发言时才能用 group_close')
+    if (state.moderator !== from) throw new Error('只有主持人能用 group_close')
     context.close = required(summary, '结论')
   }
 
@@ -476,10 +496,13 @@ export class GroupScheduler {
         if (run.stopped) return
         this.system(run, `发言安排出错：${message(error)}`)
       }
-      if (!run.stopped && !run.pending && !run.paused) this.guardLoop(run)
+      if (!run.stopped && !run.pending && !run.paused)
+        if (!this.guardRelay(run)) this.guardLoop(run)
       if (run.paused) return
     }
-    if (!run.stopped) this.turn(run, 'finished')
+    // Everyone asked said 没有补充 (GRP-15): the turn says why it ended.
+    if (!run.stopped)
+      this.turn(run, 'finished', run.withdrawn > 0 ? 'pass_streak' : undefined)
   }
 
   /** The user spoke while the turn ran: the queue follows the new message. */
@@ -491,6 +514,9 @@ export class GroupScheduler {
     run.queue = [...pending.plan]
     run.spend = { usd: 0, tokens: 0 }
     run.spoke = new Set()
+    run.relays = new Map()
+    run.held = []
+    run.withdrawn = 0
     run.closed = false
     run.intervened = false
     this.turn(run, 'started')
@@ -535,25 +561,17 @@ export class GroupScheduler {
     run: Run,
     item: Extract<QueueItem, { kind: 'speak' }>,
   ): Promise<void> {
-    const planning = item.reason === 'moderator-plan'
+    // The loop guard's intervention asks it to 换人或收尾: a planning moment.
+    const planning =
+      item.reason === 'moderator-plan' || item.reason === 'intervene'
     const spoken = await this.speakOne(run, item.member, item.reason, {
       planning,
       ...(item.note ? { note: item.note } : {}),
     })
     if (!spoken || run.stopped) return
     const { context, produced } = spoken
-    if (context.close !== undefined) {
-      this.post(run, {
-        from: item.member,
-        audience: { kind: 'all' },
-        ask: [],
-        kind: 'summary',
-        text: context.close,
-      })
-      run.closed = true
-      run.queue = []
-      return
-    }
+    // group_close: speakOne posted the summary and ended the turn.
+    if (context.close !== undefined) return
     if (context.next) {
       const { speakers, mode, note } = context.next
       if (mode === 'independent' && speakers.length > 1)
@@ -591,7 +609,7 @@ export class GroupScheduler {
     members: ContactId[],
     batchId: string,
   ): Promise<void> {
-    const results: { member: ContactId; text: string }[] = []
+    const results: { member: ContactId; text: string; close?: string }[] = []
     for (
       let i = 0;
       i < members.length && !run.stopped;
@@ -604,6 +622,9 @@ export class GroupScheduler {
           this.speakOne(run, member, 'batch', { batchId }).then((s) => ({
             member,
             text: s?.reply ?? '',
+            ...(s?.context.close !== undefined
+              ? { close: s.context.close }
+              : {}),
           })),
         ),
       )
@@ -622,6 +643,10 @@ export class GroupScheduler {
           answerMode: 'independent',
         })
     this.deps.groups.append(run.groupId, 'group/reveal', { batchId })
+    run.withdrawn = 0
+    // The moderator closed while answering blind: after the reveal.
+    const closing = results.find((r) => r.close !== undefined)
+    if (closing) this.closeTurn(run, closing.member, closing.close!)
   }
 
   private async poll(
@@ -771,7 +796,8 @@ export class GroupScheduler {
       ...task,
       state: done ? 'done' : 'failed',
     })
-    if (spoken) this.plan(run, spoken.produced)
+    if (spoken && spoken.context.close === undefined)
+      this.plan(run, spoken.produced)
   }
 
   // ── one speech ────────────────────────────────────────────────────────
@@ -800,7 +826,7 @@ export class GroupScheduler {
     const delivery = await this.delivery(run, state, member)
     if (run.stopped) return null
     state = groups.state(run.groupId)
-    const prompt = [delivery.text, this.why(state, reason, opts)]
+    const prompt = [delivery.text, this.why(state, member, reason, opts)]
       .filter(Boolean)
       .join('\n\n')
     const context: SpeechContext = {
@@ -858,6 +884,8 @@ export class GroupScheduler {
         reason === 'summary'
           ? []
           : parseMentions(reply, roster).filter((id) => id !== member)
+      // A summary speech that also closed: its group_close is the summary.
+      const summary = reason === 'summary' && context.close === undefined
       produced.push(
         this.post(run, {
           from: member,
@@ -865,7 +893,7 @@ export class GroupScheduler {
             ? { kind: 'members', ids: ask }
             : { kind: 'all' },
           ask,
-          kind: opts.task ? 'result' : reason === 'summary' ? 'summary' : 'say',
+          kind: opts.task ? 'result' : summary ? 'summary' : 'say',
           text: reply,
           ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
           ...(result.delegation ? { delegation: result.delegation } : {}),
@@ -874,7 +902,25 @@ export class GroupScheduler {
       if (reason !== 'summary') this.outsiders(run, member, reply, roster)
     }
     this.limitNotice(run, member, result)
+    // group_close from any speech but a blind answer (batch closes after
+    // the reveal): the summary goes after its reply, and the turn ends.
+    if (context.close !== undefined && !opts.batchId)
+      this.closeTurn(run, member, context.close)
     return { context, produced, reply, result }
+  }
+
+  /** The moderator's group_close: its summary, then nobody else speaks. */
+  private closeTurn(run: Run, member: ContactId, summary: string): void {
+    this.post(run, {
+      from: member,
+      audience: { kind: 'all' },
+      ask: [],
+      kind: 'summary',
+      text: summary,
+    })
+    run.closed = true
+    run.queue = []
+    run.withdrawn = 0
   }
 
   /** What a member is handed: a digest when the backlog is long, then the rest. */
@@ -927,6 +973,20 @@ export class GroupScheduler {
   /** Why this member is asked now (the last part of its prompt). */
   private why(
     state: GroupState,
+    member: ContactId,
+    reason: SpeakReason,
+    opts: { note?: string; task?: GroupTask },
+  ): string {
+    const ask = this.ask(state, reason, opts)
+    // GRP-15: the moderator may end the turn from any speech.
+    const moderator =
+      state.moderator === member &&
+      !['moderator-plan', 'intervene', 'summary', 'batch'].includes(reason)
+    return moderator ? `${ask}\n${MODERATOR_MAY_CLOSE}` : ask
+  }
+
+  private ask(
+    state: GroupState,
     reason: SpeakReason,
     opts: { note?: string; task?: GroupTask },
   ): string {
@@ -945,7 +1005,7 @@ export class GroupScheduler {
       case 'moderator-plan':
         return '你是主持人。决定谁来回答：用 group_next 安排（接力或独立作答）；简单的问题可以直接回答；不需要讨论时用 group_close 收尾。'
       case 'intervene':
-        return `你是主持人。${opts.note ?? ''}`
+        return `你是主持人。${opts.note ?? ''}用 group_next 换人接着说，或用 group_close 写结论收尾。`
       case 'batch':
         return '请独立作答：你看不到其他人的回答，所有回答会一起揭晓。'
       case 'summary':
@@ -969,18 +1029,79 @@ export class GroupScheduler {
   private plan(run: Run, produced: GroupMessage[]): void {
     const state = this.deps.groups.state(run.groupId)
     const roster = this.deps.groups.roster(state)
+    const guard = state.settings.loopGuard
+    // 交办接力 (GRP-15): a speech that hands out tasks counts once for its
+    // member; past TASK_RELAY_LIMIT its tasks are held for the user.
+    const delegator = produced.find((m) => m.kind === 'task' && m.task)?.from
+    let hold = false
+    if (delegator !== undefined) {
+      const relays = run.relays.get(delegator) ?? 0
+      hold = guard && relays >= TASK_RELAY_LIMIT
+      if (!hold) run.relays.set(delegator, relays + 1)
+    }
+    const held: GroupTask[] = []
     for (const message of produced) {
-      if (message.kind === 'pass' || message.kind === 'summary') continue
+      if (message.kind === 'summary') continue
+      if (message.kind === 'pass') {
+        if (guard) this.withdraw(run, message.from)
+        continue
+      }
+      // Something with content: a streak of 没有补充 starts over after it.
+      run.withdrawn = 0
       // A task's queue item comes from its message.
-      if (message.kind === 'task' && message.task) {
-        const items = planFor(message, state, roster)
-        run.queue.push(...items)
+      if (message.kind === 'task' && message.task && hold) {
+        held.push(message.task)
         continue
       }
       run.queue.push(...planFor(message, state, roster))
     }
+    if (held.length) this.hold(run, delegator!, held)
     for (const item of run.queue)
       if (item.kind === 'speak') this.status(run, item.member, 'queued')
+  }
+
+  /**
+   * A member said 没有补充 after reading everything before its speech: the
+   * asks still queued for it are withdrawn (GRP-15). Once everyone asked
+   * has passed, the queue is empty and the turn ends.
+   */
+  private withdraw(run: Run, member: ContactId): void {
+    const before = run.queue.length
+    run.queue = run.queue.filter(
+      (item) =>
+        item.kind !== 'speak' ||
+        item.member !== member ||
+        !PASS_WITHDRAWS.has(item.reason),
+    )
+    run.withdrawn += before - run.queue.length
+  }
+
+  /** 交办接力 past its limit: the tasks wait for the user; the turn pauses. */
+  private hold(run: Run, member: ContactId, tasks: GroupTask[]): void {
+    for (const task of tasks) {
+      this.deps.groups.append(run.groupId, 'group/task', {
+        ...task,
+        state: 'waiting_user',
+        hold: 'task_relay',
+      })
+      run.held.push(task)
+    }
+    const state = this.deps.groups.state(run.groupId)
+    const titles = tasks.map((t) => `「${t.title}」`).join('')
+    this.system(
+      run,
+      `「${this.name(state, member)}」这一轮已经交办了 ${TASK_RELAY_LIMIT} 次任务，新交办的${titles}先不开始：回复「继续」就接着做，也可以在任务卡上点「同意」或「不同意」，或者给出新的方向。`,
+    )
+  }
+
+  /** Tasks held by the relay guard: the turn pauses for the user (GRP-15). */
+  private guardRelay(run: Run): boolean {
+    if (!run.held.length) return false
+    run.held = []
+    run.queue = []
+    run.paused = true
+    this.turn(run, 'paused', 'task_relay')
+    return true
   }
 
   /** Two members going round in circles: the moderator steps in, or the turn pauses. */
@@ -1053,18 +1174,30 @@ export class GroupScheduler {
     })
   }
 
-  /** An @ to someone outside the group: tell the speaker it went nowhere. */
+  /**
+   * An @ that reached nobody: tell the speaker, once per name, who is in
+   * the group — or, for a name start several members share, to write the
+   * full name (GRP-15).
+   */
   private outsiders(
     run: Run,
     member: ContactId,
     text: string,
     roster: readonly GroupMember[],
   ): void {
-    for (const match of text.matchAll(MENTION_TOKEN)) {
-      const token = match[1]!
-      if (token === '所有人' || /[./]/.test(token)) continue
-      if (roster.some((m) => token.startsWith(m.name))) continue
-      this.system(run, `「${token}」不在这个群里，这次点名没有送达。`, member)
+    const told = new Set<string>()
+    const name = (id: ContactId) => roster.find((m) => m.id === id)?.name ?? id
+    const others = roster.filter((m) => m.id !== member).map((m) => m.name)
+    for (const hit of resolveMentions(text, roster)) {
+      if (hit.kind === 'member' || told.has(hit.token)) continue
+      told.add(hit.token)
+      this.system(
+        run,
+        hit.kind === 'ambiguous'
+          ? `「${hit.token}」能对上好几位成员：${hit.ids.map(name).join('、')}，请写全名；这次点名没有送达。`
+          : `「${hit.token}」不在这个群里，这次点名没有送达。${others.length ? `群里的成员：${others.join('、')}。` : ''}`,
+        member,
+      )
     }
   }
 
@@ -1140,6 +1273,20 @@ export class GroupScheduler {
     if (id === 'system') return '系统'
     return this.deps.groups.roster(state).find((m) => m.id === id)?.name ?? id
   }
+}
+
+/** group_next outside planning: what the moderator can do instead (GRP-15). */
+const NEXT_OUTSIDE_PLANNING =
+  'group_next 只在请你安排谁发言时能用，这次是请你发言。要请人接着说，在回答里写「@全名」；要结束这一轮，用 group_close 写结论。'
+/** Added to the moderator's prompt when it speaks for any other reason. */
+const MODERATOR_MAY_CLOSE =
+  '你是主持人：这一轮的问题已经答完，就用 group_close 写结论结束这一轮。'
+
+/** A held task let go: it no longer waits for the relay guard. */
+function release(task: GroupTask): GroupTask {
+  const out = { ...task }
+  delete out.hold
+  return out
 }
 
 const ACCESS_LABELS: Record<GroupTaskAccess, string> = {
