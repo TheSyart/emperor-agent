@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用 Group 模式的用户<br>
-> 最后核验：2026-10-28（对照 `5e3cc8b2`）<br>
-> 事实源：`desktop/src/renderer/src/components/contacts/`（`ContactEditor.vue`、`ContactMethods.vue`、`TemplatePicker.vue`、`TrialBench.vue`、`AvatarRecommend.vue`、`AvatarLibraryPicker.vue`、`ContactProfile.vue`）、`desktop/src/renderer/src/components/groups/`（`GroupHome.vue`、`GroupPage.vue`、`GroupComposer.vue`、`groupModel.ts`、`GroupMembers.vue`、`GroupSettings.vue`、`NewGroupDialog.vue`、`newGroupModel.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarGroupSections.vue`、`desktop/src/renderer/src/components/settings/GroupsSection.vue`、`desktop/src/renderer/src/components/conversation/nodes/TurnTail.vue`、`packages/core/src/contacts/`、`packages/core/src/groups/`、`templates/contacts/`
+> 最后核验：2026-10-28（对照 `6c120e0b`）<br>
+> 事实源：`desktop/src/renderer/src/components/contacts/`（`ContactEditor.vue`、`ContactMethods.vue`、`TemplatePicker.vue`、`TrialBench.vue`、`AvatarRecommend.vue`、`AvatarLibraryPicker.vue`、`ContactProfile.vue`）、`desktop/src/renderer/src/components/groups/`（`GroupHome.vue`、`GroupPage.vue`、`GroupComposer.vue`、`groupModel.ts`、`GroupMembers.vue`、`GroupSettings.vue`、`NewGroupDialog.vue`、`newGroupModel.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarGroupSections.vue`、`desktop/src/renderer/src/components/settings/GroupsSection.vue`、`desktop/src/renderer/src/components/settings/GeneralSection.vue`（最近删除）、`desktop/src/renderer/src/components/conversation/nodes/TurnTail.vue`、`packages/core/src/contacts/`、`packages/core/src/groups/`、`templates/contacts/`
 
 联系人是长期存在的 agent：有名字、头像和一份岗位说明书，有自己的模型、工具、权限和记忆。群聊把几位联系人拉到一起：谁对谁说了什么、交给谁做了什么、交出了什么，都在一条时间线上，你随时可以插话、点名或停止。它们都在 Group 模式里（⌘3，见[三种模式](modes.md)）。
 
@@ -98,6 +98,14 @@ Emperor 自带三位联系人：
 - 五个标签页：职责与方法、知识、能力、记忆、版本。
 - **记忆**：它的个人记忆，每条可以改、可以删；也可以在这里关掉个人记忆。
 - **版本**：每次保存岗位说明书就生成一个新版本，旧版本保留最近 20 个。可以选任意两个版本对比，逐项列出哪里不同；「退回到 vN」确认后会存成一个新版本，旧的都还在。群里永远用最新的版本。
+
+### 删除联系人
+
+在档案里点「编辑」旁的「⋯」，选「删除联系人」，确认后删除，然后回到群聊首页。Emperor、Claude Code、Codex 是内置联系人，没有这一项。
+
+- 它的单聊留着，可以查看，不能再发消息，输入框写「这个联系人已删除，这个会话只能查看」。
+- 它退出所在的每个群；它在群里说过的话都留着，头像变灰，名字写「已删除的联系人」。它主持的群改为没有主持人，可以在群设置里另选一位。
+- 它的岗位说明书历史版本和个人记忆一起删除。删除联系人不能恢复。
 
 ### 单聊
 
@@ -218,6 +226,14 @@ Emperor 自带三位联系人：
   - **安静模式**：只回应 @，没人被 @ 就没人说话。
 - **成员**：移出或邀请。移出的成员说过的话还留在群里。
 - **群文件**：列出成员交办时写在群里的文件，只显示名字。
+- **删除群聊**（最下面）：确认后，进行中的一轮先停下，群聊连同每位成员的工作过程一起移到「设置 › 常规 › 已归档对话 › 最近删除」，然后回到群聊首页。群从侧栏和群聊首页消失。
+
+### 恢复删除的群聊
+
+删除的群聊在「设置 › 常规 › 已归档对话 › 最近删除」里占一行，写着「群聊 · 删除的日期」。
+
+- 30 天内点「恢复」，群聊原样回来：成员、消息、设置、群文件和每位成员的工作过程都在。
+- 「永久删除」（需要确认）或 30 天到期后，群聊记录、成员的工作过程和群文件才真正删除，不能恢复。
 
 ### 新群的默认设置
 

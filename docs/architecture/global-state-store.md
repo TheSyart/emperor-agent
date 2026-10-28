@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-27（对照 `76a61ad1`）<br>
+> 最后核验：2026-10-28（对照 `6c120e0b`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`、`packages/core/src/groups/`
 
 ## 两个根的区分
@@ -93,7 +93,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     index.json             # 会话索引（标题、模式、项目绑定、归档）；启动时建一次，之后常驻内存
     index.legacy-backup.json / index.corrupt-<ts>.json  # 旧索引与读不出的索引（保留，不再读取）
     .scratch/
-    .trash/<session-id>/   # 「最近删除」的会话（30 天），trash.json 记删除时间
+    .trash/<session-id>/   # 「最近删除」的会话（30 天），trash.json 记删除时间（群和成员会话另记 surface、group_id）
     <session-id>/
       meta.jsonl           # 会话索引元数据，用于重建 index.json；超过 1000 行时压缩为最新一条快照
       log.jsonl            # append-only session log：会话全部事实
@@ -310,7 +310,8 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 群聊的数据层见[联系人与群聊](../design/agent-contacts.md)，实现在 `packages/core/src/groups/`。
 
 - 一个群是一个会话：`sessions/index.json` 里 `surface: "group"`、`group_id` 等于它自己的 id，它的 `log.jsonl` 记群事件（`group/created`、`group/settings`、`group/member`、`group/message`、`group/reveal`、`group/delivery`、`group/task`、`group/digest`）。群的状态（成员、主持人、群公告、设置、消息、每位成员的投递游标）都从这份日志折叠出来，重启后原样恢复；不认识的事件跳过。
-- 每位成员在群里有自己的会话：`surface: "group_member"`、`contact_id`、`group_id`。成员的上下文是它的岗位说明书、群章程和投递给它的消息，不是整个群的日志。成员被移出后会话和历史都保留，只是不再请它发言。
+- 每位成员在群里有自己的会话：`surface: "group_member"`、`contact_id`、`group_id`。成员的上下文是它的岗位说明书、群章程和投递给它的消息，不是整个群的日志。成员被移出后会话和历史都保留，只是不再请它发言；联系人被删除时，它退出所在的每个群（同一个 `group/member` 的 `removed` 事件，GRP-16）。
+- 删除群（`groups.delete`，GRP-16）：群自己的会话和每位成员的会话在同一时刻移进 `sessions/.trash/`，`trash.json` 记 `surface` 和 `group_id`；会话索引里只剩这几个会话时也照样移走。最近删除只列群自己；恢复群时成员会话一起回来，永久删除或 30 天到期时一起删除，连同 `groups/<群 id>/`（群文件）。
 - `GroupService` 校验：成员必须是存在的联系人、不重复、1–12 位；主持人必须是成员（Emperor 在群里时默认是它）；群名 1–40 字，群公告最多 4000 字；私信和交办只能发给成员。违反时报 `group_invalid`，不是群的会话报 `group_not_found`。每次改动后发 host 事件 `groups_changed`。
 - 群纪要只用公开消息写（不含私信和还没揭晓的独立作答），因为同一份纪要交给每位成员。
 - 群文件放在 `groups/<group-id>/files/`，`groups.files.list` 列出第一层。
