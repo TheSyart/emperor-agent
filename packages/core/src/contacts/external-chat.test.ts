@@ -68,6 +68,7 @@ function setup(who: Contact | null = contact()) {
   const chat = new ExternalChat({
     delegations: delegations as never,
     parentAgentId: (sessionId) => `agent-${sessionId}`,
+    beginTask: vi.fn(),
     session: (id) =>
       id === 's-chat'
         ? { id, surface: 'contact', contact_id: 'ct-codex' }

@@ -79,6 +79,18 @@ async function open(
   return fixture
 }
 
+/** The run of one queued chat message, once it has settled. */
+async function settled(api: CoreApi, delegationId: string, messageId: string) {
+  const runOf = () =>
+    Object.values(
+      api.delegationRuntime
+        .list()
+        .find((state) => state.record?.id === delegationId)?.runs ?? {},
+    ).find((run) => run.messageId === messageId)
+  await waitFor(() => runOf() !== undefined)
+  return api.delegationRuntime.wait(delegationId, runOf()!.id)
+}
+
 async function reviewer(api: CoreApi, name = '审稿人'): Promise<string> {
   const created = await invokeCoreOperation(api, 'contacts.create', [
     {
@@ -258,18 +270,8 @@ describe('a single chat with a contact (GRP-05)', () => {
     ])
     expect(second.delegationId).toBe(first.delegationId)
     // Queued, then run as its own task.
-    const runOf = (messageId: string) =>
-      Object.values(
-        after.api.delegationRuntime
-          .list()
-          .find((state) => state.record?.id === first.delegationId)?.runs ?? {},
-      ).find((run) => run.messageId === messageId)
-    await waitFor(() => runOf('dgm-cm-2') !== undefined)
     expect(
-      await after.api.delegationRuntime.wait(
-        first.delegationId,
-        runOf('dgm-cm-2')!.id,
-      ),
+      await settled(after.api, first.delegationId, 'dgm-cm-2'),
     ).toMatchObject({ phase: 'completed' })
 
     // The conversation page's own box (delegations.send) after a restart.
@@ -288,6 +290,55 @@ describe('a single chat with a contact (GRP-05)', () => {
         },
       ]),
     ).resolves.toMatchObject({ messageId: 'dgm-page-3' })
+  })
+
+  it('spends each message’s own cost cap, never one for the whole chat (GRP-19)', async () => {
+    const fixture = await open()
+    const { api } = fixture
+    await withFakeCodex(fixture)
+    api.host.kept.modelConfig = {
+      ...api.host.kept.modelConfig,
+      policy: {
+        ...api.host.kept.modelConfig.policy,
+        cost: { maxUsdPerAgentTurn: 0.01 },
+      },
+    } as typeof api.host.kept.modelConfig
+    const chat = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    const sessionId = String(chat.id)
+    const first = await invokeCoreOperation(api, 'contacts.chatSend', [
+      { sessionId, text: '第一条', clientMessageId: 'cm-1' },
+    ])
+    await api.delegationRuntime.wait(first.delegationId, first.runId!)
+    // An API-billed answer that cost more than the cap.
+    const owner = api.delegationRuntime
+      .list()
+      .find((state) => state.record?.id === first.delegationId)!.record!.owner
+    api.host.chargeDelegation(owner, 1)
+    expect(api.host.delegationTaskSpent(owner)).toBe(true)
+
+    // The next message is a task of its own: it runs.
+    await invokeCoreOperation(api, 'contacts.chatSend', [
+      { sessionId, text: '第二条', clientMessageId: 'cm-2' },
+    ])
+    expect(await settled(api, first.delegationId, 'dgm-cm-2')).toMatchObject({
+      phase: 'completed',
+    })
+    // So is one sent from its conversation page.
+    api.host.chargeDelegation(owner, 1)
+    await invokeCoreOperation(api, 'delegations.send', [
+      {
+        id: first.delegationId,
+        sessionId,
+        messageId: 'dgm-page-3',
+        text: '第三条',
+        delivery: 'queue',
+      },
+    ])
+    expect(await settled(api, first.delegationId, 'dgm-page-3')).toMatchObject({
+      phase: 'completed',
+    })
   })
 
   it('has no single chat with a contact that is gone', async () => {

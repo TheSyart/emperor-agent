@@ -35,6 +35,8 @@ export interface ExternalChatDeps {
   delegations: Pick<DelegationService, 'start' | 'send' | 'list'>
   /** The chat session's root agent (the delegation's parent). */
   parentAgentId(sessionId: string): string
+  /** Each message is a task of its own: a fresh cost budget (GRP-19). */
+  beginTask(sessionId: string): void
   session(
     id: string,
   ): { id: string; surface?: string; contact_id?: string } | null
@@ -70,6 +72,7 @@ export class ExternalChat {
     const name = contact.name
     if (!text.trim()) throw new ContactChatFailedError('消息内容不能为空')
     const taskScopeId = contactChatScope(sessionId, messageId)
+    this.deps.beginTask(sessionId)
     try {
       const existing = this.delegationOf(sessionId)
       if (existing) {

@@ -1893,6 +1893,15 @@ export class HarnessHost {
     return this.taskTree(owner.rootSessionId).spent()
   }
 
+  /**
+   * A message the user sent straight to Claude Code or Codex (a single
+   * chat, GRP-19) starts a new task with a fresh budget, as a turn does
+   * (KRN-03): the chat's spend never adds up against one task's cap.
+   */
+  beginDelegationTask(rootSessionId: string): void {
+    this.taskTree(rootSessionId).beginTask()
+  }
+
   /** Charge a settled external run's API cost to its root task (AGT-07). */
   chargeDelegation(owner: DelegationOwner, usd: number): void {
     this.taskTree(owner.rootSessionId).chargeUsd(usd)
