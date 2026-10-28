@@ -233,7 +233,7 @@ describe('the home by mode (MOD-03)', () => {
 
   it('7 · a starter only fills the composer', () => {
     expect(source).toMatch(
-      /<HeroSuggestions\s+v-if="heroExtras && heroMode === 'chat'"/,
+      /<HeroSuggestions\s+v-if="heroExtras && heroMode === 'chat'/,
     )
     expect(source).toContain('@pick="fillSuggestion(composer, $event)"')
   })
@@ -276,5 +276,23 @@ describe('a single chat with a contact (GRP-05)', () => {
     expect(source).toContain('groupMemberOf(')
     expect(source).toContain('groupMember.value?.readOnlyReason')
     expect(source).toMatch(/<ChatTimeline[\s\S]*?:speaker="replySpeaker"/)
+  })
+
+  it('GRP-19: a chat with Claude Code or Codex keeps its own draft, follows its delegation and has no dead starters', () => {
+    // Each chat's draft (externalChatHome.ts follows the delegation, also
+    // when the same chat is opened again on the kept-alive page).
+    expect(source).toMatch(
+      /<ChildComposer[\s\S]*?v-model:draft="externalDraft"[\s\S]*?data-external-chat-composer/,
+    )
+    expect(source).toContain('useExternalChatHome({')
+    expect(source).toContain(':sending="externalHome.sendingFor(viewingId)"')
+    // The starters fill the ordinary composer, which this home has not.
+    expect(source).toMatch(
+      /<HeroSuggestions\s+v-if="heroExtras && heroMode === 'chat' && !externalChat"/,
+    )
+    // No composer takes text before the contact (and so which one) is known.
+    expect(source).toContain(
+      'contactChat.value && !contactDirectory.loaded.value',
+    )
   })
 })
