@@ -559,6 +559,23 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+test('GRP-16 · 删除群聊 at the bottom of 群设置, confirmed first', async ({
+  page,
+}) => {
+  await install(page)
+  await open(page, '/groups/grp-review/settings', 'dark')
+  const zone = page.locator('[data-danger-zone]')
+  await zone.scrollIntoViewIfNeeded()
+  await expect(zone).toContainText('删除群聊')
+  await shot(page, 'settings-delete-dark')
+  await zone.locator('[data-delete-group]').click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('最近删除')
+  await shot(page, 'settings-delete-confirm-dark')
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await expect(page).toHaveURL(/\/groups\/grp-review\/settings/)
+})
+
 test('GRP-08 · 发给 ▾ and the task form', async ({ page }) => {
   await install(page)
   await open(page, '/groups/grp-review', 'dark')

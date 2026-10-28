@@ -14,6 +14,7 @@ import {
 } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
+import { answerConfirmsForTest } from '../ui/confirm'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../api/http', () => ({ core }))
@@ -84,6 +85,12 @@ beforeEach(() => {
           })
         case 'groups.removeMember':
           return view()
+        case 'groups.delete':
+          return {
+            id: input?.id,
+            deleted: true,
+            restorableUntil: '2026-11-27T00:00:00.000Z',
+          }
         case 'contacts.list':
           return { contacts: [], readOnly: null }
         case 'groups.list':
@@ -125,6 +132,7 @@ async function mount() {
 }
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   container?.remove()
   document.body.innerHTML = ''
@@ -209,6 +217,66 @@ describe('群设置', () => {
     expect(core).toHaveBeenCalledWith('groups.removeMember', {
       id: 'grp-1',
       contactId: 'ct-rev',
+    })
+  })
+
+  describe('删除群聊 (GRP-16)', () => {
+    function calls(op: string): unknown[][] {
+      return core.mock.calls.filter(([name]) => name === op)
+    }
+
+    it('sits at the bottom, asks first, deletes, then opens the Group home', async () => {
+      const asked: Array<{ title: string; body?: string; tone?: string }> = []
+      answerConfirmsForTest((options) => {
+        asked.push(options)
+        return true
+      })
+      await mount()
+      const zone = root().querySelector<HTMLElement>('[data-danger-zone]')!
+      expect(zone).toBeTruthy()
+      expect(root().querySelector('.form')!.lastElementChild).toBe(zone)
+      const listsBefore = calls('groups.list').length
+      zone.querySelector<HTMLElement>('[data-delete-group]')!.click()
+      await flush()
+      expect(asked).toHaveLength(1)
+      expect(asked[0]!.title).toBe('删除「0.3 方案评审」？')
+      expect(asked[0]!.body).toContain('最近删除')
+      expect(asked[0]!.body).toContain('30 天')
+      expect(asked[0]!.tone).toBe('danger')
+      expect(calls('groups.delete')).toEqual([
+        ['groups.delete', { id: 'grp-1' }],
+      ])
+      expect(router.currentRoute.value.name).toBe('contacts')
+      expect(calls('groups.list').length).toBeGreaterThan(listsBefore)
+      expect(ctx.showToast).toHaveBeenCalledWith(
+        '已删除「0.3 方案评审」，可以在「设置 › 常规 › 已归档对话」里恢复',
+      )
+    })
+
+    it('deletes nothing when the confirmation is cancelled', async () => {
+      answerConfirmsForTest(() => false)
+      await mount()
+      root().querySelector<HTMLElement>('[data-delete-group]')!.click()
+      await flush()
+      expect(calls('groups.delete')).toEqual([])
+      expect(router.currentRoute.value.fullPath).toBe('/groups/grp-1/settings')
+    })
+
+    it('says so when the group could not be deleted', async () => {
+      answerConfirmsForTest(() => true)
+      await mount()
+      const base = core.getMockImplementation()!
+      core.mockImplementation(async (op: string, input?: unknown) => {
+        if (op === 'groups.delete') throw new Error('没有这个群，可能已被删除')
+        return base(op, input as Record<string, unknown>)
+      })
+      root().querySelector<HTMLElement>('[data-delete-group]')!.click()
+      await flush()
+      expect(ctx.showError).toHaveBeenCalledWith(
+        expect.any(Error),
+        '没有删除群聊',
+      )
+      expect(router.currentRoute.value.fullPath).toBe('/groups/grp-1/settings')
     })
   })
 })

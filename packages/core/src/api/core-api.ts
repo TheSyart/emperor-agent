@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { readdir, stat } from 'node:fs/promises'
+import { readdir, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
@@ -704,6 +704,9 @@ export class CoreApi {
         get: (id) => kept.sessionStore.get(id),
         list: () => kept.sessionStore.list({ includeArchived: true }),
         rename: (id, title) => kept.sessionStore.rename(id, title),
+        // To 最近删除 like a conversation, members along (GRP-16).
+        trashGroup: (groupId) =>
+          this.sessionApplicationService.deleteGroup(groupId),
       },
       log: (id) => {
         const session =
@@ -1757,6 +1760,12 @@ export class CoreApi {
         this.turnFiles.forgetSession(sessionId, projectRoot),
       forgetDelegations: (sessionId) =>
         this.delegationRuntime.forgetRoot(sessionId),
+      // A purged group's 群文件 (GRP-16).
+      forgetGroup: (groupId) =>
+        rm(join(this.paths.stateRoot, 'groups', groupId), {
+          recursive: true,
+          force: true,
+        }),
       stopSession: (sessionId) => {
         host.stop(sessionId)
       },
@@ -2991,8 +3000,18 @@ export class CoreApi {
       view: ViewScope,
     ): Promise<SessionDefaults> =>
       this.sessionDefaultsService.update(change, view),
-    restoreDeleted: (sessionId: string) =>
-      this.sessionApplicationService.restoreDeleted(sessionId),
+    /** A group comes back whole, its members too, and says so (GRP-16). */
+    restoreDeleted: async (sessionId: string) => {
+      const entry =
+        await this.sessionApplicationService.restoreDeleted(sessionId)
+      if (entry.surface === 'group')
+        this.host.emitHost({
+          event: 'groups_changed',
+          reason: 'restored',
+          group_id: entry.id,
+        })
+      return entry
+    },
     purgeDeleted: (sessionId: string) =>
       this.sessionApplicationService.purgeDeleted(sessionId),
     purgeExpiredDeleted: (now?: number) =>
@@ -3806,6 +3825,17 @@ export class CoreApi {
       this.groupService.state(input.id)
       return { stopped: this.groupScheduler.stop(input.id) }
     },
+    /**
+     * Delete the group (GRP-16): a running turn is stopped and waited for,
+     * then the group and its member sessions go to 最近删除 for 30 days
+     * (`sessions.restoreDeleted` brings it back whole).
+     */
+    delete: async (input: { id: string }) => {
+      this.groupService.state(input.id)
+      this.groupScheduler.stop(input.id)
+      await this.groupScheduler.settled(input.id)
+      return this.groupService.delete(input.id)
+    },
     /** Resolves once the group's current turn has settled (tests, shutdown). */
     settled: (id: string) => this.groupScheduler.settled(id),
     history: async (input: { id: string; before?: string; limit?: number }) => {
@@ -3831,7 +3861,15 @@ export class CoreApi {
     create: (input: ContactInput) => this.contactStore.create(input),
     update: (input: { id: string; patch: ContactPatch }) =>
       this.contactStore.update(input.id, input.patch),
-    delete: (input: { id: string }) => this.contactStore.delete(input.id),
+    /**
+     * Its single chats stay, read-only; it leaves every group it was in,
+     * what it said there stays (GRP-16). Builtins refuse.
+     */
+    delete: async (input: { id: string }) => {
+      const deleted = await this.contactStore.delete(input.id)
+      this.groupService.leaveAll(deleted.id)
+      return deleted
+    },
     duplicate: (input: { id: string; name?: string }) =>
       this.contactStore.duplicate(
         input.id,

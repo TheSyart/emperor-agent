@@ -97,6 +97,12 @@ function nextId(prefix: string) {
 }
 
 const SCHEDULER_DONE_PENDING_MS = 2500
+/** `groups_changed` reasons that add or remove sessions (GRP-05, GRP-16). */
+const GROUP_SESSION_CHANGES: ReadonlySet<string> = new Set([
+  'created',
+  'deleted',
+  'restored',
+])
 
 function defaultControlPayload(): NonNullable<BootstrapPayload['control']> {
   return {
@@ -1181,9 +1187,10 @@ export function useRuntime(options: {
     }
 
     // A new group is a new session (GRP-05): the list learns it, so search,
-    // ⌘3 and the Group sidebar find it without a reload.
+    // ⌘3 and the Group sidebar find it without a reload. A deleted group
+    // takes its sessions along, a restored one brings them back (GRP-16).
     if (data.event === 'groups_changed') {
-      if (origin === 'live' && data.reason === 'created')
+      if (origin === 'live' && GROUP_SESSION_CHANGES.has(data.reason))
         void options.refreshSessions?.().catch(() => undefined)
       return
     }

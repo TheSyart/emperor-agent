@@ -88,6 +88,11 @@ export interface GroupServiceDeps {
     get(id: string): GroupSessionEntry | null
     list(): readonly GroupSessionEntry[]
     rename(id: string, title: string): boolean
+    /**
+     * Move the group's session and its members' to 最近删除 (GRP-16);
+     * restoring the group brings them all back.
+     */
+    trashGroup(groupId: string): { restorableUntil: string }
   }
   /** The group session's log, opened or created. */
   log(sessionId: string): GroupLog
@@ -100,7 +105,8 @@ export interface GroupServiceDeps {
 }
 
 export interface GroupChange {
-  reason: 'created' | 'updated' | 'member' | 'message'
+  /** `deleted`: the group went to 最近删除 (GRP-16). */
+  reason: 'created' | 'updated' | 'member' | 'message' | 'deleted'
   groupId: string
 }
 
@@ -339,6 +345,43 @@ export class GroupService {
     })
     this.changed('member', groupId)
     return this.get(groupId)
+  }
+
+  /**
+   * A deleted contact leaves every group it is in (GRP-16), as removeMember
+   * does: its session and every message stay, a group it moderated has no
+   * moderator. Returns the groups it left.
+   */
+  leaveAll(contactId: ContactId): string[] {
+    const left: string[] = []
+    for (const session of this.deps.sessions.list()) {
+      if (session.surface !== 'group') continue
+      if (!this.fold(session.id).members.includes(contactId)) continue
+      this.deps.log(session.id).append('group/member', {
+        action: 'removed',
+        contactId,
+        contactVersion: this.deps.contact(contactId)?.version ?? 0,
+      })
+      this.changed('member', session.id)
+      left.push(session.id)
+    }
+    return left
+  }
+
+  /**
+   * Delete the group (GRP-16): its session and its members' go to 最近删除
+   * for 30 days, the way a conversation is deleted. The caller stops a
+   * running turn first.
+   */
+  delete(groupId: string): {
+    id: string
+    deleted: true
+    restorableUntil: string
+  } {
+    this.state(groupId)
+    const { restorableUntil } = this.deps.sessions.trashGroup(groupId)
+    this.changed('deleted', groupId)
+    return { id: groupId, deleted: true, restorableUntil }
   }
 
   /** Log what the user sent and say who speaks next (GRP-07 runs it). */

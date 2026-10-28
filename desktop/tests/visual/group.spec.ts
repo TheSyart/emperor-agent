@@ -528,6 +528,27 @@ test('GRP-05 · @ completes a contact’s name on the Group home', async ({
   await expect(page).toHaveURL(/\/chat\/chat-reviewer/)
 })
 
+test('GRP-16 · 「⋯」 › 删除联系人 on a profile, confirmed first', async ({
+  page,
+}) => {
+  await install(page)
+  await open(page, '/contacts/ct-reviewer00001', 'light')
+  const profile = page.locator('[data-contact-profile]')
+  await profile.locator('[data-contact-more]').click()
+  await expect(page.getByRole('menuitem', { name: '删除联系人' })).toBeVisible()
+  await shot(page, 'profile-more-light')
+  await page.getByRole('menuitem', { name: '删除联系人' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('删除「审稿人」？')
+  await shot(page, 'profile-delete-confirm-light')
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await expect(profile.locator('h1')).toHaveText('审稿人')
+  // Emperor has no 「⋯」.
+  await open(page, '/contacts/ct-emperor', 'light')
+  await expect(page.locator('[data-contact-profile] h1')).toHaveText('Emperor')
+  await expect(page.locator('[data-contact-more]')).toHaveCount(0)
+})
+
 test('GRP-05 · a profile in a narrow window', async ({ page }) => {
   await install(page)
   await open(page, '/contacts/ct-reviewer00001', 'light', 900)

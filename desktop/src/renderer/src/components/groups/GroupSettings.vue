@@ -6,14 +6,17 @@
  * collaboration (自主 / 主持人审核 — 设置 › 群聊 holds the default, this
  * changes the group only) and the moderator; then 每轮结束时主持人出结论,
  * 防打转 and 安静模式, each saved at once (预览 B 第 5 步's order); then
- * the members; last, the group's files.
+ * the members; the group's files; last, 删除群聊 (GRP-16).
  * Every change goes to `groups.update` (members: addMember / removeMember)
  * and shows what Core returns; a change that fails says so and goes back.
+ * 删除群聊 asks first, then `groups.delete` moves the group and its members'
+ * sessions to 最近删除 (restorable for 30 days) and the Group home opens.
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import { core } from '../../api/http'
+import { confirm } from '../ui/confirm'
 import { useAppContext } from '../../composables/useAppContext'
 import { contactAvatarProps } from '../contacts/contactAvatar'
 import { useContactDirectory } from '../contacts/contactDirectory'
@@ -211,6 +214,34 @@ const SWITCHES: {
   },
 ]
 
+// ── 删除群聊 (GRP-16) ─────────────────────────────────────────────────
+const deleting = ref(false)
+
+async function deleteGroup(): Promise<void> {
+  const current = group.value
+  if (!current || deleting.value) return
+  const confirmed = await confirm({
+    title: `删除「${current.title}」？`,
+    body: '群聊和每位成员的工作过程一起移到「设置 › 常规 › 已归档对话 › 最近删除」，30 天内可以恢复，之后自动清除。进行中的一轮会先停下。',
+    confirmLabel: '删除',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  deleting.value = true
+  try {
+    await core('groups.delete', { id: current.id })
+    ctx.showToast(
+      `已删除「${current.title}」，可以在「设置 › 常规 › 已归档对话」里恢复`,
+    )
+    await router.push({ name: 'contacts' }).catch(() => undefined)
+    await directory.refresh()
+  } catch (error) {
+    ctx.showError(error, '没有删除群聊')
+  } finally {
+    deleting.value = false
+  }
+}
+
 function back(): void {
   void router
     .push({ name: 'group', params: { groupId: groupId.value } })
@@ -391,6 +422,23 @@ function back(): void {
             </li>
           </ul>
         </section>
+
+        <section class="block danger-zone" data-danger-zone>
+          <div class="danger-text">
+            <h2 class="block-title">删除群聊</h2>
+            <p class="hint">
+              群聊和成员的工作过程移到「最近删除」，30 天内可以恢复。
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="danger"
+            :loading="deleting"
+            data-delete-group
+            @click="deleteGroup"
+            >删除群聊</Button
+          >
+        </section>
       </div>
     </div>
   </div>
@@ -563,5 +611,15 @@ function back(): void {
 
 .files li {
   font-size: var(--fs-xs);
+}
+
+.danger-zone {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.danger-text {
+  display: grid;
+  gap: var(--space-0-5);
 }
 </style>

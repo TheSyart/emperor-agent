@@ -1476,6 +1476,9 @@ export interface DeletedSessionInfo {
   project_name: string | null
   project_path: string | null
   deleted_at: string
+  /** `group`: a deleted group, its members' sessions with it (GRP-16). */
+  surface?: string
+  group_id?: string
 }
 
 export interface SessionInfo {

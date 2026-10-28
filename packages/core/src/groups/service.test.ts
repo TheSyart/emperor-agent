@@ -22,6 +22,7 @@ function fixture(
   const sessions = new Map<string, GroupSessionEntry>()
   const logs = new Map<string, { type: string; data: unknown }[]>()
   const changes: unknown[] = []
+  const trashedGroups: string[] = []
   let n = 0
   const service = new GroupService({
     sessions: {
@@ -45,6 +46,12 @@ function fixture(
         entry.title = title
         return true
       },
+      trashGroup: (groupId) => {
+        trashedGroups.push(groupId)
+        for (const [id, entry] of sessions)
+          if (id === groupId || entry.group_id === groupId) sessions.delete(id)
+        return { restorableUntil: '2026-11-27T00:00:00.000Z' }
+      },
     },
     log: (id): GroupLog => {
       const events = logs.get(id) ?? []
@@ -60,7 +67,7 @@ function fixture(
     onChange: (change) => changes.push(change),
     ...extra,
   })
-  return { service, sessions, logs, changes }
+  return { service, sessions, logs, changes, trashedGroups }
 }
 
 const CONTACTS: GroupContact[] = [
@@ -630,5 +637,66 @@ describe('the user’s answers in the group log (GRP-12)', () => {
         asked: '',
       }),
     ).toThrow(GroupError)
+  })
+})
+
+describe('GroupService.delete (GRP-16)', () => {
+  it('hands the group and its member sessions to the trash and says it is deleted', () => {
+    const { service, view, changes, trashedGroups, sessions } = group()
+    changes.length = 0
+    expect(service.delete(view.id)).toEqual({
+      id: view.id,
+      deleted: true,
+      restorableUntil: '2026-11-27T00:00:00.000Z',
+    })
+    expect(trashedGroups).toEqual([view.id])
+    expect(changes).toEqual([{ reason: 'deleted', groupId: view.id }])
+    expect(service.list()).toEqual([])
+    expect([...sessions.values()]).toEqual([])
+  })
+
+  it('refuses an unknown group or a session that is not one', () => {
+    const f = fixture()
+    const chat = f.sessions
+    chat.set('chat-1', { id: 'chat-1', title: '对话' })
+    for (const id of ['grp-none', 'chat-1'])
+      expect(() => f.service.delete(id)).toThrow(
+        expect.objectContaining({ code: 'group_not_found' }),
+      )
+    expect(f.trashedGroups).toEqual([])
+    expect(f.changes).toEqual([])
+  })
+})
+
+describe('GroupService.leaveAll (GRP-16)', () => {
+  it('takes a deleted contact out of every group it is in; what it said stays', () => {
+    const f = fixture()
+    const a = f.service.create({
+      title: 'a',
+      members: ['ct-arch', 'ct-rev'],
+      moderator: 'ct-rev',
+    })
+    const b = f.service.create({ title: 'b', members: ['ct-arch'] })
+    const c = f.service.create({
+      title: 'c',
+      members: ['ct-rev', 'ct-emperor'],
+    })
+    f.service.send(a.id, { way: 'broadcast', text: '开始' })
+    f.changes.length = 0
+
+    expect(f.service.leaveAll('ct-rev')).toEqual([a.id, c.id])
+    expect(f.service.get(a.id)).toMatchObject({ moderator: null })
+    expect(f.service.get(a.id).members.map((m) => m.id)).toEqual(['ct-arch'])
+    expect(f.service.get(b.id).members.map((m) => m.id)).toEqual(['ct-arch'])
+    expect(f.service.get(c.id)).toMatchObject({ moderator: 'ct-emperor' })
+    expect(f.service.get(c.id).members.map((m) => m.id)).toEqual(['ct-emperor'])
+    expect(f.service.history(a.id).messages.map((m) => m.text)).toEqual([
+      '开始',
+    ])
+    expect(f.changes).toEqual([
+      { reason: 'member', groupId: a.id },
+      { reason: 'member', groupId: c.id },
+    ])
+    expect(f.service.leaveAll('ct-rev')).toEqual([])
   })
 })

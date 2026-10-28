@@ -240,6 +240,8 @@ beforeEach(() => {
         }
       case 'contacts.chatDelegation':
         return { delegationId: chatDelegation }
+      case 'contacts.delete':
+        return { id: arg?.id, deleted: true }
       default:
         throw new Error(`unexpected ${op}`)
     }
@@ -436,5 +438,95 @@ describe('the contact profile', () => {
       '这个联系人已删除',
     )
     expect(calls('contacts.stats')).toEqual([])
+  })
+
+  describe('删除联系人 (GRP-16)', () => {
+    async function openDelete(): Promise<void> {
+      q('[data-contact-more]').click()
+      await flush()
+      const item = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((element) => element.textContent?.trim() === '删除联系人')
+      if (!item) throw new Error('no 删除联系人')
+      item.click()
+      await flush()
+    }
+
+    it('asks first, deletes, then opens the Group home and reads the lists again', async () => {
+      const asked: Array<{ title: string; body?: string; tone?: string }> = []
+      answerConfirmsForTest((options) => {
+        asked.push(options)
+        return true
+      })
+      await mount()
+      const listsBefore = calls('contacts.list').length
+      await openDelete()
+      expect(asked).toHaveLength(1)
+      expect(asked[0]!.title).toBe('删除「审稿人」？')
+      expect(asked[0]!.body).toContain('单聊')
+      expect(asked[0]!.body).toContain('退出')
+      expect(asked[0]!.tone).toBe('danger')
+      expect(calls('contacts.delete')).toEqual([
+        ['contacts.delete', { id: 'ct-reviewer00001' }],
+      ])
+      expect(router.currentRoute.value.name).toBe('contacts')
+      expect(calls('contacts.list').length).toBeGreaterThan(listsBefore)
+      expect(ctx.showToast).toHaveBeenCalledWith('已删除「审稿人」')
+    })
+
+    it('deletes nothing when the confirmation is cancelled', async () => {
+      answerConfirmsForTest(() => false)
+      await mount()
+      await openDelete()
+      expect(calls('contacts.delete')).toEqual([])
+      expect(router.currentRoute.value.fullPath).toBe(
+        '/contacts/ct-reviewer00001',
+      )
+    })
+
+    it('says so when Core refuses, and stays on the profile', async () => {
+      await mount()
+      const base = core.getMockImplementation()!
+      core.mockImplementation(async (op: string, arg?: unknown) => {
+        if (op === 'contacts.delete')
+          throw Object.assign(new Error('内置联系人不能删除'), {
+            code: 'contact_builtin',
+          })
+        return base(op, arg)
+      })
+      await openDelete()
+      expect(ctx.showError).toHaveBeenCalledWith(
+        expect.any(Error),
+        '没有删除联系人',
+      )
+      expect(router.currentRoute.value.name).toBe('contact')
+    })
+
+    it('offers no delete for Emperor, Claude Code or Codex', async () => {
+      for (const [id, patch] of [
+        [
+          'ct-emperor',
+          { name: 'Emperor', avatar: { kind: 'mascot', pose: 'crown' } },
+        ],
+        [
+          'ct-codex',
+          {
+            name: 'Codex',
+            kind: 'external',
+            backend: 'codex',
+            avatar: { kind: 'logo', backend: 'codex' },
+          },
+        ],
+      ] as const) {
+        current = contact({ id, builtin: true, ...patch } as Partial<Contact>)
+        await mount(id)
+        expect(document.querySelector('[data-contact-more]')).toBeNull()
+        expect(document.body.textContent).not.toContain('删除联系人')
+        app?.unmount()
+        container?.remove()
+        app = null
+        container = null
+      }
+    })
   })
 })
