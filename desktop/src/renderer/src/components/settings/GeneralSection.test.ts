@@ -109,7 +109,7 @@ const trashed = {
 beforeEach(() => {
   localStorage.removeItem(UI_PREFERENCES_STORAGE_KEY)
   reloadUiPreferences()
-  pet.value = { enabled: false, running: false }
+  pet.value = { enabled: false, running: false, outfit: 'daily' }
   core.mockImplementation(async (op: string) =>
     op === 'sessions.defaults' ? { permission: 'workspace-write' } : {},
   )
