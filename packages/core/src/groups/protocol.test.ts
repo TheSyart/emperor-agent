@@ -384,9 +384,11 @@ describe('foldGroupEvents and delivery', () => {
         '  权限：只读',
       ].join('\n'),
     )
-    expect(lines('ct-arch')).toMatch(
-      /^\[10:42\] 审稿人 → 所有人（交办给你）：查溢出\n  交付物：原因和修法/,
-    )
+    expect(
+      lines('ct-arch').startsWith(
+        '[10:42] 审稿人 → 所有人（交办给你）：查溢出\n  交付物：原因和修法',
+      ),
+    ).toBe(true)
   })
 })
 
