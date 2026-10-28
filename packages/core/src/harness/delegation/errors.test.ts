@@ -17,3 +17,16 @@ it('keeps unknown native details and malformed error codes out of IPC', () => {
   expect(value.toSafe().code).toBe('EXTERNAL_OPERATION_FAILED')
   expect(JSON.stringify(value.toSafe())).not.toContain('secret')
 })
+it('tells apart why a message to a subagent did not go out (GRP-19)', () => {
+  const said = [
+    'NEEDS_RECOVERY',
+    'STOPPING',
+    'QUEUE_LIMIT',
+    'BRIEF_LIMIT',
+    'RESTART_PAUSED',
+  ].map((code) => new DelegationError(code, 'detail').toSafe().message)
+  expect(new Set(said).size).toBe(said.length)
+  expect(said).not.toContain(
+    new DelegationError('SOMETHING_ELSE', 'detail').toSafe().message,
+  )
+})

@@ -66,10 +66,12 @@ function fakeDelegations() {
 function speaker(
   delegations = fakeDelegations(),
   contact: Record<string, unknown> = {},
+  beginTask: (memberSessionId: string) => void = () => {},
 ) {
   const external = new ExternalSpeaker({
     delegations: delegations.api as never,
     parentAgentId: (sessionId) => `agent-${sessionId}`,
+    beginTask,
     contact: () =>
       ({
         id: 'ct-codex',
@@ -118,6 +120,17 @@ const request = (
 })
 
 describe('ExternalSpeaker', () => {
+  // GRP-19: the cost cap counts each speech on its own (as the 0.3 notes
+  // say); without a new task per speech a member's spend added up across
+  // every group turn until a restart.
+  it('starts a new task, with a fresh budget, for every speech', async () => {
+    const began: string[] = []
+    const { external } = speaker(fakeDelegations(), {}, (id) => began.push(id))
+    await external.speak(request())
+    await external.speak(request({ turnId: 'gt-2' }))
+    expect(began).toEqual(['s-codex', 's-codex'])
+  })
+
   it('speaks read-only through a delegation rooted at its member session', async () => {
     const { external, delegations } = speaker()
     const result = await external.speak(request())

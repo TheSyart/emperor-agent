@@ -786,6 +786,24 @@ export class DelegationError extends Error {
         '消息送达状态未知，请先查看原生历史，避免重复发送。',
         'inspect_retained_results',
       ],
+      // Why a message did not go out (GRP-19), so the composer can say so.
+      NEEDS_RECOVERY: [
+        '上一次运行没有正常结束：先点「标记为已结束」，再发消息。',
+        'refresh_delegation',
+      ],
+      STOPPING: ['它正在停下上一条：等它停下再发。', 'refresh_delegation'],
+      QUEUE_LIMIT: [
+        '排队的消息太多了：等它回完前面的再发。',
+        'refresh_delegation',
+      ],
+      BRIEF_LIMIT: [
+        '消息太长了：一条最多 32 KB（大约一万个汉字），分几条发。',
+        'refresh_delegation',
+      ],
+      RESTART_PAUSED: [
+        'Emperor 重启前还有消息没发出：先处理它们，再发新的。',
+        'refresh_delegation',
+      ],
       AUTH_REQUIRED: [
         'Claude Code 还没有登录，请在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」。',
         'configure_executor',

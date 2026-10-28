@@ -1893,6 +1893,15 @@ export class HarnessHost {
     return this.taskTree(owner.rootSessionId).spent()
   }
 
+  /**
+   * A message the user sent straight to Claude Code or Codex (a single
+   * chat, GRP-19) starts a new task with a fresh budget, as a turn does
+   * (KRN-03): the chat's spend never adds up against one task's cap.
+   */
+  beginDelegationTask(rootSessionId: string): void {
+    this.taskTree(rootSessionId).beginTask()
+  }
+
   /** Charge a settled external run's API cost to its root task (AGT-07). */
   chargeDelegation(owner: DelegationOwner, usd: number): void {
     this.taskTree(owner.rootSessionId).chargeUsd(usd)
@@ -1901,7 +1910,8 @@ export class HarnessHost {
   delegationParent(owner: DelegationOwner): DelegationParentContext {
     const parent =
       this.agents.get(owner.parentAgentId) ??
-      this.subagents.get(owner.parentAgentId)
+      this.subagents.get(owner.parentAgentId) ??
+      this.restoredRootParent(owner)
     if (!parent || this.rootOf(parent).id !== owner.rootSessionId)
       throw new DelegationError(
         'PARENT_NOT_FOUND',
@@ -1925,6 +1935,20 @@ export class HarnessHost {
       planMode ||= this.planMode.get(ancestor.session).active
     }
     return { cwd: policy.workspaceRoot, policy, planMode }
+  }
+  /**
+   * A delegation its root session started, after a restart: the root agent
+   * is made again from its session, as for its notices (GRP-19), so the
+   * next message (a single chat's, or one from the conversation page) goes
+   * out instead of failing with PARENT_NOT_FOUND. A subagent parent that
+   * ended is not brought back.
+   */
+  private restoredRootParent(owner: DelegationOwner): Agent | undefined {
+    if (this.closed || owner.parentAgentId !== owner.rootSessionId)
+      return undefined
+    if (this.kept.sessionStore.get(owner.rootSessionId) === null)
+      return undefined
+    return this.agentFor(owner.rootSessionId)
   }
   canControlDelegation(agent: Agent, owner: DelegationOwner): boolean {
     if (this.rootOf(agent).id !== owner.rootSessionId) return false

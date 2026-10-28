@@ -135,7 +135,9 @@ async function send() {
       if (contact?.kind === 'external') {
         const target = await sendExternalChat(session.id, message)
         text.value = ''
-        await router.push(target)
+        // Sent; a user who already went elsewhere stays there (GRP-19).
+        if (router.currentRoute.value.name === 'contacts')
+          await router.push(target)
         return
       }
       handDraftTo(session.id, message, { send: true })

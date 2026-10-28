@@ -341,6 +341,27 @@ describe('the Group home', () => {
     )
   })
 
+  it('never pulls the user back once they left before Claude Code took the message (GRP-19)', async () => {
+    let accept: (value: unknown) => void = () => {}
+    const base = core.getMockImplementation()!
+    core.mockImplementation(
+      async (op: string, arg?: Record<string, unknown>) =>
+        op === 'contacts.chatSend'
+          ? new Promise((resolve) => {
+              accept = resolve
+            })
+          : base(op, arg),
+    )
+    await mount()
+    await type('@Claude Code 看看这个仓库')
+    await key('Enter')
+    await flush()
+    await router.push('/groups/grp-review')
+    accept({ delegationId: 'dlg-chat1', runId: 'dgr-chat1' })
+    await flush()
+    expect(router.currentRoute.value.fullPath).toBe('/groups/grp-review')
+  })
+
   it('completes a name after @ with ↓ and Enter, never listing a name that is no contact', async () => {
     await mount()
     await type('请 @审')

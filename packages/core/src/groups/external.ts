@@ -34,6 +34,8 @@ export interface ExternalSpeakerDeps {
   >
   /** The member session's root agent (the delegation's parent). */
   parentAgentId(memberSessionId: string): string
+  /** Each speech is its own task with a fresh cost budget (GRP-19). */
+  beginTask?(memberSessionId: string): void
   contact(id: ContactId): Contact | null
   charter(groupId: string, contactId: ContactId): string
   title(groupId: string): string
@@ -57,6 +59,8 @@ export class ExternalSpeaker {
         spend: none,
       }
     const name = BACKEND_NAMES[contact.backend]
+    // 费用上限按每一次发言计算 (0.3): a speech never pays for the last one.
+    this.deps.beginTask?.(request.memberSessionId)
     const task = request.reason === 'task' ? request.task : undefined
     let id: string | undefined
     let runId: string | undefined
@@ -224,7 +228,7 @@ function codeOf(error: unknown): string | undefined {
   return error instanceof DelegationError ? error.code : undefined
 }
 
-/** A refusal in words, with where to fix it (also a single chat's, GRP-11). */
+/** A refusal in words, with where to fix it. */
 export function describeExternalFailure(error: unknown, name: string): string {
   switch (codeOf(error)) {
     case 'AUTH_REQUIRED':

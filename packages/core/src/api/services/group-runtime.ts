@@ -52,6 +52,7 @@ export function installGroupRuntime(opts: GroupRuntimeOptions): GroupScheduler {
       list: () => host.delegations?.list() ?? [],
     },
     parentAgentId: (sessionId) => host.agentFor(sessionId).id,
+    beginTask: (sessionId) => host.beginDelegationTask(sessionId),
     contact: opts.contact,
     charter: (groupId, contactId) => {
       const state = groups.state(groupId)

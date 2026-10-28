@@ -83,6 +83,8 @@ export class CoreDelegationService {
       assertMutation: (id: string, action: string) => void
       /** Throws when no message may go to this delegation (a deleted contact's chat). */
       refuseSend?: (owner: DelegationOwner) => void
+      /** A single chat's message starts a task with a fresh budget (GRP-19). */
+      beginTask?: (owner: DelegationOwner) => void
     },
   ) {}
   private access(
@@ -186,6 +188,7 @@ export class CoreDelegationService {
     if (owner) this.options.refuseSend?.(owner)
     // In a single chat with Claude Code or Codex every message is its own
     // task (GRP-11), from the chat page as from its first message.
+    if (owner?.source === 'contact') this.options.beginTask?.(owner)
     return this.options.service.send(
       input.id,
       owner?.source === 'contact'

@@ -2,17 +2,70 @@
 // one (only `surface: 'contact'` counts: a trial or a group member's session
 // of the same contact never does), made when there is none, kept across a
 // restart — and the profile's four numbers (`contacts.stats`).
-import { afterEach, describe, expect, it } from 'vitest'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CoreApi } from './core-api'
 import { invokeCoreOperation } from './operations'
-import { makeApi, type ApiFixture } from './test-helpers'
+import { makeApi, waitFor, type ApiFixture } from './test-helpers'
+import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
+import type { DelegationServiceOptions } from '../harness/delegation/service'
+import { fakeCodexProcesses } from '../harness/delegation/testing'
 import type { ScriptedReply } from '../harness/testing'
 
 const fixtures: ApiFixture[] = []
 
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.api.close()
+  vi.restoreAllMocks()
 })
+
+/**
+ * Codex on, allowed and signed in, its every process the fake app-server
+ * (testing.ts): nothing runs the real codex or reads ~/.codex.
+ */
+async function withFakeCodex(fixture: ApiFixture): Promise<void> {
+  const { api, root } = fixture
+  const config = api.executorConfig.read()
+  if (!config.profiles.every((profile) => profile.enabled)) {
+    for (const profile of config.profiles) profile.enabled = true
+    await api.executors.configure(
+      { expectedRevision: config.revision, config },
+      { sessionId: null },
+    )
+  }
+  for (const profile of config.profiles)
+    api.host.delegationConsent.store?.grant(profile.id)
+  vi.spyOn(api.executorRegistry, 'requireAvailable').mockImplementation(
+    async (profile) => ({
+      status: 'available',
+      checkedAt: Date.now(),
+      authVerified: true,
+      capabilities: api.executorRegistry.capabilities(profile.backend),
+    }),
+  )
+  const options = (
+    api.delegationRuntime as unknown as { options: DelegationServiceOptions }
+  ).options
+  options.checkAuth = undefined
+  options.runtime = async (_profile, id) => {
+    const runtimeRoot = join(root, 'codex-runtimes', id),
+      tempRoot = join(runtimeRoot, 'tmp')
+    mkdirSync(tempRoot, { recursive: true })
+    return {
+      runtimeRoot,
+      tempRoot,
+      environment: { PATH: process.env.PATH ?? '' },
+      billing: 'subscription' as const,
+    }
+  }
+  options.adapters.set(
+    'codex',
+    new CodexExecutorAdapter({
+      processes: fakeCodexProcesses({ reply: '收到' }),
+    }),
+  )
+}
 
 async function open(
   replies: ScriptedReply[] = [],
@@ -24,6 +77,18 @@ async function open(
   })
   fixtures.push(fixture)
   return fixture
+}
+
+/** The run of one queued chat message, once it has settled. */
+async function settled(api: CoreApi, delegationId: string, messageId: string) {
+  const runOf = () =>
+    Object.values(
+      api.delegationRuntime
+        .list()
+        .find((state) => state.record?.id === delegationId)?.runs ?? {},
+    ).find((run) => run.messageId === messageId)
+  await waitFor(() => runOf() !== undefined)
+  return api.delegationRuntime.wait(delegationId, runOf()!.id)
 }
 
 async function reviewer(api: CoreApi, name = '审稿人'): Promise<string> {
@@ -174,6 +239,119 @@ describe('a single chat with a contact (GRP-05)', () => {
       code: 'contact_chat_failed',
       message: expect.stringMatching(/设置 › 子智能体/),
     })
+  })
+
+  it('goes on with Claude Code or Codex after a restart, from the chat and from its conversation (GRP-19)', async () => {
+    const before = await open()
+    await withFakeCodex(before)
+    const chat = await invokeCoreOperation(before.api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    const sessionId = String(chat.id)
+    const first = await invokeCoreOperation(before.api, 'contacts.chatSend', [
+      { sessionId, text: '第一条', clientMessageId: 'cm-1' },
+    ])
+    expect(
+      await before.api.delegationRuntime.wait(first.delegationId, first.runId!),
+    ).toMatchObject({ phase: 'completed' })
+    await before.api.close()
+    fixtures.splice(fixtures.indexOf(before), 1)
+
+    // Nothing made the chat's root agent again: the next message must.
+    const after = await open([], before.stateRoot)
+    await withFakeCodex(after)
+    expect(
+      await invokeCoreOperation(after.api, 'contacts.chatDelegation', [
+        { sessionId },
+      ]),
+    ).toEqual({ delegationId: first.delegationId })
+    const second = await invokeCoreOperation(after.api, 'contacts.chatSend', [
+      { sessionId, text: '第二条', clientMessageId: 'cm-2' },
+    ])
+    expect(second.delegationId).toBe(first.delegationId)
+    // Queued, then run as its own task.
+    expect(
+      await settled(after.api, first.delegationId, 'dgm-cm-2'),
+    ).toMatchObject({ phase: 'completed' })
+
+    // The conversation page's own box (delegations.send) after a restart.
+    await after.api.close()
+    fixtures.splice(fixtures.indexOf(after), 1)
+    const third = await open([], before.stateRoot)
+    await withFakeCodex(third)
+    await expect(
+      invokeCoreOperation(third.api, 'delegations.send', [
+        {
+          id: first.delegationId,
+          sessionId,
+          messageId: 'dgm-page-3',
+          text: '第三条',
+          delivery: 'queue',
+        },
+      ]),
+    ).resolves.toMatchObject({ messageId: 'dgm-page-3' })
+  })
+
+  it('spends each message’s own cost cap, never one for the whole chat (GRP-19)', async () => {
+    const fixture = await open()
+    const { api } = fixture
+    await withFakeCodex(fixture)
+    api.host.kept.modelConfig = {
+      ...api.host.kept.modelConfig,
+      policy: {
+        ...api.host.kept.modelConfig.policy,
+        cost: { maxUsdPerAgentTurn: 0.01 },
+      },
+    } as typeof api.host.kept.modelConfig
+    const chat = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    const sessionId = String(chat.id)
+    const first = await invokeCoreOperation(api, 'contacts.chatSend', [
+      { sessionId, text: '第一条', clientMessageId: 'cm-1' },
+    ])
+    await api.delegationRuntime.wait(first.delegationId, first.runId!)
+    // An API-billed answer that cost more than the cap.
+    const owner = api.delegationRuntime
+      .list()
+      .find((state) => state.record?.id === first.delegationId)!.record!.owner
+    api.host.chargeDelegation(owner, 1)
+    expect(api.host.delegationTaskSpent(owner)).toBe(true)
+
+    // The next message is a task of its own: it runs.
+    await invokeCoreOperation(api, 'contacts.chatSend', [
+      { sessionId, text: '第二条', clientMessageId: 'cm-2' },
+    ])
+    expect(await settled(api, first.delegationId, 'dgm-cm-2')).toMatchObject({
+      phase: 'completed',
+    })
+    // So is one sent from its conversation page.
+    api.host.chargeDelegation(owner, 1)
+    await invokeCoreOperation(api, 'delegations.send', [
+      {
+        id: first.delegationId,
+        sessionId,
+        messageId: 'dgm-page-3',
+        text: '第三条',
+        delivery: 'queue',
+      },
+    ])
+    expect(await settled(api, first.delegationId, 'dgm-page-3')).toMatchObject({
+      phase: 'completed',
+    })
+  })
+
+  it('takes only a message id a delegation can keep (GRP-19)', async () => {
+    const { api } = await open()
+    const codex = await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: 'ct-codex' },
+    ])
+    for (const clientMessageId of ['a/b', 'x'.repeat(200), 'cm 1'])
+      await expect(
+        invokeCoreOperation(api, 'contacts.chatSend', [
+          { sessionId: String(codex.id), text: 'hi', clientMessageId },
+        ]),
+      ).rejects.toMatchObject({ code: 'invalid_core_arguments' })
   })
 
   it('has no single chat with a contact that is gone', async () => {

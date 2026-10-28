@@ -12,9 +12,10 @@
  * canStop (hide 停止 when there is nothing to stop), placeholder and
  * idleHint (a single chat with Claude Code or Codex says its own, GRP-11).
  * Emits: send(text) — the parent clears the draft by calling `clear()`
- * once Core accepted it — and stop.
+ * once Core accepted it — and stop. v-model:draft keeps the draft in the
+ * parent (one per chat, GRP-19).
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import Button from '../ui/Button.vue'
 import TextArea from '../ui/TextArea.vue'
 
@@ -49,7 +50,9 @@ const emit = defineEmits<{
   stop: []
 }>()
 
-const draft = ref('')
+// The parent may keep the draft per chat (v-model:draft, GRP-19), so a
+// draft never follows the user into another chat; else it is the seat's.
+const draft = defineModel<string>('draft', { default: '' })
 const canSend = computed(
   () => !props.closed && !props.sending && draft.value.trim().length > 0,
 )

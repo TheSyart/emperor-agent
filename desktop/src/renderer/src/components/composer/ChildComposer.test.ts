@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, reactive, ref, type App } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import ChildComposer from './ChildComposer.vue'
 
@@ -106,4 +106,28 @@ it('names the parent and shows a failed send; the way back is the page header (B
   expect(root.querySelector('[data-child-root]')).toBeNull()
   expect(root.textContent).not.toContain('返回父智能体')
   expect(root.textContent).not.toContain('返回主会话')
+})
+
+it('GRP-19 · keeps its draft in the parent when given one, so each chat has its own', async () => {
+  const drafts = reactive<Record<string, string>>({ A: '给 A 的话', B: '' })
+  const on = ref('A')
+  root = document.createElement('div')
+  document.body.append(root)
+  app = createApp({
+    render: () =>
+      h(ChildComposer, {
+        draft: drafts[on.value],
+        'onUpdate:draft': (text: string) => {
+          drafts[on.value] = text
+        },
+      }),
+  })
+  app.mount(root)
+  await nextTick()
+  expect(input().value).toBe('给 A 的话')
+  on.value = 'B'
+  await nextTick()
+  expect(input().value).toBe('')
+  await type('给 B 的话')
+  expect(drafts).toEqual({ A: '给 A 的话', B: '给 B 的话' })
 })

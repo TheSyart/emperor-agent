@@ -14,6 +14,7 @@ import ExternalAgentConversation from './ExternalAgentConversation.vue'
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { useSession } from '../../composables/useSession'
 import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
+import { resetContactDirectoryForTest } from '../contacts/contactDirectory'
 const bridge = vi.hoisted(() => ({
   invokeCore: vi.fn(),
   push: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: bridge.push }),
 }))
 vi.mock('../../api/backend', () => ({
+  hasCoreBridge: () => true,
   invokeCore: bridge.invokeCore,
   onCoreEvent: (listener: (e: unknown) => void) => {
     bridge.listener = listener
@@ -107,6 +109,7 @@ async function mount(context?: Record<string, unknown>) {
   return root
 }
 beforeEach(() => {
+  resetContactDirectoryForTest()
   currentRun = 'dgr-one'
   archived = false
   rootExists = true
@@ -1041,4 +1044,63 @@ it('GRP-11 · a single chat with Codex leads back to the contact, never to the c
   expect(bridge.push).not.toHaveBeenCalledWith(
     expect.objectContaining({ name: 'chat' }),
   )
+})
+/** A single chat with Codex: the delegation the user started from it. */
+function contactChatMock(
+  options: { contacts?: { id: string }[]; archivedRoot?: boolean } = {},
+) {
+  const base = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    async (key: string, input: Record<string, unknown>) => {
+      if (key === 'contacts.list')
+        return { contacts: options.contacts ?? [{ id: 'ct-codex' }] }
+      if (key === 'groups.list') return []
+      if (key === 'sessions.list')
+        return [
+          {
+            id: 'root',
+            surface: 'contact',
+            contact_id: 'ct-codex',
+            archived_at: options.archivedRoot ? '2026-10-27' : null,
+          },
+        ]
+      const result = await base(key, input)
+      if (key === 'delegations.get')
+        result.record.owner = {
+          rootSessionId: 'root',
+          parentAgentId: 'root',
+          source: 'contact',
+        }
+      return result
+    },
+  )
+}
+it('GRP-19 · a single chat whose contact was deleted is read, never written to', async () => {
+  useSession().sessions.value = [
+    { id: 'root', surface: 'contact', contact_id: 'ct-codex' } as never,
+  ]
+  contactChatMock({ contacts: [] })
+  const dom = await mount()
+  await vi.waitFor(() =>
+    expect(dom.textContent).toContain('这个联系人已删除，这个会话只能查看'),
+  )
+  expect(
+    dom.querySelector<HTMLTextAreaElement>('[data-child-input]')!.disabled,
+  ).toBe(true)
+  expect(dom.textContent).toContain('公开结果')
+})
+it('GRP-19 · an archived single chat still leads back to its contact', async () => {
+  // The sidebar's list leaves archived chats out.
+  useSession().sessions.value = []
+  contactChatMock({ archivedRoot: true })
+  const dom = await mount()
+  expect(dom.querySelector('nav')!.textContent).toContain('联系人')
+  const back = dom.querySelector<HTMLButtonElement>('[data-child-header-back]')!
+  expect(back.getAttribute('aria-label')).toBe('返回联系人档案')
+  back.click()
+  await settle()
+  expect(bridge.push).toHaveBeenLastCalledWith({
+    name: 'contact',
+    params: { id: 'ct-codex' },
+  })
 })

@@ -19,6 +19,12 @@ import {
 /** What the composer says in the chat of a contact that is gone. */
 export const CONTACT_DELETED_REASON = '这个联系人已删除，这个会话只能查看'
 
+/**
+ * What the composer says while the contact list is read (GRP-19): a chat
+ * with Claude Code or Codex takes another composer, so none takes text yet.
+ */
+export const CONTACT_LOADING_REASON = '正在读取联系人…'
+
 export interface ContactSpeaker {
   name: string
   avatar: ContactAvatarProps

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用 Group 模式的用户<br>
-> 最后核验：2026-10-28（对照 `6c120e0b`）<br>
+> 最后核验：2026-10-29（对照 `8cf2be55`）<br>
 > 事实源：`desktop/src/renderer/src/components/contacts/`（`ContactEditor.vue`、`ContactMethods.vue`、`TemplatePicker.vue`、`TrialBench.vue`、`AvatarRecommend.vue`、`AvatarLibraryPicker.vue`、`ContactProfile.vue`）、`desktop/src/renderer/src/components/groups/`（`GroupHome.vue`、`GroupPage.vue`、`GroupComposer.vue`、`groupModel.ts`、`GroupMembers.vue`、`GroupSettings.vue`、`NewGroupDialog.vue`、`newGroupModel.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarGroupSections.vue`、`desktop/src/renderer/src/components/settings/GroupsSection.vue`、`desktop/src/renderer/src/components/settings/GeneralSection.vue`（最近删除）、`desktop/src/renderer/src/components/conversation/nodes/TurnTail.vue`、`packages/core/src/contacts/`、`packages/core/src/groups/`、`templates/contacts/`
 
 联系人是长期存在的 agent：有名字、头像和一份岗位说明书，有自己的模型、工具、权限和记忆。群聊把几位联系人拉到一起：谁对谁说了什么、交给谁做了什么、交出了什么，都在一条时间线上，你随时可以插话、点名或停止。它们都在 Group 模式里（⌘3，见[三种模式](modes.md)）。
@@ -126,9 +126,10 @@ Emperor 自带三位联系人：
 在 Claude Code 或 Codex 的档案里点「发消息」，或者在群聊首页只 @ 它们，打开和它们的单聊。
 
 - 消息直接交给它们自己，不由本地模型代答。你亲手发给它们就是同意，不会再弹「允许交给它」的确认。
-- 第一条消息发出后，单聊就是它们的对话页：可以接着发消息、停止、回答它们的提问；路径写「联系人 / 单聊」，左上角的「‹」回到联系人档案。每条消息各算一个任务，所以聊得再久也不会累计到「每个任务最多启动外部运行」的次数上限。
+- 第一条消息发出后，单聊就是它们的对话页：可以接着发消息、停止、回答它们的提问；路径写「联系人 / 单聊」，左上角的「‹」回到联系人档案。每条消息各算一个任务，所以聊得再久也不会累计到「每个任务最多启动外部运行」的次数上限；「设置 › 用量与费用」的费用上限也只管单条消息，整段单聊的总花费不设上限。Emperor 重启后可以接着聊。
 - 单聊里它们只读、不改文件；要它们改代码，在 Build 对话里把任务交给它们（见[子智能体](automation-collaboration.md#子智能体)）。
-- 没登录、版本不兼容、正在升级或没启用时，写明原因，去「设置 › 子智能体」处理。
+- 发不出去时写明原因和该怎么做：没登录、版本不兼容、正在升级或没启用，去「设置 › 子智能体」处理；它还在停下上一条、排队的消息太多，等一会儿再发；上次运行没有正常结束，在对话页点「标记为已结束」再发。一条消息最多 32 KB（大约一万个汉字）。
+- 再次打开已经聊过的单聊，直接到它的对话页。没发出的字留在各自的单聊里，不会带到别的单聊。
 
 ## 群聊
 

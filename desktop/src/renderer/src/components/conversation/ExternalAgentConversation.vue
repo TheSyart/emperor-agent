@@ -66,6 +66,8 @@ import VersionFailureActions from './VersionFailureActions.vue'
 import Button from '../ui/Button.vue'
 import Avatar from '../ui/Avatar.vue'
 import { useSkinExempt } from '../../skin/skinState'
+import { useContactDirectory } from '../contacts/contactDirectory'
+import { CONTACT_DELETED_REASON } from './contactChat'
 
 /** BRD-05 (D8): a skin may not reach this zone. */
 const exempt = useSkinExempt()
@@ -74,6 +76,8 @@ const route = useRoute(),
 const rootId = computed(() => String(route.params.sessionId ?? ''))
 const delegationId = computed(() => String(route.params.delegationId ?? ''))
 const rootAvailability = ref<OwningRootAvailability>('loading')
+/** The contact of the root session, when it is a single chat (GRP-19). */
+const rootContactId = ref<string | null>(null)
 const availability = ref<ExternalConversationAvailability>('loading')
 const canOpenRoot = computed(() => rootAvailability.value === 'available')
 const controlsAvailable = computed(
@@ -179,12 +183,12 @@ function location(id: string) {
     : { name: 'chat', params: { sessionId: id } }
 }
 async function readRoot(sessionId: string, current: number) {
-  const result = owningRootAvailability(
-    sessionId,
-    await invokeCore('sessions.list', { includeArchived: true }),
-  )
+  const listed = await invokeCore('sessions.list', { includeArchived: true })
+  const result = owningRootAvailability(sessionId, listed)
   if (current === generation) {
     rootAvailability.value = result
+    rootContactId.value =
+      listed.find((session) => session.id === sessionId)?.contact_id ?? null
     if (result !== 'available') detailsRunId.value = null
   }
   if (result === 'missing')
@@ -214,10 +218,26 @@ async function navigate(id: string) {
  */
 const chatContactId = computed(() => {
   if (record.value?.owner.source !== 'contact') return null
+  // Read with archived sessions too: the sidebar's list leaves them out,
+  // and an archived chat still leads back to its contact (GRP-19).
   return (
-    sessions.value.find((item) => item.id === rootId.value)?.contact_id ?? null
+    rootContactId.value ??
+    sessions.value.find((item) => item.id === rootId.value)?.contact_id ??
+    null
   )
 })
+const contactDirectory = useContactDirectory({ lazy: true })
+watch(chatContactId, (id) => {
+  if (id) contactDirectory.ensure()
+})
+/** The chat's contact was deleted: it is read, not written to (GRP-19). */
+const chatContactDeleted = computed(
+  () =>
+    chatContactId.value !== null &&
+    contactDirectory.loaded.value &&
+    !contactDirectory.failed.value &&
+    contactDirectory.find(chatContactId.value) === undefined,
+)
 function openChatContact() {
   if (!chatContactId.value) return
   void router.push({ name: 'contact', params: { id: chatContactId.value } })
@@ -262,13 +282,14 @@ const question = computed(() => {
     : null
 })
 const closedReason = computed(() => {
+  if (chatContactDeleted.value) return CONTACT_DELETED_REASON
   if (rootAvailability.value === 'archived')
     return '主会话已归档，不能再给它发消息。'
   if (!controlsAvailable.value && !loading.value) return '现在不能给它发消息。'
   return undefined
 })
 async function send(text: string) {
-  if (!controlsAvailable.value || sending.value) return
+  if (!controlsAvailable.value || closedReason.value || sending.value) return
   sending.value = true
   sendError.value = ''
   try {
@@ -352,6 +373,7 @@ function openFeed() {
   }
   loading.value = true
   rootAvailability.value = 'loading'
+  rootContactId.value = null
   availability.value = 'loading'
   error.value = ''
   stopping.value = requestedStops.get(stopKey(sessionId, id)) ?? null

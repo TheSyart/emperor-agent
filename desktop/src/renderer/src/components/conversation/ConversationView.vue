@@ -111,6 +111,7 @@ import { useContactDirectory } from '../contacts/contactDirectory'
 import type { ChatFeedback } from './chatContext'
 import {
   CONTACT_DELETED_REASON,
+  CONTACT_LOADING_REASON,
   contactChatOf,
   groupMemberOf,
   groupPageOf,
@@ -118,10 +119,9 @@ import {
 import ChildComposer from '../composer/ChildComposer.vue'
 import {
   EXTERNAL_CHAT_INTRO,
-  externalChatLocation,
   externalChatPlaceholder,
-  sendExternalChat,
 } from '../contacts/externalChat'
+import { useExternalChatHome } from './externalChatHome'
 import { useProvisionalPrompts } from './provisionalPrompts'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
@@ -535,13 +535,15 @@ const providerOptions = computed(
 const composerUnavailableReason = computed(() =>
   contactChat.value?.deleted
     ? CONTACT_DELETED_REASON
-    : groupMember.value
-      ? groupMember.value?.readOnlyReason
-      : !unknownSession.value
-        ? ''
-        : lineageLoading.value
-          ? '正在读取会话…'
-          : '没有找到这个会话，请从侧栏打开其他会话',
+    : contactChat.value && !contactDirectory.loaded.value
+      ? CONTACT_LOADING_REASON
+      : groupMember.value
+        ? groupMember.value?.readOnlyReason
+        : !unknownSession.value
+          ? ''
+          : lineageLoading.value
+            ? '正在读取会话…'
+            : '没有找到这个会话，请从侧栏打开其他会话',
 )
 const modelBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
@@ -641,42 +643,27 @@ const chatFeedback: ChatFeedback = {
 const externalChat = computed(() =>
   contactChat.value?.external ? contactChat.value : null,
 )
-const externalComposer = ref<InstanceType<typeof ChildComposer> | null>(null)
-const externalSending = ref(false)
-const externalSendError = ref('')
-watch(
-  () =>
-    knownSession.value?.surface === 'contact' ? knownSession.value.id : null,
-  async (sessionId) => {
-    externalSendError.value = ''
-    if (!sessionId) return
-    try {
-      const { delegationId } = await core('contacts.chatDelegation', {
-        sessionId,
-      })
-      if (delegationId && routeSessionId.value === sessionId)
-        await router.replace(externalChatLocation(sessionId, delegationId))
-    } catch {
-      // The chat's own page stays; its first message tries again.
-    }
+/** Each chat's unsent message, so it never follows the user into another (GRP-19). */
+const externalDrafts = reactive(new Map<string, string>())
+const externalDraft = computed({
+  get: () => externalDrafts.get(viewingId.value) ?? '',
+  set: (text: string) => {
+    if (text) externalDrafts.set(viewingId.value, text)
+    else externalDrafts.delete(viewingId.value)
   },
-  { immediate: true },
-)
+})
+const externalHome = useExternalChatHome({
+  sessionId: () =>
+    knownSession.value?.surface === 'contact' ? knownSession.value.id : null,
+  onScreen: (sessionId) =>
+    route.name === 'chat' && routeSessionId.value === sessionId,
+  go: (target) => router.replace(target),
+})
 async function sendToExternalChat(text: string) {
   const sessionId = viewingId.value
-  if (!sessionId || externalSending.value) return
-  externalSending.value = true
-  externalSendError.value = ''
-  try {
-    const target = await sendExternalChat(sessionId, text)
-    externalComposer.value?.clear()
-    await router.replace(target)
-  } catch (error) {
-    externalSendError.value =
-      error instanceof Error ? error.message : String(error)
-  } finally {
-    externalSending.value = false
-  }
+  if (!sessionId) return
+  // The draft that went out is that chat's, wherever the user is now.
+  if (await externalHome.send(sessionId, text)) externalDrafts.delete(sessionId)
 }
 // A group's own session opens on the group's page (GRP-08).
 watch(
@@ -1457,12 +1444,12 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
       </template>
       <ChildComposer
         v-else-if="externalChat?.speaker"
-        ref="externalComposer"
+        v-model:draft="externalDraft"
         data-external-chat-composer
         :placeholder="externalChatPlaceholder(externalChat.speaker.name)"
         idle-hint="单聊里它只读、不改文件"
-        :sending="externalSending"
-        :error="externalSendError || undefined"
+        :sending="externalHome.sendingFor(viewingId)"
+        :error="externalHome.errorFor(viewingId) || undefined"
         :can-stop="false"
         @send="sendToExternalChat"
       />
@@ -1557,7 +1544,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :blocked="Boolean(pendingInteraction)"
       />
       <HeroSuggestions
-        v-if="heroExtras && heroMode === 'chat'"
+        v-if="heroExtras && heroMode === 'chat' && !externalChat"
         @pick="fillSuggestion(composer, $event)"
       />
       <HeroRecentProjects

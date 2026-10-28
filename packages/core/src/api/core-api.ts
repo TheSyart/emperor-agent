@@ -765,6 +765,7 @@ export class CoreApi {
         list: () => host.delegations?.list() ?? [],
       },
       parentAgentId: (sessionId) => host.agentFor(sessionId).id,
+      beginTask: (sessionId) => host.beginDelegationTask(sessionId),
       session: (id) => kept.sessionStore.get(id) ?? null,
       contact: (id) => this.contactStore.peek(id),
     })
@@ -1460,6 +1461,7 @@ export class CoreApi {
         if (contactId && this.contactStore.peek(contactId) === null)
           throw new ContactDeletedError(contactId)
       },
+      beginTask: (owner) => host.beginDelegationTask(owner.rootSessionId),
       // Guarded by the owning chat itself, named by the caller (KRN-01).
       assertMutation: (id, action) => {
         if (action !== 'control')
