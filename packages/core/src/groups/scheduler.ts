@@ -18,7 +18,7 @@
  * speech's own step and cost limits stop that speech only.
  */
 import { digestPrompt, digestSource } from './digest'
-import { formatDelivery, planDelivery } from './delivery'
+import { ACCESS_LABELS, formatDelivery, planDelivery } from './delivery'
 import { parseMentions, resolveMentions } from './envelope'
 import {
   GROUP_TURN_ENDED,
@@ -826,7 +826,7 @@ export class GroupScheduler {
     const delivery = await this.delivery(run, state, member)
     if (run.stopped) return null
     state = groups.state(run.groupId)
-    const prompt = [delivery.text, this.why(state, member, reason, opts)]
+    const prompt = [delivery.text, this.why(run, state, member, reason, opts)]
       .filter(Boolean)
       .join('\n\n')
     const context: SpeechContext = {
@@ -972,17 +972,33 @@ export class GroupScheduler {
 
   /** Why this member is asked now (the last part of its prompt). */
   private why(
+    run: Run,
     state: GroupState,
     member: ContactId,
     reason: SpeakReason,
     opts: { note?: string; task?: GroupTask },
   ): string {
-    const ask = this.ask(state, reason, opts)
+    const lines = [this.ask(state, reason, opts)]
+    // GRP-17: a task for this member still waits in the queue; it is handed
+    // over on its own, so this speech answers only what it was asked.
+    if (reason !== 'task') {
+      const waiting = run.queue.flatMap((item) =>
+        item.kind === 'task' && item.task.to === member
+          ? [item.task.title]
+          : [],
+      )
+      if (waiting.length)
+        lines.push(
+          `交给你的任务${waiting.map((t) => `「${t}」`).join('')}稍后单独交给你，到时再做；这次只回应上面的消息。`,
+        )
+    }
     // GRP-15: the moderator may end the turn from any speech.
-    const moderator =
+    if (
       state.moderator === member &&
       !['moderator-plan', 'intervene', 'summary', 'batch'].includes(reason)
-    return moderator ? `${ask}\n${MODERATOR_MAY_CLOSE}` : ask
+    )
+      lines.push(MODERATOR_MAY_CLOSE)
+    return lines.join('\n')
   }
 
   private ask(
@@ -1287,12 +1303,6 @@ function release(task: GroupTask): GroupTask {
   const out = { ...task }
   delete out.hold
   return out
-}
-
-const ACCESS_LABELS: Record<GroupTaskAccess, string> = {
-  group_files: '可以读写群文件',
-  readonly: '只读',
-  isolated_worktree: '在独立的工作树里改',
 }
 
 function required(value: string, label: string): string {

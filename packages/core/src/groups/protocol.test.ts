@@ -349,6 +349,45 @@ describe('foldGroupEvents and delivery', () => {
       ].join('\n'),
     )
   })
+
+  // GRP-17: a task line used to carry only its title, so a member asked to
+  // speak before its task ran guessed the job from the title.
+  it('formats a task with its assignee, deliverable, basis and access', () => {
+    const task = {
+      taskId: 'gt_1',
+      to: 'ct-arch',
+      title: '查溢出',
+      deliverable: '原因和修法',
+      basis: '审稿人的截图',
+      access: 'readonly' as const,
+      state: 'queued' as const,
+      chain: ['ct-rev'],
+    }
+    const state = foldGroupEvents([
+      created(),
+      said({
+        id: 't1',
+        from: 'ct-rev',
+        kind: 'task',
+        text: '查溢出',
+        ask: ['ct-arch'],
+        task,
+      }),
+    ])
+    const lines = (self: string) =>
+      formatDelivery(pendingDelivery(state, self), ROSTER, self)
+    expect(lines('ct-wri')).toBe(
+      [
+        '[10:42] 审稿人 → 所有人（交办给 架构师）：查溢出',
+        '  交付物：原因和修法',
+        '  依据：审稿人的截图',
+        '  权限：只读',
+      ].join('\n'),
+    )
+    expect(lines('ct-arch')).toMatch(
+      /^\[10:42\] 审稿人 → 所有人（交办给你）：查溢出\n  交付物：原因和修法/,
+    )
+  })
 })
 
 describe('groupCharter', () => {
