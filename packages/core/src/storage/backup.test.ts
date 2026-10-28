@@ -183,7 +183,10 @@ describe('stageHomeBackup', () => {
   it('takes contacts and imported skins, never a skin import half done (0.3)', async () => {
     const { home } = await populated()
     mkdirSync(join(home, 'contacts', 'memory'), { recursive: true })
-    writeFileSync(join(home, 'contacts', 'contacts.json'), '{"schemaVersion":2}')
+    writeFileSync(
+      join(home, 'contacts', 'contacts.json'),
+      '{"schemaVersion":2}',
+    )
     writeFileSync(join(home, 'contacts', 'memory', 'ct-a.jsonl'), '{}\n')
     mkdirSync(join(home, 'skins', 'my-skin'), { recursive: true })
     writeFileSync(join(home, 'skins', 'my-skin', 'skin.json'), '{}')
