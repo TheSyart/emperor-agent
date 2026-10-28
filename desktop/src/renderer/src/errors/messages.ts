@@ -100,6 +100,12 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   PLAN_MODE_UNSUPPORTED: '计划模式下子智能体只能做只读审查。',
   OUTCOME_UNKNOWN: '还不能确认子智能体已经停止，请检查保留的成果与原生历史。',
   DELIVERY_UNKNOWN: '消息是否送达还不确定，请先查看原生历史，避免重复发送。',
+  // Why a message to a subagent did not go out (GRP-19).
+  NEEDS_RECOVERY: '上一次运行没有正常结束：先点「标记为已结束」，再发消息。',
+  STOPPING: '它正在停下上一条：等它停下再发。',
+  QUEUE_LIMIT: '排队的消息太多了：等它回完前面的再发。',
+  BRIEF_LIMIT: '消息太长了：一条最多 32 KB（大约一万个汉字），分几条发。',
+  RESTART_PAUSED: 'Emperor 重启前还有消息没发出：先处理它们，再发新的。',
   AUTH_REQUIRED:
     'Claude Code 还没有登录，请在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」。',
   AUTH_EXPIRED:
