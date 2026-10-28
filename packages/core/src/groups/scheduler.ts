@@ -992,12 +992,29 @@ export class GroupScheduler {
           `交给你的任务${waiting.map((t) => `「${t}」`).join('')}稍后单独交给你，到时再做；这次只回应上面的消息。`,
         )
     }
-    // GRP-15: the moderator may end the turn from any speech.
+    // GRP-15: the moderator may end the turn from any speech. GRP-18: it is
+    // a choice, and closing drops whoever is still queued — say who.
     if (
       state.moderator === member &&
       !['moderator-plan', 'intervene', 'summary', 'batch'].includes(reason)
-    )
+    ) {
       lines.push(MODERATOR_MAY_CLOSE)
+      const waiting = [
+        ...new Set(
+          run.queue.flatMap((item) =>
+            item.kind === 'speak' && item.member !== member
+              ? [item.member]
+              : item.kind === 'task' && item.task.to !== member
+                ? [item.task.to]
+                : [],
+          ),
+        ),
+      ]
+      if (waiting.length)
+        lines.push(
+          `${waiting.map((id) => this.name(state, id)).join('、')}还在等着发言，结束这一轮他们就不说了。`,
+        )
+    }
     return lines.join('\n')
   }
 
@@ -1296,7 +1313,7 @@ const NEXT_OUTSIDE_PLANNING =
   'group_next 只在请你安排谁发言时能用，这次是请你发言。要请人接着说，在回答里写「@全名」；要结束这一轮，用 group_close 写结论。'
 /** Added to the moderator's prompt when it speaks for any other reason. */
 const MODERATOR_MAY_CLOSE =
-  '你是主持人：这一轮的问题已经答完，就用 group_close 写结论结束这一轮。'
+  '你是主持人：如果这一轮的问题已经答完、不需要别人再说，可以用 group_close 写结论结束这一轮；还要听成员的意见，就在回答里 @ 他们。'
 
 /** A held task let go: it no longer waits for the relay guard. */
 function release(task: GroupTask): GroupTask {

@@ -854,6 +854,38 @@ describe('GRP-15 · the moderator closes the turn whenever it speaks', () => {
     ).toBe('done')
   })
 
+  // GRP-18: in the GRP-10 rerun the moderator raised its hand first, read
+  // 「这一轮的问题已经答完，就用 group_close」 as a fact and closed, so the
+  // two members who had raised their hands never spoke.
+  it('the moderator speaking first is told closing is a choice, and who would lose their turn', async () => {
+    const r = room({
+      settings: { summarizeAtEnd: false },
+      hands: {
+        'ct-emperor': { raise: true, score: 0.9 },
+        'ct-arch': { raise: true, score: 0.5 },
+        'ct-rev': { raise: true, score: 0.4 },
+      },
+    })
+    await r.send({ way: 'broadcast', text: '各说说方案的利弊' })
+    expect(r.speeches.map((s) => s.member)).toEqual([
+      'ct-emperor',
+      'ct-arch',
+      'ct-rev',
+    ])
+    const first = r.speeches[0]!.prompt
+    expect(first).toMatch(/如果这一轮的问题已经答完/)
+    expect(first).not.toMatch(/这一轮的问题已经答完，就用/)
+    expect(first).toMatch(/架构师、审稿人还在等着发言，结束这一轮他们就不说了/)
+  })
+
+  it('with nobody waiting, the moderator hears only that it may close', async () => {
+    const r = room({ settings: { summarizeAtEnd: false } })
+    await r.send({ way: 'mention', text: '@Emperor 你怎么看' })
+    const prompt = r.speeches[0]!.prompt
+    expect(prompt).toMatch(/如果这一轮的问题已经答完/)
+    expect(prompt).not.toMatch(/还在等着发言/)
+  })
+
   it('group_next stays a planning tool, and its refusal says what to do instead', async () => {
     const errors: string[] = []
     const r = room({
