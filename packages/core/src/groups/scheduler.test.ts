@@ -252,6 +252,39 @@ describe('what a member’s message starts', () => {
     expect(task).toMatchObject({ to: 'ct-rev', state: 'done' })
   })
 
+  // GRP-17: in the real 正反方 run a member asked by an @ saw its new task
+  // as a title, did the job from a guess, then took the real task for a
+  // replay. Now it sees the whole task and is told it comes separately.
+  it('a member asked before its queued task sees the task whole and waits for it', async () => {
+    const r = room({
+      settings: { summarizeAtEnd: false },
+      script: (req, s) => {
+        if (req.member === 'ct-rev' && req.reason !== 'task')
+          s.assign(r.view.id, 'ct-rev', {
+            to: 'ct-arch',
+            title: '查溢出',
+            deliverable: '原因和修法',
+            access: 'readonly',
+          })
+        return {}
+      },
+    })
+    await r.send({ way: 'mention', text: '@审稿人 @架构师 看看方案' })
+    const arch = r.speeches.filter((s) => s.member === 'ct-arch')
+    expect(arch.map((s) => s.reason)).toEqual(['asked', 'task'])
+    expect(arch[0]!.prompt).toContain('交付物：原因和修法')
+    expect(arch[0]!.prompt).toMatch(/「查溢出」.*稍后单独交给你/)
+    expect(arch[1]!.prompt).toContain('交付物：原因和修法')
+    expect(arch[1]!.prompt).not.toMatch(/稍后单独交给你/)
+  })
+
+  it('a member with no task waiting gets no such note', async () => {
+    const r = room({ settings: { summarizeAtEnd: false } })
+    await r.send({ way: 'mention', text: '@审稿人 @架构师 看看方案' })
+    for (const speech of r.speeches)
+      expect(speech.prompt).not.toMatch(/稍后单独交给你/)
+  })
+
   it('pass leaves a 没有补充 line and starts nothing', async () => {
     const r = room({
       settings: { summarizeAtEnd: false },

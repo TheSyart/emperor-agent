@@ -6,7 +6,12 @@
  */
 import { isPublic } from './digest'
 import type { GroupState } from './events'
-import type { ContactId, GroupMember, GroupMessage } from './types'
+import type {
+  ContactId,
+  GroupMember,
+  GroupMessage,
+  GroupTaskAccess,
+} from './types'
 import { visibleTo } from './visibility'
 
 export function pendingDelivery(
@@ -41,6 +46,12 @@ function who(
   return roster.find((m) => m.id === id)?.name ?? '已删除的联系人'
 }
 
+export const ACCESS_LABELS: Record<GroupTaskAccess, string> = {
+  group_files: '可以读写群文件',
+  readonly: '只读',
+  isolated_worktree: '在独立的工作树里改',
+}
+
 /**
  * Lines like `[10:42] 审稿人 → @架构师：…`, written for member `self`: the
  * user is 「用户」 and `self` is 「你」.
@@ -59,6 +70,19 @@ export function formatDelivery(
           : m.audience.kind === 'members'
             ? m.audience.ids.map((id) => `@${who(id, roster, self)}`).join(' ')
             : '所有人'
+      if (m.kind === 'task' && m.task) {
+        // The whole task, not just its title (GRP-17): whoever reads it
+        // before the task runs must not have to guess the job.
+        const task = m.task
+        const assignee =
+          task.to === self ? '你' : ` ${who(task.to, roster, self)}`
+        return [
+          `[${clock(m.at)}] ${from} → ${to}（交办给${assignee}）：${task.title}`,
+          `  交付物：${task.deliverable}`,
+          ...(task.basis ? [`  依据：${task.basis}`] : []),
+          `  权限：${ACCESS_LABELS[task.access]}`,
+        ].join('\n')
+      }
       const tag =
         m.kind === 'task' ? '（交办）' : m.kind === 'summary' ? '（结论）' : ''
       return `[${clock(m.at)}] ${from} → ${to}${tag}：${m.text}`
