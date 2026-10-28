@@ -1,11 +1,13 @@
 /**
  * 群工具 (GRP-07): what a member can do in a group besides answering —
  * group_whisper (a private note), group_assign (a task with a deliverable),
- * group_pass (没有补充) — and, for the moderator while it plans the turn,
- * group_next (who answers) and group_close (end with a summary). They are
- * registered once and visible only to the root agent of a member's own
- * session; a member's subagents never see them. Members are named the way
- * the charter lists them (their names); ids work too.
+ * group_pass (没有补充) — and, for the moderator, group_close (end the
+ * turn with a summary, from any of its speeches, GRP-15) and, while it
+ * plans the turn, group_next (who answers). They are registered once and
+ * visible only to the root agent of a member's own session; a member's
+ * subagents never see them. Members are named the way the charter lists
+ * them (their full names); ids and a name start that fits one member work
+ * too (GRP-15).
  */
 import { z } from 'zod'
 import type { Agent } from '../harness/agent/agent'
@@ -14,6 +16,7 @@ import {
   ToolError,
   type ToolDefinition,
 } from '../harness/tools/definition'
+import { resolveName } from './envelope'
 import type { GroupScheduler } from './scheduler'
 import type { ContactId, GroupMember } from './types'
 
@@ -50,7 +53,9 @@ export interface GroupToolRegistration {
 const memberName = z
   .string()
   .min(1)
-  .describe('A member of this group, by the name the charter lists.')
+  .describe(
+    'A member of this group, by the full name the charter lists after @.',
+  )
 
 export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
   const speaker = (agent: Agent | undefined) => {
@@ -59,13 +64,23 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
     return member
   }
   const resolve = (groupId: string, name: string): ContactId => {
-    const wanted = name.trim().replace(/^@/, '')
-    const found = host
-      .roster(groupId)
-      .find((m) => m.id === wanted || m.name === wanted)
-    if (!found) throw new ToolError(`「${wanted}」不在这个群里`, 'NOT_A_MEMBER')
-    return found.id
+    const roster = host.roster(groupId)
+    const hit = resolveName(name, roster)
+    if (hit.kind === 'member') return hit.id
+    const names = (ids: readonly ContactId[]) =>
+      roster
+        .filter((m) => ids.includes(m.id))
+        .map((m) => m.name)
+        .join('、')
+    throw new ToolError(
+      hit.kind === 'ambiguous'
+        ? `「${hit.token}」能对上好几位成员：${names(hit.ids)}，请写全名`
+        : `「${hit.token}」不在这个群里。群里的成员：${names(roster.map((m) => m.id))}。`,
+      'NOT_A_MEMBER',
+    )
   }
+  const nameOf = (groupId: string, id: ContactId) =>
+    host.roster(groupId).find((m) => m.id === id)?.name ?? id
   const run = <T>(body: () => T): T => {
     try {
       return body()
@@ -98,7 +113,7 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
       run(() =>
         host.scheduler.whisper(groupId, contactId, { to, text: args.text }),
       )
-      return `已私信「${args.to.replace(/^@/, '')}」。`
+      return `已私信「${nameOf(groupId, to)}」。`
     },
   })
 
@@ -137,7 +152,7 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
           access: args.access,
         }),
       )
-      return `已交办给「${args.to.replace(/^@/, '')}」：${task.title}`
+      return `已交办给「${nameOf(groupId, to)}」：${task.title}`
     },
   })
 
@@ -159,8 +174,10 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
   const next = defineTool({
     name: 'group_next',
     description:
-      'Moderator only, while you plan the turn: choose who answers next. relay: one after another, ' +
-      'each seeing the ones before; independent: all at once, blind to each other, revealed together.',
+      'Moderator only, and only when you are asked to plan who answers (the turn starts with you, or the loop ' +
+      'guard asks you to step in): choose who answers next. relay: one after another, each seeing the ones ' +
+      'before; independent: all at once, blind to each other, revealed together. In any other speech, ' +
+      'write @ and the full name in your reply instead.',
     input: z.object({
       speakers: z.array(memberName).min(1).describe('Who answers, in order.'),
       mode: z.enum(['relay', 'independent']),
@@ -179,14 +196,15 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
           ...(args.note ? { note: args.note } : {}),
         }),
       )
-      return `已安排：${args.speakers.join('、')}。`
+      return `已安排：${speakers.map((id) => nameOf(groupId, id)).join('、')}。`
     },
   })
 
   const close = defineTool({
     name: 'group_close',
     description:
-      'Moderator only, while you plan the turn: end it with this summary when no discussion is needed.',
+      'Moderator only: end this turn now with this summary — whenever you speak in it (planning, answering, ' +
+      'doing a task), as soon as the question is answered or nothing new is coming. Nobody else speaks after it.',
     input: z.object({
       summary: z.string().min(1).describe('The conclusion the group reads.'),
     }),

@@ -386,6 +386,8 @@ const ENDED: Record<string, string> = {
 
 const ENDED_REASONS: Record<string, string> = {
   loop_guard: '两位成员来回没有新进展',
+  task_relay: '同一位成员交办的次数多了，回复「继续」接着做',
+  pass_streak: '大家都没有补充',
   user: '你停下了',
   app_restart: '应用重启时停下，可以重发',
   app_close: '应用关闭时停下',

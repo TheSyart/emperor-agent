@@ -7,6 +7,20 @@
  * 3-grams, which works for Chinese without word segmentation. An @-mention
  * is who is addressed, not content: it is left out (two members @-ing each
  * other otherwise read as fresh text every time).
+ *
+ * GRP-15 adds two shapes the novelty test cannot see, both checked by the
+ * scheduler while 防打转 is on (docs/design/agent-contacts.md § 停下来):
+ *
+ * - 交办接力: a member handing out tasks speech after speech, each with new
+ *   content (the real debate group went v0.3.1 → v0.3.9). After
+ *   TASK_RELAY_LIMIT such speeches in one turn, the tasks of the next are
+ *   held for the user and the turn pauses; 「继续」 (saysGoOn) runs them and
+ *   the count starts again with that new turn.
+ * - 没有补充连成串: a member who passes has read everything before its
+ *   speech and has nothing to add, so the asks still queued for it are
+ *   withdrawn (PASS_WITHDRAWS). Once everyone asked has passed the queue is
+ *   empty and the turn ends (`pass_streak`); the moderator's end-of-turn
+ *   summary still runs once when the group asks for it.
  */
 import type { ContactId, GroupMessage } from './types'
 
@@ -14,6 +28,34 @@ import type { ContactId, GroupMessage } from './types'
 export const LOOP_MIN_EXCHANGES = 4
 /** Below this novelty (less than half new) a message adds nothing new. */
 export const LOOP_NOVELTY = 0.5
+
+/**
+ * Speeches in one turn in which one member may hand out tasks before the
+ * next one's tasks are held. Several tasks handed out in one speech count
+ * once: splitting a job among members is not a relay.
+ */
+export const TASK_RELAY_LIMIT = 3
+
+/**
+ * Why a member was queued to speak, for the asks a pass withdraws: an @,
+ * a hand, its habit, the moderator's group_next. A task, a moderator's
+ * planning or intervention, and the end-of-turn summary are never withdrawn.
+ */
+export const PASS_WITHDRAWS: ReadonlySet<string> = new Set([
+  'asked',
+  'mention',
+  'hand',
+  'always',
+  'assigned',
+])
+
+/** What the user says to go on after a relay paused the turn: 「继续」. */
+const GO_ON = /^(?:继续|接着)(?:吧|做|来|干|交办)?$/u
+
+/** Whether the user's message is just 「继续」 (spaces and punctuation aside). */
+export function saysGoOn(text: string): boolean {
+  return GO_ON.test(text.replace(/[\s\p{P}\p{S}]+/gu, ''))
+}
 
 /** An @ and the name after it, up to a space or punctuation. */
 const MENTION = /@[^\s\p{P}\p{S}]+/gu

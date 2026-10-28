@@ -45,6 +45,13 @@ export interface GroupTask {
    * isolated worktree; any other external run is read-only.
    */
   confirmed?: boolean
+  /**
+   * Why a `waiting_user` task waits, when it is not a code change (GRP-15):
+   * `task_relay`, its member had already handed out tasks in
+   * TASK_RELAY_LIMIT speeches this turn. 「继续」 or 同意 runs it; 不同意
+   * cancels it.
+   */
+  hold?: 'task_relay'
 }
 
 export interface GroupMessage {

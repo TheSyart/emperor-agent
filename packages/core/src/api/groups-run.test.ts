@@ -114,6 +114,40 @@ describe('group turns in Core', () => {
     expect(fixture.adapter.requests).toHaveLength(1)
   })
 
+  it('GRP-15 · the moderator asked by an @ has group_close, and closing ends the turn', async () => {
+    const fixture = await open({
+      replies: [
+        {
+          tools: [
+            { name: 'group_close', args: { summary: '结论：先修溢出。' } },
+          ],
+        },
+      ],
+    })
+    const { rev } = await groupWithReviewer(fixture)
+    const group = await invokeCoreOperation(fixture.api, 'groups.create', [
+      { title: '收尾', members: ['ct-emperor', rev] },
+    ])
+    await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'mention', text: '@Emperor 收个尾' },
+    ])
+    await fixture.api.groups.settled(group.id)
+    const history = await invokeCoreOperation(fixture.api, 'groups.history', [
+      { id: group.id },
+    ])
+    expect(history.messages.map((m) => [m.from, m.kind, m.text])).toEqual([
+      ['user', 'say', '@Emperor 收个尾'],
+      ['ct-emperor', 'summary', '结论：先修溢出。'],
+    ])
+    expect(toolNames(fixture.adapter.requests[0]!)).toEqual(
+      expect.arrayContaining(['group_next', 'group_close']),
+    )
+    expect(fixture.adapter.requests).toHaveLength(1)
+    expect(
+      fixture.events.filter((e) => e.event === 'group_turn_changed').at(-1),
+    ).toMatchObject({ group_id: group.id, state: 'finished' })
+  })
+
   it('groups.stop stops the turn and drops the speech', async () => {
     const fixture = await open({ replies: [{ hang: true }] })
     const { group } = await groupWithReviewer(fixture)

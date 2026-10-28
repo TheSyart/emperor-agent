@@ -4,7 +4,10 @@
  * its title and where it is now (排队中, 进行中, 已完成, …), then 交付, 依据
  * and 权限. A task for Claude Code or Codex to change code that a member
  * handed out waits for the user (GRP-09): 「同意」 runs it in an isolated
- * copy whose changes come back as a result card; 「不同意」 cancels it.
+ * copy whose changes come back as a result card; 「不同意」 cancels it. A
+ * task held because its member had already handed out tasks several times
+ * this turn (GRP-15) waits the same way: 「同意」 (or 「继续」 in the
+ * composer) lets it go on.
  *
  * Props: task. Emits: confirm(approve).
  */
@@ -16,6 +19,7 @@ const props = defineProps<{ task: GroupTask }>()
 const emit = defineEmits<{ confirm: [approve: boolean] }>()
 
 const waiting = computed(() => props.task.state === 'waiting_user')
+const held = computed(() => props.task.hold === 'task_relay')
 const tone = computed(() => {
   switch (props.task.state) {
     case 'running':
@@ -52,7 +56,10 @@ const tone = computed(() => {
       <dd>{{ ACCESS_LABELS[task.access] }}</dd>
     </dl>
     <div v-if="waiting" class="confirm" data-task-confirm>
-      <p class="note">
+      <p v-if="held" class="note">
+        这一轮交办的次数多了，这项先不开始：同意就接着做，不同意就取消；也可以在下面回复「继续」。
+      </p>
+      <p v-else class="note">
         要改项目代码：同意后它在隔离副本里改，改动先给你看，你确认后才合进项目。
       </p>
       <div class="actions">
