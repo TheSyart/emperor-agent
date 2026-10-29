@@ -38,16 +38,28 @@ async function mount(path = '/groups/grp-1') {
     routes: [
       { path: '/groups', name: 'groups', component: stub },
       { path: '/groups/:groupId', name: 'group', component: stub },
-      { path: '/groups/:groupId/settings', name: 'group-settings', component: stub },
+      {
+        path: '/groups/:groupId/settings',
+        name: 'group-settings',
+        component: stub,
+      },
       { path: '/contacts', name: 'contacts', component: stub },
       { path: '/contacts/:id', name: 'contact', component: stub },
       { path: '/contacts/new', name: 'contact-new', component: stub },
       { path: '/contacts/:id/edit', name: 'contact-edit', component: stub },
       { path: '/chat/:sessionId?', name: 'chat', component: stub },
       { path: '/trajectory/:sessionId', name: 'trajectory', component: stub },
-      { path: '/external-agent/:sessionId', name: 'external-agent', component: stub },
+      {
+        path: '/external-agent/:sessionId',
+        name: 'external-agent',
+        component: stub,
+      },
       { path: '/scheduler', name: 'scheduler', component: stub },
-      { path: '/capabilities/:tab(plugins|skills|mcp|tools)?', name: 'capabilities', component: stub },
+      {
+        path: '/capabilities/:tab(plugins|skills|mcp|tools)?',
+        name: 'capabilities',
+        component: stub,
+      },
     ],
   })
   await router.push(path)

@@ -34,9 +34,9 @@ export function useContactBrowser() {
     if (active.value) {
       const back = lastRoom
       lastRoom = ''
-      void router.push(back || { name: GROUP_HOME_ROUTE }).catch(
-        () => undefined,
-      )
+      void router
+        .push(back || { name: GROUP_HOME_ROUTE })
+        .catch(() => undefined)
       return
     }
     if (ROOM_ROUTES.includes(String(route.name ?? '')))

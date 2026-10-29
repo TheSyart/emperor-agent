@@ -441,11 +441,8 @@ for (const theme of ['dark', 'light'] as const) {
     const profile = page.locator('[data-contact-profile]')
     await expect(profile.locator('h1')).toHaveText('审稿人')
     await expect(profile.locator('[data-stat="rating"]')).toContainText('83%')
-    await expect(
-      page.locator(
-        '[data-contacts-page] [data-contact-row="ct-reviewer00001"]',
-      ),
-    ).toHaveAttribute('aria-current', 'page')
+    await expect(page.locator('[data-contact-detail]')).toBeVisible()
+    await expect(page.locator('[data-contact-grid]')).toHaveCount(0)
     // 记忆, as 预览 B shows it.
     await profile.getByRole('tab', { name: '记忆' }).click()
     await expect(profile.locator('[data-memory-entry]')).toHaveCount(3)
@@ -526,7 +523,7 @@ test('GRP-05 · @ completes a contact’s name on the Group home', async ({
   await expect(page).toHaveURL(/\/chat\/chat-reviewer/)
 })
 
-test('GRP-21 · the contacts page, its footer button and the way back', async ({
+test('GRP-21 · the contacts page, its categories, a card and the way back', async ({
   page,
 }) => {
   await install(page)
@@ -536,19 +533,28 @@ test('GRP-21 · the contacts page, its footer button and the way back', async ({
   await expect(toggle).toBeVisible()
   await toggle.click()
   await expect(page).toHaveURL(/\/contacts$/)
-  const list = page.locator('[data-contacts-page] [data-contact-row]')
-  await expect(list).toHaveCount(6)
-  await expect(
-    page.locator('[data-contacts-page]').getByText('选一位联系人查看档案'),
-  ).toBeVisible()
+  const cards = page.locator('[data-contact-card]')
+  await expect(cards).toHaveCount(6)
+  const categories = page.getByRole('tablist', { name: '联系人分类' })
+  await expect(categories).toBeVisible()
+  await expect(categories.getByRole('tab').first()).toContainText('全部')
   await shot(page, 'contacts-page-dark')
-  await page.locator('[data-contact-row="ct-reviewer00001"]').click()
+
+  // Categories filter the grid; 外部 holds Claude Code and Codex.
+  await categories.getByRole('tab', { name: /外部/ }).click()
+  await expect(cards).toHaveCount(2)
+  await categories.getByRole('tab', { name: /全部/ }).click()
+  await expect(cards).toHaveCount(6)
+
+  await page.locator('[data-contact-card="ct-reviewer00001"]').click()
   await expect(page).toHaveURL(/\/contacts\/ct-reviewer00001$/)
   await expect(page.locator('[data-contact-profile] h1')).toHaveText('审稿人')
-  await expect(
-    page.locator('[data-contact-row="ct-reviewer00001"]'),
-  ).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-contact-grid]')).toHaveCount(0)
   await shot(page, 'contacts-page-selected-dark')
+  await page.getByRole('button', { name: /所有联系人/ }).click()
+  await expect(page).toHaveURL(/\/contacts$/)
+  await expect(cards).toHaveCount(6)
+
   // The sidebar never left the groups; the toggle returns to the Group home.
   await expect(
     sidebar(page).locator('[data-sidebar-section="groups"]'),

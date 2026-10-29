@@ -2,29 +2,51 @@
 /**
  * ContactsPage — the contacts page (GRP-21): a full page in the center
  * column, shaped like 能力 (PageShell: title, subtitle, the 新建联系人
- * action, an 880px column), with the contacts on the left and the selected
- * one's profile on the right. `/contacts` shows the list and a prompt;
- * `/contacts/:id` shows the same page with the profile. The app sidebar is
- * left alone — it still lists the groups, so a group row returns to it.
+ * action, an 880px column). A category strip over a flat grid of contact
+ * cards; a card opens the profile below a 所有联系人 back link. The page
+ * is route-driven: `/contacts` is the grid, `/contacts/:id` the profile,
+ * so back / forward and deep links keep working. The app sidebar is left
+ * alone — it still lists the groups.
  *
- * The list re-reads through the shared contact directory (contacts_changed,
- * groups_changed); the profile is `ContactProfile` in its embedded form.
+ * Categories are the contact's own `domains`; Claude Code and Codex are
+ * 外部 and appear only there. A contact with no known domain falls into
+ * 其他; a category with nothing in it is left out.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Contact } from '@emperor/core/api'
-import { DsUser } from '../icons/ds'
 import PageShell from '../pages/PageShell.vue'
 import type { SettingsHeaderAction } from '../settings/settingsHeader'
 import Avatar from '../ui/Avatar.vue'
 import EmptyState from '../ui/EmptyState.vue'
+import LinkButton from '../ui/LinkButton.vue'
+import Tabs from '../ui/Tabs.vue'
 import { contactAvatarProps } from './contactAvatar'
 import ContactProfile from './ContactProfile.vue'
 import { useContactDirectory } from './contactDirectory'
+import { DOMAIN_LABELS } from './contactProfileModel'
+import { activeContactCategory, contactCategories } from './contactsCategories'
 
 const route = useRoute()
 const router = useRouter()
 const directory = useContactDirectory()
+
+const categories = computed(() => contactCategories(directory.contacts.value))
+
+const active = computed(
+  () =>
+    categories.value.find(
+      (category) => category.id === activeContactCategory.value,
+    ) ?? categories.value[0],
+)
+const visibleContacts = computed(() => active.value?.contacts ?? [])
+const tabItems = computed(() =>
+  categories.value.map((category) => ({
+    id: category.id,
+    label: category.label,
+    count: category.contacts.length,
+  })),
+)
 
 const activeId = computed(() => {
   const id = route.params.id
@@ -48,6 +70,10 @@ function line(contact: Contact): string {
 function open(id: string): void {
   void router.push({ name: 'contact', params: { id } }).catch(() => undefined)
 }
+
+function backToList(): void {
+  void router.push({ name: 'contacts' }).catch(() => undefined)
+}
 </script>
 
 <template>
@@ -57,115 +83,158 @@ function open(id: string): void {
     :actions="actions"
   >
     <div class="contacts-page" data-contacts-page>
-      <nav class="people" aria-label="联系人">
-        <div
-          v-for="contact in directory.contacts.value"
-          :key="contact.id"
-          class="person"
-          role="button"
-          tabindex="0"
-          :data-contact-row="contact.id"
-          :aria-current="contact.id === activeId ? 'page' : undefined"
-          :title="contact.name"
-          @click="open(contact.id)"
-          @keydown.enter.self="open(contact.id)"
-          @keydown.space.self.prevent="open(contact.id)"
-        >
-          <Avatar
-            v-bind="contactAvatarProps(contact.avatar, contact.name)"
-            :size="24"
-          />
-          <span class="two">
-            <span class="name">{{ contact.name }}</span>
-            <span class="line">{{ line(contact) }}</span>
-          </span>
+      <template v-if="!activeId">
+        <Tabs
+          v-model="activeContactCategory"
+          class="tabs"
+          :tabs="tabItems"
+          aria-label="联系人分类"
+        />
+        <div class="grid" data-contact-grid>
+          <div
+            v-for="contact in visibleContacts"
+            :key="contact.id"
+            class="card"
+            role="button"
+            tabindex="0"
+            :data-contact-card="contact.id"
+            :title="contact.name"
+            @click="open(contact.id)"
+            @keydown.enter.self="open(contact.id)"
+            @keydown.space.self.prevent="open(contact.id)"
+          >
+            <span class="top">
+              <Avatar
+                v-bind="contactAvatarProps(contact.avatar, contact.name)"
+                :size="40"
+              />
+              <span class="name">{{ contact.name }}</span>
+            </span>
+            <span class="intro">{{ line(contact) }}</span>
+            <span class="meta">
+              <template v-if="contact.kind === 'external'">
+                <span class="chip">外部 · 只读</span>
+              </template>
+              <template v-else-if="contact.domains.length">
+                <span
+                  v-for="domain in contact.domains"
+                  :key="domain"
+                  class="chip"
+                  >{{ DOMAIN_LABELS[domain] }}</span
+                >
+              </template>
+              <span v-else class="chip">其他</span>
+            </span>
+          </div>
         </div>
+        <EmptyState
+          v-if="
+            directory.loaded.value &&
+            !directory.failed.value &&
+            !directory.contacts.value.length
+          "
+          title="还没有联系人"
+          description="点右上「新建联系人」，套一个岗位模板开始。"
+        />
         <p
-          v-if="directory.loaded.value && directory.failed.value"
+          v-else-if="directory.loaded.value && directory.failed.value"
           class="failed"
           role="status"
         >
           联系人读取失败：{{ directory.failed.value }}
         </p>
-      </nav>
+      </template>
 
-      <section class="detail" aria-label="联系人档案">
-        <ContactProfile v-if="activeId" :key="activeId" embedded />
-        <EmptyState
-          v-else
-          :icon="DsUser"
-          title="选一位联系人查看档案"
-          description="从左边选一位，看它的职责、记忆和版本。"
-        />
-      </section>
+      <div v-else class="detail" data-contact-detail>
+        <LinkButton class="back" @click="backToList">‹ 所有联系人</LinkButton>
+        <ContactProfile :key="activeId" embedded />
+      </div>
     </div>
   </PageShell>
 </template>
 
 <style scoped>
 .contacts-page {
-  display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: start;
-}
-
-.people {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-0-5);
   min-width: 0;
 }
 
-.person {
+.tabs {
+  margin-bottom: var(--space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  gap: var(--space-3);
+}
+
+.card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2);
-  border: 0;
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: inherit;
-  text-align: left;
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--r-md);
+  background: rgb(var(--surface-raised));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-2);
   cursor: pointer;
 }
 
-.person:hover {
-  background: rgb(var(--surface-hover));
-}
-
-.person[aria-current='page'] {
+.card:hover {
   background: rgb(var(--surface-selected));
 }
 
-.two {
+.card:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 2px;
+}
+
+.top {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: var(--space-2-5);
   min-width: 0;
 }
 
 .name {
   overflow: hidden;
   color: rgb(var(--text-1));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.line {
+.intro {
+  display: -webkit-box;
+  min-height: calc(var(--lh-xxs) * 2);
   overflow: hidden;
   color: rgb(var(--text-3));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  align-items: center;
+}
+
+.chip {
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .failed {
-  margin: var(--space-2);
+  margin: var(--space-2) 0;
   color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
@@ -175,15 +244,13 @@ function open(id: string): void {
   min-width: 0;
 }
 
-@media (max-width: 760px) {
-  .contacts-page {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-4);
-  }
+.back {
+  margin-bottom: var(--space-3);
+}
 
-  .people {
-    max-height: 260px;
-    overflow-y: auto;
+@media (max-width: 760px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

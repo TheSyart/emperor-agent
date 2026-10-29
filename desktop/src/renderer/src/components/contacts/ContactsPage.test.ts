@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * GRP-21: the contacts page — a full page in the center column (PageShell)
- * with the contacts on the left and the selected one's profile on the
- * right; `/contacts` shows the prompt, `/contacts/:id` the profile. The
- * app sidebar is not involved.
+ * GRP-21: the contacts page — a category strip by domain, a flat grid of
+ * contact cards, and a card opens the profile below 所有联系人. External
+ * agents sit under 外部; a contact without a known domain falls back to
+ * 其他. `/contacts/:id` is the same page with the profile.
  */
 import { createApp, h, nextTick, type App } from 'vue'
 import {
@@ -25,16 +25,20 @@ vi.mock('./ContactProfile.vue', () => ({
 }))
 
 const { default: ContactsPage } = await import('./ContactsPage.vue')
-const { resetContactDirectoryForTest } =
-  await import('./contactDirectory')
+const { resetContactDirectoryForTest } = await import('./contactDirectory')
+const { resetContactCategoryForTest } = await import('./contactsCategories')
 
-function contact(id: string, name: string, intro = `${name}的简介`) {
+function contact(
+  id: string,
+  name: string,
+  extra: Record<string, unknown> = {},
+) {
   return {
     id,
     kind: 'local',
     name,
     avatar: { kind: 'library', id: 'AV-01-2' },
-    intro,
+    intro: `${name}的简介`,
     domains: [],
     role: {
       mission: '',
@@ -54,13 +58,24 @@ function contact(id: string, name: string, intro = `${name}的简介`) {
     builtin: false,
     createdAt: 1,
     updatedAt: 1,
+    ...extra,
   }
 }
 
 let app: App | null = null
 let container: HTMLDivElement | null = null
 let router: Router
-let contacts = [contact('ct-pm', '产品经理'), contact('ct-res', '研究员')]
+let contacts = [
+  contact('ct-pm', '产品经理', { domains: ['product', 'decision'] }),
+  contact('ct-res', '研究员', { domains: ['content', 'data'] }),
+  contact('ct-claude', 'Claude Code', {
+    kind: 'external',
+    backend: 'claude-code',
+    domains: ['engineering'],
+    intro: '',
+  }),
+  contact('ct-translator', '翻译', { domains: [] }),
+]
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 8; i += 1) {
@@ -91,7 +106,18 @@ async function mount(path = '/contacts') {
 
 beforeEach(() => {
   resetContactDirectoryForTest()
-  contacts = [contact('ct-pm', '产品经理'), contact('ct-res', '研究员')]
+  resetContactCategoryForTest()
+  contacts = [
+    contact('ct-pm', '产品经理', { domains: ['product', 'decision'] }),
+    contact('ct-res', '研究员', { domains: ['content', 'data'] }),
+    contact('ct-claude', 'Claude Code', {
+      kind: 'external',
+      backend: 'claude-code',
+      domains: ['engineering'],
+      intro: '',
+    }),
+    contact('ct-translator', '翻译', { domains: [] }),
+  ]
   core.mockReset()
   core.mockImplementation(async (op: string) => {
     switch (op) {
@@ -117,45 +143,74 @@ function page(): HTMLElement {
   return document.querySelector<HTMLElement>('[data-contacts-page]')!
 }
 
-function rows(): string[] {
-  return [
-    ...page().querySelectorAll<HTMLElement>('[data-contact-row]'),
-  ].map((row) => row.dataset.contactRow ?? '')
+function cards(): string[] {
+  return [...page().querySelectorAll<HTMLElement>('[data-contact-card]')].map(
+    (card) => card.dataset.contactCard ?? '',
+  )
+}
+
+function tabs(): string[] {
+  return [...page().querySelectorAll<HTMLElement>('[role="tab"]')].map(
+    (tab) => tab.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+  )
+}
+
+async function chooseTab(label: string) {
+  const tab = [...page().querySelectorAll<HTMLElement>('[role="tab"]')].find(
+    (item) => item.textContent?.startsWith(label),
+  )
+  tab!.click()
+  await flush()
 }
 
 describe('the contacts page', () => {
-  it('shows the title, the list and the prompt on /contacts', async () => {
+  it('shows the title, the categories with counts and the grid', async () => {
     await mount()
     expect(document.querySelector('.page-title')?.textContent).toBe('联系人')
-    expect(rows()).toEqual(['ct-pm', 'ct-res'])
+    expect(tabs()).toEqual([
+      '全部4',
+      '产品1',
+      '内容1',
+      '数据1',
+      '决策1',
+      '外部1',
+      '其他1',
+    ])
+    expect(cards()).toEqual(['ct-pm', 'ct-res', 'ct-claude', 'ct-translator'])
     expect(page().textContent).toContain('产品经理的简介')
-    expect(page().textContent).toContain('选一位联系人查看档案')
-    expect(page().querySelector('[data-stub-profile]')).toBeNull()
+    expect(page().textContent).toContain('外部 · 只读')
   })
 
-  it('opens a contact in the right pane and marks its row', async () => {
+  it('filters by domain, external agents, and the 其他 fallback', async () => {
     await mount()
-    page()
-      .querySelector<HTMLElement>('[data-contact-row="ct-res"]')!
-      .click()
+    await chooseTab('产品')
+    expect(cards()).toEqual(['ct-pm'])
+    await chooseTab('外部')
+    expect(cards()).toEqual(['ct-claude'])
+    await chooseTab('其他')
+    expect(cards()).toEqual(['ct-translator'])
+  })
+
+  it('opens a card, then returns to the same category', async () => {
+    await mount()
+    await chooseTab('内容')
+    page().querySelector<HTMLElement>('[data-contact-card="ct-res"]')!.click()
     await flush()
     expect(router.currentRoute.value.fullPath).toBe('/contacts/ct-res')
     expect(page().querySelector('[data-stub-profile]')).not.toBeNull()
-    expect(
-      page()
-        .querySelector('[data-contact-row="ct-res"]')
-        ?.getAttribute('aria-current'),
-    ).toBe('page')
+    expect(page().querySelector('[data-contact-grid]')).toBeNull()
+
+    page().querySelector<HTMLElement>('.back')!.click()
+    await flush()
+    expect(router.currentRoute.value.fullPath).toBe('/contacts')
+    expect(cards()).toEqual(['ct-res'])
+    expect(tabs()[2]).toContain('内容')
   })
 
-  it('opens a profile route straight into the page', async () => {
+  it('opens a profile route straight into the detail', async () => {
     await mount('/contacts/ct-pm')
     expect(page().querySelector('[data-stub-profile]')).not.toBeNull()
-    expect(
-      page()
-        .querySelector('[data-contact-row="ct-pm"]')
-        ?.getAttribute('aria-current'),
-    ).toBe('page')
+    expect(page().querySelector('[data-contact-grid]')).toBeNull()
   })
 
   it('says when the contact list could not be read', async () => {
