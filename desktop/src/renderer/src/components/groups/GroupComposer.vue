@@ -4,8 +4,10 @@
  * one of the five ways (所有人 · 举手, 各自独立回答, @ 指定成员, 私信…,
  * 交办…); a private message and a task pick their member; a task fills in
  * what to do, what to hand back, on what basis and with what access. `@`
- * lists the members (↑↓, Enter / Tab, Esc). ⌘↵ sends; Enter is a new line.
- * What cannot go yet says why under the box and nothing is sent.
+ * lists the members (↑↓, Enter / Tab, Esc) and a picked name is painted in
+ * the box (GRP-20): a mirror under the textarea marks whole names after a
+ * word boundary. Enter sends, Shift+Enter is a new line (⌘/Ctrl+Enter also
+ * sends). What cannot go yet says why under the box and nothing is sent.
  *
  * Props: members; contacts (avatars); moderator; submit (sends the
  * envelope, true when it went: the box empties, a task's form closes);
@@ -29,6 +31,7 @@ import { completionMatches } from './groupHomeModel'
 import {
   ACCESS_OPTIONS,
   completionQuery,
+  mentionSpans,
   planGroupSend,
   SEND_WAYS,
   sendWayOption,
@@ -65,6 +68,8 @@ const choosing = ref(false)
 const caret = ref(0)
 const index = ref(0)
 const dismissed = ref<number | null>(null)
+const composing = ref(false)
+const mirror = ref<HTMLElement | null>(null)
 
 const option = computed(() => sendWayOption(way.value))
 const needsRecipient = computed(
@@ -72,9 +77,11 @@ const needsRecipient = computed(
 )
 const placeholder = computed(() => {
   if (props.disabled) return props.disabled
-  if (way.value === 'task') return '补充说明（可以不写）；⌘↵ 交办'
-  if (way.value === 'private') return '只有对方能看到；⌘↵ 发出'
-  return '在群里说点什么；@ 点名，⌘↵ 发出'
+  if (way.value === 'task')
+    return '补充说明（可以不写）；Enter 交办，Shift+Enter 换行'
+  if (way.value === 'private')
+    return '只有对方能看到；Enter 发出，Shift+Enter 换行'
+  return '在群里说点什么；@ 点名，Enter 发出，Shift+Enter 换行'
 })
 
 watch([text, way, to, title, deliverable], () => (hint.value = ''))
@@ -102,6 +109,12 @@ const matches = computed(() =>
       )
     : [],
 )
+const names = computed(() =>
+  props.members
+    .filter((member) => !member.missing)
+    .map((member) => member.name),
+)
+const spans = computed(() => mentionSpans(text.value, names.value))
 
 function track(): void {
   const element = area()
@@ -113,7 +126,26 @@ function track(): void {
 
 function onInput(): void {
   track()
+  syncMirror()
   if (dismissed.value !== null && !query.value) dismissed.value = null
+}
+
+/** The mirror scrolls with the textarea, never on its own. */
+function syncMirror(): void {
+  if (mirror.value) mirror.value.scrollTop = area()?.scrollTop ?? 0
+}
+
+function onCompositionStart(): void {
+  composing.value = true
+}
+
+function onCompositionEnd(): void {
+  composing.value = false
+  void nextTick(() => {
+    syncMirror()
+    track()
+    onInput()
+  })
 }
 
 async function placeCaret(position: number): Promise<void> {
@@ -204,7 +236,7 @@ async function send(): Promise<void> {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.isComposing) return
+  if (event.isComposing || event.keyCode === 229) return
   if (query.value) {
     const count = matches.value.length
     if (event.key === 'Escape') {
@@ -221,14 +253,20 @@ function onKeydown(event: KeyboardEvent): void {
     if (
       count &&
       (event.key === 'Tab' ||
-        (event.key === 'Enter' && !event.metaKey && !event.ctrlKey))
+        (event.key === 'Enter' &&
+          !event.shiftKey &&
+          !event.metaKey &&
+          !event.ctrlKey))
     ) {
       event.preventDefault()
       void pick(matches.value[Math.min(index.value, count - 1)]!)
       return
     }
+    // Shift+Enter while the list is open starts a line, it never picks.
+    if (event.key === 'Enter' && event.shiftKey)
+      dismissed.value = query.value.start
   }
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+  if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     void send()
   }
@@ -293,19 +331,33 @@ const canSend = computed(
         />
       </Field>
     </div>
-    <TextArea
-      v-model="text"
-      class="input"
-      :min-rows="1"
-      :max-rows="8"
-      :placeholder="placeholder"
-      :disabled="Boolean(disabled)"
-      aria-label="在群里发消息"
-      @input="onInput"
-      @keydown="onKeydown"
-      @keyup="track"
-      @click="track"
-    />
+    <div class="field" :data-composing="composing || undefined">
+      <div ref="mirror" class="mirror" aria-hidden="true">
+        <template v-for="(segment, at) in spans" :key="at">
+          <span v-if="segment.mention" class="mention" data-composer-mention>{{
+            segment.text
+          }}</span>
+          <template v-else>{{ segment.text }}</template>
+        </template>
+        <span v-if="text.endsWith('\n')">&#8203;</span>
+      </div>
+      <TextArea
+        v-model="text"
+        class="input"
+        :min-rows="1"
+        :max-rows="8"
+        :placeholder="placeholder"
+        :disabled="Boolean(disabled)"
+        aria-label="在群里发消息"
+        @input="onInput"
+        @keydown="onKeydown"
+        @keyup="track"
+        @click="track"
+        @scroll="syncMirror"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
+      />
+    </div>
     <ul
       v-if="query"
       class="matches"
@@ -341,7 +393,7 @@ const canSend = computed(
       <IconButton
         class="send"
         label="发送"
-        shortcut="⌘↵"
+        shortcut="↵"
         variant="primary"
         shape="circle"
         :disabled="!canSend"
@@ -386,6 +438,38 @@ const canSend = computed(
   box-shadow: var(--composer-edge);
 }
 
+.field {
+  position: relative;
+  display: grid;
+  width: 100%;
+  font: var(--weight-regular) var(--fs-s) / var(--lh-s) var(--font-sans);
+  letter-spacing: normal;
+  tab-size: 4;
+}
+
+.field > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.mirror,
+.input {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.mirror {
+  overflow: hidden;
+  color: rgb(var(--text-1));
+  pointer-events: none;
+}
+
 .input,
 .input:focus,
 .input:focus-visible {
@@ -393,8 +477,28 @@ const canSend = computed(
   background: transparent;
   box-shadow: none;
   resize: none;
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
+  font: inherit;
+  color: transparent;
+  caret-color: rgb(var(--text-1));
+}
+
+.input::placeholder {
+  color: rgb(var(--text-4));
+}
+
+.field[data-composing] .input {
+  color: rgb(var(--text-1));
+}
+
+.field[data-composing] .mirror {
+  visibility: hidden;
+}
+
+.mirror .mention {
+  border-radius: var(--r-xs);
+  background: rgb(var(--accent) / 0.16);
+  box-shadow: inset 0 0 0 0.5px rgb(var(--accent) / 0.28);
+  color: rgb(var(--text-link));
 }
 
 .recipients {

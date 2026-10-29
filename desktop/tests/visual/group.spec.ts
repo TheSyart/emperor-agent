@@ -6,7 +6,7 @@ import { ShowcaseLog } from '../../src/renderer/src/components/conversation/gall
 import { installVisualCoreBridge } from './visualBridge'
 
 // GRP-05: the Group mode — its home (预览 A: the composer with @, the
-// contacts, the recent groups) with its sidebar (群聊, 联系人), a contact's
+// contacts, the recent groups) with its sidebar (群聊 only, GRP-21), a contact's
 // profile (预览 B 第 2 步) and a single chat with a contact (its avatar and
 // name on each reply, 👍 / 👎); the group page is group-chat.spec.ts
 // (GRP-08). Baselines: the home
@@ -397,7 +397,7 @@ async function shot(page: Page, name: string) {
 for (const theme of ['dark', 'light'] as const) {
   // ⌘3 from a Build session: no Group session was open yet, so the Group
   // home. Its sidebar: 「Emperor Group ▾」, 新建群聊 (GRP-08) beside
-  // 新建联系人, 群聊 then 联系人, and no Pull Request in the footer.
+  // 新建联系人, only 群聊 (GRP-21), and no Pull Request in the footer.
   test(`GRP-05 · the Group home and its sidebar (${theme}) @baseline`, async ({
     page,
   }) => {
@@ -406,11 +406,10 @@ for (const theme of ['dark', 'light'] as const) {
     const root = sidebar(page)
     await page.keyboard.press('ControlOrMeta+3')
     await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
-    await expect(page).toHaveURL(/\/contacts(\?|$)/)
+    await expect(page).toHaveURL(/\/groups(\?|$)/)
     const home = page.locator('[data-group-home]')
     await expect(home).toContainText('今天找谁帮忙？')
-    await expect(root.locator('[data-row="ct-codex"]')).toBeVisible()
-    expect(await sections(root)).toEqual(['groups', 'contacts'])
+    expect(await sections(root)).toEqual(['groups'])
     await expect(root.locator('.session-row')).toHaveCount(0)
     const nav = root.getByRole('navigation', { name: '侧栏导航' })
     await expect(
@@ -443,7 +442,9 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(profile.locator('h1')).toHaveText('审稿人')
     await expect(profile.locator('[data-stat="rating"]')).toContainText('83%')
     await expect(
-      sidebar(page).locator('[data-row="ct-reviewer00001"]'),
+      page.locator(
+        '[data-contacts-page] [data-contact-row="ct-reviewer00001"]',
+      ),
     ).toHaveAttribute('aria-current', 'page')
     // 记忆, as 预览 B shows it.
     await profile.getByRole('tab', { name: '记忆' }).click()
@@ -474,9 +475,6 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(sidebar(page).getByTestId('sidebar-brand')).toHaveText(
       'Emperor Group',
     )
-    await expect(
-      sidebar(page).locator('[data-row="ct-reviewer00001"]'),
-    ).toHaveAttribute('aria-current', 'page')
     const speakers = page.locator('[data-contact-speaker]')
     await expect(speakers).toHaveCount(2)
     await expect(speakers.first()).toHaveText('审稿人')
@@ -513,7 +511,7 @@ test('GRP-05 · @ completes a contact’s name on the Group home', async ({
   page,
 }) => {
   await install(page)
-  await open(page, '/contacts', 'dark')
+  await open(page, '/groups', 'dark')
   const input = page.locator('[data-home-composer] textarea')
   await input.fill('请 @审')
   await expect(page.locator('[data-mention-list] [role="option"]')).toHaveCount(
@@ -526,6 +524,37 @@ test('GRP-05 · @ completes a contact’s name on the Group home', async ({
   await input.fill('@审稿人 看看这个改动')
   await input.press('Enter')
   await expect(page).toHaveURL(/\/chat\/chat-reviewer/)
+})
+
+test('GRP-21 · the contacts page, its footer button and the way back', async ({
+  page,
+}) => {
+  await install(page)
+  await open(page, '/groups', 'dark')
+  const footer = sidebar(page).locator('[data-sidebar-block="footer"]')
+  const toggle = footer.getByTestId('sidebar-contacts-toggle')
+  await expect(toggle).toBeVisible()
+  await toggle.click()
+  await expect(page).toHaveURL(/\/contacts$/)
+  const list = page.locator('[data-contacts-page] [data-contact-row]')
+  await expect(list).toHaveCount(6)
+  await expect(
+    page.locator('[data-contacts-page]').getByText('选一位联系人查看档案'),
+  ).toBeVisible()
+  await shot(page, 'contacts-page-dark')
+  await page.locator('[data-contact-row="ct-reviewer00001"]').click()
+  await expect(page).toHaveURL(/\/contacts\/ct-reviewer00001$/)
+  await expect(page.locator('[data-contact-profile] h1')).toHaveText('审稿人')
+  await expect(
+    page.locator('[data-contact-row="ct-reviewer00001"]'),
+  ).toHaveAttribute('aria-current', 'page')
+  await shot(page, 'contacts-page-selected-dark')
+  // The sidebar never left the groups; the toggle returns to the Group home.
+  await expect(
+    sidebar(page).locator('[data-sidebar-section="groups"]'),
+  ).toBeVisible()
+  await toggle.click()
+  await expect(page).toHaveURL(/\/groups$/)
 })
 
 test('GRP-16 · 「⋯」 › 删除联系人 on a profile, confirmed first', async ({

@@ -1,31 +1,25 @@
 <script setup lang="ts">
 /**
- * Group's sections of the sidebar (GRP-05, 预览 A): 群聊, then 联系人. A row
- * is an avatar, a name and one line under it — a group's member count and
- * when it last spoke, or who speaks there now (「架构师 发言中…」, 「架构师
- * 等 2 人发言中…」) or waits (「排队：研究员」) while a turn runs (GRP-13,
- * groupLive.ts); a contact's intro (「外部」 for Claude Code and Codex
- * without one). A contact opens its profile, a group its page. The row on
- * screen is marked: the contact of the profile, editor or single chat
- * open, or the group open (its settings and a member's work too). The +
- * of 联系人 opens the contact editor; the + of 群聊 opens 新建群聊
- * (GRP-08). Folding a section lasts while the
- * window is open. Loaded with the Group mode only (SidebarRoot), so the
- * entry bundle stays as it was.
+ * Group's section of the sidebar (GRP-05, GRP-21): 群聊. A row is a tile,
+ * a name and one line under it — the member count and when it last spoke,
+ * or who speaks there now (「架构师 发言中…」, 「架构师 等 2 人发言中…」)
+ * or waits (「排队：研究员」) while a turn runs (GRP-13, groupLive.ts).
+ * The + opens 新建群聊 (GRP-08); the group on screen is marked (its
+ * settings and a member's work too). Folding lasts while the window is
+ * open. Contacts live on their own page (ContactsPage) since GRP-21;
+ * SidebarRoot loads this only in Group mode, so the entry bundle stays as
+ * it was.
  */
 import { Users } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Contact } from '@emperor/core/api'
 import { useSession } from '../../composables/useSession'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import {
   useContactDirectory,
   type GroupSummary,
 } from '../contacts/contactDirectory'
-import { contactAvatarProps } from '../contacts/contactAvatar'
 import { DsPlus } from '../icons/ds'
-import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
 import {
   groupLiveLine,
@@ -42,7 +36,6 @@ const live = useGroupLive()
 const { sessions } = useSession()
 
 const groupsFolded = ref(false)
-const contactsFolded = ref(false)
 
 function param(name: string): string {
   const raw = route.params[name]
@@ -56,13 +49,6 @@ const routedSession = computed(() => {
   return id ? sessions.value.find((session) => session.id === id) : undefined
 })
 
-const activeContactId = computed(() => {
-  if (route.name === 'contact' || route.name === 'contact-edit')
-    return param('id')
-  const session = routedSession.value
-  return session?.surface === 'contact' ? (session.contact_id ?? '') : ''
-})
-
 const activeGroupId = computed(() => {
   if (route.name === 'group' || route.name === 'group-settings')
     return param('groupId')
@@ -71,11 +57,6 @@ const activeGroupId = computed(() => {
   // A member's work (「过程 ›」, GRP-08) is its group's.
   return session?.surface === 'group_member' ? (session.group_id ?? '') : ''
 })
-
-function contactLine(contact: Contact): string {
-  if (contact.intro.trim()) return contact.intro
-  return contact.kind === 'external' ? '外部' : '还没有简介'
-}
 
 function memberName(id: string): string {
   return directory.find(id)?.name ?? '已删除的联系人'
@@ -101,18 +82,10 @@ const groupLines = computed(
     ),
 )
 
-function openContact(id: string) {
-  void router.push({ name: 'contact', params: { id } }).catch(() => undefined)
-}
-
 function openGroup(groupId: string) {
   void router
     .push({ name: 'group', params: { groupId } })
     .catch(() => undefined)
-}
-
-function newContact() {
-  void router.push({ name: 'contact-new' }).catch(() => undefined)
 }
 </script>
 
@@ -161,51 +134,6 @@ function newContact() {
         class="empty"
       >
         还没有群聊：在群聊首页 @ 几位联系人就会建一个
-      </div>
-    </template>
-  </section>
-
-  <section class="section" aria-label="联系人" data-sidebar-section="contacts">
-    <SidebarSectionHeader v-model:collapsed="contactsFolded" label="联系人">
-      <IconButton
-        class="head-button"
-        label="新建联系人"
-        size="xs"
-        @click="newContact"
-      >
-        <DsPlus :size="16" />
-      </IconButton>
-    </SidebarSectionHeader>
-    <template v-if="!contactsFolded">
-      <div
-        v-for="contact in directory.contacts.value"
-        :key="contact.id"
-        class="row"
-        role="button"
-        tabindex="0"
-        :data-row="contact.id"
-        :data-active="contact.id === activeContactId || undefined"
-        :aria-current="contact.id === activeContactId ? 'page' : undefined"
-        :title="contact.name"
-        @click="openContact(contact.id)"
-        @keydown.enter.self="openContact(contact.id)"
-        @keydown.space.self.prevent="openContact(contact.id)"
-      >
-        <Avatar
-          v-bind="contactAvatarProps(contact.avatar, contact.name)"
-          :size="24"
-        />
-        <span class="two">
-          <span class="name">{{ contact.name }}</span>
-          <span class="line">{{ contactLine(contact) }}</span>
-        </span>
-      </div>
-      <div
-        v-if="directory.loaded.value && directory.failed.value"
-        class="empty"
-        role="status"
-      >
-        联系人读取失败：{{ directory.failed.value }}
       </div>
     </template>
   </section>

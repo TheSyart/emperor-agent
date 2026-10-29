@@ -440,14 +440,12 @@ it('MOD-02 3 · each mode shows only its own sections', async () => {
   await settle()
   expect(rowTitles()).toEqual(['project-root'])
 
-  // Group (GRP-05): 群聊 and 联系人, loaded with the mode; no session rows.
+  // Group (GRP-05, GRP-21): 群聊 only — contacts have their own page.
   appMode.mode.value = 'group'
   await settleAsync()
-  expect(sections()).toEqual(['groups', 'contacts'])
+  expect(sections()).toEqual(['groups'])
   expect(rowTitles()).toEqual([])
-  expect(
-    root.querySelector('[data-sidebar-section="contacts"]')?.textContent,
-  ).toContain('联系人')
+  expect(root.querySelector('[data-sidebar-section="contacts"]')).toBeNull()
 })
 
 it('MOD-02 3 · an old Build session with no project shows under Chat (D2)', async () => {

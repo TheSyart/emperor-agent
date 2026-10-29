@@ -576,6 +576,62 @@ test('GRP-16 · 删除群聊 at the bottom of 群设置, confirmed first', async
   await expect(page).toHaveURL(/\/groups\/grp-review\/settings/)
 })
 
+test('GRP-20 · @ names are painted in the box, and Enter sends', async ({
+  page,
+}) => {
+  await install(page)
+  await open(page, '/groups/grp-review', 'dark')
+  const input = page.locator('[data-group-composer] textarea')
+  await input.fill('请 @审')
+  await expect(
+    page.locator('[data-mention-list] [role="option"]').first(),
+  ).toBeVisible()
+  await input.press('Enter')
+  await expect(input).toHaveValue(/@审稿人 /)
+  await expect(page.locator('[data-composer-mention]')).toHaveText('@审稿人')
+  await shot(page, 'composer-mention-dark')
+  await input.press('Enter')
+  // The box empties once it goes; the fixture does not echo it into the log.
+  await expect(input).toHaveValue('')
+})
+
+test('GRP-20 · a member’s speech streams into the room', async ({ page }) => {
+  await install(page)
+  await open(page, '/groups/grp-review', 'dark')
+  await page.evaluate(() => {
+    const emit = (
+      window as unknown as {
+        __visualEmitCoreEvent?: (event: unknown) => void
+      }
+    ).__visualEmitCoreEvent
+    if (!emit) throw new Error('no core event hook')
+    emit({
+      event: 'group_turn_changed',
+      group_id: 'grp-review',
+      turn_id: 't-live',
+      state: 'speaking',
+      speakers: ['ct-architect0001'],
+      spend: { usd: 0, tokens: 0 },
+    })
+    emit({
+      event: 'group_member_status',
+      group_id: 'grp-review',
+      contact_id: 'ct-architect0001',
+      status: 'thinking',
+    })
+    emit({
+      event: 'message_delta',
+      session_id: 'member-ct-architect0001',
+      delta: '先说结论：',
+    })
+  })
+  await expect(page.locator('[data-group-streaming]')).toContainText(
+    '先说结论：',
+  )
+  await expect(page.locator('[data-group-streaming]')).toContainText('发言中')
+  await shot(page, 'streaming-dark')
+})
+
 test('GRP-08 · 发给 ▾ and the task form', async ({ page }) => {
   await install(page)
   await open(page, '/groups/grp-review', 'dark')

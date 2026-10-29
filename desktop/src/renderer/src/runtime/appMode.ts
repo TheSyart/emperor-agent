@@ -33,8 +33,8 @@ const SESSION_ROUTE_NAMES: readonly string[] = [
   'external-agent',
 ]
 
-/** The Group home: the contacts, the recent groups, @ to start (GRP-05). */
-export const GROUP_HOME_ROUTE = 'contacts'
+/** The Group home: the recent groups, the contacts, @ to start (GRP-05). */
+export const GROUP_HOME_ROUTE = 'groups'
 
 /** A group's page (GRP-05, GRP-08): `/groups/:groupId`. */
 export const GROUP_PAGE_ROUTE = 'group'
@@ -42,10 +42,11 @@ export const GROUP_PAGE_ROUTE = 'group'
 export const GROUP_SETTINGS_ROUTE = 'group-settings'
 
 /**
- * The contacts' own pages, Group like the Group home: the editor (GRP-04)
- * and the profile (GRP-05).
+ * The contacts' own pages, Group like the Group home: the contacts page
+ * with its list and profile (GRP-21), and the editor (GRP-04).
  */
-export const CONTACT_EDITOR_ROUTES: readonly string[] = [
+export const CONTACT_ROUTES: readonly string[] = [
+  'contacts',
   'contact-new',
   'contact-edit',
   'contact',
@@ -154,7 +155,7 @@ export function routeModeTarget(
   find: (id: string) => SessionInfo | undefined,
 ): RouteModeTarget {
   const name = typeof route.name === 'string' ? route.name : ''
-  if (name === GROUP_HOME_ROUTE || CONTACT_EDITOR_ROUTES.includes(name))
+  if (name === GROUP_HOME_ROUTE || CONTACT_ROUTES.includes(name))
     return { mode: 'group', sessionId: '' }
   if (name === GROUP_PAGE_ROUTE || name === GROUP_SETTINGS_ROUTE) {
     const raw = route.params.groupId

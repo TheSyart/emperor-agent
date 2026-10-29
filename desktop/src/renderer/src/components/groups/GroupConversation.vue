@@ -22,7 +22,8 @@
  * message where it was asked (D29). A deleted contact is greyed out.
  *
  * Props: messages; members; contacts; finished (members done speaking in
- * this turn, for an independent card's progress); asks.
+ * this turn, for an independent card's progress); asks; streams (the
+ * speeches still being written, GRP-20).
  * Emits: process(contactId), answer, cancelAsk, confirmTask, openSettings.
  */
 import { computed, ref } from 'vue'
@@ -52,17 +53,22 @@ import {
   type TimelineRow,
 } from './groupModel'
 import { useSkinExempt } from '../../skin/skinState'
+import type { GroupStreamView } from './useGroupRoom'
 
 /** BRD-05 (D8): a skin may not reach this zone. */
 const exempt = useSkinExempt()
 
-const props = defineProps<{
-  messages: readonly GroupHistoryMessage[]
-  members: readonly GroupMemberView[]
-  contacts: readonly Contact[]
-  finished: readonly string[]
-  asks: readonly GroupAsk[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    messages: readonly GroupHistoryMessage[]
+    members: readonly GroupMemberView[]
+    contacts: readonly Contact[]
+    finished: readonly string[]
+    asks: readonly GroupAsk[]
+    streams?: readonly GroupStreamView[]
+  }>(),
+  { streams: () => [] },
+)
 const emit = defineEmits<{
   process: [contactId: string]
   answer: [
@@ -483,6 +489,42 @@ function progress(batch: IndependentBatch): string {
         </div>
       </div>
     </li>
+
+    <!-- A member's speech while it is still being written (GRP-20). -->
+    <li
+      v-for="stream in props.streams"
+      :key="`stream-${stream.contactId}`"
+      class="item"
+      data-group-streaming
+    >
+      <div class="msg streaming">
+        <span
+          class="face"
+          :data-missing="person(stream.contactId).missing || undefined"
+        >
+          <Avatar v-bind="person(stream.contactId).avatar" :size="28" />
+        </span>
+        <div class="main">
+          <div class="who">
+            <b>{{ person(stream.contactId).name }}</b>
+            <span v-if="person(stream.contactId).intro" class="role">{{
+              person(stream.contactId).intro
+            }}</span>
+            <span class="live">发言中</span>
+            <LinkButton
+              v-if="person(stream.contactId).sessionId"
+              class="process"
+              data-process
+              @click="emit('process', stream.contactId)"
+              >过程 ›</LinkButton
+            >
+          </div>
+          <div class="body">
+            <GroupMarkdown :content="stream.text" :names="names" />
+          </div>
+        </div>
+      </div>
+    </li>
   </ol>
 </template>
 
@@ -626,6 +668,32 @@ function progress(batch: IndependentBatch): string {
   line-height: var(--lh-s);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.live {
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: rgb(var(--info) / 0.14);
+  color: rgb(var(--info));
+  font-size: var(--fs-xxxs);
+  line-height: var(--lh-xxxs);
+}
+
+.streaming .body::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: rgb(var(--text-2));
+  animation: group-caret 1s steps(1) infinite;
+}
+
+@keyframes group-caret {
+  50% {
+    opacity: 0;
+  }
 }
 
 .mention {

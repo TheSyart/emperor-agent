@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * GRP-05 (预览 A 的 Group 侧栏): 群聊 and 联系人 replace the placeholder —
- * each row an avatar, a name and a line under it; a contact opens its
- * profile, a group its page; the row of the contact (or group) on screen is
- * marked; the lists follow `contacts_changed` / `groups_changed`. GRP-13:
- * a group's line says who speaks now, or who waits.
+ * GRP-05 (预览 A 的 Group 侧栏): 群聊 replaces the placeholder — each row a
+ * tile, a name and a line under it; a group opens its page; the group on
+ * screen is marked; the list follows `groups_changed`. GRP-21: contacts
+ * left the sidebar for their own page. GRP-13: a group's line says who
+ * speaks now, or who waits.
  */
 import { createApp, h, nextTick, ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
@@ -176,41 +176,21 @@ afterEach(() => {
 })
 
 describe('the Group sidebar', () => {
-  it('lists the groups, then the contacts, each with a line under its name', async () => {
+  it('lists the groups, each with a line under its name', async () => {
     await mount()
     const sections = [
       ...document.querySelectorAll<HTMLElement>('[data-sidebar-section]'),
     ].map((section) => section.dataset.sidebarSection)
-    expect(sections).toEqual(['groups', 'contacts'])
+    expect(sections).toEqual(['groups'])
     expect(rows('groups')).toEqual(['grp-review'])
-    expect(rows('contacts')).toEqual([
-      'ct-emperor',
-      'ct-reviewer00001',
-      'ct-architect0001',
-      'ct-claude-code',
-    ])
     expect(row('grp-review').textContent).toContain('4 人')
-    expect(row('ct-reviewer00001').textContent).toContain('代码与方案评审')
-    expect(row('ct-claude-code').textContent).toContain('外部')
   })
 
-  it('opens a contact’s profile, a group’s page, and the editor from +', async () => {
+  it('opens a group’s page and the editor from 新建群聊', async () => {
     await mount()
-    row('ct-reviewer00001').click()
-    await flush()
-    expect(router.currentRoute.value.fullPath).toBe(
-      '/contacts/ct-reviewer00001',
-    )
     row('grp-review').click()
     await flush()
     expect(router.currentRoute.value.fullPath).toBe('/groups/grp-review')
-    document
-      .querySelector<HTMLElement>(
-        '[data-sidebar-section="contacts"] [aria-label="新建联系人"]',
-      )!
-      .click()
-    await flush()
-    expect(router.currentRoute.value.name).toBe('contact-new')
     // 新建群聊 opens the dialog (GRP-08).
     const create = document.querySelector<HTMLElement>(
       '[data-sidebar-section="groups"] [aria-label="新建群聊"]',
@@ -224,19 +204,12 @@ describe('the Group sidebar', () => {
     newGroupDialog.open.value = false
   })
 
-  it('marks the contact on screen — its profile or its single chat — and the group on screen', async () => {
-    await mount('/contacts/ct-reviewer00001')
-    expect(row('ct-reviewer00001').getAttribute('aria-current')).toBe('page')
-    await router.push('/chat/chat-reviewer')
-    await flush()
-    expect(row('ct-reviewer00001').getAttribute('aria-current')).toBe('page')
-    await router.push('/groups/grp-review')
-    await flush()
+  it('marks the group on screen', async () => {
+    await mount('/groups/grp-review')
     expect(row('grp-review').getAttribute('aria-current')).toBe('page')
-    expect(row('ct-reviewer00001').getAttribute('aria-current')).toBeNull()
   })
 
-  it('follows contacts_changed and groups_changed', async () => {
+  it('does not list contacts any more (GRP-21)', async () => {
     await mount()
     contacts = [...contacts, contact('ct-researcher001', '研究员')]
     for (const listener of events.listeners)
@@ -249,7 +222,10 @@ describe('the Group sidebar', () => {
     await flush()
     await new Promise((resolve) => setTimeout(resolve, 120))
     await flush()
-    expect(rows('contacts')).toContain('ct-researcher001')
+    expect(
+      document.querySelector('[data-sidebar-section="contacts"]'),
+    ).toBeNull()
+    expect(rows('groups')).toEqual(['grp-review'])
   })
 
   it('says who speaks in a group now, who waits, and goes back to its count (GRP-13)', async () => {

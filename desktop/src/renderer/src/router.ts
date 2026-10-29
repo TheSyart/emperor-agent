@@ -30,7 +30,7 @@ const GitHubIssuesPage = () =>
 const GitHubRunsPage = () =>
   import('./components/pages/github/GitHubRunsPage.vue')
 const ContactEditor = () => import('./components/contacts/ContactEditor.vue')
-const ContactProfile = () => import('./components/contacts/ContactProfile.vue')
+const ContactsPage = () => import('./components/contacts/ContactsPage.vue')
 const GroupHome = () => import('./components/groups/GroupHome.vue')
 const GroupPage = () => import('./components/groups/GroupPage.vue')
 const GroupSettings = () => import('./components/groups/GroupSettings.vue')
@@ -88,14 +88,21 @@ export const routeRecords: RouteRecordRaw[] = [
     component: ConversationView,
     meta: { label: '对话', tab: 'chat' },
   },
-  // Group: the home (GRP-05), the contact editor (GRP-04) — a new contact,
-  // or a saved one — a contact's profile (GRP-05), a group's page and its
+  // Group: the groups' home (GRP-05, GRP-20 moved it to /groups), the
+  // contacts page (GRP-21: a list and the profile in one page), the contact
+  // editor (GRP-04) — a new contact, or a saved one — a group's page and its
   // settings (GRP-08).
+  {
+    path: '/groups',
+    name: 'groups',
+    component: GroupHome,
+    meta: { label: '群聊', page: true },
+  },
   {
     path: '/contacts',
     name: 'contacts',
-    component: GroupHome,
-    meta: { label: '群聊', page: true },
+    component: ContactsPage,
+    meta: { label: '联系人', page: true },
   },
   {
     path: '/contacts/new',
@@ -112,7 +119,7 @@ export const routeRecords: RouteRecordRaw[] = [
   {
     path: '/contacts/:id',
     name: 'contact',
-    component: ContactProfile,
+    component: ContactsPage,
     meta: { label: '联系人', page: true },
   },
   {

@@ -121,6 +121,7 @@ async function mount() {
       },
       { path: '/groups/:groupId', name: 'group', component: stub },
       { path: '/contacts', name: 'contacts', component: stub },
+      { path: '/groups', name: 'groups', component: stub },
     ],
   })
   await router.push('/groups/grp-1/settings')
@@ -246,7 +247,7 @@ describe('群设置', () => {
       expect(calls('groups.delete')).toEqual([
         ['groups.delete', { id: 'grp-1' }],
       ])
-      expect(router.currentRoute.value.name).toBe('contacts')
+      expect(router.currentRoute.value.name).toBe('groups')
       expect(calls('groups.list').length).toBeGreaterThan(listsBefore)
       expect(ctx.showToast).toHaveBeenCalledWith(
         '已删除「0.3 方案评审」，可以在「设置 › 常规 › 已归档对话」里恢复',

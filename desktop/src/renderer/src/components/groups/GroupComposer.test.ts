@@ -2,7 +2,8 @@
 /**
  * GRP-08 (预览 B 第 3 步): the group's composer — 发给 ▾ with the five ways
  * (each one sends its own envelope), the recipient for a private message
- * or a task, the task form, @ completion (↑↓, Enter, Esc) and ⌘↵ to send.
+ * or a task, the task form, @ completion (↑↓, Enter, Esc), the mention
+ * mirror in the box and Enter to send (Shift+Enter is a new line).
  */
 import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -252,14 +253,56 @@ describe('@ completion and keys', () => {
     expect(document.querySelector('[data-mention-list]')).toBeNull()
   })
 
-  it('sends with ⌘↵; Enter is a new line', async () => {
+  it('sends with Enter; Shift+Enter and an input method Enter do not', async () => {
     await mount()
     await type('第一行')
-    await key('Enter')
+    await key('Enter', { shiftKey: true })
     expect(submit).not.toHaveBeenCalled()
-    await key('Enter', { metaKey: true })
+    await key('Enter', { isComposing: true })
+    expect(submit).not.toHaveBeenCalled()
+    await key('Enter')
     expect(submit).toHaveBeenCalledWith({ way: 'broadcast', text: '第一行' })
     expect(area().value).toBe('')
+  })
+
+  it('still sends with ⌘↵', async () => {
+    await mount()
+    await type('第二行')
+    await key('Enter', { metaKey: true })
+    expect(submit).toHaveBeenCalledWith({ way: 'broadcast', text: '第二行' })
+  })
+
+  it('paints a picked name in the box, and leaves e-mail alone', async () => {
+    await mount()
+    await type('请 @研究员 看看')
+    expect(document.querySelector('[data-composer-mention]')?.textContent).toBe(
+      '@研究员',
+    )
+    await type('a@b.com')
+    expect(document.querySelector('[data-composer-mention]')).toBeNull()
+  })
+
+  it('shows the draft itself while an input method composes', async () => {
+    await mount()
+    const field = () => document.querySelector('[data-group-composer] .field')
+    area().dispatchEvent(new CompositionEvent('compositionstart'))
+    await flush()
+    expect(field()?.getAttribute('data-composing')).toBe('true')
+    area().dispatchEvent(new CompositionEvent('compositionend'))
+    await flush()
+    expect(field()?.getAttribute('data-composing')).toBeNull()
+  })
+
+  it('keeps the mirror scrolled with the box', async () => {
+    await mount()
+    await type('第一行\n第二行\n第三行')
+    area().scrollTop = 18
+    area().dispatchEvent(new Event('scroll'))
+    await flush()
+    expect(
+      document.querySelector<HTMLElement>('[data-group-composer] .mirror')!
+        .scrollTop,
+    ).toBe(18)
   })
 
   it('stops a mention without an @ and says why', async () => {

@@ -549,10 +549,11 @@ test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 (GRP-08)',
   await page.keyboard.press('ControlOrMeta+3')
   await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
   // No Group session open before: the Group home (GRP-05).
-  await expect(page).toHaveURL(/\/contacts(\?|$)/)
+  await expect(page).toHaveURL(/\/groups(\?|$)/)
   await expect(page.locator('[data-group-home]')).toBeVisible()
   await expect(root.locator('.session-row')).toHaveCount(0)
-  await expect(root.locator('[data-sidebar-section="contacts"]')).toBeVisible()
+  await expect(root.locator('[data-sidebar-section="contacts"]')).toHaveCount(0)
+  await expect(root.getByTestId('sidebar-contacts-toggle')).toBeVisible()
   await expect(root.locator('[data-sidebar-section="groups"]')).toContainText(
     '还没有群聊',
   )
@@ -564,7 +565,7 @@ test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 (GRP-08)',
   const dialog = page.getByRole('dialog', { name: '新建群聊' })
   await expect(dialog).toBeVisible()
   await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
-  await expect(page).toHaveURL(/\/contacts(\?|$)/)
+  await expect(page).toHaveURL(/\/groups(\?|$)/)
   await dialog.getByRole('button', { name: '取消' }).click()
   await expect(dialog).toHaveCount(0)
   // No Pull Request outside Build.

@@ -11,7 +11,9 @@
  *   who finished speaking; an ended one clears the statuses);
  * - `group_member_status`: idle, thinking, queued, error;
  * - a member session's `tool_call` / `tool_result` (执行中), `ask_request`
- *   / `plan_draft` (waiting for the user) and the events that settle them.
+ *   / `plan_draft` (waiting for the user) and the events that settle them;
+ * - its `message_delta` / `assistant_reset` (GRP-20): the speech as it is
+ *   written, until the group log has the final `group/message`.
  *
  * The actions go to Core: send, stop, confirm a task, answer or skip a
  * question, invite a member. An answered question leaves the room; Core
@@ -20,6 +22,7 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onCoreEvent } from '../../api/backend'
+import { STREAMING_RENDER_MS } from '../../composables/useStreamingText'
 import { core } from '../../api/http'
 import type { ControlInteraction } from '../../types'
 import {
@@ -56,6 +59,14 @@ interface RoomEvent {
   spend?: { usd: number; tokens: number }
   status?: MemberLiveStatus
   interaction?: ControlInteraction | null
+  delta?: string
+  content?: string
+}
+
+/** A member's speech while it is still being written (GRP-20). */
+export interface GroupStreamView {
+  contactId: string
+  text: string
 }
 
 export interface GroupRoomOptions {
@@ -73,6 +84,11 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   const tools = ref<Record<string, boolean>>({})
   const pending = ref<Record<string, ControlInteraction | null>>({})
   const finished = ref<string[]>([])
+  const live = ref<Record<string, { text: string; startedAt: number }>>({})
+  const buffers = new Map<string, { text: string; startedAt: number }>()
+  const idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  let streamTimer: ReturnType<typeof setTimeout> | null = null
+  let streamPublishedAt = 0
   let generation = 0
 
   /** Member session → contact. */
@@ -84,6 +100,115 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
           .map((member) => [member.memberSessionId!, member.id]),
       ),
   )
+
+  // ── the speech being written (GRP-20) ─────────────────────────────────
+  function publishStreams(force = false): void {
+    const now = Date.now()
+    if (!force && now - streamPublishedAt < STREAMING_RENDER_MS) {
+      if (!streamTimer)
+        streamTimer = setTimeout(
+          () => {
+            streamTimer = null
+            publishStreams(true)
+          },
+          STREAMING_RENDER_MS - (now - streamPublishedAt),
+        )
+      return
+    }
+    if (streamTimer) {
+      clearTimeout(streamTimer)
+      streamTimer = null
+    }
+    streamPublishedAt = now
+    live.value = Object.fromEntries(
+      [...buffers].map(([id, draft]) => [id, { ...draft }]),
+    )
+  }
+
+  function addDelta(contactId: string, delta: string | undefined): void {
+    if (!delta || statuses.value[contactId] !== 'thinking') return
+    const draft = buffers.get(contactId) ?? {
+      text: '',
+      startedAt: Date.now(),
+    }
+    draft.text += delta
+    buffers.set(contactId, draft)
+    publishStreams()
+  }
+
+  function replaceStream(contactId: string, content: string | undefined): void {
+    if (content === undefined || statuses.value[contactId] !== 'thinking')
+      return
+    const draft = buffers.get(contactId) ?? {
+      text: '',
+      startedAt: Date.now(),
+    }
+    draft.text = content
+    buffers.set(contactId, draft)
+    publishStreams(true)
+  }
+
+  /** A tool call ends the prose so far; only the answer after it is shown. */
+  function clearStreamText(contactId: string): void {
+    if (statuses.value[contactId] !== 'thinking') return
+    const draft = buffers.get(contactId)
+    if (!draft) return
+    draft.text = ''
+    draft.startedAt = Date.now()
+    publishStreams(true)
+  }
+
+  function dropStream(contactId: string): void {
+    if (buffers.delete(contactId)) publishStreams(true)
+  }
+
+  function clearStreams(): void {
+    for (const timer of idleTimers.values()) clearTimeout(timer)
+    idleTimers.clear()
+    if (!buffers.size) return
+    buffers.clear()
+    publishStreams(true)
+  }
+
+  function disarmIdle(contactId: string): void {
+    const timer = idleTimers.get(contactId)
+    if (!timer) return
+    clearTimeout(timer)
+    idleTimers.delete(contactId)
+  }
+
+  /** No final message after a speech ended: stop showing the draft. */
+  function armIdle(contactId: string): void {
+    disarmIdle(contactId)
+    idleTimers.set(
+      contactId,
+      setTimeout(() => {
+        idleTimers.delete(contactId)
+        dropStream(contactId)
+      }, 1500),
+    )
+  }
+
+  /** The final `group/message` has landed: the draft is no longer needed. */
+  function absorbStreams(): void {
+    let changed = false
+    for (const [contactId, draft] of [...buffers]) {
+      const final = messages.value.some(
+        (message) =>
+          message.from === contactId &&
+          message.at >= draft.startedAt &&
+          (message.kind === 'say' ||
+            message.kind === 'result' ||
+            message.kind === 'summary'),
+      )
+      if (final) {
+        buffers.delete(contactId)
+        disarmIdle(contactId)
+        changed = true
+      }
+    }
+    if (changed) publishStreams(true)
+  }
 
   function adoptTurn(next: GroupTurnView | null): void {
     turn.value = next
@@ -155,6 +280,7 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     pending.value = {}
     finished.value = []
     turn.value = null
+    clearStreams()
     if (!(await readGroup(id, run))) return
     adoptTurn(group.value?.turn ?? null)
     await readPending(run)
@@ -164,6 +290,7 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   async function reload(): Promise<void> {
     const run = ++generation
     if (await readGroup(groupId(), run)) {
+      absorbStreams()
       const view = group.value?.turn ?? null
       // The log only has a turn's start and end; events carry the rest.
       if (view && (!turn.value || view.turnId !== turn.value.turnId))
@@ -200,9 +327,11 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
       speakers: event.speakers ?? (same ? (previous?.speakers ?? []) : []),
       queued: same ? (previous?.queued ?? []) : [],
     }
+    if (!same && previous) clearStreams()
     if (event.state && ENDED.has(event.state)) {
       statuses.value = {}
       tools.value = {}
+      clearStreams()
     }
   }
 
@@ -213,6 +342,12 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     statuses.value = { ...statuses.value, [id]: event.status }
     if (event.status !== 'thinking')
       tools.value = { ...tools.value, [id]: false }
+    if (event.status === 'thinking') disarmIdle(id)
+    if (event.status === 'error') {
+      disarmIdle(id)
+      dropStream(id)
+    }
+    if (event.status === 'idle') armIdle(id)
     if (
       before === 'thinking' &&
       (event.status === 'idle' || event.status === 'error') &&
@@ -223,10 +358,14 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
 
   function onMemberSession(contactId: string, event: RoomEvent): void {
     const name = event.event ?? ''
-    if (name === 'tool_call')
+    if (name === 'tool_call') {
       tools.value = { ...tools.value, [contactId]: true }
-    else if (TOOL_ENDS.has(name))
+      clearStreamText(contactId)
+    } else if (TOOL_ENDS.has(name))
       tools.value = { ...tools.value, [contactId]: false }
+    else if (name === 'message_delta') addDelta(contactId, event.delta)
+    else if (name === 'assistant_reset') replaceStream(contactId, event.content)
+    else if (name === 'error') dropStream(contactId)
     else if (
       (name === 'ask_request' || name === 'plan_draft') &&
       event.interaction?.status !== 'answered'
@@ -294,6 +433,23 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
         .map((message) => message.task!.to),
     ),
   ])
+  /** The speeches being written, unless the answers are still hidden. */
+  const independent = computed(() => {
+    const turnId = turn.value?.turnId
+    const ask = [...messages.value]
+      .reverse()
+      .find(
+        (message) =>
+          message.from === 'user' && (!turnId || message.turnId === turnId),
+      )
+    return ask?.answerMode === 'independent'
+  })
+  const streams = computed<GroupStreamView[]>(() => {
+    if (independent.value) return []
+    return Object.entries(live.value)
+      .filter(([, draft]) => draft.text.length > 0)
+      .map(([contactId, draft]) => ({ contactId, text: draft.text }))
+  })
   const asks = computed<GroupAsk[]>(() =>
     Object.entries(pending.value)
       .filter((entry): entry is [string, ControlInteraction] =>
@@ -384,6 +540,7 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     tools,
     pending,
     finished,
+    streams,
     asks,
     members,
     taskMembers,

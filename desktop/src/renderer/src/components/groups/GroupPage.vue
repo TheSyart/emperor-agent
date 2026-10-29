@@ -75,7 +75,12 @@ function onScroll(): void {
   pinned = element.scrollHeight - element.scrollTop - element.clientHeight < 48
 }
 watch(
-  () => [room.messages.value.length, room.asks.value.length],
+  () => [
+    room.messages.value.length,
+    room.asks.value.length,
+    room.streams.value.length,
+    room.streams.value.reduce((sum, stream) => sum + stream.text.length, 0),
+  ],
   async () => {
     if (!pinned) return
     await nextTick()
@@ -113,7 +118,7 @@ function openSettings(section: SettingsModalSection): void {
 }
 
 function backHome(): void {
-  void router.push({ name: 'contacts' }).catch(() => undefined)
+  void router.push({ name: 'groups' }).catch(() => undefined)
 }
 
 function stop(): void {
@@ -185,6 +190,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             :contacts="directory.contacts.value"
             :finished="room.finished.value"
             :asks="room.asks.value"
+            :streams="room.streams.value"
             @process="openProcess"
             @answer="room.answer"
             @cancel-ask="room.cancelAsk"

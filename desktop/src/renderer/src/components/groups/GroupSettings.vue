@@ -233,7 +233,7 @@ async function deleteGroup(): Promise<void> {
     ctx.showToast(
       `已删除「${current.title}」，可以在「设置 › 常规 › 已归档对话」里恢复`,
     )
-    await router.push({ name: 'contacts' }).catch(() => undefined)
+    await router.push({ name: 'groups' }).catch(() => undefined)
     await directory.refresh()
   } catch (error) {
     ctx.showError(error, '没有删除群聊')

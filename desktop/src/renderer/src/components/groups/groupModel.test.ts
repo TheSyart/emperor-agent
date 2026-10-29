@@ -12,6 +12,7 @@ import {
   isLongMessage,
   liveBarParts,
   memberStatusLine,
+  mentionSpans,
   planGroupSend,
   privateLabel,
   SEND_WAYS,
@@ -492,5 +493,45 @@ describe('the live bar and the members’ status', () => {
     expect(
       memberStatusLine(member('ct-gone', 'ct-gone', { missing: true }), base),
     ).toEqual({ text: '联系人已删除', tone: 'idle' })
+  })
+})
+
+describe('mentionSpans (GRP-20)', () => {
+  const names = ['研究员', 'Claude Code', 'Claude']
+
+  it('marks whole names after a word boundary, longest first', () => {
+    expect(mentionSpans('请 @研究员 看看', names)).toEqual([
+      { text: '请 ', mention: false },
+      { text: '@研究员', mention: true },
+      { text: ' 看看', mention: false },
+    ])
+    expect(mentionSpans('@Claude Code 在吗', names)).toEqual([
+      { text: '@Claude Code', mention: true },
+      { text: ' 在吗', mention: false },
+    ])
+  })
+
+  it('leaves e-mail addresses, partial names and @所有人 alone', () => {
+    expect(mentionSpans('a@b.com', names)).toEqual([
+      { text: 'a@b.com', mention: false },
+    ])
+    expect(mentionSpans('@研究员员', names)).toEqual([
+      { text: '@研究员员', mention: false },
+    ])
+    expect(mentionSpans('@所有人 看这里', names)).toEqual([
+      { text: '@所有人', mention: true },
+      { text: ' 看这里', mention: false },
+    ])
+  })
+
+  it('marks several mentions and returns plain text unchanged', () => {
+    expect(mentionSpans('@研究员 和 @Claude Code', names)).toEqual([
+      { text: '@研究员', mention: true },
+      { text: ' 和 ', mention: false },
+      { text: '@Claude Code', mention: true },
+    ])
+    expect(mentionSpans('没有点名', names)).toEqual([
+      { text: '没有点名', mention: false },
+    ])
   })
 })

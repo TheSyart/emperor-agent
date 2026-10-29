@@ -107,12 +107,12 @@ async function mount() {
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/contacts', name: 'contacts', component: stub },
+      { path: '/groups', name: 'groups', component: stub },
       { path: '/contacts/new', name: 'contact-new', component: stub },
       { path: '/groups/:groupId', name: 'group', component: stub },
     ],
   })
-  await router.push('/contacts')
+  await router.push('/groups')
   open.value = true
   app = createApp(() =>
     h('div', [

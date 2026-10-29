@@ -78,7 +78,7 @@ function previewStyle(view: SkinView): Record<string, string> {
 
 function picture(view: SkinView): string | null {
   if (!decorations.value) return null
-  return view.slots.hero ?? view.slots.sidebarFooter ?? null
+  return view.slots.hero ?? null
 }
 
 async function use(view: SkinView): Promise<void> {

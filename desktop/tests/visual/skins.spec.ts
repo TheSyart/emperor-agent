@@ -143,9 +143,10 @@ for (const theme of ['dark', 'light'] as const) {
   }) => {
     await chatHome(page, theme, 'yushufang')
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    // GRP-21: the sidebar's foot no longer draws a decoration.
     await expect(
       page.locator('img[data-skin-slot="sidebarFooter"]'),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(page.locator('img[data-skin-slot="hero"]')).toHaveCount(0)
     await expectBaseline(page, 'skins', `yushufang-home-${theme}`)
   })
@@ -168,7 +169,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     await expect(
       page.locator('img[data-skin-slot="sidebarFooter"]'),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(page.locator('img[data-skin-slot="hero"]')).toBeVisible()
     await expectBaseline(page, 'skins', `richang-home-${theme}`)
   })

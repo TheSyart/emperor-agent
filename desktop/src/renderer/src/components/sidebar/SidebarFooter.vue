@@ -11,8 +11,9 @@ import IconButton from '../ui/IconButton.vue'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppContext } from '../../composables/useAppContext'
+import { useContactBrowser } from '../../composables/useContactBrowser'
 import { useTheme } from '../../composables/useTheme'
-import { DsDark, DsLight, DsSettings } from '../icons/ds'
+import { DsDark, DsLight, DsSettings, DsUser } from '../icons/ds'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
 import Tooltip from '../ui/Tooltip.vue'
 import {
@@ -28,6 +29,7 @@ const route = useRoute()
 const router = useRouter()
 const settings = useSettingsRoute()
 const { theme, toggle } = useTheme()
+const contactBrowser = useContactBrowser()
 
 const pages = computed(() =>
   visibleSidebarPages(ctx.boot.value?.plugins ?? [], ctx.appMode.mode.value),
@@ -70,6 +72,18 @@ function go(entry: SidebarPageEntry): void {
         <component :is="entry.icon" :size="16" />
       </IconButton>
     </template>
+    <IconButton
+      v-if="ctx.appMode.mode.value === 'group'"
+      class="contacts"
+      label="联系人"
+      :selected="contactBrowser.active.value"
+      :aria-current="contactBrowser.active.value ? 'page' : undefined"
+      :side="rail ? 'right' : 'top'"
+      data-testid="sidebar-contacts-toggle"
+      @click="contactBrowser.toggle()"
+    >
+      <DsUser :size="rail ? 18 : 16" />
+    </IconButton>
     <IconButton
       class="theme"
       :label="themeLabel"

@@ -4,7 +4,9 @@
   "name": "日常",
   "author": "Emperor",
   "license": "仅限 Emperor 使用，不开放二次创作",
-  "description": "默认的颜色，浅色深色都有；侧栏底部是日常版小单，空白首页是卫衣版",
+  "description": "默认的颜色，浅色深色都有；空白首页是卫衣版。",
   "base": "auto",
-  "slots": { "sidebarFooter": "daily.webp", "hero": "hoodie.webp" }
+  "slots": {
+    "hero": "hoodie.webp"
+  }
 }

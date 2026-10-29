@@ -102,7 +102,7 @@ async function mount() {
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/contacts', name: 'contacts', component: GroupHome },
+      { path: '/groups', name: 'groups', component: GroupHome },
       { path: '/contacts/new', name: 'contact-new', component: stub },
       { path: '/contacts/:id', name: 'contact', component: stub },
       {
@@ -114,7 +114,7 @@ async function mount() {
       { path: '/groups/:groupId', name: 'group', component: stub },
     ],
   })
-  await router.push('/contacts')
+  await router.push('/groups')
   app = createApp(() => h(RouterView))
   app.use(router)
   app.provide(APP_CONTEXT_KEY, ctx as never)
@@ -240,7 +240,7 @@ describe('the Group home', () => {
     expect(router.currentRoute.value.fullPath).toBe(
       '/contacts/ct-reviewer00001',
     )
-    await router.push('/contacts')
+    await router.push('/groups')
     await flush()
     q('[data-person="new"]').click()
     await flush()

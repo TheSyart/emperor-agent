@@ -322,7 +322,7 @@ describe('switching (⌘1 / ⌘2 / ⌘3)', () => {
     const controller = createAppModeController(store, win.nav)
     await controller.switchTo('group')
     expect(store.mode.value).toBe('group')
-    expect(win.nav.openRoute).toHaveBeenCalledWith('contacts')
+    expect(win.nav.openRoute).toHaveBeenCalledWith('groups')
     expect(win.nav.openSession).not.toHaveBeenCalled()
     expect(win.nav.createDraft).not.toHaveBeenCalled()
     expect(win.routeSessionId.value).toBe('chat-1')
@@ -381,7 +381,7 @@ describe('⌘N per mode', () => {
       await import('../components/groups/newGroupDialog')
     newGroupDialog.open.value = false
     await createAppModeController(store, win.nav).newSession()
-    expect(win.nav.openRoute).toHaveBeenCalledWith('contacts')
+    expect(win.nav.openRoute).toHaveBeenCalledWith('groups')
     expect(win.nav.createDraft).not.toHaveBeenCalled()
     expect(newGroupDialog.open.value).toBe(true)
     newGroupDialog.open.value = false

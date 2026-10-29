@@ -201,6 +201,7 @@ async function mount() {
       { path: '/chat/:sessionId?', name: 'chat', component: stub },
       { path: '/contacts/:id', name: 'contact', component: stub },
       { path: '/contacts', name: 'contacts', component: stub },
+      { path: '/groups', name: 'groups', component: stub },
     ],
   })
   await router.push('/groups/grp-1')
@@ -285,6 +286,87 @@ describe('the group page', () => {
         .querySelector('[data-member-row="ct-rev"] [data-status]')
         ?.textContent?.trim(),
     ).toBe('执行中')
+  })
+
+  it('writes a member’s speech as it arrives, then lets the log replace it', async () => {
+    await mount()
+    emit({
+      event: 'group_turn_changed',
+      group_id: 'grp-1',
+      turn_id: 't1',
+      state: 'speaking',
+      speakers: ['ct-rev'],
+      spend: { usd: 0, tokens: 0 },
+    })
+    emit({
+      event: 'group_member_status',
+      group_id: 'grp-1',
+      contact_id: 'ct-rev',
+      status: 'thinking',
+    })
+    emit({
+      event: 'message_delta',
+      session_id: 'member-ct-rev',
+      delta: '先说结论：',
+    })
+    await flush()
+    const live = () => page().querySelector('[data-group-streaming]')
+    expect(live()?.textContent).toContain('审稿人')
+    expect(live()?.textContent).toContain('先说结论：')
+    expect(live()?.textContent).toContain('发言中')
+
+    // A tool call ends the prose so far; the answer after it streams.
+    emit({ event: 'tool_call', session_id: 'member-ct-rev', name: 'read' })
+    await flush()
+    expect(live()).toBeNull()
+    emit({
+      event: 'message_delta',
+      session_id: 'member-ct-rev',
+      delta: '查完了。',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await flush()
+    expect(live()?.textContent).toContain('查完了。')
+
+    // The final group/message lands: the draft makes way for the log row.
+    history = [
+      ...history,
+      message('m-live', 'ct-rev', '查完了。', { at: Date.now() }),
+    ]
+    emit({ event: 'groups_changed', group_id: 'grp-1' })
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    await flush()
+    expect(live()).toBeNull()
+    expect(page().textContent).toContain('查完了。')
+  })
+
+  it('keeps independent answers hidden while they are being written', async () => {
+    history = [
+      message('m1', 'user', '@审稿人 独立回答', { answerMode: 'independent' }),
+    ]
+    await mount()
+    emit({
+      event: 'group_turn_changed',
+      group_id: 'grp-1',
+      turn_id: 't1',
+      state: 'speaking',
+      speakers: ['ct-rev'],
+      spend: { usd: 0, tokens: 0 },
+    })
+    emit({
+      event: 'group_member_status',
+      group_id: 'grp-1',
+      contact_id: 'ct-rev',
+      status: 'thinking',
+    })
+    emit({
+      event: 'message_delta',
+      session_id: 'member-ct-rev',
+      delta: '这是我的独立答案',
+    })
+    await flush()
+    expect(page().querySelector('[data-group-streaming]')).toBeNull()
+    expect(page().textContent).not.toContain('这是我的独立答案')
   })
 
   it('stops the turn with 停止 and with ⌘.', async () => {

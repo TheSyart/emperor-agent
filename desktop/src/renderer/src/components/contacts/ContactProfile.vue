@@ -66,6 +66,15 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+
+/**
+ * `embedded` draws the profile as the right pane of the contacts page
+ * (GRP-21): no page background, no crumb bar, no second scroll or width
+ * cap. A route of its own is still the full page.
+ */
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
+  embedded: false,
+})
 const ctx = useAppContext()
 const sessionStore = useSession()
 const directory = useContactDirectory()
@@ -499,7 +508,11 @@ function backHome() {
 </script>
 
 <template>
-  <div class="contact-profile" data-contact-profile>
+  <div
+    class="contact-profile"
+    :data-embedded="props.embedded || undefined"
+    data-contact-profile
+  >
     <header class="bar">
       <span class="crumb">联系人</span>
       <span v-if="contact" class="crumb-current">/ {{ contact.name }}</span>
@@ -511,7 +524,7 @@ function backHome() {
         title="这个联系人已删除"
         description="它的单聊还在，可以查看，不能再发消息；群里的历史消息也都留着。"
       >
-        <Button size="sm" @click="backHome">回到群聊首页</Button>
+        <Button size="sm" @click="backHome">回到联系人列表</Button>
       </EmptyState>
       <Notice
         v-else-if="loadError"
@@ -822,6 +835,26 @@ function backHome() {
   height: 100%;
   background: rgb(var(--surface-base));
   color: rgb(var(--text-1));
+}
+
+.contact-profile[data-embedded] {
+  height: auto;
+  min-height: 0;
+  flex: none;
+  background: transparent;
+}
+
+.contact-profile[data-embedded] .bar {
+  display: none;
+}
+
+.contact-profile[data-embedded] .scroll {
+  padding: 0;
+  overflow: visible;
+}
+
+.contact-profile[data-embedded] .profile {
+  max-width: none;
 }
 
 .bar {

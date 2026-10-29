@@ -529,3 +529,44 @@ export function mentionSegments(
     segments.push({ text: text.slice(last), mention: false })
   return segments
 }
+
+/** Where a name typed after @ ends: the same stops the group home uses. */
+const NAME_END = /[\s，。！？、；：,.!?;:（）()「」『』"'“”‘’]/u
+
+/** A character before @ that lets it start a mention (not a word). */
+function mentionStarts(text: string, at: number): boolean {
+  if (at === 0) return true
+  return !/[\p{L}\p{N}_]/u.test(text[at - 1]!)
+}
+
+/**
+ * The composer's own cut of the draft (GRP-20): only a whole member name
+ * after a word boundary counts, so `a@b.com` and `@研究员员` stay text.
+ * The mirror paints these; sending still goes by the plain text.
+ */
+export function mentionSpans(
+  text: string,
+  names: Iterable<string>,
+): TextSegment[] {
+  const known = [...new Set([...names, '所有人'].filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  )
+  const segments: TextSegment[] = []
+  let last = 0
+  for (let at = text.indexOf('@'); at >= 0; at = text.indexOf('@', at + 1)) {
+    if (at < last || !mentionStarts(text, at)) continue
+    const rest = text.slice(at + 1)
+    const name = known.find(
+      (item) =>
+        rest.startsWith(item) &&
+        (rest.length === item.length || NAME_END.test(rest[item.length]!)),
+    )
+    if (!name) continue
+    if (at > last) segments.push({ text: text.slice(last, at), mention: false })
+    segments.push({ text: `@${name}`, mention: true })
+    last = at + name.length + 1
+  }
+  if (last < text.length)
+    segments.push({ text: text.slice(last), mention: false })
+  return segments
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * GroupHome — the Group mode's home, `/contacts` (GRP-05, 预览 A, D12):
+ * GroupHome — the Group mode's home, `/groups` (GRP-05, 预览 A, D12; moved from
+ * `/contacts` in GRP-21):
  * 「今天找谁帮忙？」, a composer for @-mentioning contacts, then the
  * contacts and the recent groups.
  *
@@ -136,7 +137,7 @@ async function send() {
         const target = await sendExternalChat(session.id, message)
         text.value = ''
         // Sent; a user who already went elsewhere stays there (GRP-19).
-        if (router.currentRoute.value.name === 'contacts')
+        if (router.currentRoute.value.name === 'groups')
           await router.push(target)
         return
       }

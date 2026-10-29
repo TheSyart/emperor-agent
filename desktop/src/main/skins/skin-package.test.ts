@@ -360,7 +360,7 @@ describe('the official skins', () => {
       tokens: {},
       fonts: { heading: 'system' },
     })
-    expect(Object.keys(skins.yushufang!.slots)).toEqual(['sidebarFooter'])
+    expect(Object.keys(skins.yushufang!.slots)).toEqual([])
     expect(skins.zhupi).toMatchObject({
       name: '朱批',
       base: 'light',
@@ -374,9 +374,6 @@ describe('the official skins', () => {
       base: 'auto',
       tokens: {},
     })
-    expect(Object.keys(skins.richang!.slots).sort()).toEqual([
-      'hero',
-      'sidebarFooter',
-    ])
+    expect(Object.keys(skins.richang!.slots).sort()).toEqual(['hero'])
   })
 })
