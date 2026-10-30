@@ -31,17 +31,17 @@ describe('the experience store (CP-04)', () => {
     const added = await experiences.add(
       'ct-a',
       [
-        { text: '先跑测试再下结论', evidence: [{ kind: 'tool_result', ref: 'c1' }], status: 'active' },
+        {
+          text: '先跑测试再下结论',
+          evidence: [{ kind: 'tool_result', ref: 'c1' }],
+          status: 'active',
+        },
         { text: '含糊的猜测', status: 'candidate' },
       ],
       SOURCE,
     )
     expect(added.map((entry) => entry.status)).toEqual(['active', 'candidate'])
-    const again = await experiences.add(
-      'ct-a',
-      [{ text: '不该重复' }],
-      SOURCE,
-    )
+    const again = await experiences.add('ct-a', [{ text: '不该重复' }], SOURCE)
     expect(again).toEqual([])
     expect((await experiences.list('ct-a')).experiences).toHaveLength(2)
   })
@@ -51,15 +51,25 @@ describe('the experience store (CP-04)', () => {
     await experiences.add(
       'ct-a',
       [
-        { text: '短经验', status: 'active', evidence: [{ kind: 'tool_result', ref: 'c1' }] },
-        { text: '很长的经验'.repeat(100), status: 'active', evidence: [{ kind: 'tool_result', ref: 'c2' }] },
+        {
+          text: '短经验',
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'c1' }],
+        },
+        {
+          text: '很长的经验'.repeat(100),
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'c2' }],
+        },
       ],
       SOURCE,
     )
     const listing = await experiences.list('ct-a')
     const text = recallText(listing.experiences, { kind: 'contact' }, 40)
     expect(text).toContain('短经验')
-    expect(text).not.toContain('很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验')
+    expect(text).not.toContain(
+      '很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验很长的经验',
+    )
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(40)
   })
 
@@ -68,15 +78,31 @@ describe('the experience store (CP-04)', () => {
     await experiences.add(
       'ct-a',
       [
-        { text: '群里先复述任务', status: 'active', scope: { kind: 'group', id: 'g1' }, evidence: [{ kind: 'tool_result', ref: 'c1' }] },
-        { text: '这次只对这一段有效', status: 'active', scope: { kind: 'session', id: 's9' }, evidence: [{ kind: 'tool_result', ref: 'c2' }] },
+        {
+          text: '群里先复述任务',
+          status: 'active',
+          scope: { kind: 'group', id: 'g1' },
+          evidence: [{ kind: 'tool_result', ref: 'c1' }],
+        },
+        {
+          text: '这次只对这一段有效',
+          status: 'active',
+          scope: { kind: 'session', id: 's9' },
+          evidence: [{ kind: 'tool_result', ref: 'c2' }],
+        },
       ],
       SOURCE,
     )
     const listing = await experiences.list('ct-a')
-    expect(recallText(listing.experiences, { kind: 'group', id: 'g2' })).toBe('')
-    expect(recallText(listing.experiences, { kind: 'group', id: 'g1' })).toContain('群里先复述任务')
-    expect(recallText(listing.experiences, { kind: 'session', id: 's9' })).toContain('只对这一段有效')
+    expect(recallText(listing.experiences, { kind: 'group', id: 'g2' })).toBe(
+      '',
+    )
+    expect(
+      recallText(listing.experiences, { kind: 'group', id: 'g1' }),
+    ).toContain('群里先复述任务')
+    expect(
+      recallText(listing.experiences, { kind: 'session', id: 's9' }),
+    ).toContain('只对这一段有效')
     expect(recallText(listing.experiences, { kind: 'contact' })).toBe('')
   })
 
@@ -84,7 +110,13 @@ describe('the experience store (CP-04)', () => {
     const experiences = store()
     const [entry] = await experiences.add(
       'ct-a',
-      [{ text: '一条经验', status: 'active', evidence: [{ kind: 'tool_result', ref: 'c1' }] }],
+      [
+        {
+          text: '一条经验',
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'c1' }],
+        },
+      ],
       SOURCE,
     )
     await experiences.remove('ct-a', entry!.id)
@@ -99,9 +131,15 @@ describe('the experience store (CP-04)', () => {
   it('imports old feedback once, waiting for confirmation', async () => {
     const experiences = store()
     await experiences.importLegacy('ct-a', [
-      { rawText: '2026-10-20 · 👍 · 「先给结论」', rating: 'up', date: '2026-10-20' },
+      {
+        rawText: '2026-10-20 · 👍 · 「先给结论」',
+        rating: 'up',
+        date: '2026-10-20',
+      },
     ])
-    await experiences.importLegacy('ct-a', [{ rawText: '不该重复', rating: null }])
+    await experiences.importLegacy('ct-a', [
+      { rawText: '不该重复', rating: null },
+    ])
     const listing = await experiences.list('ct-a')
     expect(listing.legacy).toHaveLength(1)
     expect(listing.legacy[0]!.status).toBe('needs_confirmation')
@@ -125,7 +163,12 @@ describe('the experience collector (CP-04)', () => {
     const experiences = store()
     const complete = vi.fn(async () =>
       JSON.stringify([
-        { text: '改完先跑测试', conditions: '改代码后', scope: 'contact', evidenceRefs: ['c1'] },
+        {
+          text: '改完先跑测试',
+          conditions: '改代码后',
+          scope: 'contact',
+          evidenceRefs: ['c1'],
+        },
         { text: '猜的', scope: 'contact', evidenceRefs: ['missing'] },
       ]),
     )
@@ -142,7 +185,9 @@ describe('the experience collector (CP-04)', () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     const listing = await experiences.list('ct-a')
-    expect(listing.experiences.map((entry) => [entry.text, entry.status])).toEqual([
+    expect(
+      listing.experiences.map((entry) => [entry.text, entry.status]),
+    ).toEqual([
       ['改完先跑测试', 'active'],
       ['猜的', 'candidate'],
     ])

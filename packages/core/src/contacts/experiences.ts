@@ -11,10 +11,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import {
-  durableReplace,
-  type PersistenceAdapter,
-} from '../store/persistence'
+import { durableReplace, type PersistenceAdapter } from '../store/persistence'
 
 export const EXPERIENCES_SCHEMA_VERSION = 1
 export const EXPERIENCE_RECALL_BYTES = 4 * 1024
@@ -23,11 +20,7 @@ export const EXPERIENCE_TEXT_CHARS = 500
 export const EXPERIENCE_CONDITION_CHARS = 300
 
 export type ExperienceStatus =
-  | 'candidate'
-  | 'active'
-  | 'superseded'
-  | 'disabled'
-  | 'deleted'
+  'candidate' | 'active' | 'superseded' | 'disabled' | 'deleted'
 export type ExperienceScopeKind = 'contact' | 'project' | 'group' | 'session'
 
 export interface ExperienceScope {
@@ -295,10 +288,7 @@ export class ContactExperienceStore {
           id: experienceId(),
           contactId,
           text,
-          conditions: clip(
-            draft.conditions ?? '',
-            EXPERIENCE_CONDITION_CHARS,
-          ),
+          conditions: clip(draft.conditions ?? '', EXPERIENCE_CONDITION_CHARS),
           scope: draft.scope ?? { kind: 'contact' },
           source: {
             sessionId: source.sessionId,
@@ -338,10 +328,7 @@ export class ContactExperienceStore {
       if (patch.text !== undefined)
         entry.text = clip(patch.text, EXPERIENCE_TEXT_CHARS)
       if (patch.conditions !== undefined)
-        entry.conditions = clip(
-          patch.conditions,
-          EXPERIENCE_CONDITION_CHARS,
-        )
+        entry.conditions = clip(patch.conditions, EXPERIENCE_CONDITION_CHARS)
       if (patch.scope !== undefined) entry.scope = { ...patch.scope }
       if (patch.status !== undefined) entry.status = patch.status
       entry.updatedAt = this.now()

@@ -64,7 +64,9 @@ function clip(text: string, chars: number): string {
 }
 
 /** The host-checked evidence in this turn. */
-export function turnEvidence(items: readonly ExperienceTurnItem[]): ExperienceEvidence[] {
+export function turnEvidence(
+  items: readonly ExperienceTurnItem[],
+): ExperienceEvidence[] {
   const evidence: ExperienceEvidence[] = []
   for (const item of items) {
     if (item.role === 'tool' && item.failed !== true && item.text.trim())
@@ -141,9 +143,7 @@ export class ContactExperienceCollector {
    */
   collect(turn: ExperienceTurn): void {
     const previous = this.queues.get(turn.contactId) ?? Promise.resolve()
-    const run = previous
-      .then(() => this.run(turn))
-      .catch(() => undefined)
+    const run = previous.then(() => this.run(turn)).catch(() => undefined)
     this.queues.set(turn.contactId, run)
   }
 
@@ -194,14 +194,12 @@ export class ContactExperienceCollector {
       if (!text) continue
       const refs = Array.isArray(item.evidenceRefs)
         ? item.evidenceRefs.filter(
-            (ref): ref is string =>
-              typeof ref === 'string' && allowed.has(ref),
+            (ref): ref is string => typeof ref === 'string' && allowed.has(ref),
           )
         : []
       drafts.push({
         text,
-        conditions:
-          typeof item.conditions === 'string' ? item.conditions : '',
+        conditions: typeof item.conditions === 'string' ? item.conditions : '',
         scope: scopeOf(item.scope, turn.scope),
         evidence: refs.map((ref) => allowed.get(ref)!),
         status: refs.length ? 'active' : 'candidate',

@@ -77,6 +77,12 @@ describe('builtin contacts (card test 1)', () => {
       ...BUILTIN_CONTACT_IDS,
     ])
 
+    for (const contact of listing.contacts) {
+      expect(contact.knowledge).toEqual([])
+      expect(contact.skills).toEqual([])
+      expect(contact.mcp).toEqual([])
+    }
+
     const [emperor, claude, codex] = listing.contacts
     expect(emperor).toMatchObject({
       kind: 'local',
