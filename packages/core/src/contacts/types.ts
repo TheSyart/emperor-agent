@@ -19,7 +19,7 @@ export const BUILTIN_CONTACT_IDS = [
 ] as const
 export type BuiltinContactId = (typeof BUILTIN_CONTACT_IDS)[number]
 
-export const CONTACTS_SCHEMA_VERSION = 2
+export const CONTACTS_SCHEMA_VERSION = 3
 
 export interface ContactsFile {
   schemaVersion: typeof CONTACTS_SCHEMA_VERSION
@@ -125,12 +125,47 @@ export interface GroupHabit {
   length: ReplyLength
 }
 
+/** V021–schema 2 shape; read only to migrate into {@link ContactKnowledge}. */
 export type KnowledgeRef =
   /** An absolute path; must exist when saved (and is checked again at run time). */
   | { kind: 'file' | 'folder'; path: string; pinned?: boolean }
   /** https only. */
   | { kind: 'url'; url: string }
   | { kind: 'skill'; name: string }
+
+/** `on_demand`: the contact reads it when the work needs it; `pinned`: inlined (8 KiB together). */
+export type KnowledgeUse = 'on_demand' | 'pinned'
+
+/** A reference the contact works with (schema 3): its own list, not the role card. */
+export type ContactKnowledge =
+  | {
+      id: string
+      kind: 'file' | 'folder'
+      path: string
+      use: KnowledgeUse
+    }
+  | { id: string; kind: 'url'; url: string; use: 'on_demand' }
+  | {
+      id: string
+      kind: 'note'
+      title: string
+      text: string
+      use: KnowledgeUse
+    }
+
+/** A Skill chosen for the contact (schema 3); resolved against the live catalog. */
+export interface ContactSkillSelection {
+  id: string
+  /** Where the Skill came from (`user`, `project`, `plugin:<id>`, …). */
+  sourceId: string
+  name: string
+}
+
+/** MCP servers and the tools of each that the contact may use (schema 3). */
+export interface ContactMcpSelection {
+  serverId: string
+  toolNames: string[]
+}
 
 export interface RoleExample {
   input: string
@@ -146,7 +181,8 @@ export interface RoleCard {
   playbook: string
   /** 边界：不做什么、何时交还。 */
   boundaries: string
-  knowledge: KnowledgeRef[]
+  /** Schema 2 only; schema 3 reads {@link Contact.knowledge}. */
+  knowledge?: KnowledgeRef[]
   examples?: RoleExample[]
   /** 试用台的样例任务。 */
   trialTask?: string
@@ -180,6 +216,12 @@ export interface Contact {
   /** At most 3. */
   domains: Domain[]
   role: RoleCard
+  /** 知识: files, folders, urls and the user's notes (schema 3). */
+  knowledge?: ContactKnowledge[]
+  /** 工作技能 Skill (schema 3); the runtime must resolve them. */
+  skills?: ContactSkillSelection[]
+  /** 外部连接 MCP, down to tool names (schema 3). */
+  mcp?: ContactMcpSelection[]
   /** External contacts keep {@link EXTERNAL_CAPABILITIES}: their executor's settings rule. */
   capabilities: Capabilities
   groupHabit: GroupHabit
@@ -204,6 +246,11 @@ export const CONTACT_LIMITS = Object.freeze({
   playbook: 4000,
   boundaries: 2000,
   knowledge: 20,
+  knowledgeNote: 4000,
+  knowledgeTitle: 100,
+  skills: 20,
+  mcpServers: 8,
+  mcpTools: 64,
   examples: 3,
   example: 2000,
   trialTask: 1000,
@@ -268,6 +315,9 @@ export interface ContactInput {
   intro?: string
   domains?: Domain[]
   role?: Partial<RoleCard>
+  knowledge?: ContactKnowledge[]
+  skills?: ContactSkillSelection[]
+  mcp?: ContactMcpSelection[]
   capabilities?: Partial<Capabilities>
   groupHabit?: Partial<GroupHabit>
   memory?: { enabled: boolean }
@@ -281,6 +331,9 @@ export interface ContactPatch {
   intro?: string
   domains?: Domain[]
   role?: Partial<RoleCard>
+  knowledge?: ContactKnowledge[]
+  skills?: ContactSkillSelection[]
+  mcp?: ContactMcpSelection[]
   capabilities?: Partial<Capabilities>
   groupHabit?: Partial<GroupHabit>
   memory?: { enabled: boolean }
@@ -356,6 +409,31 @@ export interface ContactDraft {
 export interface ContactDraftInput extends Partial<Omit<ContactInput, 'name'>> {
   id?: ContactId
   name?: string
+}
+
+/** What a contact's selected Skill / MCP looks like on this install (CP-02). */
+export interface ContactCapabilityView {
+  /** The tools it would see; null: not narrowed (Emperor, external contacts). */
+  tools: string[] | null
+  skills: {
+    id: string
+    sourceId: string
+    name: string
+    available: boolean
+    reason: string
+  }[]
+  mcp: {
+    serverId: string
+    available: boolean
+    reason: string
+    tools: { name: string; available: boolean }[]
+  }[]
+}
+
+/** A saved contact or an unsaved draft to resolve capabilities for. */
+export interface ContactCapabilityInput {
+  id?: ContactId
+  draft?: ContactDraftInput
 }
 
 /** The compiled prompt of a draft, exactly as a session would get it. */

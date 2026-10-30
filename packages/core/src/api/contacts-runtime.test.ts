@@ -109,6 +109,69 @@ function lastToolResult(request: GenerateOptions): string {
   return JSON.stringify(last?.content ?? [])
 }
 
+describe('contact experiences (CP-04)', () => {
+  it('recalls an active experience in a later contact session', async () => {
+    const fixture = await setup([{ text: 'ok' }])
+    const { api, adapter } = fixture
+    const person = await contact(api, { name: '审稿人' })
+    const { ContactExperienceStore } = await import('../contacts/experiences')
+    const experiences = new ContactExperienceStore({
+      stateRoot: fixture.stateRoot,
+    })
+    await experiences.add(
+      person.id,
+      [
+        {
+          text: '先跑测试再下结论',
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'call-1' }],
+        },
+      ],
+      {
+        sessionId: 'earlier',
+        turnId: 'turn-1',
+        messageIds: ['m1'],
+        roleVersion: person.version,
+      },
+    )
+    await api.contacts.experiences.list({ id: person.id })
+    const id = contactSession(api, person.id)
+    await api.host.submit({ sessionId: id, content: '再审一次' })
+    expect(JSON.stringify(adapter.requests[0])).toContain('先跑测试再下结论')
+  })
+})
+
+describe('contact memory isolation (CP-03)', () => {
+  it('never puts the main memory or user profile into a contact session', async () => {
+    const fixture = await setup([{ text: 'ok' }])
+    const { api, adapter } = fixture
+    writeFileSync(
+      api.host.kept.sharedMemory.memoryFile,
+      '# Memory\n- shared fact only the main chat should see\n',
+    )
+    const person = await contact(api, { name: '审稿人' })
+    const id = contactSession(api, person.id)
+    await api.host.submit({ sessionId: id, content: '你好' })
+    const text = JSON.stringify(adapter.requests[0]!.messages)
+    expect(text).not.toContain('shared fact only the main chat should see')
+    expect(text).not.toContain('USER.md')
+  })
+
+  it('keeps the main memory for an ordinary Chat session', async () => {
+    const fixture = await setup([{ text: 'ok' }])
+    const { api, adapter } = fixture
+    writeFileSync(
+      api.host.kept.sharedMemory.memoryFile,
+      '# Memory\n- shared fact\n',
+    )
+    const id = plainSession(api)
+    await api.host.submit({ sessionId: id, content: '你好' })
+    expect(JSON.stringify(adapter.requests[0]!.messages)).toContain(
+      'shared fact',
+    )
+  })
+})
+
 describe('a session without a contact', () => {
   it('keeps today’s system prompt and tools byte for byte (golden)', async () => {
     const fixture = await setup([{ text: 'ok' }])

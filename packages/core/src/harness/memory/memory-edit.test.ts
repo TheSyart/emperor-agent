@@ -5,13 +5,14 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '../agent/agent'
 import type { ApprovalOutcome } from '../approval/service'
 import { ToolRegistry } from '../tools/registry'
-import { createMemoryTool, type MemoryDeps } from './memory'
+import { createMemoryTool, memoryMiddleware, type MemoryDeps } from './memory'
 
 function setup(
   options: {
     memory?: string
     mode?: 'read-only' | 'workspace-write' | 'danger-full-access'
     outcome?: ApprovalOutcome
+    contact?: boolean
   } = {},
 ) {
   let memory = options.memory ?? ''
@@ -26,7 +27,10 @@ function setup(
       writeUser: () => undefined,
     } as unknown as MemoryDeps['memory'],
     projects: {} as MemoryDeps['projects'],
-    sessionEntry: () => null,
+    sessionEntry: () =>
+      options.contact
+        ? ({ contact_id: 'ct-x', surface: 'contact', mode: 'chat' } as never)
+        : null,
     permissionMode: () => options.mode ?? 'workspace-write',
     approval: { request },
   }
@@ -52,6 +56,43 @@ function setup(
   }
   return { call, request, memory: () => memory }
 }
+
+describe('a contact session (CP-03)', () => {
+  it('does not inject the main memory baseline', () => {
+    const deps: MemoryDeps = {
+      memory: {
+        readMemory: () => 'shared fact',
+        readUser: () => 'user profile',
+      } as unknown as MemoryDeps['memory'],
+      projects: {} as MemoryDeps['projects'],
+      sessionEntry: () =>
+        ({ contact_id: 'ct-x', surface: 'contact', mode: 'chat' }) as never,
+    }
+    const append = vi.fn()
+    const agent = {
+      id: 's1',
+      owner: undefined,
+      session: { append, lastOf: () => undefined },
+    } as unknown as Agent
+    const run = memoryMiddleware(deps) as unknown as (input: {
+      agent: Agent
+      messages: unknown[]
+      step: number
+    }) => unknown
+    expect(run({ agent, messages: [], step: 1 })).toBeUndefined()
+    expect(append).not.toHaveBeenCalled()
+  })
+
+  it('may not edit the main memory', async () => {
+    const { call } = setup({ contact: true, memory: 'shared' })
+    const result = await call({
+      target: 'memory',
+      new_string: 'a contact fact',
+    })
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('own experiences')
+  })
+})
 
 describe('memory_edit', () => {
   it('writes $$ and $& literally', async () => {

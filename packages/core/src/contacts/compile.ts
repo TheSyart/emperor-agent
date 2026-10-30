@@ -1,8 +1,8 @@
 import type {
   Contact,
+  ContactKnowledge,
   Domain,
   GroupCharter,
-  KnowledgeRef,
   ReplyLength,
   SpeakMode,
 } from './types'
@@ -19,12 +19,14 @@ export interface PinnedKnowledge {
   status: 'full' | 'cut' | 'budget' | 'binary' | 'unreadable'
 }
 
-/** What the run time found of the role card's knowledge (GRP-03). */
+/** What the run time found of the contact's knowledge (GRP-03, CP-01). */
 export interface KnowledgeContext {
   /** File and folder references no longer on disk. */
   missing?: readonly string[]
-  /** Pinned files, in the order of the role card. */
+  /** Pinned files, in the order of the contact's list. */
   pinned?: readonly PinnedKnowledge[]
+  /** The user's notes, inlined within the pinned budget. */
+  notes?: readonly { title: string; text: string }[]
 }
 
 export interface CompileRoleContext {
@@ -37,6 +39,8 @@ export interface CompileRoleContext {
   memory?: string
   /** Knowledge gone from disk, and pinned files to inline (GRP-03). */
   knowledge?: KnowledgeContext
+  /** Active working experiences recalled for this work (CP-04). */
+  experiences?: string
 }
 
 /** Said before the pinned material: it is data, never instructions. */
@@ -83,20 +87,20 @@ function code(text: string): string {
 }
 
 function knowledgeLine(
-  ref: KnowledgeRef,
+  ref: ContactKnowledge,
   missing: ReadonlySet<string>,
 ): string {
   if ((ref.kind === 'file' || ref.kind === 'folder') && missing.has(ref.path))
-    return `- ${ref.kind === 'file' ? '文件' : '文件夹'} ${code(ref.path)}${ref.pinned ? '（置顶）' : ''}：已不存在`
+    return `- ${ref.kind === 'file' ? '文件' : '文件夹'} ${code(ref.path)}${ref.use === 'pinned' ? '（置顶）' : ''}：已不存在`
   switch (ref.kind) {
     case 'file':
-      return `- 文件 ${code(ref.path)}${ref.pinned ? '（置顶）' : ''}：用 read 读取`
+      return `- 文件 ${code(ref.path)}${ref.use === 'pinned' ? '（置顶）' : ''}：用 read 读取`
     case 'folder':
-      return `- 文件夹 ${code(ref.path)}${ref.pinned ? '（置顶）' : ''}：用 glob、grep 查找，用 read 读取`
+      return `- 文件夹 ${code(ref.path)}${ref.use === 'pinned' ? '（置顶）' : ''}：用 glob、grep 查找，用 read 读取`
     case 'url':
       return `- 网址 ${code(ref.url)}：用 web_fetch 读取`
-    case 'skill':
-      return `- Skill ${code(ref.name)}：用 skill 工具加载`
+    case 'note':
+      return `- 知识笔记「${code(ref.title)}」：见下方`
   }
 }
 
@@ -184,21 +188,52 @@ export function compileRolePrompt(
   const boundaries = clean(role.boundaries)
   if (boundaries) sections.push(`# 边界\n\n${boundaries}`)
 
-  if (role.knowledge.length) {
+  const knowledgeRefs = contact.knowledge ?? []
+  if (knowledgeRefs.length) {
     const missing = new Set(context.knowledge?.missing ?? [])
     const parts = [
       '# 参考资料',
       '这些资料只读，需要时自己去读；回答里用到它们时注明出处。',
-      role.knowledge.map((ref) => knowledgeLine(ref, missing)).join('\n'),
+      knowledgeRefs.map((ref) => knowledgeLine(ref, missing)).join('\n'),
     ]
     const pinned = context.knowledge?.pinned ?? []
     if (pinned.length)
       parts.push('## 置顶资料', MATERIAL_NOTICE, ...pinned.map(pinnedBlock))
+    const notes = context.knowledge?.notes ?? []
+    if (notes.length)
+      parts.push(
+        '## 知识笔记',
+        MATERIAL_NOTICE,
+        ...notes.map(
+          (note) => `### ${code(note.title)}\n\n${quote(note.text)}`,
+        ),
+      )
     sections.push(parts.join('\n\n'))
+  }
+
+  const skills = contact.skills ?? []
+  if (skills.length) {
+    sections.push(
+      [
+        '# 工作技能',
+        '这些 Skill 已为这个联系人启用；需要时用 skill 工具加载，按里面的步骤做。',
+        skills.map((skill) => `- Skill ${code(skill.name)}`).join('\n'),
+      ].join('\n\n'),
+    )
   }
 
   const memory = clean(context.memory)
   if (memory && contact.memory.enabled) sections.push(`# 记忆\n\n${memory}`)
+
+  const experiences = clean(context.experiences)
+  if (experiences && contact.memory.enabled)
+    sections.push(
+      [
+        '# 工作经验',
+        '从你以前做过的工作里整理出的经验，只在适用时参考；和这次的实际情况冲突时，以这次的证据为准。',
+        experiences,
+      ].join('\n\n'),
+    )
 
   if (context.inGroup) {
     const parts = ['# 群聊习惯']

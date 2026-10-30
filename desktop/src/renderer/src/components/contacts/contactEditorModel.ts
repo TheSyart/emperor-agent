@@ -17,7 +17,10 @@ import type {
   ContactDomain,
   ContactDraftInput,
   ContactGroupHabit,
+  ContactKnowledge,
+  ContactMcpSelection,
   ContactRoleCard,
+  ContactSkillSelection,
   ContactTemplate,
   ContactToolPreset,
   DraftSection,
@@ -67,6 +70,9 @@ export interface EditorDraft {
   intro: string
   domains: ContactDomain[]
   role: ContactRoleCard
+  knowledge: ContactKnowledge[]
+  skills: ContactSkillSelection[]
+  mcp: ContactMcpSelection[]
   capabilities: ContactCapabilities
   groupHabit: ContactGroupHabit
   memory: { enabled: boolean }
@@ -110,7 +116,6 @@ function emptyRole(): ContactRoleCard {
     deliverable: '',
     playbook: '',
     boundaries: '',
-    knowledge: [],
   }
 }
 
@@ -124,6 +129,9 @@ export function emptyDraft(): EditorDraft {
     intro: '',
     domains: [],
     role: emptyRole(),
+    knowledge: [],
+    skills: [],
+    mcp: [],
     capabilities: {
       model: 'inherit',
       tools: { preset: 'read_only' },
@@ -206,6 +214,9 @@ export function draftFromContact(contact: Contact): EditorDraft {
     intro: contact.intro,
     domains: [...contact.domains],
     role: clone(contact.role),
+    knowledge: clone(contact.knowledge ?? []),
+    skills: clone(contact.skills ?? []),
+    mcp: clone(contact.mcp ?? []),
     capabilities: clone(contact.capabilities),
     groupHabit: { ...contact.groupHabit },
     memory: { ...contact.memory },
@@ -465,7 +476,14 @@ function fields(draft: EditorDraft) {
     intro: draft.intro,
     domains: draft.domains,
     role: draft.role,
-    ...(draft.kind === 'external' ? {} : { capabilities: draft.capabilities }),
+    ...(draft.kind === 'external'
+      ? {}
+      : {
+          knowledge: draft.knowledge,
+          skills: draft.skills,
+          mcp: draft.mcp,
+          capabilities: draft.capabilities,
+        }),
     groupHabit: draft.groupHabit,
     memory: draft.memory,
   }

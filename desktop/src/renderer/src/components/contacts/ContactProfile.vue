@@ -23,6 +23,9 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type {
   Contact,
+  ContactCapabilityView,
+  ContactExperience,
+  ContactExperienceListing,
   ContactMemoryListing,
   ContactStats,
   ContactVersionEntry,
@@ -86,6 +89,8 @@ const loadError = ref('')
 const stats = ref<ContactStats | null>(null)
 const saved = ref<ContactVersionEntry[]>([])
 const memory = ref<ContactMemoryListing | null>(null)
+const experiences = ref<ContactExperienceListing | null>(null)
+const capabilityView = ref<ContactCapabilityView | null>(null)
 const tab = ref('role')
 /** The two versions 版本 compares (null: the previous one, the current one). */
 const compareFrom = ref<number | null>(null)
@@ -93,15 +98,26 @@ const compareTo = ref<number | null>(null)
 let generation = 0
 
 async function loadNumbers(contactId: string, run: number) {
-  const [nextStats, nextVersions, nextMemory] = await Promise.all([
-    core('contacts.stats', { id: contactId }).catch(() => null),
-    core('contacts.versions', { id: contactId }).catch(() => []),
-    core('contacts.memory.list', { contactId }).catch(() => null),
-  ])
+  const [nextStats, nextVersions, nextMemory, nextExperiences, nextCaps] =
+    await Promise.all([
+      core('contacts.stats', { id: contactId }).catch(() => null),
+      core('contacts.versions', { id: contactId }).catch(() => []),
+      core('contacts.memory.list', { contactId }).catch(() => null),
+      core('contacts.experiences.list', { id: contactId }).catch(() => null),
+      core('contacts.capabilities.resolve', { id: contactId }).catch(
+        () => null,
+      ),
+    ])
   if (run !== generation) return
   stats.value = nextStats
   saved.value = Array.isArray(nextVersions) ? nextVersions : []
   memory.value = nextMemory
+  experiences.value =
+    nextExperiences && Array.isArray(nextExperiences.experiences)
+      ? nextExperiences
+      : null
+  capabilityView.value =
+    nextCaps && Array.isArray(nextCaps.skills) ? nextCaps : null
 }
 
 async function load() {
@@ -323,6 +339,10 @@ const roleSections = computed(() => {
   ].filter((section) => section.text.trim())
 })
 
+function useLabel(use: string): string {
+  return use === 'pinned' ? '常驻上下文' : '按需读取'
+}
+
 const capabilityRows = computed(() => {
   const current = contact.value
   if (!current) return []
@@ -428,6 +448,127 @@ async function setMemory(enabled: boolean) {
     memory.value = await core('contacts.memory.list', { contactId: current.id })
   } catch (error) {
     ctx.showError(error, '没有改成')
+  }
+}
+
+const experienceBusy = ref(false)
+const editingExperience = ref('')
+const experienceText = ref('')
+
+const EXPERIENCE_STATUS: Readonly<Record<string, string>> = {
+  candidate: '待验证',
+  active: '有效',
+  superseded: '已被替代',
+  disabled: '已停用',
+  deleted: '已删除',
+}
+const EXPERIENCE_SCOPE: Readonly<Record<string, string>> = {
+  contact: '这个联系人的通用经验',
+  project: '项目',
+  group: '群聊',
+  session: '这段单聊',
+}
+
+function experienceStatus(entry: ContactExperience): string {
+  return EXPERIENCE_STATUS[entry.status] ?? entry.status
+}
+
+function experienceScope(entry: ContactExperience): string {
+  const label = EXPERIENCE_SCOPE[entry.scope.kind] ?? entry.scope.kind
+  return entry.scope.kind === 'contact'
+    ? label
+    : `${label} · ${entry.scope.id ?? ''}`
+}
+
+async function refreshExperiences(contactId: string): Promise<void> {
+  experiences.value = await core('contacts.experiences.list', {
+    id: contactId,
+  })
+}
+
+async function setExperienceStatus(
+  entry: ContactExperience,
+  status: 'active' | 'disabled' | 'candidate',
+): Promise<void> {
+  const current = contact.value
+  if (!current || experienceBusy.value) return
+  experienceBusy.value = true
+  try {
+    await core('contacts.experiences.setStatus', {
+      id: current.id,
+      experienceId: entry.id,
+      status,
+    })
+    await refreshExperiences(current.id)
+  } catch (error) {
+    ctx.showError(error, '没有改成')
+  } finally {
+    experienceBusy.value = false
+  }
+}
+
+async function removeExperience(entry: ContactExperience): Promise<void> {
+  const current = contact.value
+  if (!current || experienceBusy.value) return
+  const ok = await confirm({
+    title: '删除这条经验？',
+    body: '它不会再被召回；恢复后会先回到待验证。',
+    confirmLabel: '删除',
+    tone: 'danger',
+  })
+  if (!ok) return
+  experienceBusy.value = true
+  try {
+    await core('contacts.experiences.remove', {
+      id: current.id,
+      experienceId: entry.id,
+    })
+    await refreshExperiences(current.id)
+  } catch (error) {
+    ctx.showError(error, '没有删掉')
+  } finally {
+    experienceBusy.value = false
+  }
+}
+
+async function restoreExperience(entry: ContactExperience): Promise<void> {
+  const current = contact.value
+  if (!current || experienceBusy.value) return
+  experienceBusy.value = true
+  try {
+    await core('contacts.experiences.restore', {
+      id: current.id,
+      experienceId: entry.id,
+    })
+    await refreshExperiences(current.id)
+  } catch (error) {
+    ctx.showError(error, '没有恢复')
+  } finally {
+    experienceBusy.value = false
+  }
+}
+
+function beginExperienceEdit(entry: ContactExperience): void {
+  editingExperience.value = entry.id
+  experienceText.value = entry.text
+}
+
+async function saveExperience(): Promise<void> {
+  const current = contact.value
+  if (!current || !editingExperience.value || experienceBusy.value) return
+  experienceBusy.value = true
+  try {
+    await core('contacts.experiences.update', {
+      id: current.id,
+      experienceId: editingExperience.value,
+      patch: { text: experienceText.value.trim() },
+    })
+    editingExperience.value = ''
+    await refreshExperiences(current.id)
+  } catch (error) {
+    ctx.showError(error, '没有改成')
+  } finally {
+    experienceBusy.value = false
   }
 }
 
@@ -663,18 +804,22 @@ function backHome() {
           class="panel"
           data-tab="knowledge"
         >
-          <p class="hint">只读参考资料：回答时会注明出处。</p>
+          <p class="hint">
+            只读资料：工作时要用的文件、文件夹、网址和笔记。常驻的资料会放进每一次提示词；其余按需读取。
+          </p>
           <Surface
-            v-for="(item, index) in contact.role.knowledge"
-            :key="index"
+            v-for="item in contact.knowledge ?? []"
+            :key="item.id"
             pad="sm"
             class="line-item"
           >
-            {{ knowledgeLine(item) }}
+            <span>{{ knowledgeLine(item) }}</span>
+            <span class="hint">{{ useLabel(item.use) }}</span>
           </Surface>
-          <p v-if="!contact.role.knowledge.length" class="hint">
-            还没有参考资料：在「编辑 › 知识」里加文件、文件夹、网址或 Skill。
+          <p v-if="!(contact.knowledge ?? []).length" class="hint">
+            还没有知识：在「编辑」里加文件、文件夹、网址或笔记。
           </p>
+          <Button size="sm" @click="edit">添加资料</Button>
         </section>
 
         <section
@@ -688,6 +833,49 @@ function backHome() {
               <dd>{{ row.value }}</dd>
             </template>
           </dl>
+          <template v-if="contact.kind === 'external'">
+            <p class="hint">
+              外部智能体（Claude Code、Codex）暂不支持在 Emperor 里绑定 Skill 或
+              MCP；它们在群里只读、只在被 @ 时发言。
+            </p>
+          </template>
+          <template v-else-if="!contact.builtin && capabilityView">
+            <h4 class="cap-title">工作技能</h4>
+            <p v-if="!capabilityView.skills.length" class="hint">
+              还没有选 Skill：在「编辑 › 能力」里从当前可用的 Skill 里选。
+            </p>
+            <Surface
+              v-for="skill in capabilityView.skills"
+              :key="skill.id"
+              pad="sm"
+              class="line-item"
+              :data-skill="skill.name"
+            >
+              <span>{{ skill.name }}</span>
+              <span class="hint">{{
+                skill.available ? '可用' : skill.reason
+              }}</span>
+            </Surface>
+            <h4 class="cap-title">外部连接</h4>
+            <p v-if="!capabilityView.mcp.length" class="hint">
+              还没有连接 MCP：在「编辑 › 能力」里选已配置的服务和工具。
+            </p>
+            <Surface
+              v-for="server in capabilityView.mcp"
+              :key="server.serverId"
+              pad="sm"
+              class="line-item"
+              :data-mcp="server.serverId"
+            >
+              <span>{{ server.serverId }}</span>
+              <span class="hint">{{
+                server.available ? '已连接' : server.reason
+              }}</span>
+              <span class="hint">
+                {{ server.tools.map((tool) => tool.name).join('、') }}
+              </span>
+            </Surface>
+          </template>
         </section>
 
         <section v-else-if="tab === 'memory'" class="panel" data-tab="memory">
@@ -699,12 +887,102 @@ function backHome() {
               @change="setMemory"
             />
             <span>
-              个人记忆{{
-                contact.memory.enabled ? '开着' : '关着'
-              }}：你在单聊里的 👍 / 👎 和一句话会记在这里，只对{{
+              记忆{{ contact.memory.enabled ? '开着' : '关着' }}：{{
                 contact.name
-              }}生效。可以改、可以删。
+              }}从自己的工作里整理出的经验，以及你给的 👍 /
+              👎。只对它自己生效；推测先待验证，不参与回答。
             </span>
+          </div>
+          <div class="experience-block" data-experiences>
+            <h4 class="cap-title">工作经验</h4>
+            <p v-if="experiences?.lastError" class="hint warn">
+              上次整理没有完成：{{ experiences.lastError.message }}
+            </p>
+            <p v-if="!experiences?.experiences?.length" class="hint">
+              还没有经验：一项工作结束后，有工具结果或你的确认 /
+              纠正时自动整理。
+            </p>
+            <Surface
+              v-for="entry in experiences?.experiences ?? []"
+              :key="entry.id"
+              pad="sm"
+              class="memory-entry"
+              :data-experience="entry.id"
+              :data-status="entry.status"
+            >
+              <template v-if="editingExperience === entry.id">
+                <div class="memory-edit" data-experience-edit>
+                  <TextField
+                    v-model="experienceText"
+                    size="sm"
+                    aria-label="这条经验"
+                  />
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    :loading="experienceBusy"
+                    @click="saveExperience"
+                    >保存</Button
+                  >
+                  <Button size="sm" @click="editingExperience = ''"
+                    >取消</Button
+                  >
+                </div>
+              </template>
+              <template v-else>
+                <span class="memory-text">{{ entry.text }}</span>
+                <span class="experience-meta">
+                  {{ experienceStatus(entry) }} · {{ experienceScope(entry) }}
+                  <template v-if="entry.conditions">
+                    · 适用：{{ entry.conditions }}</template
+                  >
+                  · 来源：{{ entry.source.sessionId.slice(0, 8) }} · 第
+                  {{ entry.source.turnId }} 轮
+                </span>
+                <span class="memory-actions">
+                  <Button size="sm" @click="beginExperienceEdit(entry)"
+                    >改</Button
+                  >
+                  <Button
+                    v-if="entry.status === 'active'"
+                    size="sm"
+                    @click="setExperienceStatus(entry, 'disabled')"
+                    >停用</Button
+                  >
+                  <Button
+                    v-else-if="entry.status === 'disabled'"
+                    size="sm"
+                    @click="setExperienceStatus(entry, 'active')"
+                    >启用</Button
+                  >
+                  <Button
+                    v-if="entry.status !== 'deleted'"
+                    size="sm"
+                    @click="removeExperience(entry)"
+                    >删除</Button
+                  >
+                  <Button v-else size="sm" @click="restoreExperience(entry)"
+                    >恢复</Button
+                  >
+                </span>
+              </template>
+            </Surface>
+            <template v-if="experiences?.legacy?.length">
+              <h4 class="cap-title">历史反馈（待确认）</h4>
+              <p class="hint">
+                这些旧反馈没有可追溯的来源，不会自动用于回答；确认结论和范围前只在这里保留原文。
+              </p>
+              <Surface
+                v-for="entry in experiences.legacy"
+                :key="entry.id"
+                pad="sm"
+                class="line-item"
+                data-legacy-feedback
+              >
+                {{ entry.rawText }}
+              </Surface>
+            </template>
+            <h4 class="cap-title">你的反馈</h4>
           </div>
           <p v-if="memory?.notice" class="hint warn">{{ memory.notice }}</p>
           <Surface
@@ -1006,6 +1284,19 @@ function backHome() {
   line-height: var(--lh-base);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.cap-title {
+  margin: var(--space-4) 0 var(--space-1);
+  color: rgb(var(--text-1));
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.experience-meta {
+  color: rgb(var(--text-3));
+  font-size: var(--fs-xxxs);
+  line-height: var(--lh-xxxs);
 }
 
 .line-item {

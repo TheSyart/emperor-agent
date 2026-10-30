@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
 import type {
+  ContactCapabilityInput,
   ContactDraftInput,
   ContactInput,
   ContactPatch,
@@ -1029,6 +1030,46 @@ const contactKnowledgeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('url'), url: z.string().max(4096) }).strict(),
   z.object({ kind: z.literal('skill'), name: z.string().max(128) }).strict(),
 ])
+const contactResourceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      id: z.string().max(40).optional(),
+      kind: z.enum(['file', 'folder']),
+      path: z.string().max(4096),
+      use: z.enum(['on_demand', 'pinned']).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().max(40).optional(),
+      kind: z.literal('url'),
+      url: z.string().max(4096),
+      use: z.literal('on_demand').optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().max(40).optional(),
+      kind: z.literal('note'),
+      title: z.string().max(100),
+      text: z.string().max(4000),
+      use: z.enum(['on_demand', 'pinned']).optional(),
+    })
+    .strict(),
+])
+const contactSkillSchema = z
+  .object({
+    id: z.string().max(40).optional(),
+    sourceId: z.string().max(128),
+    name: z.string().max(128),
+  })
+  .strict()
+const contactMcpSchema = z
+  .object({
+    serverId: z.string().max(128),
+    toolNames: z.array(z.string().max(128)).max(64),
+  })
+  .strict()
 const contactRoleSchema = z
   .object({
     mission: contactTextSchema.optional(),
@@ -1084,6 +1125,9 @@ const contactFieldsSchema = {
   intro: z.string().max(1000).optional(),
   domains: z.array(z.string().max(32)).max(16).optional(),
   role: contactRoleSchema.optional(),
+  knowledge: z.array(contactResourceSchema).max(64).optional(),
+  skills: z.array(contactSkillSchema).max(64).optional(),
+  mcp: z.array(contactMcpSchema).max(16).optional(),
   capabilities: contactCapabilitiesSchema.optional(),
   groupHabit: z
     .object({
@@ -1165,6 +1209,28 @@ const contactDraftSchema = z
     backend: contactBackendSchema.optional(),
     templateId: contactTemplateIdSchema.optional(),
     ...contactFieldsSchema,
+  })
+  .strict()
+const experienceScopeSchema = z
+  .object({
+    kind: z.enum(['contact', 'project', 'group', 'session']),
+    id: z.string().max(128).optional(),
+  })
+  .strict()
+const contactExperiencePatchSchema = z
+  .object({
+    text: z.string().max(2000).optional(),
+    conditions: z.string().max(1000).optional(),
+    scope: experienceScopeSchema.optional(),
+    status: z
+      .enum(['candidate', 'active', 'superseded', 'disabled'])
+      .optional(),
+  })
+  .strict()
+const contactCapabilityInputSchema = z
+  .object({
+    id: contactIdSchema.optional(),
+    draft: contactDraftSchema.optional(),
   })
   .strict()
 const contactTrialIdSchema = z.string().regex(/^tr-[a-z0-9]{6,32}$/)
@@ -2501,6 +2567,11 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input]) =>
       api.contacts.preview(input as { draft: ContactDraftInput }),
   ),
+  'contacts.capabilities.resolve': operation(
+    z.tuple([contactCapabilityInputSchema]),
+    (api, [input]) =>
+      api.contacts.capabilities.resolve(input as ContactCapabilityInput),
+  ),
   'contacts.trial': operation(
     z.tuple([
       z
@@ -2549,6 +2620,50 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'contacts.stats': operation(z.tuple([contactRefSchema]), (api, [input]) =>
     api.contacts.stats(input),
+  ),
+  'contacts.experiences.list': operation(
+    z.tuple([contactRefSchema]),
+    (api, [input]) => api.contacts.experiences.list(input),
+  ),
+  'contacts.experiences.update': operation(
+    z.tuple([
+      z
+        .object({
+          id: contactIdSchema,
+          experienceId: z.string().max(64),
+          patch: contactExperiencePatchSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.experiences.update(input),
+  ),
+  'contacts.experiences.setStatus': operation(
+    z.tuple([
+      z
+        .object({
+          id: contactIdSchema,
+          experienceId: z.string().max(64),
+          status: z.enum(['candidate', 'active', 'superseded', 'disabled']),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.experiences.setStatus(input),
+  ),
+  'contacts.experiences.remove': operation(
+    z.tuple([
+      z
+        .object({ id: contactIdSchema, experienceId: z.string().max(64) })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.experiences.remove(input),
+  ),
+  'contacts.experiences.restore': operation(
+    z.tuple([
+      z
+        .object({ id: contactIdSchema, experienceId: z.string().max(64) })
+        .strict(),
+    ]),
+    (api, [input]) => api.contacts.experiences.restore(input),
   ),
   'contacts.feedback': operation(
     z.tuple([contactFeedbackSchema]),

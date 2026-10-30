@@ -1,7 +1,7 @@
 // GRP-02 card test 11: compileRolePrompt is a pure function of its input —
 // the same contact gives the same bytes (golden files), with 群聊习惯 only
 // inside a group and 记忆 only when GRP-03 hands it memory.
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { compileRolePrompt } from './compile'
@@ -9,7 +9,11 @@ import type { Contact } from './types'
 
 const GOLDEN = join(__dirname, '__golden__')
 
-function golden(name: string): string {
+function golden(name: string, actual?: string): string {
+  if (process.env.UPDATE_CONTACT_GOLDEN === '1' && actual !== undefined) {
+    writeFileSync(join(GOLDEN, name), actual)
+    return actual
+  }
   return readFileSync(join(GOLDEN, name), 'utf8')
 }
 
@@ -27,12 +31,6 @@ const AUDITOR: Contact = {
     playbook:
       '1. 找信任边界\n2. 顺着数据流看输入、校验和使用\n3. 查密钥\n4. 查依赖',
     boundaries: '不改代码；发现严重问题立刻报告。',
-    knowledge: [
-      { kind: 'file', path: '/Users/me/security/checklist.md', pinned: true },
-      { kind: 'folder', path: '/Users/me/security/incidents' },
-      { kind: 'url', url: 'https://owasp.org/Top10/' },
-      { kind: 'skill', name: 'threat-model' },
-    ],
     examples: [
       {
         input: '审查 login.ts 的改动',
@@ -41,6 +39,27 @@ const AUDITOR: Contact = {
     ],
     trialTask: '审查一段带 SQL 拼接的登录代码。',
   },
+  knowledge: [
+    {
+      id: 'kr-checklist',
+      kind: 'file',
+      path: '/Users/me/security/checklist.md',
+      use: 'pinned',
+    },
+    {
+      id: 'kr-incidents',
+      kind: 'folder',
+      path: '/Users/me/security/incidents',
+      use: 'on_demand',
+    },
+    {
+      id: 'kr-owasp',
+      kind: 'url',
+      url: 'https://owasp.org/Top10/',
+      use: 'on_demand',
+    },
+  ],
+  skills: [{ id: 'sk-threat', sourceId: 'legacy', name: 'threat-model' }],
   capabilities: {
     model: 'inherit',
     tools: { preset: 'read_only' },
@@ -70,7 +89,7 @@ function reversedKeys<T>(value: T): T {
 describe('compileRolePrompt (card test 11)', () => {
   it('matches the golden prompt outside a group', () => {
     const prompt = compileRolePrompt(AUDITOR)
-    expect(prompt).toBe(golden('role-prompt.md'))
+    expect(prompt).toBe(golden('role-prompt.md', prompt))
     expect(prompt).not.toContain('# 群聊习惯')
     expect(prompt).not.toContain('# 记忆')
   })
@@ -83,7 +102,7 @@ describe('compileRolePrompt (card test 11)', () => {
       },
       memory: '- 2026-10-20 用户：报告里先写结论，再写细节。',
     })
-    expect(prompt).toBe(golden('role-prompt.group.md'))
+    expect(prompt).toBe(golden('role-prompt.group.md', prompt))
   })
 
   it('is byte-identical for the same input, whatever the key order', () => {
@@ -118,8 +137,10 @@ describe('compileRolePrompt (card test 11)', () => {
         deliverable: '',
         playbook: '',
         boundaries: '',
-        knowledge: [],
       },
+      knowledge: [],
+      skills: [],
+      mcp: [],
       memory: { enabled: false },
     }
     expect(compileRolePrompt(bare, { memory: '不该出现' })).toBe(

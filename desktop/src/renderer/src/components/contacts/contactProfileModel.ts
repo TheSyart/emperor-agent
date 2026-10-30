@@ -6,7 +6,7 @@
 import type {
   Contact,
   ContactDomain,
-  ContactKnowledgeRef,
+  ContactKnowledge,
   ContactVersionEntry,
 } from '@emperor/core/api'
 
@@ -102,17 +102,17 @@ export const LENGTH_LABELS: Readonly<Record<string, string>> = {
   detailed: '详细',
 }
 
-/** A reference as one line: what it is and where. */
-export function knowledgeLine(ref: ContactKnowledgeRef): string {
+/** A resource as one line: what it is and where. */
+export function knowledgeLine(ref: ContactKnowledge): string {
   switch (ref.kind) {
     case 'file':
-      return `文件 · ${ref.path}${ref.pinned ? '（放进提示词）' : ''}`
+      return `文件 · ${ref.path}${ref.use === 'pinned' ? '（常驻）' : ''}`
     case 'folder':
-      return `文件夹 · ${ref.path}`
+      return `文件夹 · ${ref.path}${ref.use === 'pinned' ? '（常驻）' : ''}`
     case 'url':
       return `网址 · ${ref.url.replace(/^https:\/\//, '')}`
-    default:
-      return `Skill · ${ref.name}`
+    case 'note':
+      return `笔记 · ${ref.title}${ref.use === 'pinned' ? '（常驻）' : ''}`
   }
 }
 
@@ -159,10 +159,23 @@ const FIELDS: ReadonlyArray<{
   { key: 'playbook', label: '工作方法', read: (c) => c.role.playbook },
   {
     key: 'knowledge',
-    label: '参考资料',
-    read: (c) => c.role.knowledge.map(knowledgeLine).join('\n'),
+    label: '知识',
+    read: (c) => (c.knowledge ?? []).map(knowledgeLine).join('\n'),
   },
   { key: 'boundaries', label: '边界', read: (c) => c.role.boundaries },
+  {
+    key: 'skills',
+    label: '工作技能',
+    read: (c) => (c.skills ?? []).map((skill) => skill.name).join('、'),
+  },
+  {
+    key: 'mcp',
+    label: '外部连接',
+    read: (c) =>
+      (c.mcp ?? [])
+        .map((server) => `${server.serverId}：${server.toolNames.join('、')}`)
+        .join('\n'),
+  },
   { key: 'model', label: '模型', read: modelLine },
   { key: 'tools', label: '工具', read: toolsLine },
   {

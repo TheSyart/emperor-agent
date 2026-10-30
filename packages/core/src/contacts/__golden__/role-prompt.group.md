@@ -46,7 +46,12 @@
 - 文件 `/Users/me/security/checklist.md`（置顶）：用 read 读取
 - 文件夹 `/Users/me/security/incidents`：用 glob、grep 查找，用 read 读取
 - 网址 `https://owasp.org/Top10/`：用 web_fetch 读取
-- Skill `threat-model`：用 skill 工具加载
+
+# 工作技能
+
+这些 Skill 已为这个联系人启用；需要时用 skill 工具加载，按里面的步骤做。
+
+- Skill `threat-model`
 
 # 记忆
 

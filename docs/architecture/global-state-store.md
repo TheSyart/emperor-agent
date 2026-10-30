@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-28（对照 `6c120e0b`）<br>
+> 最后核验：2026-10-30（对照 `6c120e0b`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`、`packages/core/src/contacts/`、`packages/core/src/groups/`
 
 ## 两个根的区分
@@ -295,7 +295,8 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 
 联系人是长期存在的 agent，设计见[联系人与群聊](../design/agent-contacts.md)。`packages/core/src/contacts/store.ts` 的 `ContactStore` 管理 `contacts/`：
 
-- `contacts.json` 用原子快照写（同目录临时文件 → rename → 同步目录），`schemaVersion: 2`；更新版本写的文件只读（见下文「数据版本与只读降级」），`contacts/contacts.json` 在数据文件清单里。
+- `contacts.json` 用原子快照写（同目录临时文件 → rename → 同步目录），`schemaVersion: 3`（知识/能力/经验分开；旧 schema 2 读取时先备份 `contacts.schema2-<时间>.bak.json` 再迁移）；更新版本写的文件只读（见下文「数据版本与只读降级」），`contacts/contacts.json` 在数据文件清单里。
+- 每位联系人的工作经验在 `contacts/<id>/memory/experiences.json`（schemaVersion 1、revision，原子替换；删除留 tombstone），旧反馈 Markdown 原样保留；记忆整理的一次小模型调用记入用量。
 - 第一次读取时写入三个内置联系人：`ct-emperor`（岗位说明书就是随包的 `templates/agent/persona.md`）、`ct-claude-code`、`ct-codex`（模型和权限跟随「设置 › 子智能体」，联系人上不存）。内置联系人不能删除，只能改头像和简介；文件里只读回这几项和版本号，其余每次按随包定义生成。
 - 版本：名字、简介、领域、岗位说明书、能力、群聊习惯或个人记忆开关有变化时版本号加 1，改动前的完整联系人写到 `contacts/<id>/versions/<旧版本号>.json`，只留最近 20 个；只换头像不加版本。退回旧版本（`contacts.restoreVersion`）本身产生一个新版本，不改历史。
 - 校验：名字去掉首尾空白后 1–24 字，忽略大小写不重名，不含 `@` 和换行；简介一行、最多 60 字；领域最多 3 个；职责、交付、边界各 2000 字，工作方法 4000 字，样例任务 1000 字；参考资料最多 20 条，文件和文件夹必须是存在的绝对路径，网址只收 https；工具的允许、禁止只能是工具注册表里的名字；权限不能高于「设置 › 常规 › 会话 › 新会话的权限」。违反时报 `contact_invalid`，消息写明哪一项。

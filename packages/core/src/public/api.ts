@@ -59,11 +59,26 @@ export type {
   ContactVersionEntry,
   ContactsChange,
   ContactsListing,
+  ContactCapabilityInput,
+  ContactCapabilityView,
+  ContactKnowledge,
+  ContactMcpSelection,
+  ContactSkillSelection,
   Domain as ContactDomain,
   KnowledgeRef as ContactKnowledgeRef,
+  KnowledgeUse as ContactKnowledgeUse,
   RoleCard as ContactRoleCard,
   ToolPreset as ContactToolPreset,
 } from '../contacts/types'
+// CP-04: a contact's own working experiences.
+export type {
+  ContactExperience,
+  ContactExperienceListing,
+  ExperienceEvidence as ContactExperienceEvidence,
+  ExperienceScope as ContactExperienceScope,
+  ExperienceStatus as ContactExperienceStatus,
+  LegacyFeedback as ContactLegacyFeedback,
+} from '../contacts/experiences'
 // GRP-03: a contact's personal memory (contacts.feedback, contacts.memory.*).
 export type {
   ContactMemoryEntry,

@@ -1089,7 +1089,7 @@ export class Agent {
     signal.throwIfAborted()
     const request: GenerateOptions = {
       ...header.config,
-      messages: session.deriveMessages(),
+      messages: session.deriveRequestMessages(),
       ...(header.system !== undefined ? { system: header.system } : {}),
       ...(header.tools !== undefined ? { tools: header.tools } : {}),
       sessionId: session.id,

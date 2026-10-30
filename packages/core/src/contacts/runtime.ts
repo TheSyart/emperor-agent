@@ -39,9 +39,9 @@ import { ContactModelUnavailableError } from './errors'
 import type { ContactMemoryStore } from './memory'
 import type {
   Contact,
+  ContactKnowledge,
   ContactPermission,
   ContactTools,
-  KnowledgeRef,
   ToolPreset,
 } from './types'
 
@@ -127,6 +127,42 @@ export function contactToolNames(
   return [...names].filter((name) => known.has(name)).sort()
 }
 
+/** The registered MCP tools a contact selected (server + its own tool name). */
+export function selectedMcpToolNames(
+  contact: Contact,
+  registered: Iterable<string>,
+): string[] {
+  const known = new Set(registered)
+  const names = new Set<string>()
+  for (const server of contact.mcp ?? [])
+    for (const tool of server.toolNames)
+      names.add(`mcp_${server.serverId}_${tool}`)
+  return [...names].filter((name) => known.has(name)).sort()
+}
+
+/**
+ * The tools a contact actually has (CP-02): preset ∪ allow − deny, and when
+ * the contact has an MCP selection, MCP tools follow that selection instead
+ * of whatever the old allow list happened to name. Other MCP tools stay out.
+ */
+export function contactEffectiveTools(
+  contact: Contact,
+  registered: Iterable<string>,
+): string[] {
+  const base = contactToolNames(contact.capabilities.tools, registered)
+  if (contact.mcp === undefined) return base
+  const denied = new Set(contact.capabilities.tools.deny ?? [])
+  const selected = new Set(
+    selectedMcpToolNames(contact, registered).filter(
+      (name) => !denied.has(name),
+    ),
+  )
+  return [
+    ...base.filter((name) => !name.startsWith('mcp_') || selected.has(name)),
+    ...selected,
+  ].sort()
+}
+
 // ── permission ────────────────────────────────────────────────────────
 
 const RANKED_PRESETS = [
@@ -174,7 +210,7 @@ function statOf(path: string): Stats | null {
 }
 
 /** Whether a file or folder reference is still there, as what it says it is. */
-function present(ref: KnowledgeRef): boolean {
+function present(ref: ContactKnowledge): boolean {
   if (ref.kind !== 'file' && ref.kind !== 'folder') return true
   const stat = statOf(ref.path)
   return ref.kind === 'file'
@@ -237,24 +273,38 @@ function readPinned(path: string, room: number): PinnedKnowledge {
  * (once a file is cut, the rest are not inlined).
  */
 export function readKnowledge(
-  refs: readonly KnowledgeRef[],
+  refs: readonly ContactKnowledge[],
   budget = PINNED_KNOWLEDGE_BYTES,
-): { missing: string[]; pinned: PinnedKnowledge[] } {
+): {
+  missing: string[]
+  pinned: PinnedKnowledge[]
+  notes: { title: string; text: string }[]
+} {
   const missing: string[] = []
   const pinned: PinnedKnowledge[] = []
+  const notes: { title: string; text: string }[] = []
   let room = budget
   for (const ref of refs) {
+    if (ref.kind === 'note') {
+      if (room < MIN_CUT_BYTES) continue
+      const size = Buffer.byteLength(ref.text)
+      const text = size <= room ? ref.text : cutUtf8(ref.text, room)
+      if (!text) continue
+      notes.push({ title: ref.title, text })
+      room -= Buffer.byteLength(text)
+      continue
+    }
     if (ref.kind !== 'file' && ref.kind !== 'folder') continue
     if (!present(ref)) {
       missing.push(ref.path)
       continue
     }
-    if (ref.kind !== 'file' || ref.pinned !== true) continue
+    if (ref.kind !== 'file' || ref.use !== 'pinned') continue
     const item = readPinned(ref.path, room)
     pinned.push(item)
     room = item.status === 'cut' ? 0 : room - Buffer.byteLength(item.text)
   }
-  return { missing, pinned }
+  return { missing, pinned, notes }
 }
 
 function isUnder(path: string, root: string): boolean {
@@ -270,7 +320,7 @@ function isUnder(path: string, root: string): boolean {
  * can still write where its permission lets it.
  */
 export function knowledgeReadOnlyRoots(
-  refs: readonly KnowledgeRef[],
+  refs: readonly ContactKnowledge[],
   workspaceRoot: string,
 ): string[] {
   const workspace = canonicalPath(resolve(workspaceRoot))
@@ -302,6 +352,8 @@ export interface ContactRuntimeDeps {
   memory: ContactMemoryStore
   /** Every tool name the registry has. */
   toolNames(): Iterable<string>
+  /** Active experiences to recall for one contact session (CP-04). */
+  experiences?(contactId: string, sessionId?: string): string
   /** 设置 › 常规 › 会话 › 新会话的权限. */
   globalPreset(): string
   /** A configured model entry, by id. */
@@ -397,7 +449,11 @@ export class ContactRuntime {
     workspaceRoot: string,
     sessionId?: string,
   ): ContactSnapshot {
-    return this.snapshotOf(this.resolve(contactId, sessionId), workspaceRoot)
+    return this.snapshotOf(
+      this.resolve(contactId, sessionId),
+      workspaceRoot,
+      sessionId,
+    )
   }
 
   /**
@@ -420,6 +476,7 @@ export class ContactRuntime {
   private snapshotOf(
     contact: Contact | null,
     workspaceRoot: string,
+    sessionId?: string,
   ): ContactSnapshot {
     if (contact === null)
       return {
@@ -440,30 +497,32 @@ export class ContactRuntime {
     } satisfies ContactSnapshot
     if (contact.kind === 'external') return unchanged
     const memory = contact.memory.enabled ? this.memoryText(contact.id) : ''
-    if (contact.builtin)
-      return memory
-        ? {
-            ...unchanged,
-            prompt: `${this.deps.persona()}\n\n# 记忆\n\n${memory}`,
-          }
+    const experiences = contact.memory.enabled
+      ? (this.deps.experiences?.(contact.id, sessionId) ?? '')
+      : ''
+    if (contact.builtin) {
+      const sections = [this.deps.persona()]
+      if (memory) sections.push(`# 记忆\n\n${memory}`)
+      if (experiences) sections.push(`# 工作经验\n\n${experiences}`)
+      return sections.length > 1
+        ? { ...unchanged, prompt: sections.join('\n\n') }
         : unchanged
-    const knowledge: KnowledgeContext = readKnowledge(contact.role.knowledge)
+    }
+    const knowledge: KnowledgeContext = readKnowledge(contact.knowledge ?? [])
     return {
       contact,
-      tools: contactToolNames(
-        contact.capabilities.tools,
-        this.deps.toolNames(),
-      ),
+      tools: contactEffectiveTools(contact, this.deps.toolNames()),
       prompt: compileRolePrompt(contact, {
         ...(memory ? { memory } : {}),
         knowledge,
+        ...(experiences ? { experiences } : {}),
       }).trimEnd(),
       ceiling: contactPermissionPreset(
         contact.capabilities.permission,
         this.deps.globalPreset(),
       ),
       readOnlyRoots: knowledgeReadOnlyRoots(
-        contact.role.knowledge,
+        contact.knowledge ?? [],
         workspaceRoot,
       ),
       model: this.model(contact),
@@ -567,6 +626,13 @@ export class ContactBinding implements ToolFilter {
       contactId: this.contactId,
       profileId,
     })
+  }
+
+  /** Whether a Skill is one this contact selected (no selection: all). */
+  allowsSkill(name: string): boolean {
+    const contact = this.snapshot.contact
+    if (!contact || contact.skills === undefined) return true
+    return contact.skills.some((skill) => skill.name === name)
   }
 
   /** A subagent's tool filter, kept within this contact's tools. */

@@ -72,7 +72,7 @@ describe('builtin contacts (card test 1)', () => {
       3,
     )
     const file = JSON.parse(readFileSync(contactsFile(stateRoot), 'utf8'))
-    expect(file.schemaVersion).toBe(2)
+    expect(file.schemaVersion).toBe(3)
     expect(file.contacts.map((contact: { id: string }) => contact.id)).toEqual([
       ...BUILTIN_CONTACT_IDS,
     ])
@@ -135,7 +135,9 @@ describe('creating from a template (card test 2)', () => {
     expect(created.role.playbook).toMatch(/^1\. /m)
     expect(created.role.boundaries.length).toBeGreaterThan(0)
     expect(created.role.trialTask?.length).toBeGreaterThan(0)
-    expect(created.role.knowledge).toEqual([])
+    expect(created.knowledge).toEqual([])
+    expect(created.skills).toEqual([])
+    expect(created.mcp).toEqual([])
     expect(created.createdAt).toBe(created.updatedAt)
 
     expect(await make().get(created.id)).toEqual(created)
@@ -243,32 +245,144 @@ describe('validation (card test 3)', () => {
     writeFileSync(notes, '# notes\n')
     const created = await store.create({
       name: '研究员',
+      knowledge: [
+        { id: 'kr-notes', kind: 'file', path: notes, use: 'pinned' },
+        {
+          id: 'kr-folder',
+          kind: 'folder',
+          path: stateRoot,
+          use: 'on_demand',
+        },
+        {
+          id: 'kr-guide',
+          kind: 'url',
+          url: 'https://example.com/guide',
+          use: 'on_demand',
+        },
+      ],
+      skills: [{ id: 'sk-review', sourceId: 'user', name: 'review-checklist' }],
+    })
+    expect(created.knowledge).toHaveLength(3)
+    expect(created.skills).toEqual([
+      { id: 'sk-review', sourceId: 'user', name: 'review-checklist' },
+    ])
+    expect(created.role.knowledge).toBeUndefined()
+
+    for (const knowledge of [
+      {
+        id: 'kr-bad1',
+        kind: 'file' as const,
+        path: 'notes.md',
+        use: 'on_demand' as const,
+      },
+      {
+        id: 'kr-bad2',
+        kind: 'file' as const,
+        path: join(stateRoot, 'missing.md'),
+        use: 'on_demand' as const,
+      },
+      {
+        id: 'kr-bad3',
+        kind: 'file' as const,
+        path: stateRoot,
+        use: 'on_demand' as const,
+      },
+      {
+        id: 'kr-bad4',
+        kind: 'folder' as const,
+        path: notes,
+        use: 'on_demand' as const,
+      },
+      {
+        id: 'kr-bad5',
+        kind: 'url' as const,
+        url: 'http://example.com/guide',
+        use: 'on_demand' as const,
+      },
+      {
+        id: 'kr-bad6',
+        kind: 'url' as const,
+        url: 'not a url',
+        use: 'on_demand' as const,
+      },
+    ])
+      await expect(
+        store.update(created.id, { knowledge: [knowledge] }),
+      ).rejects.toMatchObject({
+        code: 'contact_invalid',
+        field: 'knowledge',
+      })
+    await expect(
+      store.update(created.id, {
+        skills: [{ id: 'sk-bad', sourceId: 'user', name: 'Bad Name' }],
+      }),
+    ).rejects.toMatchObject({ code: 'contact_invalid', field: 'skills' })
+  })
+})
+
+describe('schema 3 (CP-01)', () => {
+  it('upgrades a schema 2 file, keeps a backup and moves role knowledge', async () => {
+    const { store, stateRoot } = setup()
+    const notes = join(stateRoot, 'notes.md')
+    writeFileSync(notes, '# notes\n')
+    const created = await store.create({
+      name: '研究员',
       role: {
         knowledge: [
           { kind: 'file', path: notes, pinned: true },
-          { kind: 'folder', path: stateRoot },
-          { kind: 'url', url: 'https://example.com/guide' },
           { kind: 'skill', name: 'review-checklist' },
         ],
       },
     })
-    expect(created.role.knowledge).toHaveLength(4)
+    const path = contactsFile(stateRoot)
+    const file = JSON.parse(readFileSync(path, 'utf8'))
+    const legacy = file.contacts.find(
+      (contact: { id: string }) => contact.id === created.id,
+    )
+    delete legacy.knowledge
+    delete legacy.skills
+    delete legacy.mcp
+    legacy.role = {
+      ...legacy.role,
+      knowledge: [
+        { kind: 'file', path: notes, pinned: true },
+        { kind: 'skill', name: 'review-checklist' },
+      ],
+    }
+    writeFileSync(
+      path,
+      JSON.stringify({ schemaVersion: 2, contacts: file.contacts }),
+    )
 
-    for (const knowledge of [
-      { kind: 'file' as const, path: 'notes.md' },
-      { kind: 'file' as const, path: join(stateRoot, 'missing.md') },
-      { kind: 'file' as const, path: stateRoot },
-      { kind: 'folder' as const, path: notes },
-      { kind: 'url' as const, url: 'http://example.com/guide' },
-      { kind: 'url' as const, url: 'not a url' },
-      { kind: 'skill' as const, name: 'Bad Name' },
+    const fresh = setup({ stateRoot })
+    const contact = await fresh.store.get(created.id)
+    expect(contact.role.knowledge).toBeUndefined()
+    expect(contact.knowledge).toEqual([
+      expect.objectContaining({
+        kind: 'file',
+        path: notes,
+        use: 'pinned',
+      }),
     ])
-      await expect(
-        store.update(created.id, { role: { knowledge: [knowledge] } }),
-      ).rejects.toMatchObject({
-        code: 'contact_invalid',
-        field: 'role.knowledge',
-      })
+    expect(contact.skills).toEqual([
+      expect.objectContaining({ name: 'review-checklist', sourceId: 'legacy' }),
+    ])
+    expect(contact.mcp).toEqual([])
+
+    const upgraded = JSON.parse(readFileSync(path, 'utf8'))
+    expect(upgraded.schemaVersion).toBe(3)
+    const backups = readdirSync(join(stateRoot, 'contacts')).filter((name) =>
+      name.startsWith('contacts.schema2-'),
+    )
+    expect(backups).toHaveLength(1)
+
+    // Reading again does not back up twice.
+    await setup({ stateRoot }).store.list()
+    expect(
+      readdirSync(join(stateRoot, 'contacts')).filter((name) =>
+        name.startsWith('contacts.schema2-'),
+      ),
+    ).toHaveLength(1)
   })
 })
 
@@ -486,7 +600,7 @@ describe('a corrupt contacts file (card test 9)', () => {
   it('leaves a file from a newer Emperor alone and read-only (REL-03)', async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-contacts-new-'))
     mkdirSync(join(stateRoot, 'contacts'), { recursive: true })
-    const newer = JSON.stringify({ schemaVersion: 3, contacts: [], groups: [] })
+    const newer = JSON.stringify({ schemaVersion: 4, contacts: [], groups: [] })
     writeFileSync(contactsFile(stateRoot), newer)
     const { store } = setup({ stateRoot })
 

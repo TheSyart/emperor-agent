@@ -172,6 +172,11 @@ export interface SessionEventMap {
   }
   /** Marks where a fork's copied seed ends. */
   'session/end-seed': Record<string, never>
+  /**
+   * CP-03: a contact session's history before this event stays in the log
+   * (and on screen) but never enters a model request again.
+   */
+  'contact/context-boundary': { contactId: string }
 }
 
 export type SessionEventType = keyof SessionEventMap

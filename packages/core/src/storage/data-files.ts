@@ -61,7 +61,7 @@ export const DATA_FILES: readonly DataFileSpec[] = [
   file('modelConfig', 'model_config.json', 'schemaVersion', 2, '模型配置'),
   file('scheduler', 'scheduler/jobs.json', 'version', 1, '定时任务'),
   file('sessions', 'sessions/index.json', 'version', 1, '会话索引'),
-  file('contacts', 'contacts/contacts.json', 'schemaVersion', 2, '联系人'),
+  file('contacts', 'contacts/contacts.json', 'schemaVersion', 3, '联系人'),
   file(
     'plugins',
     'plugins/installed_plugins.json',

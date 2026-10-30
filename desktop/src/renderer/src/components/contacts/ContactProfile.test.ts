@@ -41,8 +41,17 @@ function contact(overrides: Partial<Contact> = {}): Contact {
       deliverable: '问题清单。',
       playbook: '1. 读改动\n2. 列问题',
       boundaries: '不改代码。',
-      knowledge: [{ kind: 'url', url: 'https://example.com/guide' }],
     },
+    knowledge: [
+      {
+        id: 'kr-guide',
+        kind: 'url',
+        url: 'https://example.com/guide',
+        use: 'on_demand',
+      },
+    ],
+    skills: [],
+    mcp: [],
     capabilities: {
       model: 'inherit',
       tools: { preset: 'read_only' },

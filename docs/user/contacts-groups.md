@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用 Group 模式的用户<br>
-> 最后核验：2026-10-29（对照 `8cf2be55`）<br>
+> 最后核验：2026-10-30（对照 `8cf2be55`）<br>
 > 事实源：`desktop/src/renderer/src/components/contacts/`（`ContactEditor.vue`、`ContactMethods.vue`、`TemplatePicker.vue`、`TrialBench.vue`、`AvatarRecommend.vue`、`AvatarLibraryPicker.vue`、`ContactProfile.vue`）、`desktop/src/renderer/src/components/groups/`（`GroupHome.vue`、`GroupPage.vue`、`GroupComposer.vue`、`groupModel.ts`、`GroupMembers.vue`、`GroupSettings.vue`、`NewGroupDialog.vue`、`newGroupModel.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarGroupSections.vue`、`desktop/src/renderer/src/components/settings/GroupsSection.vue`、`desktop/src/renderer/src/components/settings/GeneralSection.vue`（最近删除）、`desktop/src/renderer/src/components/conversation/nodes/TurnTail.vue`、`packages/core/src/contacts/`、`packages/core/src/groups/`、`templates/contacts/`
 
 联系人是长期存在的 agent：有名字、头像和一份岗位说明书，有自己的模型、工具、权限和记忆。群聊把几位联系人拉到一起：谁对谁说了什么、交给谁做了什么、交出了什么，都在一条时间线上，你随时可以插话、点名或停止。它们都在 Group 模式里（⌘3，见[三种模式](modes.md)）。
@@ -96,7 +96,9 @@ Emperor 自带三位联系人：
   - **你的评分**：你给它的 👍 占全部 👍 / 👎 的比例，例如「83%」，下面写「你的评分（12 次）」；还没有评价时写「你的评分（还没有）」；
   - **岗位说明书版本**。
 - 五个标签页：职责与方法、知识、能力、记忆、版本。
-- **记忆**：它的个人记忆，每条可以改、可以删；也可以在这里关掉个人记忆。
+- **知识**：文件、文件夹、网址和笔记。标了「常驻上下文」的会放进每一次提示词，其余按需读取；常驻资料合计不超过 8 KB。在「编辑」里加。
+- **能力**：Skill 从安装里可用的目录选，MCP 选到具体工具；每一项都标「可用 / 缺什么、没连上」。Claude Code、Codex 这类外部智能体在 Emperor 里暂不支持绑定 Skill 或 MCP。
+- **记忆**：它自己的工作经验和你在单聊里给的 👍 / 👎。工作经验分有效、待验证、已停用、已删除；待验证的不会参与回答。每条可以改、停用、删除、恢复；旧反馈没有可追溯来源时列在「历史反馈（待确认）」，不会自动使用。
 - **版本**：每次保存岗位说明书就生成一个新版本，旧版本保留最近 20 个。可以选任意两个版本对比，逐项列出哪里不同；「退回到 vN」确认后会存成一个新版本，旧的都还在。群里永远用最新的版本。
 
 ### 删除联系人
@@ -110,15 +112,15 @@ Emperor 自带三位联系人：
 ### 单聊
 
 - 档案里的「发消息」打开和这位联系人最近的单聊，没有就新建一个，标题是「审稿人 · 单聊」。单聊属于 Group 模式；联系人页里能看到它所在的分类和卡片。
-- 单聊里它按自己的岗位说明书工作：用它自己的模型、工具、权限和参考资料。除此之外和普通对话一样，计划模式、目标、工作台和斜杠命令都能用；输入 `/new` 开的新会话仍是和它的单聊。
+- 单聊里它按自己的岗位说明书工作：用它自己的模型、工具、权限、知识和能力（选中的 Skill / MCP）。除此之外和普通对话一样，计划模式、目标、工作台和斜杠命令都能用；输入 `/new` 开的新会话仍是和它的单聊。
 - 空的单聊首页写着它的头像、名字和简介，输入框提示「给「审稿人」发消息」。每段回答上方是它的头像和名字。
 
-### 个人记忆与 👍 / 👎
+### 工作经验与 👍 / 👎
 
-把指针移到单聊里的一段回答上，底栏出现 👍「有帮助」和 👎「没帮助」。点了以后可以说一句为什么（可以不写），点「记下」：这条反馈写进这位联系人的个人记忆，只对它生效，之后它会照着改进。
+一项工作结束后，如果宿主核对到工具结果、你的确认或纠正，Emperor 会后台用一次小模型把这次工作整理成最多 5 条经验（费用记在「用量与费用」）。有依据的自动生效，没依据的进「待验证」，不参与以后的回答。你也可以在单聊里给一段回答点 👍 / 👎 并写一句为什么，这条反馈也会记进它的记忆。
 
-- 个人记忆只记你明确给的反馈，在档案的「记忆」里可以逐条改、删。删掉一条反馈，档案里的评分也跟着变。
-- 个人记忆关着时没有这两个按钮。
+- 这些记录只在它自己的工作里用，不会读主对话的长期记忆；在档案的「记忆」里可以逐条改、删、停用或恢复。删掉一条反馈，档案里的评分也跟着变。
+- 记忆关着时不再整理新经验、也不再召回已有的；已有条目仍可管理。
 - 评过的按钮只在这次打开的窗口里保持选中；重启后按钮回到没选，再点会再记一条。
 
 ### 和 Claude Code、Codex 单聊

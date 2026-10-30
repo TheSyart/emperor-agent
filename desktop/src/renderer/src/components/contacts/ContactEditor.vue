@@ -21,7 +21,9 @@ import { useRoute, useRouter } from 'vue-router'
 import type {
   Contact,
   ContactDomain,
-  ContactKnowledgeRef,
+  ContactKnowledge,
+  ContactMcpSelection,
+  ContactSkillSelection,
   ContactPreview,
   ContactTemplate,
   ContactToolPreset,
@@ -363,11 +365,17 @@ function toggleDomain(domain: ContactDomain) {
   change('identity', { domains: next })
 }
 
-// 知识
+// 知识（CP-01：文件、文件夹、网址、笔记）
 const refInput = ref('')
+const noteTitle = ref('')
+const noteText = ref('')
 const refError = ref('')
 
-function knowledgeLabel(ref: ContactKnowledgeRef): string {
+function newId(prefix: 'kr' | 'sk'): string {
+  return `${prefix}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+}
+
+function knowledgeLabel(ref: ContactKnowledge): string {
   switch (ref.kind) {
     case 'file':
       return `文件 · ${ref.path.split('/').pop() || ref.path}`
@@ -375,27 +383,31 @@ function knowledgeLabel(ref: ContactKnowledgeRef): string {
       return `文件夹 · ${ref.path.split('/').pop() || ref.path}`
     case 'url':
       return `网址 · ${ref.url.replace(/^https:\/\//, '')}`
-    default:
-      return `Skill · ${ref.name}`
+    case 'note':
+      return `笔记 · ${ref.title}`
   }
 }
 
-function knowledgeTitle(ref: ContactKnowledgeRef): string {
-  return ref.kind === 'url'
-    ? ref.url
-    : ref.kind === 'skill'
-      ? ref.name
-      : ref.path
+function knowledgeTitle(ref: ContactKnowledge): string {
+  switch (ref.kind) {
+    case 'file':
+    case 'folder':
+      return ref.path
+    case 'url':
+      return ref.url
+    case 'note':
+      return ref.title
+  }
 }
 
-function setKnowledge(next: ContactKnowledgeRef[]) {
-  change('knowledge', { role: { ...draft.value.role, knowledge: next } })
+function setKnowledge(next: ContactKnowledge[]) {
+  change('knowledge', { knowledge: next })
 }
 
-function addKnowledge(ref: ContactKnowledgeRef) {
-  const list = draft.value.role.knowledge
+function addKnowledge(ref: ContactKnowledge) {
+  const list = draft.value.knowledge
   if (list.length >= LIMITS.knowledge) {
-    refError.value = `参考资料最多 ${LIMITS.knowledge} 条`
+    refError.value = `知识最多 ${LIMITS.knowledge} 条`
     return
   }
   if (
@@ -411,41 +423,127 @@ function addKnowledge(ref: ContactKnowledgeRef) {
 
 async function addFile() {
   const path = await selectFile({ title: '选一个参考文件' })
-  if (path) addKnowledge({ kind: 'file', path })
+  if (path)
+    addKnowledge({ id: newId('kr'), kind: 'file', path, use: 'on_demand' })
 }
 
 async function addFolder() {
   const path = await selectDirectory()
-  if (path) addKnowledge({ kind: 'folder', path })
+  if (path)
+    addKnowledge({ id: newId('kr'), kind: 'folder', path, use: 'on_demand' })
 }
 
 function addTyped() {
   const value = refInput.value.trim()
   if (!value) return
-  if (/^https:\/\/\S+$/.test(value)) addKnowledge({ kind: 'url', url: value })
-  else if (/^[a-z0-9][a-z0-9-]{0,63}$/i.test(value))
-    addKnowledge({ kind: 'skill', name: value })
-  else {
-    refError.value = '网址要以 https:// 开头；Skill 直接写它的名字'
+  if (!/^https:\/\/\S+$/.test(value)) {
+    refError.value = '网址要以 https:// 开头'
     return
   }
+  addKnowledge({
+    id: newId('kr'),
+    kind: 'url',
+    url: value,
+    use: 'on_demand',
+  })
   refInput.value = ''
 }
 
+function addNote() {
+  const title = noteTitle.value.trim()
+  const text = noteText.value.trim()
+  if (!title || !text) {
+    refError.value = '笔记要有标题和内容'
+    return
+  }
+  addKnowledge({
+    id: newId('kr'),
+    kind: 'note',
+    title,
+    text,
+    use: 'on_demand',
+  })
+  noteTitle.value = ''
+  noteText.value = ''
+}
+
 function removeKnowledge(index: number) {
-  setKnowledge(draft.value.role.knowledge.filter((_, at) => at !== index))
+  setKnowledge(draft.value.knowledge.filter((_, at) => at !== index))
 }
 
 function togglePinned(index: number) {
   setKnowledge(
-    draft.value.role.knowledge.map((item, at) =>
-      at === index && item.kind === 'file'
-        ? item.pinned
-          ? { kind: 'file', path: item.path }
-          : { ...item, pinned: true }
+    draft.value.knowledge.map((item, at) =>
+      at === index && item.kind !== 'url'
+        ? { ...item, use: item.use === 'pinned' ? 'on_demand' : 'pinned' }
         : item,
     ),
   )
+}
+
+// 能力：Skill 与 MCP（CP-02），只从当前安装的目录里选。
+const skillChoices = computed(() =>
+  (ctx.boot?.value?.skills ?? []).filter((skill) => skill.status === 'active'),
+)
+
+const mcpChoices = computed(() => {
+  const servers = ctx.boot?.value?.mcp?.servers ?? []
+  return servers.map((server) => ({
+    serverId: server.serverName,
+    state: server.state,
+    tools: [...(server.tools ?? [])],
+  }))
+})
+
+function skillSelected(name: string): boolean {
+  return draft.value.skills.some((skill) => skill.name === name)
+}
+
+function toggleSkill(name: string): void {
+  const current = draft.value.skills
+  if (current.some((skill) => skill.name === name))
+    change('capabilities', {
+      skills: current.filter((skill) => skill.name !== name),
+    })
+  else {
+    const found = skillChoices.value.find((skill) => skill.name === name)
+    if (!found) return
+    const next: ContactSkillSelection = {
+      id: newId('sk'),
+      sourceId: found.source ?? 'user',
+      name: found.name,
+    }
+    change('capabilities', { skills: [...current, next] })
+  }
+}
+
+function mcpSelected(serverId: string, tool: string): boolean {
+  return (
+    draft.value.mcp
+      .find((server) => server.serverId === serverId)
+      ?.toolNames.includes(tool) ?? false
+  )
+}
+
+function toggleMcp(serverId: string, tool: string): void {
+  const current = draft.value.mcp.map((server) => ({
+    ...server,
+    toolNames: [...server.toolNames],
+  }))
+  const found = current.find((server) => server.serverId === serverId)
+  if (found) {
+    found.toolNames = found.toolNames.includes(tool)
+      ? found.toolNames.filter((name) => name !== tool)
+      : [...found.toolNames, tool]
+    const next = current.filter((server) => server.toolNames.length)
+    change('capabilities', { mcp: next })
+    return
+  }
+  const next: ContactMcpSelection = {
+    serverId,
+    toolNames: [tool],
+  }
+  change('capabilities', { mcp: [...current, next] })
 }
 
 // 能力
@@ -694,7 +792,7 @@ function filled(section: SectionKey): boolean {
     case 'playbook':
       return role.playbook.trim() !== ''
     case 'knowledge':
-      return role.knowledge.length > 0
+      return draft.value.knowledge.length > 0
     case 'boundaries':
       return role.boundaries.trim() !== ''
     default:
@@ -1077,17 +1175,17 @@ const title = computed(() =>
               <span class="num">4</span> 知识
               <small>只读参考资料，回答时注明出处</small>
               <span v-if="filled('knowledge')" class="ok"
-                >{{ draft.role.knowledge.length }} 项</span
+                >{{ draft.knowledge.length }} 项</span
               >
             </h3>
             <div
-              v-if="draft.role.knowledge.length"
+              v-if="draft.knowledge.length"
               class="tags"
               data-field="knowledge"
             >
               <span
-                v-for="(item, index) in draft.role.knowledge"
-                :key="`${item.kind}:${knowledgeTitle(item)}`"
+                v-for="(item, index) in draft.knowledge"
+                :key="item.id"
                 class="knowledge"
               >
                 <Tag
@@ -1098,11 +1196,11 @@ const title = computed(() =>
                   @remove="removeKnowledge(index)"
                 />
                 <Tag
-                  v-if="item.kind === 'file'"
-                  label="放进提示词"
-                  :selected="item.pinned === true"
+                  v-if="item.kind !== 'url'"
+                  label="常驻上下文"
+                  :selected="item.use === 'pinned'"
                   :disabled="locked"
-                  :title="'置顶的文件合计不超过 8 KB，直接放进提示词'"
+                  :title="'常驻的资料合计不超过 8 KB，直接放进提示词'"
                   @click="togglePinned(index)"
                 />
               </span>
@@ -1127,8 +1225,8 @@ const title = computed(() =>
                 size="sm"
                 class="ref-input"
                 :disabled="locked"
-                placeholder="https:// 网址，或 Skill 名字"
-                aria-label="网址或 Skill 名字"
+                placeholder="https:// 网址"
+                aria-label="网址"
                 @keydown.enter="addTyped"
               />
               <Button
@@ -1136,6 +1234,28 @@ const title = computed(() =>
                 :disabled="locked || !refInput.trim()"
                 @click="addTyped"
                 >添加</Button
+              >
+            </div>
+            <div class="note-row">
+              <TextField
+                v-model="noteTitle"
+                size="sm"
+                :disabled="locked"
+                placeholder="笔记标题"
+                aria-label="笔记标题"
+              />
+              <TextField
+                v-model="noteText"
+                size="sm"
+                :disabled="locked"
+                placeholder="笔记内容（≤4000 字）"
+                aria-label="笔记内容"
+              />
+              <Button
+                size="sm"
+                :disabled="locked || !noteTitle.trim() || !noteText.trim()"
+                @click="addNote"
+                >+ 笔记</Button
               >
             </div>
             <p v-if="refError" class="error" role="alert">{{ refError }}</p>
@@ -1201,7 +1321,7 @@ const title = computed(() =>
             <p v-if="external || locked" class="note">
               {{
                 external
-                  ? '模型和权限跟随「设置 › 子智能体」。'
+                  ? '模型和权限跟随「设置 › 子智能体」。外部智能体暂不支持在 Emperor 里绑定 Skill 或 MCP。'
                   : '内置联系人用 Emperor 自己的模型、工具和权限。'
               }}
             </p>
@@ -1253,6 +1373,54 @@ const title = computed(() =>
                     />
                   </div>
                 </div>
+              </Field>
+              <Field
+                label="工作技能 Skill"
+                hint="只列当前安装里可用的 Skill；选中的 Skill 才会出现在它的工作里"
+              >
+                <div class="tags" data-field="skills">
+                  <Tag
+                    v-for="skill in skillChoices"
+                    :key="skill.name"
+                    :data-skill="skill.name"
+                    :label="skill.name"
+                    :selected="skillSelected(skill.name)"
+                    :title="skill.description ?? skill.name"
+                    @click="toggleSkill(skill.name)"
+                  />
+                </div>
+                <p v-if="!skillChoices.length" class="hint">
+                  安装里还没有可用的 Skill：在「能力 › Skills」里添加。
+                </p>
+              </Field>
+              <Field
+                label="外部连接 MCP"
+                hint="选已配置的服务和具体工具；连接不在联系人这里保存凭据"
+              >
+                <div
+                  v-for="server in mcpChoices"
+                  :key="server.serverId"
+                  class="mcp-server"
+                  :data-mcp="server.serverId"
+                >
+                  <span class="mcp-name">
+                    {{ server.serverId }}
+                    <small>{{ server.state }}</small>
+                  </span>
+                  <div class="tags">
+                    <Tag
+                      v-for="tool in server.tools"
+                      :key="tool"
+                      :data-mcp-tool="tool"
+                      :label="tool"
+                      :selected="mcpSelected(server.serverId, tool)"
+                      @click="toggleMcp(server.serverId, tool)"
+                    />
+                  </div>
+                </div>
+                <p v-if="!mcpChoices.length" class="hint">
+                  还没有配置 MCP：在「能力 › MCP」里添加服务。
+                </p>
               </Field>
               <Field label="权限" hint="不能高于「设置 › 常规」里新会话的权限">
                 <Segmented
@@ -1475,6 +1643,39 @@ const title = computed(() =>
 .ref-input {
   flex: 1;
   min-width: 180px;
+}
+
+.note-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-2);
+}
+
+.note-row > :nth-child(2) {
+  flex: 1;
+  min-width: 220px;
+}
+
+.mcp-server {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) 0;
+  box-shadow: inset 0 -0.5px 0 var(--hairline);
+}
+
+.mcp-name {
+  min-width: 120px;
+  color: rgb(var(--text-1));
+  font-size: var(--fs-xxs);
+}
+
+.mcp-name small {
+  margin-left: var(--space-1);
+  color: rgb(var(--text-3));
 }
 
 .note {

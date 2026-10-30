@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { isSkillName } from '../skills/name'
@@ -18,12 +19,16 @@ import {
   type Capabilities,
   type Contact,
   type ContactAvatar,
+  type ContactKnowledge,
+  type ContactMcpSelection,
   type ContactModel,
   type ContactPermission,
+  type ContactSkillSelection,
   type ContactTools,
   type Domain,
   type GroupHabit,
   type KnowledgeRef,
+  type KnowledgeUse,
   type RoleCard,
   type RoleExample,
 } from './types'
@@ -33,6 +38,8 @@ export const CONTACT_ID = /^ct-[a-z0-9-]{1,48}$/
 export const TEMPLATE_ID = /^[a-z][a-z0-9-]{0,63}$/
 /** Tool names as the registry spells them (builtins, MCP `mcp__server__tool`). */
 const TOOL_NAME = /^[A-Za-z0-9_.:-]{1,128}$/
+const RESOURCE_ID = /^kr-[a-z0-9]{6,40}$/
+const SKILL_ID = /^sk-[a-z0-9]{6,40}$/
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/
 
@@ -186,6 +193,204 @@ function normalizeKnowledge(value: unknown): KnowledgeRef {
     default:
       return fail(field, `参考资料类型不对：${String(value.kind)}`)
   }
+}
+
+/** A stable id for a resource that the old file did not give one. */
+export function stableResourceId(prefix: 'kr' | 'sk', key: string): string {
+  const digest = createHash('sha256').update(key).digest('hex').slice(0, 12)
+  return `${prefix}-${digest}`
+}
+
+function knowledgeUse(value: unknown, field: string): KnowledgeUse {
+  if (value === undefined) return 'on_demand'
+  if (value === true) return 'pinned'
+  return oneOf(value, ['on_demand', 'pinned'] as const, field, '使用方式')
+}
+
+function normalizeContactKnowledge(value: unknown): ContactKnowledge[] {
+  const field = 'knowledge'
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail(field, '知识必须是列表')
+  if (value.length > CONTACT_LIMITS.knowledge)
+    fail(field, `知识最多 ${CONTACT_LIMITS.knowledge} 条`)
+  const seen = new Set<string>()
+  return value.map((item) => {
+    if (!isRecord(item)) fail(field, '知识条目不对')
+    const kind = oneOf(
+      item.kind,
+      ['file', 'folder', 'url', 'note'] as const,
+      `${field}.kind`,
+      '知识类型',
+    )
+    if (kind === 'file' || kind === 'folder') {
+      const path = item.path
+      if (typeof path !== 'string' || !path.trim()) fail(field, '知识要写路径')
+      if (path.length > CONTACT_LIMITS.path) fail(field, '知识的路径太长')
+      if (!isAbsolute(path)) fail(field, `知识要写绝对路径：${path}`)
+      const key = `${kind}:${path}`
+      if (seen.has(key)) fail(field, `知识重复了：${path}`)
+      seen.add(key)
+      return {
+        id:
+          typeof item.id === 'string' && RESOURCE_ID.test(item.id)
+            ? item.id
+            : stableResourceId('kr', key),
+        kind,
+        path,
+        use: knowledgeUse(item.use ?? item.pinned, field),
+      }
+    }
+    if (kind === 'url') {
+      const url = item.url
+      if (typeof url !== 'string' || url.length > CONTACT_LIMITS.url)
+        fail(field, '网址不对')
+      let parsed: URL | null = null
+      try {
+        parsed = new URL(url)
+      } catch {
+        parsed = null
+      }
+      if (parsed === null || parsed.protocol !== 'https:')
+        fail(field, `只收 https 网址：${url}`)
+      const key = `url:${url}`
+      if (seen.has(key)) fail(field, `知识重复了：${url}`)
+      seen.add(key)
+      return {
+        id:
+          typeof item.id === 'string' && RESOURCE_ID.test(item.id)
+            ? item.id
+            : stableResourceId('kr', key),
+        kind: 'url',
+        url,
+        use: 'on_demand',
+      }
+    }
+    const title = text(
+      item.title,
+      `${field}.title`,
+      '知识的标题',
+      CONTACT_LIMITS.knowledgeTitle,
+    )
+    if (!title) fail(field, '知识笔记要有标题')
+    const note = text(
+      item.text,
+      `${field}.text`,
+      '知识笔记',
+      CONTACT_LIMITS.knowledgeNote,
+    )
+    if (!note) fail(field, '知识笔记不能为空')
+    const key = `note:${title}`
+    if (seen.has(key)) fail(field, `知识重复了：${title}`)
+    seen.add(key)
+    return {
+      id:
+        typeof item.id === 'string' && RESOURCE_ID.test(item.id)
+          ? item.id
+          : stableResourceId('kr', key),
+      kind: 'note',
+      title,
+      text: note,
+      use: knowledgeUse(item.use, field),
+    }
+  })
+}
+
+function normalizeSkills(value: unknown): ContactSkillSelection[] {
+  const field = 'skills'
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail(field, '工作技能必须是列表')
+  if (value.length > CONTACT_LIMITS.skills)
+    fail(field, `工作技能最多 ${CONTACT_LIMITS.skills} 个`)
+  const ids = new Set<string>()
+  const names = new Set<string>()
+  return value.map((item) => {
+    if (!isRecord(item)) fail(field, '工作技能不对')
+    if (!isSkillName(item.name))
+      fail(field, `Skill 名字不对：${String(item.name)}`)
+    const sourceId = text(item.sourceId, `${field}.sourceId`, '来源', 128)
+    if (!sourceId) fail(field, '工作技能要有来源')
+    const key = `${sourceId}:${item.name}`
+    if (names.has(key)) fail(field, `工作技能重复了：${item.name}`)
+    names.add(key)
+    const id =
+      typeof item.id === 'string' && SKILL_ID.test(item.id)
+        ? item.id
+        : stableResourceId('sk', key)
+    if (ids.has(id)) fail(field, `工作技能编号重复了：${id}`)
+    ids.add(id)
+    return { id, sourceId, name: item.name }
+  })
+}
+
+function normalizeMcp(value: unknown): ContactMcpSelection[] {
+  const field = 'mcp'
+  if (value === undefined) return []
+  if (!Array.isArray(value)) fail(field, '外部连接必须是列表')
+  if (value.length > CONTACT_LIMITS.mcpServers)
+    fail(field, `外部连接最多 ${CONTACT_LIMITS.mcpServers} 个`)
+  const servers = new Set<string>()
+  return value.map((item) => {
+    if (!isRecord(item)) fail(field, '外部连接不对')
+    if (
+      typeof item.serverId !== 'string' ||
+      !item.serverId.trim() ||
+      charCount(item.serverId) > 128 ||
+      CONTROL.test(item.serverId)
+    )
+      fail(field, '外部连接的名字不对')
+    if (servers.has(item.serverId))
+      fail(field, `外部连接重复了：${item.serverId}`)
+    servers.add(item.serverId)
+    const tools = item.toolNames ?? []
+    if (!Array.isArray(tools)) fail(field, '工具必须是列表')
+    if (tools.length > CONTACT_LIMITS.mcpTools)
+      fail(field, `每个外部连接最多 ${CONTACT_LIMITS.mcpTools} 个工具`)
+    const seen = new Set<string>()
+    const toolNames = tools.map((name) => {
+      if (
+        typeof name !== 'string' ||
+        !name.trim() ||
+        charCount(name) > 128 ||
+        CONTROL.test(name)
+      )
+        fail(field, '工具名字不对')
+      if (seen.has(name)) fail(field, `工具重复了：${name}`)
+      seen.add(name)
+      return name
+    })
+    return { serverId: item.serverId, toolNames }
+  })
+}
+
+/** Schema 2's role-card knowledge, split into the schema 3 lists. */
+function migrateLegacyKnowledge(refs: readonly KnowledgeRef[]): {
+  knowledge: ContactKnowledge[]
+  skills: ContactSkillSelection[]
+} {
+  const knowledge: ContactKnowledge[] = []
+  const skills: ContactSkillSelection[] = []
+  for (const ref of refs) {
+    if (ref.kind === 'skill') {
+      skills.push({
+        id: stableResourceId('sk', `legacy:${ref.name}`),
+        sourceId: 'legacy',
+        name: ref.name,
+      })
+      continue
+    }
+    knowledge.push(
+      normalizeContactKnowledge([
+        ref.kind === 'url'
+          ? { kind: 'url', url: ref.url }
+          : {
+              kind: ref.kind,
+              path: ref.path,
+              use: ref.pinned === true ? 'pinned' : 'on_demand',
+            },
+      ])[0]!,
+    )
+  }
+  return { knowledge, skills }
 }
 
 function normalizeExample(value: unknown): RoleExample {
@@ -352,6 +557,25 @@ export function normalizeContact(value: unknown): Contact {
     backend = oneOf(value.backend, EXTERNAL_BACKENDS, 'backend', '外部子智能体')
   else if (value.backend !== undefined)
     fail('backend', '只有外部联系人才对应 Claude Code 或 Codex')
+  const role = normalizeRole(value.role)
+  const legacy = role.knowledge ?? []
+  const migrated = migrateLegacyKnowledge(legacy)
+  const givenKnowledge = normalizeContactKnowledge(value.knowledge)
+  const givenSkills = normalizeSkills(value.skills)
+  // An old editor sends role.knowledge; a new one sends its own lists. Empty
+  // new lists (the store's build fills them) do not hide the old entries.
+  const knowledge = givenKnowledge.length
+    ? givenKnowledge
+    : migrated.knowledge.length
+      ? migrated.knowledge
+      : givenKnowledge
+  const skills = givenSkills.length
+    ? givenSkills
+    : migrated.skills.length
+      ? migrated.skills
+      : givenSkills
+  const mcp = normalizeMcp(value.mcp)
+  const { knowledge: _legacy, ...roleCard } = role
   const capabilities = normalizeCapabilities(value.capabilities)
   if (kind === 'external' && !sameValue(capabilities, EXTERNAL_CAPABILITIES))
     fail(
@@ -378,7 +602,10 @@ export function normalizeContact(value: unknown): Contact {
     avatar: normalizeAvatar(value.avatar),
     intro: normalizeIntro(value.intro),
     domains: normalizeDomains(value.domains),
-    role: normalizeRole(value.role),
+    role: roleCard,
+    knowledge,
+    skills,
+    mcp,
     capabilities,
     groupHabit: normalizeGroupHabit(value.groupHabit),
     memory: { enabled: value.memory.enabled },
@@ -437,7 +664,7 @@ export function checkContactContext(
   )
     fail('name', `已经有叫「${contact.name}」的联系人了`)
 
-  for (const ref of contact.role.knowledge) {
+  for (const ref of contact.knowledge ?? []) {
     if (ref.kind !== 'file' && ref.kind !== 'folder') continue
     let stat: ReturnType<typeof statSync> | null = null
     try {
@@ -445,11 +672,11 @@ export function checkContactContext(
     } catch {
       stat = null
     }
-    if (stat === null) fail('role.knowledge', `参考资料不存在：${ref.path}`)
+    if (stat === null) fail('knowledge', `知识不存在：${ref.path}`)
     if (ref.kind === 'file' && !stat.isFile())
-      fail('role.knowledge', `不是文件：${ref.path}`)
+      fail('knowledge', `不是文件：${ref.path}`)
     if (ref.kind === 'folder' && !stat.isDirectory())
-      fail('role.knowledge', `不是文件夹：${ref.path}`)
+      fail('knowledge', `不是文件夹：${ref.path}`)
   }
 
   checkCapabilityContext(contact, context)

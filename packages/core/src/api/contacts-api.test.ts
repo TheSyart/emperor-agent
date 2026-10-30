@@ -12,12 +12,18 @@ import { makeApi, type ApiFixture } from './test-helpers'
 
 const VIEW = { sessionId: null }
 const CONTACT_OPERATIONS = [
+  'contacts.capabilities.resolve',
   'contacts.chatDelegation',
   'contacts.chatSend',
   'contacts.create',
   'contacts.delete',
   'contacts.draftFromBrief',
   'contacts.duplicate',
+  'contacts.experiences.list',
+  'contacts.experiences.remove',
+  'contacts.experiences.restore',
+  'contacts.experiences.setStatus',
+  'contacts.experiences.update',
   'contacts.feedback',
   'contacts.fromTemplate',
   'contacts.get',
@@ -62,6 +68,61 @@ describe('contacts operations', () => {
       coreOperationKeys().filter((key) => key.startsWith('contacts.')),
     ).toEqual(CONTACT_OPERATIONS)
     expect(RUNTIME_EVENT_NAMES).toContain('contacts_changed')
+  })
+
+  it('lists, edits, disables, removes and restores an experience', async () => {
+    const fixture = await api()
+    const core = fixture.api
+    const person = await invokeCoreOperation(core, 'contacts.create', [
+      { name: '审稿人' },
+    ])
+    const { ContactExperienceStore } = await import('../contacts/experiences')
+    const store = new ContactExperienceStore({
+      stateRoot: fixture.stateRoot,
+    })
+    const [entry] = await store.add(
+      person.id,
+      [
+        {
+          text: '先跑测试',
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'c1' }],
+        },
+      ],
+      {
+        sessionId: 's1',
+        turnId: 't1',
+        messageIds: ['m1'],
+        roleVersion: person.version,
+      },
+    )
+    const listing = await invokeCoreOperation(
+      core,
+      'contacts.experiences.list',
+      [{ id: person.id }],
+    )
+    expect(listing.experiences[0]!.text).toBe('先跑测试')
+    await invokeCoreOperation(core, 'contacts.experiences.setStatus', [
+      { id: person.id, experienceId: entry!.id, status: 'disabled' },
+    ])
+    await invokeCoreOperation(core, 'contacts.experiences.remove', [
+      { id: person.id, experienceId: entry!.id },
+    ])
+    const afterRemove = await invokeCoreOperation(
+      core,
+      'contacts.experiences.list',
+      [{ id: person.id }],
+    )
+    expect(afterRemove.experiences[0]!.status).toBe('deleted')
+    await invokeCoreOperation(core, 'contacts.experiences.restore', [
+      { id: person.id, experienceId: entry!.id },
+    ])
+    const restored = await invokeCoreOperation(
+      core,
+      'contacts.experiences.list',
+      [{ id: person.id }],
+    )
+    expect(restored.experiences[0]!.status).toBe('candidate')
   })
 
   it('runs a contact through its life and announces each change', async () => {

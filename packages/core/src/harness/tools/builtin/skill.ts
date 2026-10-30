@@ -34,6 +34,11 @@ export interface SkillCatalogEntry {
 /** Skills resolution for one agent (the loader of the agent's project root). */
 export interface SkillSource {
   loaderFor(agent: Agent | undefined): FileSkillsLoader
+  /**
+   * A contact's selected Skills (CP-02): a Skill it did not choose is not
+   * listed and cannot be loaded. Absent: no narrowing.
+   */
+  allows?(agent: Agent | undefined, name: string): boolean
 }
 
 function escapeText(value: string): string {
@@ -58,10 +63,18 @@ function isModelInvocable(skill: ResolvedSkill): boolean {
   return skill.frontmatter['disable-model-invocation'] !== true
 }
 
-export function catalogEntries(loader: FileSkillsLoader): SkillCatalogEntry[] {
+export function catalogEntries(
+  loader: FileSkillsLoader,
+  allows?: (name: string) => boolean,
+): SkillCatalogEntry[] {
   return loader
     .resolvedSkills()
-    .filter((skill) => skill.status === 'active' && isModelInvocable(skill))
+    .filter(
+      (skill) =>
+        skill.status === 'active' &&
+        isModelInvocable(skill) &&
+        (allows?.(skill.name) ?? true),
+    )
     .map((skill) => ({
       name: skill.name,
       description: catalogDescription(skill.description),
@@ -181,6 +194,8 @@ export function createSkillTool(source: SkillSource): ToolDefinition {
     async execute({ name }, context) {
       if (!isSkillName(name))
         throw new ToolError(`invalid skill name "${name}"`)
+      if (source.allows && !source.allows(context.agent, name))
+        throw new ToolError(`skill "${name}" is not selected for this contact`)
       const skill = source.loaderFor(context.agent).resolve(name)
       if (skill === null || skill.status !== 'active')
         throw new ToolError(`skill "${name}" is unknown or no longer available`)
@@ -226,6 +241,7 @@ export function skillMiddleware(
             )
           )
             continue
+          if (source.allows && !source.allows(agent, name)) continue
           const skill = lookup(name)
           if (skill === undefined || skill.status !== 'active') continue
           injections.push(
@@ -240,7 +256,10 @@ export function skillMiddleware(
     }
     let next = injections.length === 0 ? messages : [...messages, ...injections]
     if (isToolVisible(agent)) {
-      const entries = catalogEntries(loader)
+      const allows = source.allows
+        ? (name: string) => source.allows!(agent, name)
+        : undefined
+      const entries = catalogEntries(loader, allows)
       const digest = digestEntries(entries)
       const history = catalogHistory(agent.session)
       if (

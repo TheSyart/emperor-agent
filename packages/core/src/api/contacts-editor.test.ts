@@ -89,6 +89,7 @@ describe('the editor operations', () => {
   it('registers the six of them', () => {
     const keys = coreOperationKeys()
     for (const key of [
+      'contacts.capabilities.resolve',
       'contacts.draftFromBrief',
       'contacts.importAgentFile',
       'contacts.preview',
@@ -246,6 +247,44 @@ describe('contacts.draftFromBrief', () => {
     expect(
       stats.recentCalls.filter((call) => call.usage_type === 'contact_draft'),
     ).toHaveLength(2)
+  })
+})
+
+describe('contacts.capabilities.resolve (CP-02)', () => {
+  it('says which selected Skills and MCP tools are usable here', async () => {
+    const { api } = await setup()
+    const view = await invokeCoreOperation(
+      api,
+      'contacts.capabilities.resolve',
+      [
+        {
+          draft: {
+            ...DRAFT,
+            skills: [
+              { id: 'sk-one123', sourceId: 'user', name: 'ghost-skill' },
+            ],
+            mcp: [{ serverId: 'github', toolNames: ['search'] }],
+          },
+        },
+      ],
+    )
+    expect(view.tools).toContain('read')
+    expect(view.tools).not.toContain('mcp_github_search')
+    expect(view.skills).toEqual([
+      {
+        id: 'sk-one123',
+        sourceId: 'user',
+        name: 'ghost-skill',
+        available: false,
+        reason: '安装里没有这个 Skill',
+      },
+    ])
+    expect(view.mcp[0]).toMatchObject({
+      serverId: 'github',
+      available: false,
+      tools: [{ name: 'search', available: false }],
+    })
+    expect(view.mcp[0]!.reason).toContain('没有连上')
   })
 })
 

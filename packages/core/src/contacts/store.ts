@@ -134,6 +134,9 @@ const PATCH_KEYS = [
   'intro',
   'domains',
   'role',
+  'knowledge',
+  'skills',
+  'mcp',
   'capabilities',
   'groupHabit',
   'memory',
@@ -404,6 +407,9 @@ export class ContactStore {
             intro: old.intro,
             domains: old.domains,
             role: old.role,
+            knowledge: old.knowledge ?? [],
+            skills: old.skills ?? [],
+            mcp: old.mcp ?? [],
             capabilities: old.capabilities,
             groupHabit: old.groupHabit,
             memory: old.memory,
@@ -500,6 +506,9 @@ export class ContactStore {
       intro: input.intro ?? '',
       domains: input.domains ?? [],
       role: { ...emptyRole(), ...(isRecord(input.role) ? input.role : {}) },
+      knowledge: input.knowledge ?? [],
+      skills: input.skills ?? [],
+      mcp: input.mcp ?? [],
       capabilities:
         kind === 'external'
           ? { ...structuredClone(EXTERNAL_CAPABILITIES), ...input.capabilities }
@@ -634,12 +643,14 @@ export class ContactStore {
       decode: (input) => {
         if (
           !isRecord(input) ||
-          input.schemaVersion !== CONTACTS_SCHEMA_VERSION ||
+          (input.schemaVersion !== 2 &&
+            input.schemaVersion !== CONTACTS_SCHEMA_VERSION) ||
           !Array.isArray(input.contacts)
         )
           throw new Error(
-            'contacts.json is not a schemaVersion 2 contacts file',
+            'contacts.json is not a schemaVersion 2 or 3 contacts file',
           )
+        const migrated = input.schemaVersion === 2
         const contacts = input.contacts.map((raw: unknown) =>
           isRecord(raw) &&
           typeof raw.id === 'string' &&
@@ -653,7 +664,11 @@ export class ContactStore {
         )
         if (ids.size !== contacts.length || names.size !== contacts.length)
           throw new Error('contacts.json repeats a contact id or name')
-        return { value: contacts, schemaVersion: CONTACTS_SCHEMA_VERSION }
+        return {
+          value: contacts,
+          schemaVersion: CONTACTS_SCHEMA_VERSION,
+          ...(migrated ? { migrated: true } : {}),
+        }
       },
     }
   }
@@ -723,8 +738,10 @@ export class ContactStore {
         },
       }
     const contacts = this.withBuiltins(result.value)
+    if (result.receipt.recoveryAction === 'migrated_in_memory')
+      await this.upgradeFromSchema2(contacts)
     // First start (or a builtin missing from the file): write the three.
-    if (
+    else if (
       !result.found ||
       !sameValue(
         contacts.map((contact) => contact.id),
@@ -733,6 +750,31 @@ export class ContactStore {
     )
       await this.snapshot.write(contacts)
     return { contacts, readOnly: null }
+  }
+
+  /**
+   * Schema 2 → 3 (GRP patch CP-01): keep the old file beside the new one
+   * first; a failed backup stops the read, so nothing is written blind.
+   */
+  private async upgradeFromSchema2(contacts: Contact[]): Promise<void> {
+    const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-')
+    const backup = join(this.dir, `contacts.schema2-${stamp}.bak.json`)
+    try {
+      const raw = this.adapter
+        ? await this.adapter.readText(this.path)
+        : await readFile(this.path, 'utf8')
+      await durableReplace(backup, raw, {
+        adapter: this.adapter,
+        fileMode: 0o600,
+        directoryMode: 0o700,
+      })
+    } catch (error) {
+      throw new Error(
+        `联系人升级前的备份没有写成，联系人文件保持原样：${String(error)}`,
+      )
+    }
+    await this.snapshot.write(contacts)
+    logger.info('contacts: upgraded contacts.json to schema 3', { backup })
   }
 
   private serial<T>(task: () => Promise<T>): Promise<T> {

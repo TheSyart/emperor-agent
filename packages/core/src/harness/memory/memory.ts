@@ -46,6 +46,16 @@ export interface MemoryDeps {
   approval?: Pick<ApprovalService, 'request'>
 }
 
+/** A contact runs on its own experience, never on the main memory (CP-03). */
+function contactSession(deps: MemoryDeps, agent: Agent): boolean {
+  const entry = deps.sessionEntry(agent)
+  return (
+    entry?.contact_id !== undefined ||
+    entry?.surface === 'contact' ||
+    entry?.surface === 'group_member'
+  )
+}
+
 function clip(text: string): string {
   const bytes = Buffer.from(text, 'utf8')
   if (bytes.length <= MAX_SECTION_BYTES) return text
@@ -117,6 +127,7 @@ function lastDigest(session: Session): string | undefined {
 export function memoryMiddleware(deps: MemoryDeps): PreStepMiddleware {
   return ({ agent, messages, step }) => {
     if (step !== 1 || agent.owner !== undefined) return undefined
+    if (contactSession(deps, agent)) return undefined
     const current = snapshot(deps, agent)
     const empty =
       !current.memory.trim() &&
@@ -193,6 +204,11 @@ export function createMemoryTool(deps: MemoryDeps): ToolDefinition {
       if (agent.owner !== undefined)
         throw new ToolError(
           'delegated subagents cannot edit long-term memory; report the fact to your parent instead',
+        )
+      if (contactSession(deps, agent))
+        throw new ToolError(
+          'a contact keeps its own experiences; it does not edit the main memory',
+          'CONTACT_MEMORY',
         )
       if (containsSecret(args.new_string))
         throw new ToolError(

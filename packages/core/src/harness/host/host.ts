@@ -833,6 +833,8 @@ export class HarnessHost {
     this.webTools.install(tools, prompt)
     const skills = {
       loaderFor: (agent: Agent | undefined) => this.skillsLoaderFor(agent),
+      allows: (agent: Agent | undefined, name: string) =>
+        this.contactAllowsSkill(agent, name),
     }
     tools.register(createSkillTool(skills))
     // Emperor Skills: writes ask unless danger-full-access (skill_manage).
@@ -1172,6 +1174,25 @@ export class HarnessHost {
     this.contactRuntime = runtime
   }
 
+  private contactTurnObserver?: (input: {
+    contactId: string
+    session: Session
+    turnId: string
+  }) => void
+
+  /** CP-04: told once when a contact root's turn ends (never blocks it). */
+  setContactTurnObserver(
+    observer:
+      | ((input: {
+          contactId: string
+          session: Session
+          turnId: string
+        }) => void)
+      | null,
+  ): void {
+    this.contactTurnObserver = observer ?? undefined
+  }
+
   /** The highest preset a session may have: its contact's (null: none). */
   private contactCeiling(sessionId: string): string | null {
     const runtime = this.contactRuntime
@@ -1247,6 +1268,12 @@ export class HarnessHost {
     // takes a turn as one of them (GRP-11).
     if (binding.snapshot.contact.kind === 'external')
       throw new ContactExternalChatError(binding.snapshot.contact.name)
+    // CP-03: once per contact session, draw the line between what the old
+    // context carried and what a contact may see from now on.
+    if (agent.session.lastOf('contact/context-boundary') === undefined)
+      agent.session.append('contact/context-boundary', {
+        contactId: binding.contactId,
+      })
     const missing = binding.missingModel()
     if (missing === null) return undefined
     const fallback = this.contactRuntime?.defaultModelName() ?? '默认模型'
@@ -1995,6 +2022,17 @@ export class HarnessHost {
       : null
   }
 
+  /**
+   * CP-02: a local contact's selected Skills only. Emperor's Chat/Build
+   * persona and external executors have no selection (all Skills as before).
+   */
+  private contactAllowsSkill(agent: Agent | undefined, name: string): boolean {
+    if (!agent) return true
+    const root = this.rootOf(agent)
+    const binding = this.contactBindings.get(root.id)
+    return binding ? binding.allowsSkill(name) : true
+  }
+
   /** The skills loader scoped to an agent's session (project skills in build mode). */
   skillsLoaderFor(agent: Agent | undefined): FileSkillsLoader {
     return this.kept.skillLoaders.forProject(
@@ -2096,6 +2134,26 @@ export class HarnessHost {
         queueMicrotask(() => {
           this.announceQueueChanges(sessionId)
         })
+      if (agent.owner === undefined && event.type === 'turn/end') {
+        const binding = this.contactBindings.get(agent.id)
+        if (binding) {
+          const observer = this.contactTurnObserver
+          const turnId = String(event.data.turn)
+          queueMicrotask(() => {
+            try {
+              observer?.({
+                contactId: binding.contactId,
+                session: agent.session,
+                turnId,
+              })
+            } catch (error) {
+              logger.warn('contacts: experience observer failed', {
+                error: String(error),
+              })
+            }
+          })
+        }
+      }
       const uiEvents = projector.apply(event)
       if (agent.owner === undefined) {
         for (const uiEvent of uiEvents) void this.sink(uiEvent)

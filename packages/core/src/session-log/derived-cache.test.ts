@@ -177,3 +177,21 @@ describe('Session.deriveEventMessage — the per-event projection', () => {
     expect(session.deriveEventMessage(empty)).toBeNull()
   })
 })
+
+describe('contact context boundary (CP-03)', () => {
+  it('keeps old nodes in the log but out of requests', () => {
+    const session = testSession('boundary')
+    userText(session, 'old context')
+    session.append('contact/context-boundary', { contactId: 'ct-x' })
+    userText(session, 'new work')
+    const texts = (messages: { content: unknown }[]) =>
+      messages.map((message) => JSON.stringify(message.content))
+    expect(texts(session.deriveMessages())).toEqual([
+      JSON.stringify([{ type: 'text', text: 'old context' }]),
+      JSON.stringify([{ type: 'text', text: 'new work' }]),
+    ])
+    expect(texts(session.deriveRequestMessages())).toEqual([
+      JSON.stringify([{ type: 'text', text: 'new work' }]),
+    ])
+  })
+})

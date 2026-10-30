@@ -141,7 +141,17 @@ import {
   type GroupUpdateInput,
 } from '../groups/service'
 import { ContactMemoryStore } from '../contacts/memory'
-import { ContactRuntime } from '../contacts/runtime'
+import { ContactRuntime, contactEffectiveTools } from '../contacts/runtime'
+import {
+  ContactExperienceStore,
+  recallText,
+  type ContactExperience,
+  type ExperienceScope,
+} from '../contacts/experiences'
+import {
+  ContactExperienceCollector,
+  type ExperienceTurnItem,
+} from '../contacts/experience-collector'
 import { ContactChatFailedError, ExternalChat } from '../contacts/external-chat'
 import {
   ContactDeletedError,
@@ -157,6 +167,8 @@ import {
   type ContactFeedbackInput,
 } from './services/contact-memory-service'
 import type {
+  ContactCapabilityInput,
+  ContactCapabilityView,
   ContactDraftInput,
   ContactInput,
   ContactPatch,
@@ -497,6 +509,10 @@ export class CoreApi {
   readonly externalChat: ExternalChat
   /** Contacts at run time; trial sessions run as their draft (GRP-04). */
   readonly contactRuntime: ContactRuntime
+  private readonly experienceStore: ContactExperienceStore
+  private readonly experienceCollector: ContactExperienceCollector
+  private readonly experienceText = new Map<string, ContactExperience[]>()
+  private readonly contactMemory: ContactMemoryStore
   /** 试用台 runs and their hidden sessions (GRP-04). */
   readonly contactTrials: ContactTrials
   /** The contact editor: avatar, drafting, import, preview, trial (GRP-04). */
@@ -677,8 +693,62 @@ export class CoreApi {
           version: change.version,
         }),
     })
+    // CP-04: working experiences, kept per contact beside its feedback.
+    this.experienceStore = new ContactExperienceStore({
+      stateRoot: this.paths.stateRoot,
+    })
+    this.experienceCollector = new ContactExperienceCollector({
+      store: this.experienceStore,
+      recordUsage: (contactId) => {
+        void this.refreshExperiences(contactId)
+      },
+      complete: async ({ contactId, system, prompt, maxTokens, signal }) => {
+        const base = host.llm.defaultCallConfig()
+        const result = await host.llm.complete({
+          provider: base.provider,
+          model: base.model,
+          system,
+          messages: [
+            {
+              id: `xp-${contactId}-${Date.now()}`,
+              role: 'user',
+              content: [{ type: 'text', text: prompt }],
+              source: { kind: 'user' },
+            },
+          ],
+          maxTokens,
+          temperature: 0.2,
+          purpose: 'auxiliary',
+          signal,
+        })
+        if (result.usage) {
+          try {
+            const entry = findEntry(host.kept.modelConfig, base.provider)
+            const counts = ledgerUsage(result.usage)
+            host.kept.tokenTracker.record(
+              base.model,
+              { ...counts },
+              {
+                provider: entry?.provider ?? null,
+                usageType: 'contact_experience',
+                modelEntryId: base.provider,
+                sessionId: contactId,
+                costUsd:
+                  entry === undefined
+                    ? null
+                    : usageCostUsd(counts, entryPrices(entry)),
+              },
+            )
+          } catch {
+            // usage accounting never breaks the turn
+          }
+        }
+        return result.text
+      },
+    })
     // A session with `contact_id` runs as that contact (GRP-03).
     const contactMemory = new ContactMemoryStore(this.paths.stateRoot)
+    this.contactMemory = contactMemory
     const persona = readPersonaText(kept.templatesDir)
     this.contactRuntime = new ContactRuntime({
       contact: (id) => this.contactStore.peek(id),
@@ -691,8 +761,31 @@ export class CoreApi {
       route: (id) => host.llm.listRoutes().find((route) => route.id === id),
       defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
       persona: () => persona,
+      experiences: (contactId, sessionId) =>
+        this.experiencesFor(contactId, sessionId),
     })
     host.setContactRuntime(this.contactRuntime)
+    void this.refreshAllExperiences()
+    host.setContactTurnObserver(({ contactId, session, turnId }) => {
+      const contact = this.contactStore.peek(contactId)
+      if (!contact?.memory.enabled) return
+      const turn = Number(turnId)
+      if (!Number.isInteger(turn)) return
+      const items = this.experienceItems(session, turn)
+      if (!items.length) return
+      this.experienceCollector.collect({
+        contactId,
+        contactName: contact.name,
+        sessionId: session.id,
+        turnId,
+        roleVersion: contact.version,
+        scope: this.experienceScope(session.id),
+        items,
+        messageIds: items
+          .filter((item) => item.role !== 'tool')
+          .map((item) => item.ref),
+      })
+    })
     this.groupDefaults = new CoreGroupDefaultsService(this.root, {
       stateRoot: this.paths.stateRoot,
     })
@@ -3857,6 +3950,87 @@ export class CoreApi {
     },
   }
 
+  // ── contact experiences (CP-04) ─────────────────────────────────────
+
+  private experienceScope(sessionId?: string): ExperienceScope {
+    const entry =
+      sessionId === undefined
+        ? undefined
+        : this.host.kept.sessionStore.get(sessionId)
+    if (entry?.surface === 'group_member')
+      return { kind: 'group', id: entry.group_id }
+    if (entry?.surface === 'contact') return { kind: 'session', id: sessionId }
+    if (entry?.mode === 'build' && entry.project_id)
+      return { kind: 'project', id: entry.project_id }
+    return { kind: 'contact' }
+  }
+
+  private experiencesFor(contactId: string, sessionId?: string): string {
+    const entries = this.experienceText.get(contactId)
+    if (!entries?.length) return ''
+    return recallText(entries, this.experienceScope(sessionId))
+  }
+
+  private async refreshExperiences(contactId: string): Promise<void> {
+    try {
+      const listing = await this.experienceStore.list(contactId)
+      this.experienceText.set(contactId, listing.experiences)
+    } catch {
+      // a broken experience file never blocks a turn
+    }
+  }
+
+  private async refreshAllExperiences(): Promise<void> {
+    try {
+      const listing = await this.contactStore.list()
+      await Promise.all(
+        listing.contacts.map((contact) => this.refreshExperiences(contact.id)),
+      )
+    } catch {
+      // best effort: a later list refreshes it
+    }
+  }
+
+  private experienceItems(
+    session: Session,
+    turn: number,
+  ): ExperienceTurnItem[] {
+    const events = session.events
+    let start = -1
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]!
+      if (event.type === 'turn/start' && event.data.turn === turn) {
+        start = index
+        break
+      }
+    }
+    if (start < 0) return []
+    const items: ExperienceTurnItem[] = []
+    for (const event of events.slice(start + 1)) {
+      if (event.type === 'turn/end' && event.data.turn === turn) break
+      if (event.type === 'user/message' || event.type === 'assistant/message') {
+        const message =
+          event.type === 'user/message' ? event.data : event.data.message
+        const text = messageText(message).trim()
+        if (text)
+          items.push({
+            role: event.type === 'user/message' ? 'user' : 'assistant',
+            text,
+            ref: message.id,
+          })
+      } else if (event.type === 'tool/result') {
+        const text = messageText(event.data.message).trim()
+        items.push({
+          role: 'tool',
+          text,
+          ref: event.data.message.source.callId,
+          failed: event.data.error !== undefined,
+        })
+      }
+    }
+    return items
+  }
+
   readonly contacts = {
     list: () => this.contactStore.list(),
     get: (input: { id: string }) => this.contactStore.get(input.id),
@@ -3892,6 +4066,147 @@ export class CoreApi {
       this.contactEditorService.importAgentFile(input),
     preview: (input: { draft: ContactDraftInput }) =>
       this.contactEditorService.preview(input),
+    // CP-04: the contact's own working experiences.
+    experiences: {
+      list: async (input: { id: string }) => {
+        const listing = await this.experienceStore.list(input.id)
+        if (!listing.legacy.length) {
+          const entries = this.contactMemory.entries(input.id).map((entry) => ({
+            rawText: entry.text,
+            rating: entry.rating ?? null,
+            ...(entry.date ? { date: entry.date } : {}),
+          }))
+          await this.experienceStore.importLegacy(input.id, entries)
+          const next = await this.experienceStore.list(input.id)
+          this.experienceText.set(input.id, next.experiences)
+          return next
+        }
+        this.experienceText.set(input.id, listing.experiences)
+        return listing
+      },
+      update: async (input: {
+        id: string
+        experienceId: string
+        patch: {
+          text?: string
+          conditions?: string
+          scope?: ExperienceScope
+          status?: 'candidate' | 'active' | 'superseded' | 'disabled'
+        }
+      }) => {
+        const entry = await this.experienceStore.update(
+          input.id,
+          input.experienceId,
+          input.patch,
+        )
+        await this.refreshExperiences(input.id)
+        this.host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: input.id,
+          version: null,
+        })
+        return entry
+      },
+      setStatus: async (input: {
+        id: string
+        experienceId: string
+        status: 'candidate' | 'active' | 'superseded' | 'disabled'
+      }) => {
+        const entry = await this.experienceStore.update(
+          input.id,
+          input.experienceId,
+          { status: input.status },
+        )
+        await this.refreshExperiences(input.id)
+        this.host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: input.id,
+          version: null,
+        })
+        return entry
+      },
+      remove: async (input: { id: string; experienceId: string }) => {
+        await this.experienceStore.remove(input.id, input.experienceId)
+        await this.refreshExperiences(input.id)
+        this.host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: input.id,
+          version: null,
+        })
+        return { removed: true as const }
+      },
+      restore: async (input: { id: string; experienceId: string }) => {
+        const entry = await this.experienceStore.restore(
+          input.id,
+          input.experienceId,
+        )
+        await this.refreshExperiences(input.id)
+        this.host.emitHost({
+          event: 'contacts_changed',
+          reason: 'memory',
+          contact_id: input.id,
+          version: null,
+        })
+        return entry
+      },
+    },
+    // CP-02: what the selected Skill / MCP resolves to on this install.
+    capabilities: {
+      resolve: async (
+        input: ContactCapabilityInput,
+      ): Promise<ContactCapabilityView> => {
+        if (input.draft === undefined && input.id === undefined)
+          throw new Error('要指定联系人或草稿')
+        const contact =
+          input.draft !== undefined
+            ? await this.contactStore.draft(input.draft)
+            : await this.contactStore.get(input.id!)
+        if (contact.kind === 'external')
+          return { tools: null, skills: [], mcp: [] }
+        const registered = [...this.host.registeredToolNames()]
+        const known = new Set(registered)
+        const catalog = new Map(
+          this.host
+            .skillsLoaderFor(undefined)
+            .resolvedSkills()
+            .map((skill) => [skill.name, skill]),
+        )
+        const skills = (contact.skills ?? []).map((selection) => {
+          const found = catalog.get(selection.name)
+          return {
+            ...selection,
+            available: found?.status === 'active',
+            reason:
+              found === undefined
+                ? '安装里没有这个 Skill'
+                : found.status === 'active'
+                  ? ''
+                  : `Skill 状态：${found.status}`,
+          }
+        })
+        const mcp = (contact.mcp ?? []).map((server) => {
+          const tools = server.toolNames.map((name) => ({
+            name,
+            available: known.has(`mcp_${server.serverId}_${name}`),
+          }))
+          const available = tools.some((tool) => tool.available)
+          return {
+            serverId: server.serverId,
+            available,
+            reason: available ? '' : '这个连接没有连上，或没有这些工具',
+            tools,
+          }
+        })
+        return {
+          tools: contactEffectiveTools(contact, registered),
+          skills,
+          mcp,
+        }
+      },
+    },
     trial: (input: {
       draft: ContactDraftInput
       task: string

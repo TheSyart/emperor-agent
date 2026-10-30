@@ -365,6 +365,30 @@ export class Session {
     return [...this.derived]
   }
 
+  /** CP-03: where a contact's model-context boundary sits, if any. */
+  contextBoundarySeq(): number | undefined {
+    return this.lastOf('contact/context-boundary')?.seq
+  }
+
+  /**
+   * The messages a model request may carry: {@link deriveMessages}, less
+   * everything at or before a `contact/context-boundary` (CP-03). The log
+   * and the transcript keep the old events.
+   */
+  deriveRequestMessages(): Message[] {
+    const boundary = this.contextBoundarySeq()
+    if (boundary === undefined) return this.deriveMessages()
+    const messages: Message[] = []
+    for (const seq of this.surface.nodes) {
+      if (seq <= boundary) continue
+      const event = this.log[seq]
+      if (event === undefined) continue
+      const message = this.deriveEventMessage(event)
+      if (message) messages.push(message)
+    }
+    return messages
+  }
+
   /**
    * Per-event projection used by incremental consumers (same rule as
    * {@link deriveMessages}): the node's message, with its images replaced

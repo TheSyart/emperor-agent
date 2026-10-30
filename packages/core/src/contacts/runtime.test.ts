@@ -11,13 +11,14 @@ import { compileRolePrompt } from './compile'
 import {
   NEVER_PRESET_TOOLS,
   PINNED_KNOWLEDGE_BYTES,
+  contactEffectiveTools,
   contactPermissionPreset,
   contactToolNames,
   knowledgeReadOnlyRoots,
   readKnowledge,
   toolPresetTable,
 } from './runtime'
-import type { Contact, KnowledgeRef } from './types'
+import type { Contact, ContactKnowledge } from './types'
 
 /** What the kernel registers today (`host.registeredToolNames()`, network tools on). */
 const REGISTRY = [
@@ -185,7 +186,28 @@ describe('permission (card test 3)', () => {
   })
 })
 
-function withKnowledge(knowledge: KnowledgeRef[]): Contact {
+let nextRef = 0
+function fileRef(path: string, pinned = false): ContactKnowledge {
+  return {
+    id: `kr-test${nextRef++}`,
+    kind: 'file',
+    path,
+    use: pinned ? 'pinned' : 'on_demand',
+  }
+}
+function folderRef(path: string): ContactKnowledge {
+  return { id: `kr-test${nextRef++}`, kind: 'folder', path, use: 'on_demand' }
+}
+function urlRef(value: string): ContactKnowledge {
+  return {
+    id: `kr-test${nextRef++}`,
+    kind: 'url',
+    url: value,
+    use: 'on_demand',
+  }
+}
+
+function withKnowledge(knowledge: ContactKnowledge[]): Contact {
   return {
     id: 'ct-abcdefghijkl',
     kind: 'local',
@@ -198,8 +220,8 @@ function withKnowledge(knowledge: KnowledgeRef[]): Contact {
       deliverable: '问题清单。',
       playbook: '1. 找信任边界\n2. 查数据流',
       boundaries: '不改代码。',
-      knowledge,
     },
+    knowledge,
     capabilities: {
       model: 'inherit',
       tools: { preset: 'read_only' },
@@ -214,14 +236,60 @@ function withKnowledge(knowledge: KnowledgeRef[]): Contact {
   }
 }
 
+describe('the selected MCP tools (CP-02)', () => {
+  const registered = [
+    'read',
+    'mcp_github_search',
+    'mcp_github_issues',
+    'mcp_slack_post',
+  ]
+  const contact = withKnowledge([])
+
+  it('adds the selected tools and keeps the other MCP tools out', () => {
+    const selected = {
+      ...contact,
+      mcp: [{ serverId: 'github', toolNames: ['search'] }],
+    }
+    expect(contactEffectiveTools(selected, registered)).toEqual([
+      'mcp_github_search',
+      'read',
+    ])
+  })
+
+  it('follows the old allow list while the contact has no selection', () => {
+    const legacy = {
+      ...contact,
+      capabilities: {
+        ...contact.capabilities,
+        tools: {
+          preset: 'custom' as const,
+          allow: ['read', 'mcp_slack_post'],
+        },
+      },
+    }
+    expect(contactEffectiveTools(legacy, registered)).toEqual([
+      'mcp_slack_post',
+      'read',
+    ])
+  })
+
+  it('leaves a selected tool out when the registry does not have it', () => {
+    const missing = {
+      ...contact,
+      mcp: [{ serverId: 'github', toolNames: ['graphql'] }],
+    }
+    expect(contactEffectiveTools(missing, registered)).toEqual(['read'])
+  })
+})
+
 describe('pinned knowledge (card test 6)', () => {
   it('inlines pinned files as quoted material, not instructions', () => {
     const dir = tmp('emperor-kb-')
     const checklist = join(dir, 'checklist.md')
     writeFileSync(checklist, '# 清单\r\n1. 查注入\n\n2. 查越权\n')
-    const refs: KnowledgeRef[] = [
-      { kind: 'file', path: checklist, pinned: true },
-      { kind: 'url', url: 'https://owasp.org/Top10/' },
+    const refs: ContactKnowledge[] = [
+      fileRef(checklist, true),
+      urlRef('https://owasp.org/Top10/'),
     ]
     const knowledge = readKnowledge(refs)
     expect(knowledge.pinned).toEqual([
@@ -250,9 +318,9 @@ describe('pinned knowledge (card test 6)', () => {
     writeFileSync(two, `${'第二份'.repeat(1000)}\n`) // 9000 bytes
     writeFileSync(three, 'three\n')
     const knowledge = readKnowledge([
-      { kind: 'file', path: one, pinned: true },
-      { kind: 'file', path: two, pinned: true },
-      { kind: 'file', path: three, pinned: true },
+      fileRef(one, true),
+      fileRef(two, true),
+      fileRef(three, true),
     ])
     const [first, second, third] = knowledge.pinned
     expect(first).toMatchObject({ path: one, status: 'full' })
@@ -267,9 +335,9 @@ describe('pinned knowledge (card test 6)', () => {
     expect(second!.text).toMatch(/^(第二份)+(第二?)?$/u)
     const prompt = compileRolePrompt(
       withKnowledge([
-        { kind: 'file', path: one, pinned: true },
-        { kind: 'file', path: two, pinned: true },
-        { kind: 'file', path: three, pinned: true },
+        fileRef(one, true),
+        fileRef(two, true),
+        fileRef(three, true),
       ]),
       { knowledge },
     )
@@ -281,17 +349,11 @@ describe('pinned knowledge (card test 6)', () => {
     const dir = tmp('emperor-kb-')
     const gone = join(dir, 'gone.md')
     const folder = join(dir, 'missing-folder')
-    const knowledge = readKnowledge([
-      { kind: 'file', path: gone, pinned: true },
-      { kind: 'folder', path: folder },
-    ])
+    const knowledge = readKnowledge([fileRef(gone, true), folderRef(folder)])
     expect(knowledge.missing).toEqual([gone, folder])
     expect(knowledge.pinned).toEqual([])
     const prompt = compileRolePrompt(
-      withKnowledge([
-        { kind: 'file', path: gone, pinned: true },
-        { kind: 'folder', path: folder },
-      ]),
+      withKnowledge([fileRef(gone, true), folderRef(folder)]),
       { knowledge },
     )
     expect(prompt).toContain(`- 文件 \`${gone}\`（置顶）：已不存在`)
@@ -303,18 +365,18 @@ describe('pinned knowledge (card test 6)', () => {
     const dir = tmp('emperor-kb-')
     const image = join(dir, 'logo.png')
     writeFileSync(image, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 1, 2]))
-    expect(
-      readKnowledge([{ kind: 'file', path: image, pinned: true }]).pinned,
-    ).toEqual([{ path: image, text: '', status: 'binary' }])
+    expect(readKnowledge([fileRef(image, true)]).pinned).toEqual([
+      { path: image, text: '', status: 'binary' },
+    ])
   })
 
   it('compiles the same bytes for the same knowledge (golden)', () => {
     const contact = withKnowledge([
-      { kind: 'file', path: '/kb/checklist.md', pinned: true },
-      { kind: 'file', path: '/kb/long.md', pinned: true },
-      { kind: 'file', path: '/kb/later.md', pinned: true },
-      { kind: 'folder', path: '/kb/gone' },
-      { kind: 'url', url: 'https://owasp.org/Top10/' },
+      fileRef('/kb/checklist.md', true),
+      fileRef('/kb/long.md', true),
+      fileRef('/kb/later.md', true),
+      folderRef('/kb/gone'),
+      urlRef('https://owasp.org/Top10/'),
     ])
     const prompt = compileRolePrompt(contact, {
       knowledge: {
@@ -350,11 +412,11 @@ describe('read-only knowledge (card test 7)', () => {
     writeFileSync(join(workspace, 'docs', 'inside.md'), 'x')
     const roots = knowledgeReadOnlyRoots(
       [
-        { kind: 'file', path: join(kb, 'guide.md') },
-        { kind: 'folder', path: kb },
-        { kind: 'file', path: join(workspace, 'docs', 'inside.md') },
-        { kind: 'file', path: join(root, 'gone.md') },
-        { kind: 'url', url: 'https://example.com/' },
+        fileRef(join(kb, 'guide.md')),
+        folderRef(kb),
+        fileRef(join(workspace, 'docs', 'inside.md')),
+        fileRef(join(root, 'gone.md')),
+        urlRef('https://example.com/'),
       ],
       workspace,
     )
