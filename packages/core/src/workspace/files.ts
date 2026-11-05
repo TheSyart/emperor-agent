@@ -349,7 +349,9 @@ export class WorkspaceFilesService {
       )
     const document = isDocument(target)
     const mimeType =
-      document || !isZipOnlyDocument(target) ? mimeFor(target) : 'text/plain'
+      document || !isZipOnlyDocument(target)
+        ? mimeTypeForPath(target)
+        : 'text/plain'
     const common = {
       projectRoot: scope.projectRoot,
       relativePath: toProjectPath(canonicalRoot, target),
@@ -624,7 +626,7 @@ function extensionOf(path: string): string {
   return dot > 0 ? name.slice(dot + 1) : ''
 }
 
-function mimeFor(path: string): string {
+export function mimeTypeForPath(path: string): string {
   return MIME_TYPES[extensionOf(path)] ?? 'text/plain'
 }
 

@@ -162,7 +162,7 @@ describe('props snapshot (test 1)', () => {
         describeEl,
       ),
     ).toMatchSnapshot()
-    expect(AVATAR_SIZES).toEqual([16, 20, 24, 28, 40])
+    expect(AVATAR_SIZES).toEqual([16, 20, 24, 28, 32, 40])
   })
 
   it('Avatar draws a library portrait on its tint, a letter for an unknown id (BRD-07)', () => {

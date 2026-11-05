@@ -30,6 +30,8 @@ const GitHubIssuesPage = () =>
 const GitHubRunsPage = () =>
   import('./components/pages/github/GitHubRunsPage.vue')
 const ContactEditor = () => import('./components/contacts/ContactEditor.vue')
+const ContactCreatorEntry = () =>
+  import('./components/contacts/ContactCreatorEntry.vue')
 const ContactsPage = () => import('./components/contacts/ContactsPage.vue')
 const GroupHome = () => import('./components/groups/GroupHome.vue')
 const GroupPage = () => import('./components/groups/GroupPage.vue')
@@ -107,14 +109,33 @@ export const routeRecords: RouteRecordRaw[] = [
   {
     path: '/contacts/new',
     name: 'contact-new',
-    component: ContactEditor,
+    component: ContactCreatorEntry,
     meta: { label: '新建联系人', page: true },
   },
   {
     path: '/contacts/:id/edit',
     name: 'contact-edit',
+    component: ContactCreatorEntry,
+    meta: { label: '调整联系人', page: true },
+  },
+  // Internal recovery only: routine entries above always open the creator.
+  {
+    path: '/contacts/advanced/new',
+    name: 'contact-advanced-new',
     component: ContactEditor,
-    meta: { label: '编辑联系人', page: true },
+    meta: { label: '高级联系人编辑器', page: true },
+  },
+  {
+    path: '/contacts/:id/advanced',
+    name: 'contact-advanced-edit',
+    component: ContactEditor,
+    meta: { label: '高级联系人编辑器', page: true },
+  },
+  {
+    path: '/contacts/ct-role-creator',
+    name: 'contact-creator',
+    component: ContactCreatorEntry,
+    meta: { label: '角色创建师', page: true },
   },
   {
     path: '/contacts/:id',

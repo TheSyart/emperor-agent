@@ -84,7 +84,7 @@ describe('settings paths in the docs (test 2)', () => {
     )
     // GRP-08: what a new group starts with.
     const groups = navigation.sections.get('群聊')!
-    for (const name of ['新群的默认设置', '协作方式', '防打转'])
+    for (const name of ['新群的默认设置', '防打转'])
       expect(groups.names.has(name), name).toBe(true)
   })
 

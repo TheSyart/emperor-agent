@@ -16,6 +16,7 @@ import type {
   GroupHistoryMessage,
   GroupMemberView,
 } from './groupModel'
+import type { GroupStreamView } from './useGroupRoom'
 
 const { getDelegation } = vi.hoisted(() => ({ getDelegation: vi.fn() }))
 vi.mock('../../api/delegations', async (original) => ({
@@ -130,6 +131,9 @@ const emitted = {
   answer: vi.fn(),
   cancelAsk: vi.fn(),
   confirmTask: vi.fn(),
+  acceptTask: vi.fn(),
+  previewArtifact: vi.fn(),
+  getArtifact: vi.fn(),
   openSettings: vi.fn(),
 }
 
@@ -137,8 +141,18 @@ const props = reactive({
   messages: [] as GroupHistoryMessage[],
   members: MEMBERS,
   contacts: CONTACTS,
-  finished: [] as string[],
   asks: [] as GroupAsk[],
+  streams: [] as GroupStreamView[],
+  groupId: 'grp-1',
+  artifacts: [
+    {
+      name: '公开报告.md',
+      size: 18,
+      dir: false,
+      artifactRef: 'artifact://grp-1/art-1/report.md',
+      mimeType: 'text/markdown',
+    },
+  ] as Array<Record<string, unknown>>,
 })
 
 async function mount() {
@@ -150,7 +164,8 @@ async function mount() {
       onProcess: emitted.process,
       onAnswer: emitted.answer,
       onCancelAsk: emitted.cancelAsk,
-      onConfirmTask: emitted.confirmTask,
+      onPreviewArtifact: emitted.previewArtifact,
+      onGetArtifact: emitted.getArtifact,
       onOpenSettings: emitted.openSettings,
     }),
   )
@@ -166,8 +181,8 @@ beforeEach(() => {
   Object.values(emitted).forEach((fn) => fn.mockReset())
   getDelegation.mockReset()
   props.messages = []
-  props.finished = []
   props.asks = []
+  props.streams = []
 })
 
 afterEach(() => {
@@ -267,7 +282,9 @@ describe('the eight kinds of group message', () => {
     await mount()
     expect(rows().map((row) => row.dataset.kind)).toEqual([
       'user',
-      'independent',
+      'say',
+      'say',
+      'say',
       'say',
       'private',
       'task',
@@ -276,51 +293,86 @@ describe('the eight kinds of group message', () => {
       'system',
       'pass',
     ])
-    const [user, independent, say, dm, task, result, summary, system, pass] =
-      rows()
+    const [
+      user,
+      answer1,
+      answer2,
+      answer3,
+      say,
+      dm,
+      task,
+      result,
+      summary,
+      system,
+      pass,
+    ] = rows()
     expect(user!.textContent).toContain('→ 所有人 · 各自独立回答')
-    expect(independent!.querySelectorAll('[data-answer]')).toHaveLength(3)
-    expect(independent!.textContent).toContain('独立作答 · 3 人')
+    expect(answer1!.textContent).toContain('要靠协议收口')
+    expect(answer2!.textContent).toContain('费用要一眼看到')
+    expect(answer3!.textContent).toContain('检测没有新进展的往返')
     expect(say!.querySelector('.mention')?.textContent).toBe('@架构师')
     expect(say!.textContent).toContain('→ @架构师')
     expect(dm!.querySelector('[data-private-label]')?.textContent).toBe(
       '🔒 私信 → 写作者 · 其他成员看不到，你能看到',
     )
-    expect(task!.querySelector('[data-task-card]')?.textContent).toContain(
-      '一页 Markdown，放进群文件',
-    )
-    expect(task!.querySelector('[data-task-state]')?.textContent).toBe('进行中')
+    expect(task!.querySelector('[data-task-card]')).toBeNull()
+    expect(task!.textContent).toContain('把讨论写成说明')
     expect(task!.textContent).toContain('交办 → 写作者')
-    expect(result!.querySelector('[data-delegation-result]')).not.toBeNull()
-    expect(getDelegation).toHaveBeenCalledWith({
-      id: 'dg-1',
-      sessionId: 'member-ct-codex',
-    })
+    expect(result!.textContent).toContain('改好了溢出')
+    expect(result!.querySelector('[data-delegation-result]')).toBeNull()
+    expect(getDelegation).not.toHaveBeenCalled()
     expect(summary!.textContent).toContain('结论')
     expect(system!.textContent).toContain('还没有登录')
     expect(pass!.textContent).toContain('架构师 没有补充')
   })
 
-  it('shows unrevealed independent answers as progress, never their text', async () => {
+  it('replays legacy coordination as a short Emperor message, not a dashboard card', async () => {
+    props.messages = [
+      message('m1', 'system', '先设计，再评审。', {
+        kind: 'coordination',
+        coordination: {
+          kind: 'arrangement',
+          speakers: ['ct-arch', 'ct-rev'],
+        },
+      }),
+      message('m2', 'system', '结论：按这个方案推进。', {
+        kind: 'coordination',
+        coordination: { kind: 'conclusion' },
+      }),
+    ]
+    await mount()
+    expect(document.querySelector('[data-coordination-card]')).toBeNull()
+    expect(rows().map((row) => row.dataset.kind)).toEqual([
+      'coordination',
+      'coordination',
+    ])
+    expect(rows()[0]!.textContent).toContain('Emperor')
+    expect(rows()[0]!.textContent).toContain('先设计，再评审。')
+    expect(rows()[0]!.querySelector('.face')).not.toBeNull()
+    expect(rows()[0]!.querySelector('[data-process]')).toBeNull()
+    expect(rows()[1]!.textContent).toContain('结论：按这个方案推进。')
+  })
+
+  it('keeps unrevealed independent answers out of the conversation', async () => {
     props.messages = [
       message('m1', 'user', '各自说说', {
         answerMode: 'independent',
         ask: ['ct-arch', 'ct-rev', 'ct-res'],
         batchId: 'gb_1',
       }),
+      message('m2', 'ct-arch', '不能提前公开', {
+        answerMode: 'independent',
+        batchId: 'gb_1',
+        hidden: true,
+      }),
     ]
-    props.finished = ['ct-arch']
     await mount()
-    const card = document.querySelector<HTMLElement>(
-      '[data-kind="independent"]',
-    )!
-    expect(card.querySelector('[data-progress]')?.textContent).toBe(
-      '1/3 已答，答完一起显示',
-    )
-    expect(card.querySelectorAll('[data-answer]')).toHaveLength(0)
+    expect(rows().map((row) => row.dataset.kind)).toEqual(['user'])
+    expect(document.querySelector('[data-kind="independent"]')).toBeNull()
+    expect(document.body.textContent).not.toContain('不能提前公开')
   })
 
-  it('opens a member’s work with 「过程 ›」, and the settings from a system message', async () => {
+  it('opens settings from a system message without adding member process controls', async () => {
     props.messages = [
       message('m1', 'ct-arch', '先拆成三步。'),
       message(
@@ -333,8 +385,8 @@ describe('the eight kinds of group message', () => {
       ),
     ]
     await mount()
-    document.querySelector<HTMLElement>('[data-process]')!.click()
-    expect(emitted.process).toHaveBeenCalledWith('ct-arch')
+    expect(document.querySelector('[data-process]')).toBeNull()
+    expect(emitted.process).not.toHaveBeenCalled()
     const settings = [...document.querySelectorAll<HTMLElement>('button')].find(
       (button) => button.textContent?.includes('打开子智能体设置'),
     )!
@@ -509,7 +561,64 @@ describe('what members ask of the user, as chat (D29)', () => {
     })
   })
 
-  it('asks the user before an external member changes code (GRP-09)', async () => {
+  it('anchors a pending question immediately after its source speech', async () => {
+    props.messages = [
+      message('m1', 'user', '@审稿人 看看'),
+      message('m2', 'ct-rev', '我先确认范围。', {
+        at: 1_750_000_000_100,
+        interactionId: question.id,
+      }),
+      message('m3', 'ct-arch', '后续发言不会移动提问。', {
+        at: 1_750_000_000_200,
+      }),
+      message('m4', 'ct-rev', '好，先看登录。', {
+        at: 1_750_000_000_300,
+      }),
+    ]
+    props.asks = [{ contactId: 'ct-rev', interaction: question }]
+    await mount()
+    const entries = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-group-row], [data-group-ask]',
+      ),
+    ]
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining('@审稿人 看看'),
+      expect.stringContaining('我先确认范围。'),
+      expect.stringContaining('先看哪一部分？'),
+      expect.stringContaining('后续发言不会移动提问。'),
+      expect.stringContaining('好，先看登录。'),
+    ])
+  })
+
+  it('merges a live speech into history by its start time', async () => {
+    props.messages = [
+      message('m1', 'user', '两位分别看看'),
+      message('m2', 'ct-rev', '审稿人的最终回答', {
+        at: 1_750_000_000_300,
+      }),
+    ]
+    props.streams = [
+      {
+        contactId: 'ct-arch',
+        text: '架构师正在发言',
+        startedAt: 1_750_000_000_100,
+      },
+    ]
+    await mount()
+    const entries = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-group-row], [data-group-streaming]',
+      ),
+    ]
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining('两位分别看看'),
+      expect.stringContaining('架构师正在发言'),
+      expect.stringContaining('审稿人的最终回答'),
+    ])
+  })
+
+  it('replays an old external task as dialogue without manual controls', async () => {
     props.messages = [
       message('m1', 'ct-rev', '请 Codex 修溢出', {
         kind: 'task',
@@ -525,20 +634,72 @@ describe('what members ask of the user, as chat (D29)', () => {
       }),
     ]
     await mount()
-    const card = document.querySelector<HTMLElement>('[data-task-card]')!
-    expect(card.querySelector('[data-task-state]')?.textContent).toBe(
-      '等你确认',
-    )
-    const buttons = [...card.querySelectorAll<HTMLElement>('button')]
-    buttons.find((button) => button.textContent?.trim() === '同意')!.click()
-    buttons.find((button) => button.textContent?.trim() === '不同意')!.click()
-    expect(emitted.confirmTask.mock.calls).toEqual([
-      [{ taskId: 'gt_9', approve: true }],
-      [{ taskId: 'gt_9', approve: false }],
-    ])
+    expect(rows()[0]?.textContent).toContain('请 Codex 修溢出')
+    expect(document.querySelector('[data-task-card]')).toBeNull()
+    expect(emitted.confirmTask).not.toHaveBeenCalled()
   })
 
-  it('a task held because its member handed out tasks again and again waits for 同意 or 继续 (GRP-15)', async () => {
+  it('CG-02: keeps dependent task assignments as ordinary dialogue', async () => {
+    props.messages = [
+      message('m1', 'user', '先确认契约', {
+        kind: 'task',
+        task: {
+          taskId: 'gt_contract',
+          to: 'ct-rev',
+          title: '接口契约',
+          deliverable: '契约文档',
+          access: 'readonly',
+          state: 'submitted',
+        },
+      }),
+      message('m2', 'user', '再执行回归', {
+        kind: 'task',
+        task: {
+          taskId: 'gt_regression',
+          to: 'ct-arch',
+          title: '执行接口回归',
+          deliverable: '回归结果',
+          access: 'readonly',
+          state: 'queued',
+          dependsOn: ['gt_contract'],
+        },
+      }),
+    ]
+    await mount()
+    expect(rows().map((row) => row.dataset.kind)).toEqual(['task', 'task'])
+    expect(rows()[1]?.textContent).toContain('再执行回归')
+    expect(document.querySelector('[data-task-card]')).toBeNull()
+  })
+
+  it('CG-02: never offers acceptance for an old submitted task', async () => {
+    const checks = [
+      { artifactRevision: 'rev-3', evidenceRef: 'run-184', passed: true },
+      { artifactRevision: 'rev-3', evidenceRef: 'review-7', passed: true },
+    ]
+    props.messages = [
+      message('m1', 'ct-rev', '报告已提交', {
+        kind: 'task',
+        task: {
+          taskId: 'gt_submit',
+          to: 'ct-arch',
+          title: '完成接口验收',
+          deliverable: '验收报告',
+          access: 'readonly',
+          state: 'submitted',
+          artifacts: [
+            { ref: 'artifact://grp/art-3/接口验收清单.md', revision: 'rev-3' },
+          ],
+          checks,
+        },
+      }),
+    ]
+    await mount()
+    expect(rows()[0]?.textContent).toContain('报告已提交')
+    expect(document.querySelector('[data-task-card]')).toBeNull()
+    expect(emitted.acceptTask).not.toHaveBeenCalled()
+  })
+
+  it('replays an old held task without asking the user to operate the agent', async () => {
     props.messages = [
       message('m1', 'ct-rev', 'v0.3.4', {
         kind: 'task',
@@ -555,14 +716,76 @@ describe('what members ask of the user, as chat (D29)', () => {
       }),
     ]
     await mount()
-    const card = document.querySelector<HTMLElement>('[data-task-card]')!
-    const note = card.querySelector('[data-task-confirm] .note')?.textContent
-    expect(note).toContain('「继续」')
-    expect(note).not.toContain('改项目代码')
-    const buttons = [...card.querySelectorAll<HTMLElement>('button')]
-    buttons.find((button) => button.textContent?.trim() === '同意')!.click()
-    expect(emitted.confirmTask.mock.calls).toEqual([
-      [{ taskId: 'gt_4', approve: true }],
-    ])
+    expect(rows()[0]?.textContent).toContain('v0.3.4')
+    expect(document.querySelector('[data-task-card]')).toBeNull()
+    expect(emitted.confirmTask).not.toHaveBeenCalled()
+  })
+
+  it('CG-05: keeps task delivery as dialogue with inline public attachments and no controls', async () => {
+    props.messages = [
+      message('m1', 'user', '整理公开报告', {
+        kind: 'task',
+        task: {
+          taskId: 'gt-chat',
+          to: 'ct-arch',
+          title: '整理公开报告',
+          deliverable: '报告',
+          access: 'group_files',
+          state: 'done',
+        },
+      }),
+      message('m2', 'ct-arch', '收到，我来做「整理公开报告」。', {
+        task: {
+          taskId: 'gt-chat',
+          to: 'ct-arch',
+          title: '整理公开报告',
+          deliverable: '报告',
+          access: 'group_files',
+          state: 'done',
+          attempt: 1,
+        },
+      }),
+      message('m3', 'ct-arch', '已完成，1 项检查通过。', {
+        kind: 'result',
+        task: {
+          taskId: 'gt-chat',
+          to: 'ct-arch',
+          title: '整理公开报告',
+          deliverable: '报告',
+          access: 'group_files',
+          state: 'done',
+          attempt: 1,
+          artifacts: [
+            { ref: 'artifact://grp-1/art-1/report.md', revision: 'art-1' },
+          ],
+          checks: [
+            { artifactRevision: 'art-1', evidenceRef: 'test-1', passed: true },
+          ],
+        },
+      }),
+    ]
+    await mount()
+    expect(document.querySelector('[data-task-card]')).toBeNull()
+    expect(document.querySelector('[data-task-acceptance]')).toBeNull()
+    expect(
+      document.querySelector('[data-kind="task"] .bubble')?.textContent,
+    ).toContain('整理公开报告')
+    const attachment = document.querySelector<HTMLElement>('[data-artifact]')!
+    expect(attachment.textContent).toContain('公开报告.md')
+    expect(attachment.querySelector('[data-icon-id]')).not.toBeNull()
+    expect(attachment.textContent).not.toContain('FILE')
+    expect(attachment.textContent).not.toContain('IMG')
+    attachment
+      .querySelector<HTMLButtonElement>('[data-artifact-preview]')!
+      .click()
+    attachment.querySelector<HTMLButtonElement>('[data-artifact-get]')!.click()
+    expect(emitted.previewArtifact).toHaveBeenCalledWith({
+      ref: 'artifact://grp-1/art-1/report.md',
+      name: '公开报告.md',
+      mimeType: 'text/markdown',
+    })
+    expect(emitted.getArtifact).toHaveBeenCalledWith(
+      'artifact://grp-1/art-1/report.md',
+    )
   })
 })

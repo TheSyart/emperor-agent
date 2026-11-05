@@ -40,6 +40,7 @@ const created: GroupLogEvent = {
     charter: '',
     settings: {
       collaboration: 'autonomous',
+      coordination: 'member',
       quiet: false,
       summarizeAtEnd: true,
       loopGuard: true,

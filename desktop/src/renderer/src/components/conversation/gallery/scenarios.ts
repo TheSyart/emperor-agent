@@ -2063,8 +2063,95 @@ export function subagentRowsScenario(now = Date.now()): Scenario {
   }
 }
 
+function roleCreatorScenario(now: number): Scenario {
+  const log = new ShowcaseLog(now - 12_000)
+  log.user('帮我建一个研究助手，能查资料、整理证据，但不要改项目文件。')
+  log.turnStart(1)
+  log.toolStep(
+    1,
+    1,
+    [{ text: '我按最小权限整理好了草稿，确认前不会保存。' }],
+    [
+      {
+        id: 'call-role-draft',
+        name: 'contact_role_draft',
+        args: {
+          action: 'create',
+          draft: {
+            name: '证据研究员',
+            role: { mission: '查证资料并交付可追溯的研究结论。' },
+          },
+        },
+        result:
+          '草稿已生成，尚未保存。用户可以先试用、继续调整，或点击确认卡保存。',
+        extra: {
+          meta: {
+            kind: 'contact-role-draft',
+            action: 'create',
+            draft: {
+              name: '证据研究员',
+              avatar: { kind: 'library', id: 'AV-04-1' },
+              intro: '查证资料、保留来源，交付可追溯的研究结论。',
+              domains: ['data', 'content'],
+              role: {
+                mission: '围绕用户问题查证资料，区分事实、推断与未知。',
+                deliverable: '带来源链接的证据表、简短结论和待核实项。',
+                playbook:
+                  '先界定问题，再交叉核实来源，最后按证据强弱组织结论。',
+                boundaries: '不修改项目文件；没有依据时不补写事实。',
+                trialTask: '核实一项产品声明并列出两个独立来源。',
+                examples: [],
+              },
+              knowledge: [
+                {
+                  id: 'kn-research-note',
+                  kind: 'note',
+                  title: '研究交付格式',
+                  text: '每条结论附来源与核验日期。',
+                  use: 'pinned',
+                },
+              ],
+              skills: [
+                {
+                  id: 'sk-web-research',
+                  sourceId: 'builtin',
+                  name: 'web-research',
+                },
+              ],
+              mcp: [
+                {
+                  serverId: 'docs',
+                  toolNames: ['search_docs', 'read_doc'],
+                },
+              ],
+              capabilities: {
+                model: 'inherit',
+                tools: { preset: 'research' },
+                permission: 'read_only',
+              },
+              groupHabit: { speak: 'relevant', length: 'detailed' },
+              memory: { enabled: true },
+            },
+          },
+        },
+      },
+    ],
+  )
+  log.stream(1, 2, [
+    { text: '可以先试用或继续调整；只有点击「确认创建」才会保存。' },
+  ])
+  log.stepEnd(1, 2)
+  log.turnEnd(1)
+  return {
+    id: 'role-creator',
+    label: '角色草稿确认',
+    sessions: [{ id: 'role-creator', events: log.events }],
+  }
+}
+
 export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   showcase: showcaseScenario,
+  'role-creator': roleCreatorScenario,
   notices: noticesScenario,
   workflow: workflowScenario,
   interactions: interactionsScenario,

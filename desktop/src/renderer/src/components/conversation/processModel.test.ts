@@ -81,6 +81,41 @@ function processRows(
   )
 }
 
+describe('contact role drafts (CG-CT-01)', () => {
+  it('lifts a validated confirmation card out of the folded process', () => {
+    const log = new LogBuilder()
+    log.user('u1', '创建研究员')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [
+      {
+        type: 'tool-call',
+        id: 'draft-1',
+        name: 'contact_role_draft',
+        arguments: '{}',
+      },
+    ])
+    log.call(1, 1, 'draft-1', 'contact_role_draft', {})
+    log.result(1, 1, 'draft-1', '草稿尚未保存', {
+      meta: {
+        kind: 'contact-role-draft',
+        action: 'create',
+        draft: {
+          name: '研究员',
+          role: { mission: '研究', deliverable: '结论' },
+        },
+      },
+    })
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    const rows = describeRows(snapshotOf(log.events))
+    expect(rows).toContain('tool:contact_role_draft')
+    expect(rows.join('\n')).not.toContain(
+      'process[done] steps=1: assistant tool:contact_role_draft',
+    )
+  })
+})
+
 describe('process rows (DSH-22)', () => {
   it('folds a finished turn into one process row before the answer', () => {
     const scenario = showcaseScenario(1_800_000_000_000)

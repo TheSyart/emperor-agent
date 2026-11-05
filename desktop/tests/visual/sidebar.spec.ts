@@ -576,8 +576,10 @@ test('Group (⌘3): the Group home, 新建联系人, and 新建群聊 (GRP-08)',
   ).toHaveCount(0)
   await shot(page, 'group-home')
   await nav.getByRole('button', { name: '新建联系人' }).click()
-  await expect(page).toHaveURL(/\/contacts\/new/)
-  await expect(page.locator('[data-contact-editor]')).toBeVisible()
+  // CG-CT-01: routine creation redirects from /contacts/new to the creator
+  // conversation; the seven-section editor is no longer the routine entry.
+  await expect(page).toHaveURL(/\/chat/)
+  await expect(page.locator('[data-contact-editor]')).toHaveCount(0)
   await expect(root.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
 })
 

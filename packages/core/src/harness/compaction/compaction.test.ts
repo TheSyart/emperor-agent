@@ -290,11 +290,14 @@ describe('CompactionEngine (KRN-05)', () => {
         },
       }
     `)
-    expect(piReasoningLevel({ ...request, reasoningEffort: 'high' })).toBe(
-      undefined,
-    )
     expect(
-      piReasoningLevel({
+      piReasoningLevel(h.llm.activeRoute()!, {
+        ...request,
+        reasoningEffort: 'high',
+      }),
+    ).toBe(undefined)
+    expect(
+      piReasoningLevel(h.llm.activeRoute()!, {
         ...request,
         purpose: undefined,
         reasoningEffort: 'high',

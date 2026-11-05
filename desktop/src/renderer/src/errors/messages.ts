@@ -221,6 +221,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   reference_url_credentials_denied: '网站地址不能包含账号或密码。',
   reference_attachment_invalid: '附件引用无效。',
   reference_attachment_unknown: '附件不存在或已被移除。',
+  reference_artifact_invalid: '公开成果引用无效。',
+  reference_artifact_unknown: '公开成果不存在或已被移除。',
   reference_image_unavailable: '图片文件不可用。',
   reference_image_unsupported: '这个文件不能预览为图片。',
   reference_image_outside_workspace: '图片不属于当前会话的工作区。',

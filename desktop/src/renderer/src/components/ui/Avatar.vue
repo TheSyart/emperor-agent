@@ -15,7 +15,7 @@
  *         mascot    a portrait of the mascot by pose (`id`, BRD-04: Emperor
  *                   wears `crown-head`), round like a library portrait;
  *                   an unknown pose falls back to the colour tile
- *   size: 16 | 20 | 24 (default) | 28 | 40 — off-scale sizes are refused in
+ *   size: 16 | 20 | 24 (default) | 28 | 32 | 40 — off-scale sizes are refused in
  *         development and drawn at the nearest step; a library portrait may
  *         also be 56 (the contact editor's and profile's large portrait),
  *         and so may a mascot portrait
@@ -84,7 +84,7 @@ const size = computed<AvatarSize | typeof PORTRAIT_HERO_SIZE>(() => {
     return PORTRAIT_HERO_SIZE
   if (import.meta.env.DEV)
     console.error(
-      `Avatar size "${String(props.size)}" is off the scale; use 16 | 20 | 24 | 28 | 40`,
+      `Avatar size "${String(props.size)}" is off the scale; use 16 | 20 | 24 | 28 | 32 | 40`,
     )
   return nearestAvatarSize(Number(props.size) || 24)
 })
@@ -267,6 +267,11 @@ const colorSlot = computed(() =>
 
 .ds-avatar[data-size='28'] {
   --avatar-box: 28px;
+  --avatar-art: var(--icon-md);
+}
+
+.ds-avatar[data-size='32'] {
+  --avatar-box: 32px;
   --avatar-art: var(--icon-md);
 }
 

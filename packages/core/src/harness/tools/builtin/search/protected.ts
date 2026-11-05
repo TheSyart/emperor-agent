@@ -11,6 +11,7 @@
 
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { canonicalPath } from '../../../sandbox/policy'
 import {
   classifyProtectedPath,
   entryCovers,
@@ -42,19 +43,34 @@ export async function protectedStateFilter(
   path: string | undefined,
 ): Promise<(rawPath: string) => boolean> {
   const stateRoot = services.protectedStateRoot
-  if (stateRoot === undefined) return () => true
-  const scope = { stateRoot, home: services.protectedHome ?? homedir() }
+  const scope = {
+    stateRoot: stateRoot ?? resolve('/'),
+    home: services.protectedHome ?? homedir(),
+  }
   const session = context.agent?.session
-  const mode = services.sandbox?.resolve(
+  const policy = services.sandbox?.resolve(
     session === undefined ? {} : { session },
-  ).mode
+  )
+  const mode = policy?.mode
+  const denied = (policy?.deniedRoots ?? []).map(canonicalPath)
   const classes: ProtectedPathClass[] =
     mode === 'danger-full-access'
       ? ['state', 'config']
       : ['state', 'config', 'credential']
   const workdir = searchWorkdir(context, defaultWorkdir)
-  const root = resolve(workdir, path ?? '.')
-  const found = await classifyProtectedPath(root, scope)
+  const root = canonicalPath(resolve(workdir, path ?? '.'))
+  const deniedEntries = denied.map((path) => ({
+    class: 'state' as const,
+    match: 'subtree' as const,
+    path,
+  }))
+  if (deniedEntries.some((entry) => entryCovers(entry, root)))
+    throw new SearchError(
+      `${toolName} cannot search "${root}": another group member's private workspace is not available in this session`,
+      'SEARCH_GROUP_PRIVATE_PATH',
+    )
+  const found =
+    stateRoot === undefined ? null : await classifyProtectedPath(root, scope)
   if (found !== null && classes.includes(found))
     throw new SearchError(
       `${toolName} cannot search "${root}": ${REASONS[found]}`,
@@ -62,10 +78,15 @@ export async function protectedStateFilter(
     )
   // Neither engine follows symlinks below the root, so a result lies in a
   // protected path exactly when its path does, spelled under the root.
-  const hidden = await protectedEntriesUnder(root, scope, classes)
+  const hidden = [
+    ...(stateRoot === undefined
+      ? []
+      : await protectedEntriesUnder(root, scope, classes)),
+    ...deniedEntries,
+  ]
   if (hidden.length === 0) return () => true
   return (rawPath) => {
-    const absolute = resolve(workdir, rawPath)
+    const absolute = canonicalPath(resolve(workdir, rawPath))
     return !hidden.some((entry) => entryCovers(entry, absolute))
   }
 }

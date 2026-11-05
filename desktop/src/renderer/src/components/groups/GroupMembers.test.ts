@@ -10,6 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Contact } from '@emperor/core/api'
 import type { GroupMemberView, MemberLiveStatus } from './groupModel'
 
+const { core } = vi.hoisted(() => ({ core: vi.fn() }))
+vi.mock('../../api/http', () => ({ core }))
+
 const { default: GroupMembers } = await import('./GroupMembers.vue')
 
 function member(
@@ -54,6 +57,8 @@ const state = reactive({
     { id: string; kind: string; status: string } | null
   >,
   tasks: [] as string[],
+  taskList: [] as Array<Record<string, unknown>>,
+  messages: [] as Array<Record<string, unknown>>,
   addable: [] as Contact[],
 })
 
@@ -175,5 +180,97 @@ describe('the members column', () => {
     ].find((element) => element.textContent?.includes('研究员'))!
     item.click()
     expect(invite).toHaveBeenCalledWith('ct-res')
+  })
+
+  it('CG-05: puts task and independent progress here, and opens only this group member session', async () => {
+    core.mockReset().mockResolvedValue({ events: [], more: false })
+    state.members = [
+      member('ct-emperor', 'Emperor'),
+      member('ct-arch', '架构师'),
+      member('ct-wri', '写作者'),
+    ]
+    state.taskList = [
+      {
+        taskId: 'gt-1',
+        to: 'ct-arch',
+        title: '整理公开报告',
+        deliverable: '报告',
+        access: 'group_files',
+        state: 'running',
+        attempt: 1,
+      },
+    ]
+    state.messages = [
+      {
+        id: 'q1',
+        turnId: 't1',
+        from: 'user',
+        audience: { kind: 'all' },
+        ask: ['ct-arch', 'ct-wri'],
+        answerMode: 'independent',
+        batchId: 'b1',
+        kind: 'say',
+        text: '分别回答',
+        at: 1,
+        private: false,
+        hidden: false,
+      },
+      {
+        id: 'a1',
+        turnId: 't1',
+        from: 'ct-arch',
+        audience: { kind: 'all' },
+        ask: [],
+        answerMode: 'independent',
+        batchId: 'b1',
+        kind: 'say',
+        text: '未揭晓的秘密答案',
+        at: 2,
+        private: false,
+        hidden: true,
+      },
+    ]
+    await mount()
+    expect(
+      document.querySelector('[data-task-progress]')?.textContent,
+    ).toContain('整理公开报告')
+    expect(
+      document.querySelector('[data-task-progress]')?.textContent,
+    ).toContain('进行中')
+    expect(
+      document.querySelector('[data-independent-progress]')?.textContent,
+    ).toContain('1/2')
+    expect(
+      document.querySelector('[data-independent-progress]')?.textContent,
+    ).not.toContain('未揭晓的秘密答案')
+    expect(document.querySelector('[data-task-progress] button')).toBeNull()
+    document.querySelector<HTMLElement>('[data-member-row="ct-arch"]')!.click()
+    await flush()
+    expect(
+      document
+        .querySelector('[data-member-activity]')
+        ?.getAttribute('data-session-id'),
+    ).toBe('member-ct-arch')
+    expect(core).toHaveBeenCalledWith('sessions.history', {
+      sessionId: 'member-ct-arch',
+      maxMessages: 50,
+    })
+  })
+
+  it('CG-05: does not leave a member without a group session loading forever', async () => {
+    core.mockReset()
+    state.members = [
+      member('ct-gone', '已删除的联系人', {
+        memberSessionId: null,
+        missing: true,
+      }),
+    ]
+    await mount()
+    document.querySelector<HTMLElement>('[data-member-row="ct-gone"]')!.click()
+    await flush()
+    const activity = document.querySelector('[data-member-activity]')!
+    expect(activity.textContent).not.toContain('读取执行记录')
+    expect(activity.textContent).toContain('本群会话还没有工具记录')
+    expect(core).not.toHaveBeenCalledWith('sessions.history', expect.anything())
   })
 })

@@ -121,7 +121,7 @@ export type ImageOffloadReason = 'request-bytes'
  * worktree, or its binding changed while it was not open (`worktree-resync`).
  */
 export type WorkingDirectoryChangeReason =
-  'worktree-enter' | 'worktree-exit' | 'worktree-resync'
+  'worktree-enter' | 'worktree-exit' | 'worktree-resync' | 'group-workspace'
 
 /** Core event payloads; domains merge more entries in. */
 export interface SessionEventMap {

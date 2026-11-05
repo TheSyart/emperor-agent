@@ -1,20 +1,23 @@
 import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ShowcaseLog } from '../../src/renderer/src/components/conversation/gallery/showcaseLog'
 import { installVisualCoreBridge } from './visualBridge'
 
 // GRP-08: a group in progress (预览 B 第 3 步) — independent answers, an @,
-// a private message, a member speaking now, a task queued; the live bar
+// a private message, a member speaking now, task progress in the right rail; the live bar
 // and 停止; the members column — and 群设置 (第 5 步). Baselines: the group
 // page and its settings, and the sidebar's group rows saying who speaks
 // now (GRP-13), dark and light. Screenshots: 发给 ▾, a member's
 // question as chat (D29) and the line the group log keeps once it is
 // answered (GRP-12), 新建群聊, 设置 › 群聊 and a member's work
-// (「过程 ›」). The contacts, the group and its messages are answered here,
+// and in-rail member activity. The contacts, the group and its messages are answered here,
 // over the shared bridge.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'group')
+const documentPageImage = readFileSync(
+  resolve(process.cwd(), 'tests/fixtures/media/document-page.png'),
+).toString('base64')
 
 test.beforeAll(() => {
   mkdirSync(screenshotDir, { recursive: true })
@@ -31,13 +34,26 @@ function architectWork() {
     '群聊投递：\n用户：群聊不设本轮额度，会不会聊停不下来？\n审稿人：@架构师 你说的「不点名就结束」，那主持人什么时候插手？\n\n有成员在发言里点了你的名，请回应。',
   )
   log.turnStart(1)
-  log.stepStart(1, 1)
-  log.stream(1, 1, [
+  log.toolStep(
+    1,
+    1,
+    [{ text: '先查看上一轮讨论。' }],
+    [
+      {
+        id: 'read-context',
+        name: 'read',
+        args: { file_path: 'shared/多agent对话失败模式.md' },
+        result: '# 多 Agent 对话失败模式\n\n没有新进展的往返需要收口。',
+      },
+    ],
+  )
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
     {
       text: '@审稿人 主持人只在三种时候插手：没人被点名但问题还没答完；检测到两人来回没有新内容；这一轮结束要出结论。',
     },
   ])
-  log.stepEnd(1, 1)
+  log.stepEnd(1, 2)
   log.turnEnd(1)
   return {
     id: 'member-ct-architect0001',
@@ -52,11 +68,13 @@ function architectWork() {
 
 async function install(page: Page) {
   await installVisualCoreBridge(page, { sessionLogs: [architectWork()] })
-  await page.addInitScript(() => {
+  await page.addInitScript((imageBase64) => {
     type Row = Record<string, unknown>
     const params = new URLSearchParams(window.location.search)
     const asking = params.has('visualAsk')
     const busy = params.has('visualLive')
+    const coordinating = params.has('visualCoordination')
+    const taskReview = params.has('visualTask')
     const base = (overrides: Row): Row => ({
       kind: 'local',
       intro: '',
@@ -86,7 +104,7 @@ async function install(page: Page) {
         id: 'ct-emperor',
         name: 'Emperor',
         avatar: { kind: 'mascot', pose: 'crown-head' },
-        intro: '主持人 · 通才',
+        intro: '通才',
         builtin: true,
       }),
       base({
@@ -144,6 +162,7 @@ async function install(page: Page) {
     })
     const settings = {
       collaboration: 'autonomous',
+      coordination: coordinating ? 'builtin' : 'member',
       quiet: false,
       summarizeAtEnd: true,
       loopGuard: true,
@@ -156,7 +175,7 @@ async function install(page: Page) {
       text: string,
       at: number,
       extra: Row = {},
-    ) => ({
+    ): Row => ({
       id,
       turnId: 't1',
       from,
@@ -245,6 +264,55 @@ async function install(page: Page) {
         },
       ),
     ]
+    const coordinationMessages = [
+      message(
+        'gc_1',
+        'system',
+        '先由架构师梳理方案，再由审稿人检查遗漏。',
+        minutes(1),
+        {
+          kind: 'coordination',
+          coordination: {
+            kind: 'arrangement',
+            speakers: ['ct-architect0001', 'ct-reviewer00001'],
+          },
+        },
+      ),
+      message('gc_2', 'system', '把结论整理成两项顺序任务。', minutes(0.9), {
+        kind: 'coordination',
+        coordination: {
+          kind: 'plan',
+          tasks: [
+            {
+              taskId: 'gt_plan_1',
+              to: 'ct-architect0001',
+              title: '整理停止规则',
+              deliverable: '停止规则草稿',
+              access: 'readonly',
+              state: 'queued',
+            },
+            {
+              taskId: 'gt_plan_2',
+              to: 'ct-reviewer00001',
+              title: '复核边界情况',
+              deliverable: '复核意见',
+              access: 'readonly',
+              state: 'queued',
+            },
+          ],
+        },
+      }),
+      message(
+        'gc_3',
+        'system',
+        '结论：保留随时停止，并在讨论重复时由群聊收尾。',
+        minutes(0.8),
+        {
+          kind: 'coordination',
+          coordination: { kind: 'conclusion' },
+        },
+      ),
+    ]
     const turn = {
       turnId: 't1',
       state: 'speaking',
@@ -274,6 +342,85 @@ async function install(page: Page) {
       answers: {},
       meta: { interaction_type: 'question' },
     }
+    const visibleMessages = taskReview
+      ? [
+          ...messages.map((entry) =>
+            entry.task
+              ? {
+                  ...entry,
+                  task: { ...(entry.task as Row), state: 'done', attempt: 1 },
+                }
+              : entry,
+          ),
+          message(
+            'gm_8',
+            'ct-researcher001',
+            '收到，我来做「把讨论写成『群聊停止规则』说明」。',
+            minutes(1),
+            {
+              task: {
+                taskId: 'gt_1',
+                to: 'ct-researcher001',
+                title: '把讨论写成「群聊停止规则」说明',
+                deliverable: '一页 Markdown，放进群文件',
+                access: 'group_files',
+                state: 'done',
+                attempt: 1,
+              },
+            },
+          ),
+          message(
+            'gm_9',
+            'ct-researcher001',
+            '已完成「群聊停止规则」，2 项检查通过。',
+            minutes(0.8),
+            {
+              kind: 'result',
+              task: {
+                taskId: 'gt_1',
+                to: 'ct-researcher001',
+                title: '把讨论写成「群聊停止规则」说明',
+                deliverable: '一页 Markdown，放进群文件',
+                access: 'group_files',
+                state: 'done',
+                attempt: 1,
+                artifacts: [
+                  {
+                    ref: 'artifact://grp-review/art-3/群聊停止规则.md',
+                    revision: 'rev-3',
+                  },
+                  {
+                    ref: 'artifact://grp-review/art-4/页面预览.png',
+                    revision: 'rev-4',
+                  },
+                ],
+                checks: [
+                  {
+                    artifactRevision: 'rev-3',
+                    evidenceRef: 'review-184',
+                    passed: true,
+                  },
+                  {
+                    artifactRevision: 'rev-3',
+                    evidenceRef: 'content-check-7',
+                    passed: true,
+                  },
+                ],
+              },
+            },
+          ),
+        ]
+      : coordinating
+        ? [
+            message(
+              'gc_user',
+              'user',
+              '请安排成员评审并给出结论',
+              minutes(1.1),
+            ),
+            ...coordinationMessages,
+          ]
+        : messages
     const iso = (time: number) => new Date(time).toISOString()
     const extraSessions = [
       {
@@ -378,11 +525,11 @@ async function install(page: Page) {
           return {
             id: 'grp-review',
             title: '0.3 方案评审',
-            moderator: 'ct-emperor',
+            moderator: coordinating ? null : 'ct-emperor',
             members,
             charter,
             settings,
-            messageCount: messages.length,
+            messageCount: visibleMessages.length,
             lastMessageAt: minutes(1.2),
             turn,
           }
@@ -391,7 +538,7 @@ async function install(page: Page) {
           return {
             messages: answered
               ? [
-                  ...messages,
+                  ...visibleMessages,
                   message(
                     'ga_1',
                     'system',
@@ -414,9 +561,19 @@ async function install(page: Page) {
                     },
                   ),
                 ]
-              : messages,
+              : visibleMessages,
             more: false,
           }
+        case 'groups.tasks': {
+          const board = new Map<string, unknown>()
+          for (const entry of visibleMessages) {
+            const coordination = entry.coordination as
+              { tasks?: Array<{ taskId: string }> } | undefined
+            for (const task of [entry.task, ...(coordination?.tasks ?? [])])
+              if (task) board.set((task as { taskId: string }).taskId, task)
+          }
+          return [...board.values()]
+        }
         case 'groups.files.list':
           return {
             files: [
@@ -426,7 +583,50 @@ async function install(page: Page) {
                 modifiedAt: minutes(2),
                 dir: false,
               },
+              ...(taskReview
+                ? [
+                    {
+                      name: '群聊停止规则.md',
+                      size: 1800,
+                      modifiedAt: minutes(0.8),
+                      dir: false,
+                      artifactRef:
+                        'artifact://grp-review/art-3/群聊停止规则.md',
+                      mimeType: 'text/markdown',
+                    },
+                    {
+                      name: '页面预览.png',
+                      size: 2400,
+                      modifiedAt: minutes(0.7),
+                      dir: false,
+                      artifactRef: 'artifact://grp-review/art-4/页面预览.png',
+                      mimeType: 'image/png',
+                    },
+                  ]
+                : []),
             ],
+          }
+        case 'references.resolve':
+          if (String(input.href).startsWith('artifact://grp-review/'))
+            return {
+              id: 'ref-art-3',
+              available: true,
+              kind: 'file',
+              actions: ['reveal'],
+              tooltip: '群聊停止规则.md',
+            }
+          return original(op, ...args)
+        case 'references.image':
+          return {
+            kind: 'image',
+            mimeType: 'image/png',
+            dataBase64: imageBase64,
+            truncated: false,
+          }
+        case 'files.preview':
+          return {
+            content:
+              '# 群聊停止规则\n\n1. 没有人被点名时结束。\n2. 没有新进展时由协调器收尾。',
           }
         case 'groups.defaults':
           return defaults
@@ -455,7 +655,7 @@ async function install(page: Page) {
           return original(op, ...args)
       }
     }
-  })
+  }, documentPageImage)
 }
 
 async function open(page: Page, path: string, theme: Theme, width = 1280) {
@@ -482,10 +682,14 @@ for (const theme of ['dark', 'light'] as const) {
     await open(page, '/groups/grp-review', theme)
     const room = page.locator('[data-group-page]')
     await expect(room.locator('h1')).toHaveText('0.3 方案评审')
-    await expect(room.locator('[data-group-row]')).toHaveCount(5)
-    await expect(
-      room.locator('[data-kind="independent"] [data-answer]'),
-    ).toHaveCount(3)
+    await expect(room.locator('[data-group-row]')).toHaveCount(7)
+    await expect(room.locator('[data-kind="independent"]')).toHaveCount(0)
+    await expect(room.locator('[data-group-row][data-kind="say"]')).toHaveCount(
+      4,
+    )
+    await expect(room.locator('[data-independent-progress]')).toContainText(
+      '3/3',
+    )
     await expect(room.locator('[data-private-label]')).toHaveText(
       '🔒 私信 → 审稿人 · 其他成员看不到，你能看到',
     )
@@ -513,9 +717,8 @@ for (const theme of ['dark', 'light'] as const) {
     await open(page, '/groups/grp-review/settings', theme)
     const settings = page.locator('[data-group-settings]')
     await expect(settings).toContainText('群设置')
-    await expect(
-      settings.locator('[data-collaboration-option="autonomous"]'),
-    ).toHaveAttribute('aria-checked', 'true')
+    await expect(settings.locator('[data-collaboration-option]')).toHaveCount(0)
+    await expect(settings).not.toContainText('协作方式')
     await expect(settings).toContainText('多agent对话失败模式.md')
     await shot(page, `settings-${theme}`)
     await expectBaseline(page, 'group', `settings-${theme}`)
@@ -540,6 +743,52 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+for (const theme of ['dark', 'light'] as const) {
+  test(`CG-05 · delivery is dialogue with an inline public attachment (${theme})`, async ({
+    page,
+  }) => {
+    await install(page)
+    await open(page, '/groups/grp-review?visualTask=1', theme)
+    const room = page.locator('[data-group-page]')
+    await expect(room.locator('[data-task-card]')).toHaveCount(0)
+    await expect(
+      room.locator('[data-group-row][data-kind="task"]'),
+    ).toContainText('把讨论写成')
+    const document = room.locator('[data-artifact]').filter({
+      hasText: '群聊停止规则.md',
+    })
+    await expect(document).toContainText('群聊停止规则.md')
+    await expect(room.locator('[data-task-progress]')).toContainText('已完成')
+    await expect(room.locator('[data-task-progress]')).toContainText(
+      '2 项检查通过 · 已自动完成',
+    )
+    await expect(room.getByRole('button', { name: '确认完成' })).toHaveCount(0)
+    await document.scrollIntoViewIfNeeded()
+    await shot(page, `task-delivery-${theme}`)
+    await document.locator('[data-artifact-preview]').click()
+    await expect(page.locator('[data-artifact-preview-content]')).toContainText(
+      '没有人被点名时结束',
+    )
+  })
+}
+
+test('CG-05 · an image delivery opens the shared viewer', async ({ page }) => {
+  await install(page)
+  await open(page, '/groups/grp-review?visualTask=1', 'light')
+  const room = page.locator('[data-group-page]')
+  const image = room
+    .locator('[data-artifact]')
+    .filter({ hasText: '页面预览.png' })
+  await expect(image.locator('img.thumbnail')).toBeVisible()
+  await image.locator('[data-artifact-preview]').click()
+  const viewer = page.getByRole('dialog', { name: '图片预览：页面预览.png' })
+  await expect(viewer).toBeVisible()
+  await expect(viewer.getByRole('img', { name: '页面预览.png' })).toBeVisible()
+  await shot(page, 'task-image-viewer-light')
+  await viewer.getByRole('button', { name: '关闭图片预览' }).click()
+  await expect(viewer).toHaveCount(0)
+})
+
 // GRP-13: the sidebar's group rows say who speaks now (预览 A): one
 // speaker, several at once, only a queue, and a group at rest.
 for (const theme of ['dark', 'light'] as const) {
@@ -558,6 +807,52 @@ for (const theme of ['dark', 'light'] as const) {
     await expectBaseline(groups, 'group', `sidebar-live-${theme}`)
   })
 }
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`CG-00 · Emperor arrangement, plan and conclusion (${theme})`, async ({
+    page,
+  }) => {
+    await install(page)
+    await open(page, '/groups/grp-review?visualCoordination=1', theme)
+    const messages = page.locator('[data-group-row][data-kind="coordination"]')
+    await expect(messages).toHaveCount(3)
+    await expect(page.locator('[data-coordination-card]')).toHaveCount(0)
+    await expect(messages.locator('[data-process]')).toHaveCount(0)
+    await expect(messages.locator('.ds-avatar[data-size="32"]')).toHaveCount(3)
+    await expect(messages.nth(1)).toContainText('把结论整理成两项顺序任务。')
+    await expect(messages.nth(1)).toContainText('内置协调')
+    await shot(page, `coordination-${theme}`)
+  })
+}
+
+test('CG-00 · Emperor messages and execution drawer in a narrow window', async ({
+  page,
+}) => {
+  await install(page)
+  await open(page, '/groups/grp-review?visualCoordination=1', 'light', 900)
+  await expect(
+    page.locator('[data-group-row][data-kind="coordination"]'),
+  ).toHaveCount(3)
+  await expect(page.locator('[data-coordination-card]')).toHaveCount(0)
+  await expect(page.locator('[data-group-page] > .side')).not.toHaveClass(
+    /open/,
+  )
+  await page.locator('[data-open-members]').click()
+  await expect(page.locator('[data-group-page] > .side')).toHaveClass(/open/)
+  await expect(page.locator('[data-member-row="ct-emperor"]')).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+  await shot(page, 'coordination-narrow-light')
+  await page
+    .locator('[data-close-members]')
+    .click({ position: { x: 20, y: 400 } })
+  await expect(page.locator('[data-group-page] > .side')).not.toHaveClass(
+    /open/,
+  )
+})
 
 test('GRP-16 · 删除群聊 at the bottom of 群设置, confirmed first', async ({
   page,
@@ -645,40 +940,169 @@ test('GRP-08 · 发给 ▾ and the task form', async ({ page }) => {
   await shot(page, 'task-form-dark')
 })
 
-test('GRP-08 · 新建群聊 from the sidebar', async ({ page }) => {
+for (const theme of ['dark', 'light'] as const) {
+  test(`CG-01 · 新建群聊 with fixed built-in Emperor (${theme})`, async ({
+    page,
+  }) => {
+    await install(page)
+    await open(page, '/groups/grp-review', theme)
+    await page
+      .locator('[data-sidebar-section="groups"]')
+      .getByRole('button', { name: '新建群聊' })
+      .click()
+    const dialog = page.getByRole('dialog', { name: '新建群聊' })
+    await dialog.locator('[data-template="review"]').click()
+    await expect(dialog.locator('[data-new-group-title] input')).toHaveValue(
+      '评审',
+    )
+    await expect(dialog).toContainText('还没有：测试工程师')
+    await expect(dialog.locator('[data-group-section]')).toHaveCount(3)
+    await expect(dialog).toContainText('每位成员在独立工作区按指令自主执行')
+    await expect(dialog.locator('[data-fixed-emperor]')).toContainText(
+      '默认内置',
+    )
+    await expect(
+      dialog.locator('[data-fixed-emperor]').locator('input, button'),
+    ).toHaveCount(0)
+    await expect(dialog.locator('[data-pick-member="ct-emperor"]')).toHaveCount(
+      0,
+    )
+    await expect(dialog).toContainText(
+      '已选 2 位其他成员 · 共 3 人（含 Emperor）',
+    )
+    await expect(dialog).not.toContainText('协作方式')
+    await expect(dialog).not.toContainText('项目')
+    await expect(dialog).not.toContainText('Git')
+    await shot(page, `new-group-${theme}`)
+  })
+}
+
+test('CG-01 · 新建群聊 in a narrow window', async ({ page }) => {
   await install(page)
-  await open(page, '/groups/grp-review', 'dark')
+  await open(page, '/groups/grp-review', 'light')
   await page
     .locator('[data-sidebar-section="groups"]')
     .getByRole('button', { name: '新建群聊' })
     .click()
   const dialog = page.getByRole('dialog', { name: '新建群聊' })
-  await dialog.locator('[data-template="review"]').click()
-  await expect(dialog.locator('[data-new-group-title] input')).toHaveValue(
-    '评审',
+  await expect(dialog.locator('[data-group-section]')).toHaveCount(3)
+  await expect(dialog).toContainText('3. 可选群公告')
+  await expect(dialog).toContainText(
+    '已选 0 位其他成员 · 共 1 人（含 Emperor）',
   )
-  await expect(dialog).toContainText('还没有：测试工程师')
-  await shot(page, 'new-group-dark')
+  await expect(dialog.locator('[data-fixed-emperor]')).toContainText(
+    '无需选择，建群后自动加入且不可移除。',
+  )
+  await page.setViewportSize({ width: 900, height: 820 })
+  await shot(page, 'new-group-narrow-light')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect
+    .poll(() =>
+      dialog
+        .locator('.templates')
+        .evaluate(
+          (element) =>
+            getComputedStyle(element).gridTemplateColumns.split(' ').length,
+        ),
+    )
+    .toBe(2)
+  await expect
+    .poll(() =>
+      dialog
+        .locator('.people')
+        .evaluate(
+          (element) =>
+            getComputedStyle(element).gridTemplateColumns.split(' ').length,
+        ),
+    )
+    .toBe(1)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+  await shot(page, 'new-group-mobile-light')
 })
 
 test('GRP-08 · 设置 › 群聊', async ({ page }) => {
   await install(page)
   await open(page, '/groups/grp-review?settings=groups', 'dark')
   await expect(page.getByRole('dialog')).toContainText('新群的默认设置')
+  await expect(page.getByRole('dialog')).not.toContainText('协作方式')
   await shot(page, 'settings-groups-dark')
 })
 
-test('GRP-08 · 「过程 ›」 opens a member’s work, read-only', async ({
+test('CG-05 · a member opens real read-only activity inside the group', async ({
   page,
 }) => {
   await install(page)
   await open(page, '/groups/grp-review', 'dark')
-  // The architect's independent answer.
-  await page.locator('[data-answer]').first().locator('[data-process]').click()
-  await expect(page).toHaveURL(/\/chat\/member-ct-architect0001/)
-  await expect(page.getByText('0.3 方案评审').first()).toBeVisible()
-  await expect(page.locator('[data-contact-speaker]').first()).toHaveText(
-    '架构师',
+  await page.locator('[data-member-row="ct-architect0001"]').click()
+  await expect(page).toHaveURL(/\/groups\/grp-review/)
+  const activity = page.locator('[data-member-activity]')
+  await expect(activity).toHaveAttribute(
+    'data-session-id',
+    'member-ct-architect0001',
   )
-  await shot(page, 'member-work-dark')
+  await expect(activity).toContainText('只读')
+  await expect(activity).toContainText('本群执行详情')
+  await expect(activity.locator('[data-member-trace]')).toContainText(
+    '多agent对话失败模式.md',
+  )
+  await expect(activity.locator('[data-member-trace]')).toContainText('已完成')
+  await shot(page, 'member-activity-dark')
+})
+
+test('CG-UI-01 · messages, status and composer share the 748px axis', async ({
+  page,
+}) => {
+  await install(page)
+  for (const width of [1280, 1440, 1920]) {
+    await open(page, '/groups/grp-review?visualLive=1', 'dark', width)
+    const flow = page.locator('[data-group-page] .flow')
+    const composer = page.locator('[data-group-page] .dock > *').last()
+    const status = page.locator('[data-live-bar]')
+    await expect(flow).toBeVisible()
+    await expect(composer).toBeVisible()
+    await expect(status).toBeVisible()
+    const boxes = await Promise.all(
+      [flow, status, composer].map(async (locator) => {
+        const box = await locator.boundingBox()
+        expect(box).not.toBeNull()
+        return box!
+      }),
+    )
+    for (const box of boxes) expect(box.width).toBeLessThanOrEqual(748)
+    const center = boxes[0].x + boxes[0].width / 2
+    for (const box of boxes)
+      expect(Math.abs(box.x + box.width / 2 - center)).toBeLessThanOrEqual(1)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true)
+  }
+  await open(page, '/groups/grp-review?visualLive=1', 'light', 390)
+  await expect(page.locator('[data-group-page] .flow')).toBeVisible()
+  await expect(page.locator('[data-group-page] > .side')).not.toHaveClass(
+    /open/,
+  )
+  await expect(page.locator('[data-open-members]')).toBeVisible()
+  await page.locator('[data-open-members]').click()
+  await expect(page.locator('[data-group-page] > .side')).toHaveClass(/open/)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-group-page] > .side')).not.toHaveClass(
+    /open/,
+  )
+  const narrowComposer = await page
+    .locator('[data-group-page] .dock > *')
+    .last()
+    .boundingBox()
+  expect(narrowComposer!.width).toBeGreaterThan(280)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true)
+  await shot(page, 'content-axis-narrow-light')
 })

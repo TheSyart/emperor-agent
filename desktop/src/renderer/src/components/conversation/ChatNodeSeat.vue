@@ -12,6 +12,7 @@
 import { computed, defineAsyncComponent, type Component } from 'vue'
 import type { ConversationHandle } from '../../conversation/store'
 import type { ChatNodeKind } from '../../conversation/types'
+import type { RuntimeGoalView } from '../../types'
 import JsonTree from '../ui/JsonTree.vue'
 import AssistantStep from './nodes/AssistantStep.vue'
 import CompactionRow from './nodes/CompactionRow.vue'
@@ -22,6 +23,8 @@ import GoalRow from './nodes/GoalRow.vue'
 import HookRow from './nodes/HookRow.vue'
 import RetryRow from './nodes/RetryRow.vue'
 import ToolCallTree from './nodes/ToolCallTree.vue'
+import RoleDraftCard from '../contacts/RoleDraftCard.vue'
+import { contactRoleDraftMeta } from '../../conversation/contactRoleDraft'
 import TurnBudgetRow from './nodes/TurnBudgetRow.vue'
 import TurnErrorRow from './nodes/TurnErrorRow.vue'
 import TurnFilesCard from './nodes/TurnFilesCard.vue'
@@ -37,8 +40,9 @@ const props = withDefaults(
     closing?: boolean
     part?: 'reasoning' | 'answer'
     dense?: boolean
+    goal?: RuntimeGoalView | null
   }>(),
-  { closing: false, part: undefined, dense: false },
+  { closing: false, part: undefined, dense: false, goal: null },
 )
 
 const RENDERERS: Record<ChatNodeKind, Component> = {
@@ -66,9 +70,16 @@ const RENDERERS: Record<ChatNodeKind, Component> = {
 
 const nodeRef = computed(() => props.handle.node(props.nodeKey))
 const node = computed(() => nodeRef.value.value)
-const renderer = computed(() =>
-  node.value === undefined ? undefined : RENDERERS[node.value.kind],
-)
+const renderer = computed(() => {
+  const current = node.value
+  if (current === undefined) return undefined
+  if (
+    current.kind === 'tool' &&
+    contactRoleDraftMeta(current.data.result?.meta) !== null
+  )
+    return RoleDraftCard
+  return RENDERERS[current.kind]
+})
 </script>
 
 <template>
@@ -84,7 +95,13 @@ const renderer = computed(() =>
       :is="renderer"
       v-if="renderer"
       :node="node"
-      v-bind="node.kind === 'assistant' ? { closing, part } : {}"
+      v-bind="
+        node.kind === 'assistant'
+          ? { closing, part }
+          : node.kind === 'turnBudget'
+            ? { goal }
+            : {}
+      "
     />
     <JsonTree v-else :value="node" />
   </div>

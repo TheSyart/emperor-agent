@@ -113,6 +113,84 @@ async function history(fixture: ApiFixture, groupId: string) {
 }
 
 describe('the user’s answers in the group log (GRP-12)', () => {
+  it('anchors a pending question to the speech published immediately before it', async () => {
+    const fixture = await open({
+      replies: [
+        { text: '我先确认范围。', tools: ASK.tools },
+        { text: '好，先看登录。' },
+      ],
+    })
+    const { rev, group, sessionOf } = await room(fixture)
+    await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'mention', text: '@审稿人 看看' },
+    ])
+    const pending = await waiting(fixture, sessionOf(rev))
+    const before = await history(fixture, group.id)
+    expect(before.map((message) => [message.from, message.text])).toEqual([
+      ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
+      [rev, '我先确认范围。'],
+    ])
+    expect(before[2]).toMatchObject({
+      kind: 'say',
+      interactionId: pending.id,
+    })
+    await invokeCoreOperation(fixture.api, 'control.answerInteraction', [
+      pending.id,
+      { scope: { choice: '登录', freeform: '' } },
+    ])
+    await fixture.api.groups.settled(group.id)
+    const after = await history(fixture, group.id)
+    expect(after.map((message) => [message.from, message.text])).toEqual([
+      ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
+      [rev, '我先确认范围。'],
+      ['system', '你回答了 审稿人 的提问：登录'],
+      [rev, '好，先看登录。'],
+    ])
+  })
+
+  it('built-in clarify waits as Emperor’s real controlled question', async () => {
+    const fixture = await open({
+      replies: [
+        { text: '{"raise":false,"score":0,"reason":""}' },
+        { text: '{"kind":"clarify","text":"先看哪一部分？"}' },
+        { text: '我先确认范围。', tools: ASK.tools },
+        { text: '明白，先看登录。' },
+      ],
+    })
+    const { group, sessionOf } = await room(fixture)
+    await invokeCoreOperation(fixture.api, 'groups.update', [
+      { id: group.id, patch: { settings: { summarizeAtEnd: false } } },
+    ])
+    await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'broadcast', text: '看看这个页面' },
+    ])
+    const pending = await waiting(fixture, sessionOf('ct-emperor'))
+    const before = await history(fixture, group.id)
+    expect(before.map((message) => [message.from, message.text])).toEqual([
+      ['user', '看看这个页面'],
+      ['ct-emperor', '我先确认范围。'],
+    ])
+    expect(before[1]).toMatchObject({ interactionId: pending.id })
+    await invokeCoreOperation(fixture.api, 'control.answerInteraction', [
+      pending.id,
+      { scope: { choice: '登录', freeform: '' } },
+    ])
+    await fixture.api.groups.settled(group.id)
+    expect(
+      (await history(fixture, group.id)).map((message) => [
+        message.from,
+        message.text,
+      ]),
+    ).toEqual([
+      ['user', '看看这个页面'],
+      ['ct-emperor', '我先确认范围。'],
+      ['system', '你回答了 Emperor 的提问：登录'],
+      ['ct-emperor', '明白，先看登录。'],
+    ])
+  })
+
   it('a quick reply leaves 「你回答了 …」 between the question and the speech it let go on', async () => {
     const fixture = await open({ replies: [ASK, { text: '好，先看登录。' }] })
     const { rev, group, sessionOf } = await room(fixture)
@@ -134,10 +212,11 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     const messages = await history(fixture, group.id)
     expect(messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
       ['system', '你回答了 审稿人 的提问：登录'],
       [rev, '好，先看登录。'],
     ])
-    expect(messages[1]).toMatchObject({
+    expect(messages[2]).toMatchObject({
       kind: 'system',
       private: true,
       note: {
@@ -162,7 +241,7 @@ describe('the user’s answers in the group log (GRP-12)', () => {
       { scope: { choice: '', freeform: '两个都看，先登录' } },
     ])
     await fixture.api.groups.settled(group.id)
-    expect((await history(fixture, group.id))[1]!.text).toBe(
+    expect((await history(fixture, group.id))[2]!.text).toBe(
       '你回答了 审稿人 的提问：两个都看，先登录',
     )
   })
@@ -182,6 +261,7 @@ describe('the user’s answers in the group log (GRP-12)', () => {
       (await history(fixture, group.id)).map((m) => [m.from, m.text]),
     ).toEqual([
       ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
       ['system', '你没有回答 审稿人 的提问：先看哪一部分？'],
       [rev, '那我先看登录。'],
     ])
@@ -246,10 +326,11 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     const messages = await history(fixture, group.id)
     expect(messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '悄悄问你一句'],
+      ['ct-emperor', '已请审稿人回答。'],
       ['system', '你回答了 审稿人 的提问：注册'],
       [rev, '私下说：先看登录。'],
     ])
-    expect(messages[1]!.turnId).toBe(messages[0]!.turnId)
+    expect(messages[2]!.turnId).toBe(messages[0]!.turnId)
   })
 
   it('no member is ever given it: the next speeches read without it', async () => {
@@ -308,12 +389,13 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     const again = await open({ stateRoot })
     expect((await history(again, group.id)).map((m) => m.text)).toEqual([
       '@审稿人 看看',
+      '已请审稿人回答。',
       '你回答了 审稿人 的提问：登录',
       '好。',
     ])
   })
 
-  it('stopping the turn drops a waiting question without a line', async () => {
+  it('stopping drops a waiting question but keeps the acceptance', async () => {
     const fixture = await open({ replies: [ASK] })
     const { rev, group, sessionOf } = await room(fixture)
     await invokeCoreOperation(fixture.api, 'groups.send', [
@@ -324,6 +406,7 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     await fixture.api.groups.settled(group.id)
     expect((await history(fixture, group.id)).map((m) => m.from)).toEqual([
       'user',
+      'ct-emperor',
     ])
   })
 

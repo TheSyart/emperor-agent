@@ -29,6 +29,11 @@ export type GroupSendInput = Omit<CoreOperationArgs<'groups.send'>[0], 'id'>
 export type SendWay = GroupSendInput['way']
 export type TaskAccess = NonNullable<GroupSendInput['task']>['access']
 export type GroupTask = NonNullable<GroupHistoryMessage['task']>
+export type GroupArtifactFile =
+  CoreOperationResult<'groups.files.list'>['files'][number] & {
+    artifactRef?: string
+    mimeType?: string
+  }
 /** What `group_member_status` says of a member. */
 export type MemberLiveStatus = 'idle' | 'thinking' | 'queued' | 'error'
 
@@ -55,7 +60,7 @@ export const SEND_WAYS: readonly SendWayOption[] = [
     way: 'broadcast',
     label: '所有人 · 有关的人举手',
     short: '所有人 · 举手',
-    hint: '大家都能看到，和职责有关的成员举手回答（主持人审核时由主持人安排）',
+    hint: '大家都能看到，和职责有关的成员举手回答',
   },
   {
     way: 'independent',
@@ -213,12 +218,12 @@ export { completionQuery }
 export type RowKind =
   | 'user'
   | 'say'
-  | 'independent'
   | 'private'
   | 'task'
   | 'result'
   | 'summary'
   | 'system'
+  | 'coordination'
   | 'pass'
   /** The user's answer to a member, for the user only (GRP-12). */
   | 'note'
@@ -228,20 +233,19 @@ export interface IndependentBatch {
   /** Who was asked (the user's ask), else who answered. */
   members: string[]
   answers: GroupHistoryMessage[]
-  /** All answers out; until then the card shows progress only. */
+  /** All answers are public; hidden answers never enter the conversation. */
   revealed: boolean
 }
 
-export type TimelineRow =
-  | {
-      key: string
-      kind: Exclude<RowKind, 'independent'>
-      message: GroupHistoryMessage
-    }
-  | { key: string; kind: 'independent'; batch: IndependentBatch }
+export interface TimelineRow {
+  key: string
+  kind: RowKind
+  message: GroupHistoryMessage
+}
 
-function kindOf(message: GroupHistoryMessage): Exclude<RowKind, 'independent'> {
+function kindOf(message: GroupHistoryMessage): RowKind {
   if (message.note) return 'note'
+  if (message.kind === 'coordination') return 'coordination'
   if (message.from === 'system' || message.kind === 'system') return 'system'
   if (message.kind === 'task') return 'task'
   if (message.from === 'user') return 'user'
@@ -252,28 +256,21 @@ function kindOf(message: GroupHistoryMessage): Exclude<RowKind, 'independent'> {
   return 'say'
 }
 
-/**
- * The rows of the flow, oldest first. The answers of one independent ask
- * become one card: right after the user's question when the user asked,
- * else where the first answer is.
- */
-export function timelineRows(
+/** Independent-answer facts for the side rail; never reveals hidden text there. */
+export function independentProgress(
   messages: readonly GroupHistoryMessage[],
-): TimelineRow[] {
-  const rows: TimelineRow[] = []
+): IndependentBatch[] {
   const batches = new Map<string, IndependentBatch>()
   const batch = (batchId: string, members: string[]) => {
     let found = batches.get(batchId)
     if (!found) {
       found = { batchId, members, answers: [], revealed: false }
       batches.set(batchId, found)
-      rows.push({ key: `batch:${batchId}`, kind: 'independent', batch: found })
     }
     return found
   }
   for (const message of messages) {
     if (message.from === 'user' && message.answerMode === 'independent') {
-      rows.push({ key: message.id, kind: 'user', message })
       if (message.batchId) batch(message.batchId, [...message.ask])
       continue
     }
@@ -287,14 +284,35 @@ export function timelineRows(
       found.answers.push(message)
       if (!found.members.includes(message.from as string))
         found.members.push(message.from as string)
-      continue
     }
-    rows.push({ key: message.id, kind: kindOf(message), message })
   }
   for (const found of batches.values())
     found.revealed =
       found.answers.length > 0 &&
       found.answers.every((answer) => !answer.hidden)
+  return [...batches.values()]
+}
+
+/**
+ * Pure conversation rows, oldest first. Hidden independent answers occupy no
+ * row; once revealed, each answer is an ordinary member message (D54).
+ */
+export function timelineRows(
+  messages: readonly GroupHistoryMessage[],
+): TimelineRow[] {
+  const rows: TimelineRow[] = []
+  for (const message of messages) {
+    if (
+      message.batchId &&
+      message.from !== 'user' &&
+      message.from !== 'system' &&
+      message.kind === 'say'
+    ) {
+      if (!message.hidden) rows.push({ key: message.id, kind: 'say', message })
+      continue
+    }
+    rows.push({ key: message.id, kind: kindOf(message), message })
+  }
   return rows
 }
 
@@ -344,6 +362,7 @@ export const TASK_STATE_LABELS: Record<GroupTask['state'], string> = {
   queued: '排队中',
   waiting_user: '等你确认',
   running: '进行中',
+  submitted: '已交付',
   done: '已完成',
   failed: '没有完成',
   cancelled: '已取消',
@@ -480,12 +499,17 @@ export function memberStatusLine(
   return { text: '空闲', tone: 'idle' }
 }
 
-/** 自主 / 主持人审核, as the header's tag says it. */
+/** Core normalizes every group to autonomous; quiet remains a separate option. */
 export function collaborationLabel(
-  settings: Pick<GroupView['settings'], 'collaboration' | 'quiet'>,
+  settings: Pick<
+    GroupView['settings'],
+    'collaboration' | 'quiet' | 'coordination'
+  >,
 ): string {
-  const base = settings.collaboration === 'moderated' ? '主持人审核' : '自主'
-  return settings.quiet ? `${base} · 安静` : base
+  const base = settings.collaboration === 'moderated' ? '协调后审核' : '自主'
+  const quiet = settings.quiet ? ' · 安静' : ''
+  const coordination = settings.coordination === 'builtin' ? ' · 内置协调' : ''
+  return `${base}${quiet}${coordination}`
 }
 
 // ── @ in what was said ───────────────────────────────────────────────────

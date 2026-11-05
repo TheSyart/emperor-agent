@@ -4,7 +4,7 @@
  */
 import { avatarIndex } from '../workspace/environmentModel'
 
-export const AVATAR_SIZES = [16, 20, 24, 28, 40] as const
+export const AVATAR_SIZES = [16, 20, 24, 28, 32, 40] as const
 export type AvatarSize = (typeof AVATAR_SIZES)[number]
 
 /**

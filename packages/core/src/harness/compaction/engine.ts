@@ -21,7 +21,7 @@
  * A span too large for one summary request (always, in overflow recovery)
  * is summarized map-reduce: chunks of at most chunkRatio × W are condensed
  * one by one, then the partial checkpoints are merged. Summary requests use
- * `purpose: 'compaction'`, which adapters send without thinking.
+ * `purpose: 'compaction'`; adapters choose valid thinking for each route.
  *
  * Commit: `compaction/start` → summary call(s) → `compaction/summary` →
  * checkpoint `user/message` replacing the range → `compaction/end`.

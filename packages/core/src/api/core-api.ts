@@ -127,10 +127,20 @@ import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
 import { ContactStore } from '../contacts/store'
+import {
+  createRoleCreatorTools,
+  recordRoleCreatorIntent,
+  roleCreatorIntent,
+  ROLE_CREATOR_CONTACT_ID,
+  RoleCreatorService,
+  type RoleCreatorIntent,
+} from '../contacts/creator'
 import { groupAnswer, type InteractionSettle } from '../groups/answers'
 import type { GroupEventMap } from '../groups/events'
+import { GroupWorkspaceStore } from '../groups/workspace'
 import type { GroupScheduler } from '../groups/scheduler'
 import { installGroupRuntime } from './services/group-runtime'
+import type { GroupWorkScheduler } from '../groups/work-scheduler'
 import { CoreGroupDefaultsService } from './services/group-defaults-service'
 import type { GroupPreferences, PetOutfit } from '../config/local-config'
 import {
@@ -228,6 +238,7 @@ import {
 import { NodeEnvironmentProcessRunner } from '../environment/process-runner'
 import {
   WorkspaceFilesService,
+  mimeTypeForPath,
   type WorkspaceFileListResult,
   type WorkspaceFileReadResult,
 } from '../workspace/files'
@@ -326,7 +337,10 @@ import {
   type TerminalEvent,
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
-import { WorkspaceReferenceService } from '../workspace/references'
+import {
+  WorkspaceReferenceService,
+  type AttachmentReferenceTarget,
+} from '../workspace/references'
 import {
   WorkspaceMediaGrants,
   workspaceMediaUrl,
@@ -499,8 +513,11 @@ export class CoreApi {
   readonly memoryService: CoreMemoryService
   /** Contacts (GRP-02): `<stateRoot>/contacts/`. */
   readonly contactStore: ContactStore
+  readonly roleCreatorService: RoleCreatorService
+  readonly groupWorkspaces: GroupWorkspaceStore
   readonly groupService: GroupService
   readonly groupScheduler: GroupScheduler
+  readonly groupWorkScheduler: GroupWorkScheduler
   /** 设置 › 群聊: what a new group starts with (GRP-08). */
   readonly groupDefaults: CoreGroupDefaultsService
   /** Contacts' personal memory: feedback and its lines (GRP-03). */
@@ -693,6 +710,26 @@ export class CoreApi {
           version: change.version,
         }),
     })
+    this.roleCreatorService = new RoleCreatorService({
+      contacts: this.contactStore,
+      skills: () =>
+        this.skillService.list({ sessionId: null }).skills.map((skill) => ({
+          name: skill.name,
+          sourceId: skill.source,
+          description: skill.description,
+        })),
+      mcp: () =>
+        host.kept.mcpClient.snapshot().servers.map((server) => ({
+          serverId: server.serverName,
+          state: server.state,
+          tools: [...server.tools],
+        })),
+    })
+    const roleCreatorTools = createRoleCreatorTools({
+      service: this.roleCreatorService,
+      session: (id) => kept.sessionStore.get(id) ?? null,
+    })
+
     // CP-04: working experiences, kept per contact beside its feedback.
     this.experienceStore = new ContactExperienceStore({
       stateRoot: this.paths.stateRoot,
@@ -761,13 +798,22 @@ export class CoreApi {
       route: (id) => host.llm.listRoutes().find((route) => route.id === id),
       defaultCallConfig: (routeId) => host.llm.defaultCallConfig(routeId),
       persona: () => persona,
+      creatorIntent: (sessionId) =>
+        roleCreatorIntent(host.sessionLog(sessionId)),
       experiences: (contactId, sessionId) =>
         this.experiencesFor(contactId, sessionId),
+      group: (sessionId) => {
+        const entry = host.kept.sessionStore.get(sessionId)
+        if (entry?.surface !== 'group_member' || !entry.group_id) return null
+        const state = this.groupService.state(entry.group_id)
+        return { title: state.title, charter: state.charter }
+      },
     })
     host.setContactRuntime(this.contactRuntime)
     void this.refreshAllExperiences()
     host.setContactTurnObserver(({ contactId, session, turnId }) => {
       const contact = this.contactStore.peek(contactId)
+      if (contactId === ROLE_CREATOR_CONTACT_ID) return
       if (!contact?.memory.enabled) return
       const turn = Number(turnId)
       if (!Number.isInteger(turn)) return
@@ -790,7 +836,11 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
     })
     // A group is a session whose log holds the group events (GRP-06).
+    this.groupWorkspaces = new GroupWorkspaceStore({
+      stateRoot: this.paths.stateRoot,
+    })
     this.groupService = new GroupService({
+      workspace: this.groupWorkspaces,
       sessions: {
         create: (title, opts) =>
           kept.sessionStore.create(title, { mode: 'chat', ...opts }),
@@ -829,21 +879,29 @@ export class CoreApi {
       },
       // groups.create reads 设置 › 群聊 first, so this is current (GRP-08).
       defaults: () => this.groupDefaults.current(),
-      onChange: (change) =>
+      onChange: (change) => {
         host.emitHost({
           event: 'groups_changed',
           reason: change.reason,
           group_id: change.groupId,
-        }),
+        })
+        if (change.reason !== 'deleted')
+          queueMicrotask(() => this.groupWorkScheduler?.kick(change.groupId))
+      },
     })
+    // CG-00: migrate old groups once, by appending (never rewriting) events.
+    this.groupService.migrateLegacyCoordination()
+    this.groupService.migrateLegacyWorkspaces()
     // Who speaks when; member speeches are background turns (GRP-07).
-    this.groupScheduler = installGroupRuntime({
+    const groupRuntime = installGroupRuntime({
       host,
       sessions: kept.sessionStore,
       groups: this.groupService,
       tokenTracker: kept.tokenTracker,
       contact: (id) => this.contactStore.peek(id),
     })
+    this.groupScheduler = groupRuntime.speeches
+    this.groupWorkScheduler = groupRuntime.work
     const delegations = () => {
       if (!host.delegations)
         throw new ContactChatFailedError(
@@ -1723,6 +1781,7 @@ export class CoreApi {
     })
     // Everything CoreApi plugs into the kernel, in one registration (KRN-13).
     host.extend({
+      tools: roleCreatorTools,
       turnFiles: this.turnFiles,
       workspaceAccess,
       pluginOverrides: (projectRoot) =>
@@ -1735,6 +1794,13 @@ export class CoreApi {
       // A session in a managed worktree works there (KRN-11).
       worktrees: (sessionId, projectRoot) =>
         this.workspaceBindings.resolve(sessionId, projectRoot),
+      groupWorkspaces: (entry) => {
+        if (!entry.group_id || !entry.contact_id) return null
+        return this.groupService.memberWorkspace(
+          entry.group_id,
+          entry.contact_id,
+        )
+      },
       // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10).
       localSubagentModel: () =>
         localSubagentModelOf(this.executorConfig.read()),
@@ -1801,6 +1867,8 @@ export class CoreApi {
         this.requireReadableLogSession(sessionId, 'references.preview')
       },
       webFetchClient: opts.webFetchClient ?? null,
+      resolveArtifact: (sessionId, artifactRef) =>
+        this.groupArtifactTarget(sessionId, artifactRef),
       resolveAttachment: (attachmentId) => {
         const attachment = this.attachmentStore.get(attachmentId)
         return attachment
@@ -2243,7 +2311,8 @@ export class CoreApi {
           new Promise<void>((done) => setTimeout(done, 2000).unref()),
         ])
       this.updateService.close()
-      // Group turns stop before the sessions they speak in close.
+      // Both queues stop before the sessions they run in close.
+      await this.groupWorkScheduler.shutdown()
       await this.groupScheduler.shutdown()
       this.flushAll()
       await this.executors.close()
@@ -3260,6 +3329,43 @@ export class CoreApi {
     }
   }
 
+  private groupIdForSession(sessionId: string): string | null {
+    const entry = this.host.kept.sessionStore.get(sessionId)
+    if (
+      entry?.surface === 'group' &&
+      sessionId === (entry.group_id ?? sessionId)
+    )
+      return sessionId
+    return entry?.surface === 'group_member' ? (entry.group_id ?? null) : null
+  }
+
+  private groupArtifactTarget(
+    sessionId: string,
+    artifactRef: string,
+  ): AttachmentReferenceTarget {
+    const { groupId, artifact } = this.groupService.artifactByRef(artifactRef)
+    if (this.groupIdForSession(sessionId) !== groupId)
+      throw new WorkspaceOperationError(
+        'reference_session_mismatch',
+        '当前会话不能读取这个群的公开成果。',
+      )
+    return {
+      root: this.groupService.workspace(groupId).root,
+      relativePath: artifact.path,
+      label: artifact.name,
+    }
+  }
+
+  private groupSharedRoots(sessionId: string): string[] {
+    const groupId = this.groupIdForSession(sessionId)
+    if (!groupId) return []
+    try {
+      return [this.groupService.workspace(groupId).shared]
+    } catch {
+      return []
+    }
+  }
+
   readonly references = {
     siteIcon: (input: Parameters<WorkspaceReferenceService['siteIcon']>[0]) =>
       this.workspaceReferenceService.siteIcon(input),
@@ -3298,6 +3404,7 @@ export class CoreApi {
         ? [ownedRecord.cwd, ...this.delegationImageRoots(ownedRecord)]
         : [
             this.host.sessionWorkspaceRoot(input.sessionId),
+            ...this.groupSharedRoots(input.sessionId),
             ...this.delegationRuntime
               .list()
               .flatMap((state) =>
@@ -3864,6 +3971,71 @@ export class CoreApi {
       await this.groupDefaults.get()
       return this.groupService.create(input)
     },
+    workspace: async (input: { id: string }) => {
+      await this.contactStore.ready()
+      return this.groupService.workspace(input.id)
+    },
+    publishArtifact: async (input: {
+      id: string
+      contactId: string
+      sourcePath: string
+      taskId?: string
+    }) => {
+      await this.contactStore.ready()
+      return this.groupService.publishArtifact(input.id, input)
+    },
+    tasks: async (input: { id: string }) => {
+      await this.contactStore.ready()
+      return this.groupService.tasks(input.id)
+    },
+    claimTask: async (input: {
+      id: string
+      taskId: string
+      owner: string
+      contractRevision: number
+      runId: string
+    }) => {
+      await this.contactStore.ready()
+      return this.groupService.claimTask(input.id, input)
+    },
+    submitTask: async (input: {
+      id: string
+      taskId: string
+      owner: string
+      attempt: number
+      leaseEpoch: number
+      artifact: { ref: string; revision: string }
+      checks?: Array<{
+        artifactRevision: string
+        evidenceRef: string
+        passed: boolean
+      }>
+    }) => {
+      await this.contactStore.ready()
+      return this.groupService.submitTask(input.id, input)
+    },
+    acceptTask: async (input: {
+      id: string
+      taskId: string
+      artifactRevision: string
+      checks: Array<{
+        artifactRevision: string
+        evidenceRef: string
+        passed: boolean
+      }>
+    }) => {
+      await this.contactStore.ready()
+      return this.groupService.acceptTask(input.id, input)
+    },
+    transferTask: async (input: {
+      id: string
+      taskId: string
+      to: string
+      contractRevision: number
+    }) => {
+      await this.contactStore.ready()
+      return this.groupService.transferTask(input.id, input)
+    },
     /** 设置 › 群聊 (GRP-08, D14). */
     defaults: (): Promise<GroupPreferences> => this.groupDefaults.get(),
     setDefaults: (change: Partial<GroupPreferences>) =>
@@ -3915,10 +4087,15 @@ export class CoreApi {
         )
       return this.groupService.state(input.id).tasks.get(input.taskId)!
     },
-    /** Stop the group's turn: speeches aborted, tasks cancelled. */
+    /** Stop speeches only; extended background work has its own command. */
     stop: async (input: { id: string }) => {
       this.groupService.state(input.id)
       return { stopped: this.groupScheduler.stop(input.id) }
+    },
+    /** Request work cancellation; each task changes after its runner confirms. */
+    stopWork: async (input: { id: string }) => {
+      this.groupService.state(input.id)
+      return this.groupWorkScheduler.stop(input.id)
     },
     /**
      * Delete the group (GRP-16): a running turn is stopped and waited for,
@@ -3928,11 +4105,20 @@ export class CoreApi {
     delete: async (input: { id: string }) => {
       this.groupService.state(input.id)
       this.groupScheduler.stop(input.id)
-      await this.groupScheduler.settled(input.id)
+      this.groupWorkScheduler.stop(input.id)
+      await Promise.all([
+        this.groupScheduler.settled(input.id),
+        this.groupWorkScheduler.settled(input.id),
+      ])
       return this.groupService.delete(input.id)
     },
     /** Resolves once the group's current turn has settled (tests, shutdown). */
-    settled: (id: string) => this.groupScheduler.settled(id),
+    settled: async (id: string) => {
+      await Promise.all([
+        this.groupScheduler.settled(id),
+        this.groupWorkScheduler.settled(id),
+      ])
+    },
     history: async (input: { id: string; before?: string; limit?: number }) => {
       await this.contactStore.ready()
       return this.groupService.history(input.id, input)
@@ -3941,11 +4127,20 @@ export class CoreApi {
       /** 群文件 (`<stateRoot>/groups/<id>/files`), the top level only. */
       list: async (input: { id: string }) => {
         this.groupService.state(input.id)
-        return {
-          files: await listGroupFiles(
-            join(this.paths.stateRoot, 'groups', input.id, 'files'),
-          ),
-        }
+        const legacy = await listGroupFiles(
+          join(this.paths.stateRoot, 'groups', input.id, 'files'),
+        )
+        const artifacts = this.groupService
+          .workspace(input.id)
+          .artifacts.map((artifact) => ({
+            name: artifact.name,
+            size: artifact.size,
+            modifiedAt: artifact.at,
+            dir: false,
+            artifactRef: artifact.artifactRef,
+            mimeType: artifact.mimeType ?? mimeTypeForPath(artifact.name),
+          }))
+        return { files: [...legacy, ...artifacts] }
       },
     },
   }
@@ -4019,7 +4214,12 @@ export class CoreApi {
             ref: message.id,
           })
       } else if (event.type === 'tool/result') {
-        const text = messageText(event.data.message).trim()
+        const text = event.data.message.content
+          .flatMap((block) => block.content)
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+          .join('')
+          .trim()
         items.push({
           role: 'tool',
           text,
@@ -4218,11 +4418,25 @@ export class CoreApi {
      * The contact's most recent single chat, or a new one (GRP-05): what
      * 发消息 on its profile and an @ on the Group home open.
      */
-    openChat: async (input: { id: string; fresh?: boolean }) => {
+    openChat: async (input: {
+      id: string
+      fresh?: boolean
+      intent?: RoleCreatorIntent
+    }) => {
       const contact = await this.contactStore.get(input.id)
-      return this.sessionApplicationService.openContactChat(contact.id, {
+      if (input.intent !== undefined) {
+        if (contact.id !== ROLE_CREATOR_CONTACT_ID)
+          throw new Error('创建或调整意图只能交给角色创建师')
+        await this.roleCreatorService.validateIntent(input.intent)
+      }
+      const entry = this.sessionApplicationService.openContactChat(contact.id, {
         fresh: input.fresh === true,
       })
+      if (input.intent !== undefined) {
+        const session = this.host.agentFor(entry.id).session
+        recordRoleCreatorIntent(session, input.intent)
+      }
+      return entry
     },
     /**
      * A message to Claude Code or Codex in their single chat (GRP-11): the

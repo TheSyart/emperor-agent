@@ -82,7 +82,7 @@ import {
   type TimelineRow,
 } from './processModel'
 import type { TimelineAgents } from './subagentRows'
-import type { ProvisionalPrompt } from '../../types'
+import type { ProvisionalPrompt, RuntimeGoalView } from '../../types'
 import { isAtBottom, turnStatusLabel } from './timelineModel'
 import { useSkinExempt } from '../../skin/skinState'
 
@@ -100,6 +100,7 @@ const props = withDefaults(
     speaker?: ContactSpeaker
     /** 👍 / 👎 under its replies (GRP-05). */
     feedback?: ChatFeedback
+    goal?: RuntimeGoalView | null
   }>(),
   {
     store: undefined,
@@ -107,6 +108,7 @@ const props = withDefaults(
     provisional: () => [],
     speaker: undefined,
     feedback: undefined,
+    goal: null,
   },
 )
 const emit = defineEmits<{
@@ -612,11 +614,13 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
                   v-if="item.row.kind === 'process'"
                   :handle="handle"
                   :row="item.row"
+                  :goal="goal"
                 />
                 <SubagentGroup
                   v-else-if="item.row.kind === 'agents'"
                   :handle="handle"
                   :row="item.row"
+                  :goal="goal"
                 />
                 <ChatNodeSeat
                   v-else
@@ -624,6 +628,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
                   :node-key="item.id"
                   :closing="item.row.closing === true"
                   :part="item.row.answerOnly ? 'answer' : undefined"
+                  :goal="goal"
                 />
               </template>
             </DynamicScrollerItem>

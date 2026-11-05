@@ -110,20 +110,18 @@ describe('what sending does', () => {
     })
   })
 
-  it('makes a group for two or more, Emperor joining as moderator (card tests: @ 多位建群；临时群里 Emperor 作为主持人加入)', () => {
+  it('CG-00: makes a group from exactly the asked members, with no visible moderator', () => {
     expect(planHomeSend('@架构师 @审稿人 帮我评估一下方案', CONTACTS)).toEqual({
       kind: 'group',
       title: '帮我评估一下方案',
-      members: ['ct-emperor', 'ct-arch', 'ct-rev'],
-      moderator: 'ct-emperor',
+      members: ['ct-arch', 'ct-rev'],
       ask: ['ct-arch', 'ct-rev'],
     })
-    // Emperor @-mentioned too: one member, still the moderator, asked too.
+    // Emperor is included only when explicitly @-mentioned.
     expect(planHomeSend('@Emperor @审稿人 一起看看', CONTACTS)).toEqual({
       kind: 'group',
       title: '一起看看',
       members: ['ct-emperor', 'ct-rev'],
-      moderator: 'ct-emperor',
       ask: ['ct-emperor', 'ct-rev'],
     })
   })

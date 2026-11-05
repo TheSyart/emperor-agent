@@ -6,6 +6,7 @@ import {
   type ExternalBackend,
   type RoleCard,
 } from './types'
+import { ROLE_CREATOR_PROMPT } from './creator-prompt'
 
 /** What a builtin contact lets the user change; the rest is the shipped definition. */
 export const BUILTIN_EDITABLE_FIELDS = ['avatar', 'intro'] as const
@@ -58,7 +59,7 @@ function external(
 }
 
 /**
- * The three builtin contacts as shipped. Emperor's role card is today's
+ * The builtin contacts as shipped. Emperor's role card is today's
  * persona; Claude Code and Codex take their model and permission from
  * 设置 › 子智能体, so their capabilities are only {@link EXTERNAL_CAPABILITIES}.
  */
@@ -99,5 +100,28 @@ export function builtinContacts(persona: string, at: number): Contact[] {
       '外部编程智能体，模型和权限跟随子智能体设置',
       at,
     ),
+    {
+      id: 'ct-role-creator',
+      kind: 'local',
+      name: '角色创建师',
+      avatar: { kind: 'library', id: 'AV-05-1' },
+      intro: '通过询问和草稿，创建或调整联系人',
+      domains: ['other'],
+      role: { ...emptyRole(), mission: ROLE_CREATOR_PROMPT },
+      knowledge: [],
+      skills: [],
+      mcp: [],
+      capabilities: {
+        model: 'inherit',
+        tools: { preset: 'custom', allow: [] },
+        permission: 'read_only',
+      },
+      groupHabit: { speak: 'mentioned', length: 'brief' },
+      memory: { enabled: false },
+      version: 1,
+      builtin: true,
+      createdAt: at,
+      updatedAt: at,
+    },
   ]
 }

@@ -14,8 +14,9 @@
  * - reserved/claimed round never admitted, or admitted round cancelled
  *   (turn aborted) → durable `pause` (fallback: disarm);
  * - downstream pre-step rejection of a valid round → `block` `prompt-rejected`;
- * - cancellation unrelated to a goal round, max-tokens, a spent task budget
- *   (KRN-03), or agent error → disarm.
+ * - max-tokens or a step budget → reserve the next round from the checkpoint;
+ * - cancellation unrelated to a goal round, a spent cost budget (KRN-03),
+ *   or agent error → disarm.
  *
  * Human work always wins: a competing `next-turn` message queued while a
  * reservation is still pending makes it stale; the round is re-reserved at
@@ -244,7 +245,9 @@ export class GoalRoundDriver {
         return
       case 'turn/end': {
         const reason = event.data.reason
-        if (reason.kind === 'max-tokens' || reason.kind === 'budget') {
+        if (reason.kind === 'budget' && (reason.limit as string) !== 'steps') {
+          // Cost and other hard budgets belong to the user; never wake the
+          // model again to bypass them. Step boundaries alone are resumable.
           this.disarm(state)
         } else if (reason.kind === 'aborted') {
           // Claimed/admitted (or discarded from the inbox by the cancel) → the round was cancelled.

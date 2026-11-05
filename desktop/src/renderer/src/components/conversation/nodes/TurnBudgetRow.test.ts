@@ -6,6 +6,7 @@ import type {
   TurnBudgetChatNode,
 } from '../../../conversation/types'
 import TurnBudgetRow from './TurnBudgetRow.vue'
+import type { RuntimeGoalView } from '../../../types'
 
 // KRN-03: the user is told why the task budget ended a turn.
 
@@ -19,7 +20,10 @@ afterEach(() => {
   root = null
 })
 
-function render(reason: TurnBudgetChatData['reason']): string {
+function render(
+  reason: TurnBudgetChatData['reason'],
+  goal?: RuntimeGoalView,
+): string {
   root = document.createElement('div')
   document.body.append(root)
   const node = {
@@ -28,7 +32,7 @@ function render(reason: TurnBudgetChatData['reason']): string {
     seq: 1,
     data: { turn: 1, seq: 1, time: 1, reason },
   } as unknown as TurnBudgetChatNode
-  app = createApp({ render: () => h(TurnBudgetRow, { node }) })
+  app = createApp({ render: () => h(TurnBudgetRow, { node, goal }) })
   app.mount(root)
   return root.textContent ?? ''
 }
@@ -39,6 +43,67 @@ describe('TurnBudgetRow', () => {
     expect(text).toContain('已达到单轮步数上限')
     expect(text).toContain('本轮已执行 400 步')
     expect(text).toContain('设置 › 高级 › 任务预算')
+  })
+
+  it('says an armed active goal is continuing from its checkpoint', () => {
+    const text = render(
+      { kind: 'budget', limit: 'steps', maxSteps: 400 },
+      {
+        id: 'goal-1',
+        revision: 1,
+        objective: '完成大学模拟',
+        phase: 'active',
+        activation: 'armed',
+        maxGoalRounds: 256,
+        roundsStarted: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    )
+    expect(text).toContain('断点已保存，正在自动继续')
+    expect(text).not.toContain('可以让我继续')
+  })
+
+  it('does not call an active but disarmed goal automatic', () => {
+    const text = render(
+      { kind: 'budget', limit: 'steps', maxSteps: 120 },
+      {
+        id: 'goal-1',
+        revision: 1,
+        objective: '完成大学模拟',
+        phase: 'active',
+        activation: 'disarmed',
+        maxGoalRounds: 256,
+        roundsStarted: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    )
+    expect(text).toContain('断点已保留，可恢复目标后继续')
+    expect(text).not.toContain('正在自动继续')
+  })
+
+  it('never says a cost cap will continue automatically', () => {
+    const text = render(
+      {
+        kind: 'budget',
+        limit: 'cost',
+        capUsdNanos: 1_000_000_000,
+        spentUsdNanos: 1_000_000_000,
+      },
+      {
+        id: 'goal-1',
+        revision: 1,
+        objective: '完成大学模拟',
+        phase: 'active',
+        activation: 'armed',
+        maxGoalRounds: 256,
+        roundsStarted: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    )
+    expect(text).not.toContain('自动继续')
   })
 
   it('says the task spent its cost cap, subagents and failed attempts included', () => {

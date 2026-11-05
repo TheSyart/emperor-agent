@@ -5,13 +5,12 @@
  * - the user: a warm bubble on the right, its audience above it
  *   (「→ 所有人」, 「→ @架构师」, 「🔒 私信 → 写作者」);
  * - say: avatar, name, role and audience, what was said (Markdown, @
- *   marked), 「过程 ›」 at the top right for the member's own work;
- * - independent answers: one card, side by side once all are revealed,
- *   until then 「N/3 已答，答完一起显示」;
+ *   marked); execution details stay in the right-hand member view;
+ * - independent answers: ordinary member messages once revealed; hidden
+ *   answers occupy no row and their progress stays in the right rail;
  * - private: a violet line and 「🔒 私信 → X · 其他成员看不到，你能看到」;
- * - task: the task card (交付, 依据, 权限, state; 同意 / 不同意 when a code
- *   change for Claude Code or Codex waits for the user);
- * - result: what was handed back, with the result card of an external run;
+ * - task and result: the original assignment and delivery as dialogue;
+ *   public files/images are inline attachments on the delivery;
  * - summary: the moderator's conclusion on a light gold ground;
  * - system: one centred line (a 「设置 › …」 in it becomes a button);
  * - note: what the user answered a member, as the group log keeps it for
@@ -22,9 +21,9 @@
  * message where it was asked (D29). A deleted contact is greyed out.
  *
  * Props: messages; members; contacts; finished (members done speaking in
- * this turn, for an independent card's progress); asks; streams (the
- * speeches still being written, GRP-20).
- * Emits: process(contactId), answer, cancelAsk, confirmTask, openSettings.
+ * this turn); asks; streams (the speeches still being written, GRP-20).
+ * Emits: process(contactId), answer, cancelAsk, artifact preview/get,
+ * openSettings.
  */
 import { computed, ref } from 'vue'
 import type { Contact } from '@emperor/core/api'
@@ -38,8 +37,7 @@ import Avatar from '../ui/Avatar.vue'
 import LinkButton from '../ui/LinkButton.vue'
 import GroupAskMessage from './GroupAskMessage.vue'
 import GroupMarkdown from './GroupMarkdown.vue'
-import GroupResultCard from './GroupResultCard.vue'
-import GroupTaskCard from './GroupTaskCard.vue'
+import GroupArtifacts from './GroupArtifacts.vue'
 import { mentionedContacts } from './groupHomeModel'
 import {
   isLongMessage,
@@ -49,7 +47,6 @@ import {
   type GroupAsk,
   type GroupHistoryMessage,
   type GroupMemberView,
-  type IndependentBatch,
   type TimelineRow,
 } from './groupModel'
 import { useSkinExempt } from '../../skin/skinState'
@@ -63,11 +60,12 @@ const props = withDefaults(
     messages: readonly GroupHistoryMessage[]
     members: readonly GroupMemberView[]
     contacts: readonly Contact[]
-    finished: readonly string[]
     asks: readonly GroupAsk[]
     streams?: readonly GroupStreamView[]
+    groupId: string
+    artifacts?: readonly import('./groupModel').GroupArtifactFile[]
   }>(),
-  { streams: () => [] },
+  { streams: () => [], artifacts: () => [] },
 )
 const emit = defineEmits<{
   process: [contactId: string]
@@ -79,7 +77,8 @@ const emit = defineEmits<{
     },
   ]
   cancelAsk: [payload: { contactId: string; interaction: ControlInteraction }]
-  confirmTask: [payload: { taskId: string; approve: boolean }]
+  previewArtifact: [payload: { ref: string; name: string; mimeType: string }]
+  getArtifact: [ref: string]
   openSettings: [section: SettingsModalSection]
 }>()
 
@@ -89,7 +88,6 @@ interface Person {
   avatar:
     ReturnType<typeof contactAvatarProps> | { kind: 'initials'; label: string }
   missing: boolean
-  sessionId: string | null
 }
 
 function person(id: string): Person {
@@ -101,7 +99,6 @@ function person(id: string): Person {
       intro: '',
       avatar: { kind: 'initials', label: '?' },
       missing: true,
-      sessionId: null,
     }
   const name = contact?.name ?? member?.name ?? id
   return {
@@ -111,7 +108,6 @@ function person(id: string): Person {
       ? contactAvatarProps(contact.avatar, contact.name)
       : { kind: 'initials', label: name },
     missing: false,
-    sessionId: member?.memberSessionId ?? null,
   }
 }
 
@@ -124,6 +120,11 @@ const names = computed(() => [
 
 function nameOf(id: string): string {
   return person(id).name
+}
+
+/** Legacy system coordination is spoken by the fixed visible member. */
+function speakerId(row: TimelineRow): string {
+  return row.kind === 'coordination' ? 'ct-emperor' : row.message.from
 }
 
 /** Who a message is for, above it. */
@@ -177,45 +178,95 @@ function toggleFold(id: string): void {
   unfolded.value = next
 }
 
-// ── the flow with the asks in it ────────────────────────────────────────
+// ── one chronological flow: history, source-anchored asks and live prose ──
 type Item =
-  | { key: string; row: TimelineRow; ask?: undefined }
-  | { key: string; ask: GroupAsk; row?: undefined }
+  | { key: string; row: TimelineRow; ask?: undefined; stream?: undefined }
+  | { key: string; ask: GroupAsk; row?: undefined; stream?: undefined }
+  | {
+      key: string
+      stream: GroupStreamView
+      row?: undefined
+      ask?: undefined
+    }
 
-function rowAt(row: TimelineRow, previous: number): number {
-  if (row.kind !== 'independent') return row.message.at
-  return row.batch.answers[0]?.at ?? previous
+function speaker(item: Item): string | null {
+  if (item.ask) return item.ask.contactId
+  if (item.stream) return item.stream.contactId
+  if (item.row.kind === 'note' || item.row.kind === 'system') return null
+  return item.row.message.from === 'user' ? 'user' : speakerId(item.row)
+}
+
+function continuous(index: number): boolean {
+  if (index === 0) return false
+  const current = speaker(items.value[index]!)
+  return current !== null && current === speaker(items.value[index - 1]!)
 }
 
 const items = computed<Item[]>(() => {
-  const asks = [...props.asks].sort(
+  const rows = timelineRows(props.messages)
+  const sources = new Set(
+    rows.map((row) => row.message.interactionId).filter(Boolean),
+  )
+  const sortedAsks = [...props.asks].sort(
     (a, b) =>
       (a.interaction.created_at ?? Number.MAX_SAFE_INTEGER) -
       (b.interaction.created_at ?? Number.MAX_SAFE_INTEGER),
   )
+  const anchored = new Map<string, GroupAsk[]>()
+  const fallback: GroupAsk[] = []
+  for (const ask of sortedAsks) {
+    const source = rows.find(
+      (row) => row.message.interactionId === ask.interaction.id,
+    )?.message.interactionId
+    if (source && sources.has(source)) {
+      const list = anchored.get(source) ?? []
+      list.push(ask)
+      anchored.set(source, list)
+    } else fallback.push(ask)
+  }
+
+  let order = 0
+  const base: Array<{ at: number; order: number; item: Item }> = [
+    ...rows.map((row) => ({
+      at: row.message.at,
+      order: order++,
+      item: { key: row.key, row } as Item,
+    })),
+    ...props.streams.map((stream) => ({
+      at: stream.startedAt,
+      order: order++,
+      item: { key: `stream:${stream.contactId}`, stream } as Item,
+    })),
+  ].sort((a, b) => a.at - b.at || a.order - b.order)
+
   const list: Item[] = []
-  let at = 0
-  for (const row of timelineRows(props.messages)) {
-    at = rowAt(row, at)
-    while (asks.length && (asks[0]!.interaction.created_at ?? Infinity) < at) {
-      const ask = asks.shift()!
+  for (const entry of base) {
+    while (
+      fallback.length &&
+      (fallback[0]!.interaction.created_at ?? Infinity) < entry.at
+    ) {
+      const ask = fallback.shift()!
       list.push({ key: `ask:${ask.interaction.id}`, ask })
     }
-    list.push({ key: row.key, row })
+    list.push(entry.item)
+    const interactionId = entry.item.row?.message.interactionId
+    for (const ask of anchored.get(interactionId ?? '') ?? [])
+      list.push({ key: `ask:${ask.interaction.id}`, ask })
   }
-  for (const ask of asks) list.push({ key: `ask:${ask.interaction.id}`, ask })
+  for (const ask of fallback)
+    list.push({ key: `ask:${ask.interaction.id}`, ask })
   return list
 })
-
-function progress(batch: IndependentBatch): string {
-  const done = batch.members.filter((id) => props.finished.includes(id)).length
-  return `${done}/${batch.members.length} 已答，答完一起显示`
-}
 </script>
 
 <template>
   <ol class="flow" data-group-flow :style="exempt">
-    <li v-for="item in items" :key="item.key" class="item">
+    <li
+      v-for="(item, itemIndex) in items"
+      :key="item.key"
+      class="item"
+      :data-continuous="continuous(itemIndex) || undefined"
+    >
       <!-- A member asks the user (D29). -->
       <GroupAskMessage
         v-if="item.ask"
@@ -238,56 +289,30 @@ function progress(batch: IndependentBatch): string {
         @process="emit('process', item.ask.contactId)"
       />
 
-      <!-- Independent answers. -->
+      <!-- Live prose occupies its actual chronological position. -->
       <div
-        v-else-if="item.row.kind === 'independent'"
-        class="indep"
-        data-group-row
-        data-kind="independent"
+        v-else-if="item.stream"
+        class="msg streaming"
+        data-group-streaming
+        :data-stream-contact="item.stream.contactId"
       >
-        <div class="indep-head">
-          <span>独立作答 · {{ item.row.batch.members.length }} 人</span>
-          <span class="indep-why">都答完后一起显示，避免互相带偏</span>
-        </div>
-        <div v-if="item.row.batch.revealed" class="cols">
-          <div
-            v-for="answer in item.row.batch.answers"
-            :key="answer.id"
-            class="col"
-            data-answer
-          >
-            <div class="who small">
-              <span
-                class="face"
-                :data-missing="person(answer.from).missing || undefined"
-              >
-                <Avatar v-bind="person(answer.from).avatar" :size="20" />
-              </span>
-              <b>{{ person(answer.from).name }}</b>
-              <LinkButton
-                v-if="person(answer.from).sessionId"
-                class="process"
-                data-process
-                @click="emit('process', answer.from)"
-                >过程 ›</LinkButton
-              >
-            </div>
-            <GroupMarkdown class="body" :content="answer.text" :names="names" />
+        <span
+          class="face"
+          :data-missing="person(item.stream.contactId).missing || undefined"
+        >
+          <Avatar v-bind="person(item.stream.contactId).avatar" :size="32" />
+        </span>
+        <div class="main">
+          <div class="who">
+            <b>{{ person(item.stream.contactId).name }}</b>
+            <span v-if="item.stream.contactId === 'ct-emperor'" class="fixed"
+              >内置协调</span
+            >
+            <span class="live">发言中</span>
           </div>
-        </div>
-        <div v-else class="waiting">
-          <span class="progress" data-progress>{{
-            progress(item.row.batch)
-          }}</span>
-          <span
-            v-for="id in item.row.batch.members"
-            :key="id"
-            class="waiting-face"
-            :data-done="finished.includes(id) || undefined"
-            :title="person(id).name"
-          >
-            <Avatar v-bind="person(id).avatar" :size="20" />
-          </span>
+          <div class="body">
+            <GroupMarkdown :content="item.stream.text" :names="names" />
+          </div>
         </div>
       </div>
 
@@ -326,6 +351,7 @@ function progress(batch: IndependentBatch): string {
         v-else-if="item.row.message.from === 'user'"
         class="me"
         data-group-row
+        :data-task-id="item.row.message.task?.taskId"
         :data-kind="item.row.kind"
       >
         <span
@@ -343,13 +369,7 @@ function progress(batch: IndependentBatch): string {
               : audience(item.row.message)
           }}</span
         >
-        <div
-          v-if="
-            item.row.kind !== 'task' ||
-            item.row.message.text !== item.row.message.task?.title
-          "
-          class="bubble"
-        >
+        <div class="bubble">
           <template
             v-for="(segment, index) in mentionSegments(
               item.row.message.text,
@@ -363,16 +383,9 @@ function progress(batch: IndependentBatch): string {
             <template v-else>{{ segment.text }}</template>
           </template>
         </div>
-        <GroupTaskCard
-          v-if="item.row.kind === 'task' && item.row.message.task"
-          :task="item.row.message.task"
-          @confirm="
-            emit('confirmTask', {
-              taskId: item.row.message.task.taskId,
-              approve: $event,
-            })
-          "
-        />
+        <span class="face me-face">
+          <Avatar kind="initials" label="我" :size="32" />
+        </span>
       </div>
 
       <!-- Nothing to add. -->
@@ -384,31 +397,37 @@ function progress(batch: IndependentBatch): string {
       >
         <span
           class="face"
-          :data-missing="person(item.row.message.from).missing || undefined"
+          :data-missing="person(speakerId(item.row)).missing || undefined"
         >
-          <Avatar v-bind="person(item.row.message.from).avatar" :size="16" />
+          <Avatar v-bind="person(speakerId(item.row)).avatar" :size="16" />
         </span>
         <span
-          >{{ person(item.row.message.from).name }} 没有补充{{
+          >{{ person(speakerId(item.row)).name }} 没有补充{{
             item.row.message.text ? `：${item.row.message.text}` : ''
           }}</span
         >
       </div>
 
       <!-- A member speaks: say, private, task, result, summary. -->
-      <div v-else class="msg" data-group-row :data-kind="item.row.kind">
+      <div
+        v-else
+        class="msg"
+        data-group-row
+        :data-kind="item.row.kind"
+        :data-task-id="item.row.message.task?.taskId"
+      >
         <span
           class="face"
-          :data-missing="person(item.row.message.from).missing || undefined"
+          :data-missing="person(speakerId(item.row)).missing || undefined"
         >
-          <Avatar v-bind="person(item.row.message.from).avatar" :size="28" />
+          <Avatar v-bind="person(speakerId(item.row)).avatar" :size="32" />
         </span>
         <div class="main">
           <div class="who">
-            <b>{{ person(item.row.message.from).name }}</b>
-            <span v-if="person(item.row.message.from).intro" class="role">{{
-              person(item.row.message.from).intro
-            }}</span>
+            <b>{{ person(speakerId(item.row)).name }}</b>
+            <span v-if="speakerId(item.row) === 'ct-emperor'" class="fixed"
+              >内置协调</span
+            >
             <span
               v-if="
                 item.row.kind === 'private' &&
@@ -444,84 +463,31 @@ function progress(batch: IndependentBatch): string {
             <span v-else-if="item.row.message.ask.length" class="to">{{
               audience(item.row.message)
             }}</span>
-            <LinkButton
-              v-if="person(item.row.message.from).sessionId"
-              class="process"
-              data-process
-              @click="emit('process', item.row.message.from)"
-              >过程 ›</LinkButton
-            >
           </div>
-          <GroupTaskCard
-            v-if="item.row.kind === 'task' && item.row.message.task"
-            :task="item.row.message.task"
-            @confirm="
-              emit('confirmTask', {
-                taskId: item.row.message.task.taskId,
-                approve: $event,
-              })
-            "
-          />
-          <template v-else>
-            <div
-              class="body"
-              :data-kind="item.row.kind"
-              :data-folded="folded(item.row.message) || undefined"
-            >
-              <GroupMarkdown :content="item.row.message.text" :names="names" />
-            </div>
-            <LinkButton
-              v-if="isLongMessage(item.row.message.text)"
-              class="fold"
-              @click="toggleFold(item.row.message.id)"
-              >{{ folded(item.row.message) ? '展开全文' : '收起' }}</LinkButton
-            >
-            <GroupResultCard
+          <div
+            class="body"
+            :data-kind="item.row.kind"
+            :data-folded="folded(item.row.message) || undefined"
+          >
+            <GroupMarkdown :content="item.row.message.text" :names="names" />
+            <GroupArtifacts
               v-if="
                 item.row.kind === 'result' &&
-                item.row.message.delegation &&
-                person(item.row.message.from).sessionId
+                item.row.message.task?.artifacts?.length
               "
-              :delegation="item.row.message.delegation"
-              :session-id="person(item.row.message.from).sessionId!"
+              :group-id="groupId"
+              :artifacts="item.row.message.task.artifacts"
+              :files="artifacts"
+              @preview="emit('previewArtifact', $event)"
+              @get="emit('getArtifact', $event)"
             />
-          </template>
-        </div>
-      </div>
-    </li>
-
-    <!-- A member's speech while it is still being written (GRP-20). -->
-    <li
-      v-for="stream in props.streams"
-      :key="`stream-${stream.contactId}`"
-      class="item"
-      data-group-streaming
-    >
-      <div class="msg streaming">
-        <span
-          class="face"
-          :data-missing="person(stream.contactId).missing || undefined"
-        >
-          <Avatar v-bind="person(stream.contactId).avatar" :size="28" />
-        </span>
-        <div class="main">
-          <div class="who">
-            <b>{{ person(stream.contactId).name }}</b>
-            <span v-if="person(stream.contactId).intro" class="role">{{
-              person(stream.contactId).intro
-            }}</span>
-            <span class="live">发言中</span>
-            <LinkButton
-              v-if="person(stream.contactId).sessionId"
-              class="process"
-              data-process
-              @click="emit('process', stream.contactId)"
-              >过程 ›</LinkButton
-            >
           </div>
-          <div class="body">
-            <GroupMarkdown :content="stream.text" :names="names" />
-          </div>
+          <LinkButton
+            v-if="isLongMessage(item.row.message.text)"
+            class="fold"
+            @click="toggleFold(item.row.message.id)"
+            >{{ folded(item.row.message) ? '展开全文' : '收起' }}</LinkButton
+          >
         </div>
       </div>
     </li>
@@ -530,10 +496,12 @@ function progress(batch: IndependentBatch): string {
 
 <style scoped>
 .flow {
+  width: 100%;
+  max-width: var(--chat-content-width, 748px);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  margin: 0;
+  gap: 0;
+  margin: 0 auto;
   padding: 0;
   list-style: none;
 }
@@ -543,15 +511,26 @@ function progress(batch: IndependentBatch): string {
   flex-direction: column;
 }
 
+.item + .item {
+  margin-top: var(--space-4);
+}
+
 .msg {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: var(--space-8) minmax(0, 1fr);
   gap: var(--space-2-5);
-  max-width: 780px;
+  width: 100%;
 }
 
 .main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
+}
+
+.item[data-continuous] {
+  margin-top: calc(var(--space-1) + 1px);
 }
 
 .face {
@@ -568,7 +547,8 @@ function progress(batch: IndependentBatch): string {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1-5);
+  margin-bottom: var(--space-1);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -579,6 +559,14 @@ function progress(batch: IndependentBatch): string {
 
 .role {
   color: rgb(var(--text-3));
+  font-size: var(--fs-xxxs);
+}
+
+.fixed {
+  padding: 0 calc(var(--space-1) + 1px);
+  border-radius: var(--r-xs);
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--text-link));
   font-size: var(--fs-xxxs);
 }
 
@@ -617,7 +605,12 @@ function progress(batch: IndependentBatch): string {
 }
 
 .body {
-  margin-top: var(--space-0-5);
+  width: fit-content;
+  max-width: min(680px, 88%);
+  padding: var(--space-2) calc(var(--space-2-5) + 1px);
+  border-radius: var(--r-xs) var(--r-md) var(--r-md) var(--r-md);
+  background: rgb(var(--surface-raised));
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   overflow-wrap: anywhere;
@@ -635,14 +628,16 @@ function progress(batch: IndependentBatch): string {
 }
 
 .body[data-kind='private'] {
-  padding-left: var(--space-2-5);
-  box-shadow: inset 2px 0 0 rgb(var(--tone-violet));
+  background: color-mix(
+    in srgb,
+    rgb(var(--tone-violet)) 9%,
+    rgb(var(--surface-raised))
+  );
+  box-shadow: inset 0 0 0 0.5px rgb(var(--tone-violet) / 0.3);
   color: rgb(var(--text-2));
 }
 
 .body[data-kind='summary'] {
-  padding: var(--space-2-5) var(--space-3-5);
-  border-radius: var(--r-md);
   background: rgb(var(--accent-soft));
   box-shadow: inset 0 0 0 0.5px rgb(var(--accent) / 0.35);
 }
@@ -654,15 +649,26 @@ function progress(batch: IndependentBatch): string {
 
 .me {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--space-8);
   justify-items: end;
-  gap: var(--space-1);
-  max-width: 780px;
+  gap: var(--space-1) var(--space-2-5);
+  width: 100%;
+}
+
+.me > .to {
+  grid-column: 1;
+}
+
+.me-face {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 .bubble {
-  max-width: 80%;
-  padding: var(--space-2) var(--space-3-5);
-  border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
+  grid-column: 1;
+  max-width: min(680px, 88%);
+  padding: var(--space-2) calc(var(--space-2-5) + 1px);
+  border-radius: var(--r-md) var(--r-xs) var(--r-md) var(--r-md);
   background: rgb(var(--bubble-user));
   font-size: var(--fs-s);
   line-height: var(--lh-s);

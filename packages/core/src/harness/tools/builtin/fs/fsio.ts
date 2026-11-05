@@ -43,6 +43,7 @@ export type FsErrorCode =
   | 'FS_AMBIGUOUS_EDIT'
   | 'FS_SANDBOX_DENIED'
   | 'FS_PROTECTED_PATH'
+  | 'FS_GROUP_PRIVATE_PATH'
   /** Under a session's read-only roots (a contact's knowledge, GRP-03). */
   | 'FS_READ_ONLY_PATH'
   | 'FS_ABORTED'

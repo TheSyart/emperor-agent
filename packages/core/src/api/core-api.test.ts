@@ -174,7 +174,9 @@ const EXPECTED_OPERATIONS = [
   'goals.pause',
   'goals.resume',
   'goals.start',
+  'groups.acceptTask',
   'groups.addMember',
+  'groups.claimTask',
   'groups.confirmTask',
   'groups.create',
   'groups.defaults',
@@ -183,11 +185,17 @@ const EXPECTED_OPERATIONS = [
   'groups.get',
   'groups.history',
   'groups.list',
+  'groups.publishArtifact',
   'groups.removeMember',
   'groups.send',
   'groups.setDefaults',
   'groups.stop',
+  'groups.stopWork',
+  'groups.submitTask',
+  'groups.tasks',
+  'groups.transferTask',
   'groups.update',
+  'groups.workspace',
   'hooks.cancelRun',
   'hooks.getAudit',
   'hooks.getConfig',
@@ -885,6 +893,8 @@ describe('CoreApi control', () => {
 describe('CoreApi mutation guard', () => {
   it('FIX-10 · 1 · settings save while the chat behind the window is in plan mode', async () => {
     const { api } = await setup()
+    // This guards settings mutations, not a remote MCP server's availability.
+    vi.spyOn(api.host, 'reloadMcp').mockResolvedValue()
     const id = session(api)
     api.sessions.activate(id)
     api.control.setMode('plan', id)

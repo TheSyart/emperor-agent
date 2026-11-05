@@ -49,6 +49,9 @@ export const CONTACT_ROUTES: readonly string[] = [
   'contacts',
   'contact-new',
   'contact-edit',
+  'contact-advanced-new',
+  'contact-advanced-edit',
+  'contact-creator',
   'contact',
 ]
 

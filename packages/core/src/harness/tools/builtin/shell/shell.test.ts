@@ -553,6 +553,60 @@ describe.skipIf(!new LocalSandbox().available())(
         rmSync(outside, { recursive: true, force: true })
       }
     })
+
+    it('CG-04: real guards keep member roots private and shared roots read-only in every mode', async () => {
+      const other = join(root, 'members', 'ct-other')
+      const shared = join(root, 'shared')
+      mkdirSync(other, { recursive: true })
+      mkdirSync(shared, { recursive: true })
+      const secret = join(other, 'secret.md')
+      const publicFile = join(shared, 'public.md')
+      writeFileSync(secret, 'private')
+      writeFileSync(publicFile, 'public')
+      for (const mode of [
+        'workspace-write',
+        'danger-full-access',
+      ] as SandboxMode[]) {
+        const base = services(
+          mode,
+          new LocalSandbox({ protectedStateRoot: join(root, 'emperor-home') }),
+        )
+        const sandbox = new SandboxPolicyService({
+          defaultMode: mode,
+          workspaceRoot: workspace,
+        })
+        sandbox.resolve = (request = {}) => ({
+          mode: request.mode ?? mode,
+          workspaceRoot: workspace,
+          deniedRoots: [other],
+          readOnlyRoots: [shared],
+        })
+        const svc: ToolServices = { ...base, sandbox }
+        const privateRead = await run(
+          { command: `cat ${JSON.stringify(secret)}` },
+          svc,
+        )
+        expect(meta(privateRead)['sandbox']).toMatchObject({ denied: true })
+        expect(textOf(privateRead.content)).not.toMatch(/^private$/m)
+        const privateWrite = await run(
+          { command: `echo changed > ${JSON.stringify(secret)}` },
+          svc,
+        )
+        expect(meta(privateWrite)['sandbox']).toMatchObject({ denied: true })
+        expect(readFileSync(secret, 'utf8')).toBe('private')
+        const sharedRead = await run(
+          { command: `cat ${JSON.stringify(publicFile)}` },
+          svc,
+        )
+        expect(textOf(sharedRead.content)).toContain('public')
+        const sharedWrite = await run(
+          { command: `echo changed > ${JSON.stringify(publicFile)}` },
+          svc,
+        )
+        expect(meta(sharedWrite)['sandbox']).toMatchObject({ denied: true })
+        expect(readFileSync(publicFile, 'utf8')).toBe('public')
+      }
+    })
   },
 )
 

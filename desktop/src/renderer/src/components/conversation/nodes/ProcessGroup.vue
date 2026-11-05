@@ -37,7 +37,11 @@ import {
 } from '../processModel'
 import PreparingToolRow from './PreparingToolRow.vue'
 
-const props = defineProps<{ handle: ConversationHandle; row: ProcessRow }>()
+const props = defineProps<{
+  handle: ConversationHandle
+  row: ProcessRow
+  goal?: import('../../../types').RuntimeGoalView | null
+}>()
 const { expansion, actions } = useChatContext()
 const { preferences } = useUiPreferences()
 
@@ -155,6 +159,7 @@ function memberKey(member: ProcessMember): string {
               :handle="handle"
               :node-key="member.key"
               :part="member.reasoningOnly ? 'reasoning' : undefined"
+              :goal="goal"
               dense
             />
           </template>

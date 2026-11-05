@@ -324,7 +324,7 @@ async function shot(page: Page, name: string, fullPage = false) {
 for (const theme of ['dark', 'light'] as const) {
   test(`a contact from a template, tried once (${theme})`, async ({ page }) => {
     await install(page)
-    await open(page, '/contacts/new', theme)
+    await open(page, '/contacts/advanced/new', theme)
     await expect(page.getByTestId('sidebar-brand')).toHaveText('Emperor Group')
     await page.locator('[data-template="security-auditor"] button').click()
     await expect(page.locator('[data-field="name"] input')).toHaveValue(
@@ -346,7 +346,7 @@ for (const theme of ['dark', 'light'] as const) {
 
   test(`the avatar library (${theme})`, async ({ page }) => {
     await install(page)
-    await open(page, '/contacts/new', theme)
+    await open(page, '/contacts/advanced/new', theme)
     await page.locator('[data-template="security-auditor"] button').click()
     await page.getByRole('button', { name: '从头像库选…' }).click()
     const picker = page.locator('[data-avatar-library]')
@@ -361,7 +361,7 @@ for (const theme of ['dark', 'light'] as const) {
 
   test(`drafting from a description (${theme})`, async ({ page }) => {
     await install(page)
-    await open(page, '/contacts/new', theme)
+    await open(page, '/contacts/advanced/new', theme)
     await page.locator('[data-method="brief"]').click()
     await page
       .locator('[data-brief] textarea')
@@ -383,7 +383,7 @@ for (const theme of ['dark', 'light'] as const) {
 
   test(`a builtin contact (${theme})`, async ({ page }) => {
     await install(page)
-    await open(page, '/contacts/ct-emperor/edit', theme)
+    await open(page, '/contacts/ct-emperor/advanced', theme)
     await expect(page.locator('[data-contact-editor]')).toContainText(
       '内置联系人只能改头像和简介',
     )
@@ -393,7 +393,7 @@ for (const theme of ['dark', 'light'] as const) {
 
 test('a narrow window puts the checks under the form', async ({ page }) => {
   await install(page)
-  await open(page, '/contacts/new', 'dark', 900)
+  await open(page, '/contacts/advanced/new', 'dark', 900)
   await page.locator('[data-template="writer"] button').click()
   await shot(page, 'editor-narrow-dark')
 })

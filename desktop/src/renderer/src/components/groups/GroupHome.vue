@@ -25,6 +25,7 @@ import type { SessionInfo } from '../../types'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import { handDraftTo } from '../chat/draftHandoff'
 import { sendExternalChat } from '../contacts/externalChat'
+import { ROLE_CREATOR_CONTACT_ID } from '@emperor/core/runtime-contract'
 import type { Contact } from '@emperor/core/api'
 import { contactAvatarProps } from '../contacts/contactAvatar'
 import { DOMAIN_LABELS } from '../contacts/contactProfileModel'
@@ -46,7 +47,11 @@ const text = ref('')
 const hint = ref('')
 const sending = ref(false)
 
-const contacts = computed(() => directory.contacts.value)
+const contacts = computed(() =>
+  directory.contacts.value.filter(
+    (contact) => contact.id !== ROLE_CREATOR_CONTACT_ID,
+  ),
+)
 /** The recent groups the home shows. */
 const RECENT_GROUPS = 5
 const recentGroups = computed(() =>
@@ -69,7 +74,7 @@ const planLine = computed(() => {
   if (current.kind === 'group')
     return `发出后建临时群「${current.title}」：${current.ask
       .map(nameOf)
-      .join('、')}，Emperor 主持`
+      .join('、')}，由群聊内置协调`
   return ''
 })
 
@@ -77,10 +82,10 @@ watch(text, () => {
   hint.value = ''
 })
 
-/** The short line under a contact: 主持人, 外部, or its first domain. */
+/** The short line under a contact: 外部, a built-in generalist, or its first domain. */
 function shortRole(contact: Contact): string {
   if (contact.kind === 'external') return '外部'
-  if (contact.builtin) return '主持人'
+  if (contact.builtin) return '通才'
   const domain = contact.domains[0]
   return domain ? DOMAIN_LABELS[domain] : '联系人'
 }
@@ -149,7 +154,6 @@ async function send() {
     const group = await core('groups.create', {
       title: current.title,
       members: current.members,
-      moderator: current.moderator,
     })
     await core('groups.send', {
       id: group.id,

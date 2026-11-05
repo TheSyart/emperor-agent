@@ -95,6 +95,34 @@ const REPO_TEMPLATES = join(
 )
 
 describe('HarnessHost', () => {
+  it('CG-01: a member session uses its own root and receives group sandbox boundaries', async () => {
+    const { host } = await makeHost()
+    const own = join(host.chatWorkspace(), 'members', 'ct-a')
+    const other = join(host.chatWorkspace(), 'members', 'ct-b')
+    const shared = join(host.chatWorkspace(), 'shared')
+    const entry = host.kept.sessionStore.create('member', {
+      mode: 'chat',
+      surface: 'group_member',
+      contactId: 'ct-a',
+      groupId: 'grp-a',
+    })
+    host.extend({
+      groupWorkspaces: (candidate) =>
+        candidate.id === entry.id
+          ? {
+              workspaceRoot: own,
+              readOnlyRoots: [shared],
+              deniedRoots: [other],
+            }
+          : null,
+    })
+    const agent = host.agentFor(entry.id)
+    expect(agent.session.cwd).toBe(own)
+    const policy = host.sandbox.resolve({ session: agent.session })
+    expect(policy.readOnlyRoots).toEqual([shared])
+    expect(policy.deniedRoots).toEqual([other])
+  })
+
   it('keeps the model and working directory out of the system prompt prefix', async () => {
     const one = await makeHost([{ text: 'one' }], {
       templatesDir: REPO_TEMPLATES,

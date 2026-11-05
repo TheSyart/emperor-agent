@@ -105,9 +105,13 @@ const trialRan = ref(false)
 const saving = ref(false)
 const saveError = ref('')
 
-const isNew = computed(() => route.name === 'contact-new')
+const isNew = computed(
+  () => route.name === 'contact-new' || route.name === 'contact-advanced-new',
+)
 const editing = computed(() =>
-  route.name === 'contact-edit' ? String(route.params.id ?? '') : '',
+  route.name === 'contact-edit' || route.name === 'contact-advanced-edit'
+    ? String(route.params.id ?? '')
+    : '',
 )
 const readOnly = computed(() => listing.value?.readOnly ?? null)
 const locked = computed(() => draft.value.builtin)
@@ -179,7 +183,13 @@ async function load() {
 watch(
   () => [route.name, route.fullPath] as const,
   ([name, path]) => {
-    if (name !== 'contact-new' && name !== 'contact-edit') return
+    if (
+      name !== 'contact-new' &&
+      name !== 'contact-edit' &&
+      name !== 'contact-advanced-new' &&
+      name !== 'contact-advanced-edit'
+    )
+      return
     if (path !== loadedPath.value) void load()
   },
   { immediate: true },
@@ -517,33 +527,25 @@ function toggleSkill(name: string): void {
   }
 }
 
-function mcpSelected(serverId: string, tool: string): boolean {
-  return (
-    draft.value.mcp
-      .find((server) => server.serverId === serverId)
-      ?.toolNames.includes(tool) ?? false
-  )
+function mcpSelected(serverId: string): boolean {
+  return draft.value.mcp.some((server) => server.serverId === serverId)
 }
 
-function toggleMcp(serverId: string, tool: string): void {
-  const current = draft.value.mcp.map((server) => ({
-    ...server,
-    toolNames: [...server.toolNames],
-  }))
-  const found = current.find((server) => server.serverId === serverId)
-  if (found) {
-    found.toolNames = found.toolNames.includes(tool)
-      ? found.toolNames.filter((name) => name !== tool)
-      : [...found.toolNames, tool]
-    const next = current.filter((server) => server.toolNames.length)
-    change('capabilities', { mcp: next })
+/** CG-CT-01: one service switch; runtime still filters each named tool. */
+function toggleMcp(serverId: string): void {
+  if (mcpSelected(serverId)) {
+    change('capabilities', {
+      mcp: draft.value.mcp.filter((server) => server.serverId !== serverId),
+    })
     return
   }
+  const server = mcpChoices.value.find((item) => item.serverId === serverId)
+  if (!server || server.state !== 'ready') return
   const next: ContactMcpSelection = {
     serverId,
-    toolNames: [tool],
+    toolNames: [...server.tools],
   }
-  change('capabilities', { mcp: [...current, next] })
+  change('capabilities', { mcp: [...draft.value.mcp, next] })
 }
 
 // 能力
@@ -1395,7 +1397,7 @@ const title = computed(() =>
               </Field>
               <Field
                 label="外部连接 MCP"
-                hint="选已配置的服务和具体工具；连接不在联系人这里保存凭据"
+                hint="一次选择整个服务当前的全部工具；以后新增的工具不会自动授权"
               >
                 <div
                   v-for="server in mcpChoices"
@@ -1409,12 +1411,11 @@ const title = computed(() =>
                   </span>
                   <div class="tags">
                     <Tag
-                      v-for="tool in server.tools"
-                      :key="tool"
-                      :data-mcp-tool="tool"
-                      :label="tool"
-                      :selected="mcpSelected(server.serverId, tool)"
-                      @click="toggleMcp(server.serverId, tool)"
+                      :data-mcp-service="server.serverId"
+                      :label="`整个服务 · ${server.tools.length} 个工具`"
+                      :selected="mcpSelected(server.serverId)"
+                      :disabled="server.state !== 'ready'"
+                      @click="toggleMcp(server.serverId)"
                     />
                   </div>
                 </div>

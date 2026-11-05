@@ -10,6 +10,7 @@
  * answers are marked, not hidden.
  */
 import { EmperorError } from '../errors'
+import { ROLE_CREATOR_CONTACT_ID } from '../contacts/types'
 import type { SessionSurface } from '../sessions/app-mode'
 import { answerText, clipLine, type GroupAnswerDraft } from './answers'
 import { buildUserMessage, type SendWay } from './envelope'
@@ -21,6 +22,17 @@ import {
 } from './events'
 import { saysGoOn } from './loop-guard'
 import { planFor, type QueueItem } from './plan'
+import {
+  accept,
+  assertAcyclic,
+  cancel,
+  cancelQueued,
+  claim,
+  fail,
+  submit,
+  taskReady,
+  transfer,
+} from './task-board'
 import type {
   ContactId,
   GroupAnswerNote,
@@ -29,7 +41,16 @@ import type {
   GroupSettings,
   GroupTask,
   GroupTaskAccess,
+  GroupTaskArtifact,
+  GroupTaskCheck,
+  GroupTaskView,
+  GroupTaskProblem,
 } from './types'
+import type {
+  GroupArtifact,
+  GroupWorkspaceAccess,
+  GroupWorkspaceStore,
+} from './workspace'
 
 /** Members a group may hold (the room stays readable). */
 export const GROUP_MEMBER_LIMIT = 12
@@ -59,6 +80,15 @@ export interface GroupContact {
   kind: 'local' | 'external'
   speak: NonNullable<GroupMember['speak']>
   version: number
+}
+
+const EMPEROR_GROUP_CONTACT: GroupContact = {
+  id: BUILTIN_MODERATOR,
+  name: 'Emperor',
+  intro: '你的主智能体：统筹、拆解任务，在群里主持讨论',
+  kind: 'local',
+  speak: 'relevant',
+  version: 1,
 }
 
 export interface GroupSessionEntry {
@@ -101,6 +131,8 @@ export interface GroupServiceDeps {
   defaults?: () => Partial<GroupSettings>
   newId?: (prefix: string) => string
   now?: () => number
+  /** Core-managed D50 directories; absent only in small in-memory unit fixtures. */
+  workspace?: GroupWorkspaceStore
   onChange?: (change: GroupChange) => void
 }
 
@@ -183,6 +215,10 @@ export interface GroupSendInput {
     deliverable: string
     basis?: string
     access: GroupTaskAccess
+    idempotencyKey?: string
+    acceptance?: string[]
+    dependsOn?: string[]
+    writeScopes?: string[]
   }
 }
 
@@ -217,8 +253,12 @@ export class GroupService {
   create(input: GroupCreateInput): GroupView {
     const title = this.title(input.title)
     const members = this.newMembers(input.members)
-    const moderator =
-      input.moderator === undefined
+    const builtin = input.settings?.coordination !== 'member'
+    // Built-in coordination has no separate moderator. Emperor remains the
+    // fixed visible member; member mode is only for legacy-event replay.
+    const moderator = builtin
+      ? null
+      : input.moderator === undefined
         ? members.some((c) => c.id === BUILTIN_MODERATOR)
           ? BUILTIN_MODERATOR
           : null
@@ -228,20 +268,23 @@ export class GroupService {
     const id = this.newId('grp-')
     this.deps.sessions.create(title, { id, surface: 'group', groupId: id })
     const log = this.deps.log(id)
+    const workspace = this.deps.workspace?.ensureGroup(id)
     log.append('group/created', {
       title,
       moderator,
       members: members.map((c) => c.id),
       charter: this.charter(input.charter ?? ''),
       settings: {
-        collaboration: 'autonomous',
         quiet: false,
         summarizeAtEnd: true,
         loopGuard: true,
         ...this.deps.defaults?.(),
         ...input.settings,
+        coordination: builtin ? 'builtin' : 'member',
+        collaboration: 'autonomous',
       },
     })
+    if (workspace) log.append('group/workspace', workspace)
     for (const contact of members) this.join(id, title, log, contact)
     this.changed('created', id)
     return this.get(id)
@@ -253,7 +296,8 @@ export class GroupService {
     return {
       id: groupId,
       title: state.title,
-      moderator: state.moderator,
+      moderator:
+        state.settings.coordination === 'builtin' ? null : state.moderator,
       members: state.members.map((id) => this.memberView(state, id)),
       charter: state.charter,
       settings: { ...state.settings },
@@ -279,6 +323,374 @@ export class GroupService {
   }
 
   /**
+   * Migrate pre-CG-00 scheduling and add the fixed Emperor where absent.
+   * Historical events/messages stay byte-for-byte replayable; migration only
+   * appends settings/member facts and never creates a second coordinator.
+   */
+  migrateLegacyCoordination(): number {
+    let migrated = 0
+    for (const session of this.deps.sessions.list()) {
+      if (session.surface !== 'group') continue
+      const state = this.fold(session.id)
+      let changed = false
+      if (state.settings.coordination === 'member') {
+        this.deps.log(session.id).append('group/settings', {
+          patch: { coordination: 'builtin' },
+        })
+        changed = true
+      }
+      if (!state.members.includes(BUILTIN_MODERATOR)) {
+        this.join(
+          session.id,
+          state.title || session.title,
+          this.deps.log(session.id),
+          this.knownContact(BUILTIN_MODERATOR),
+        )
+        changed = true
+      }
+      if (changed) {
+        this.changed('member', session.id)
+        migrated += 1
+      }
+    }
+    return migrated
+  }
+
+  /** Restore pre-CG-01 logs and recreate directories missing after a restore. */
+  migrateLegacyWorkspaces(): number {
+    let migrated = 0
+    for (const session of this.deps.sessions.list()) {
+      if (session.surface !== 'group') continue
+      const state = this.fold(session.id)
+      if (!state.workspace && this.deps.workspace) {
+        const workspace = this.deps.workspace.ensureGroup(session.id)
+        this.deps.log(session.id).append('group/workspace', workspace)
+        migrated += 1
+      }
+      for (const contactId of state.memberSessions.keys())
+        this.deps.workspace?.ensureMember(session.id, contactId)
+    }
+    return migrated
+  }
+
+  workspace(groupId: string): {
+    root: string
+    shared: string
+    artifacts: GroupArtifact[]
+  } {
+    const state = this.state(groupId)
+    if (!state.workspace) throw invalid('这个群还没有协作工作区')
+    return {
+      ...state.workspace,
+      artifacts: [...state.artifacts.values()],
+    }
+  }
+
+  /** Exact immutable ref lookup; never resolves a member-private source path. */
+  artifactByRef(artifactRef: string): {
+    groupId: string
+    artifact: GroupArtifact
+  } {
+    let target: URL
+    try {
+      target = new URL(artifactRef)
+    } catch {
+      throw invalid('公开成果引用无效')
+    }
+    if (target.protocol !== 'artifact:' || !target.hostname)
+      throw invalid('公开成果引用无效')
+    const groupId = target.hostname
+    const artifact = this.state(groupId).artifacts.get(artifactRef)
+    if (!artifact) throw invalid('公开成果不存在或已被移除')
+    return { groupId, artifact }
+  }
+
+  memberWorkspace(groupId: string, contactId: string): GroupWorkspaceAccess {
+    const state = this.state(groupId)
+    if (!state.memberSessions.has(contactId))
+      throw invalid('这位联系人从未加入这个群')
+    if (!this.deps.workspace) throw invalid('这个群还没有协作工作区')
+    return this.deps.workspace.access(
+      groupId,
+      contactId,
+      state.members.includes(contactId),
+    )
+  }
+
+  publishArtifact(
+    groupId: string,
+    input: {
+      contactId: string
+      sourcePath: string
+      taskId?: string
+    },
+  ): GroupArtifact {
+    const state = this.state(groupId)
+    if (!state.memberSessions.has(input.contactId))
+      throw invalid('只有群成员可以发布成果')
+    if (!this.deps.workspace) throw invalid('这个群还没有协作工作区')
+    const artifact = this.deps.workspace.publish({
+      groupId,
+      contactId: input.contactId,
+      sourcePath: input.sourcePath,
+      active: state.members.includes(input.contactId),
+      ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+      at: this.now(),
+    })
+    this.deps.log(groupId).append('group/artifact', artifact)
+    this.changed('updated', groupId)
+    return artifact
+  }
+
+  /** The one task board, projected from the same log as the conversation. */
+  tasks(groupId: string): GroupTaskView[] {
+    const state = this.state(groupId)
+    return [...state.tasks.values()].map((task) => ({
+      ...task,
+      ready: taskReady(state.tasks, task),
+    }))
+  }
+
+  /** Register a new task, or return the existing delivery for its key. */
+  registerTask(
+    groupId: string,
+    task: GroupTask,
+  ): { task: GroupTask; created: boolean } {
+    const state = this.state(groupId)
+    if (task.idempotencyKey) {
+      const existing = [...state.tasks.values()].find(
+        (candidate) => candidate.idempotencyKey === task.idempotencyKey,
+      )
+      if (existing) return { task: existing, created: false }
+    }
+    if (state.tasks.has(task.taskId)) throw invalid('任务编号已经存在')
+    const dependencies = task.dependsOn?.map((id) => String(id).trim())
+    if (dependencies?.some((id) => !id || !state.tasks.has(id)))
+      throw invalid('依赖任务必须属于这个群')
+    if (dependencies?.includes(task.taskId)) throw invalid('任务存在循环依赖')
+    const writeScopes =
+      task.writeScopes === undefined
+        ? undefined
+        : lines(task.writeScopes, '写入范围')
+    for (const scope of writeScopes ?? []) {
+      const parts = scope.replace(/^\.\//, '').split('/')
+      if (parts[0] === 'members' && parts[1] && parts[1] !== task.to)
+        throw invalid('写入范围不能指向其他成员的私有目录')
+    }
+    const registered: GroupTask = {
+      ...task,
+      ...(task.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: required(task.idempotencyKey, '幂等键') }),
+      ...(task.acceptance === undefined
+        ? {}
+        : { acceptance: lines(task.acceptance, '通过条件') }),
+      ...(dependencies === undefined
+        ? {}
+        : { dependsOn: [...new Set(dependencies)] }),
+      ...(writeScopes === undefined ? {} : { writeScopes }),
+    }
+    const graph = new Map(state.tasks)
+    graph.set(registered.taskId, registered)
+    try {
+      assertAcyclic(graph)
+    } catch (cause) {
+      throw invalid(messageOf(cause))
+    }
+    this.deps.log(groupId).append('group/task', registered)
+    this.changed('message', groupId)
+    return { task: registered, created: true }
+  }
+
+  claimTask(
+    groupId: string,
+    input: {
+      taskId: string
+      owner: ContactId
+      contractRevision: number
+      runId: string
+    },
+  ): GroupTask {
+    return this.taskCommand(groupId, input.taskId, (state, task) =>
+      claim(task, input, taskReady(state.tasks, task)),
+    )
+  }
+
+  submitTask(
+    groupId: string,
+    input: {
+      taskId: string
+      owner: ContactId
+      attempt: number
+      leaseEpoch: number
+      artifact: GroupTaskArtifact
+      checks?: GroupTaskCheck[]
+    },
+  ): GroupTask {
+    return this.taskCommand(groupId, input.taskId, (_state, task) =>
+      submit(task, input),
+    )
+  }
+
+  /** Internal work-runner result; the run id makes late completion harmless. */
+  failTask(
+    groupId: string,
+    input: {
+      taskId: string
+      runId?: string
+      kind: GroupTaskProblem['kind']
+      reason: string
+    },
+  ): GroupTask {
+    return this.taskCommand(groupId, input.taskId, (_state, task) =>
+      fail(task, input),
+    )
+  }
+
+  cancelTask(groupId: string, taskId: string, runId: string): GroupTask {
+    return this.taskCommand(groupId, taskId, (_state, task) =>
+      cancel(task, runId),
+    )
+  }
+
+  cancelQueuedTask(groupId: string, taskId: string): GroupTask {
+    return this.taskCommand(groupId, taskId, (_state, task) =>
+      cancelQueued(task),
+    )
+  }
+
+  acceptTask(
+    groupId: string,
+    input: {
+      taskId: string
+      artifactRevision: string
+      checks: GroupTaskCheck[]
+    },
+  ): GroupTask {
+    return this.taskCommand(groupId, input.taskId, (_state, task) =>
+      accept(task, input),
+    )
+  }
+
+  transferTask(
+    groupId: string,
+    input: { taskId: string; to: ContactId; contractRevision: number },
+  ): GroupTask {
+    const state = this.state(groupId)
+    if (!state.members.includes(input.to)) throw invalid('只能移交给群里的成员')
+    this.knownContact(input.to)
+    return this.taskCommand(groupId, input.taskId, (_state, task) =>
+      transfer(task, input),
+    )
+  }
+
+  private taskCommand(
+    groupId: string,
+    taskId: string,
+    transition: (state: GroupState, task: GroupTask) => GroupTask,
+  ): GroupTask {
+    const state = this.state(groupId)
+    const task = state.tasks.get(taskId)
+    if (!task) throw invalid('没有这个任务')
+    try {
+      const next = transition(state, task)
+      this.deps.log(groupId).append('group/task', next)
+      this.changed('message', groupId)
+      if (task.state !== 'running' && next.state === 'running')
+        this.appendTaskFactMessage(groupId, next, 'say')
+      if (task.state !== 'done' && next.state === 'done')
+        this.appendTaskFactMessage(groupId, next, 'result')
+      if (task.state !== 'failed' && next.state === 'failed')
+        this.appendTaskFailureMessage(groupId, next)
+      return next
+    } catch (cause) {
+      throw invalid(messageOf(cause))
+    }
+  }
+
+  /** One deterministic message per task attempt and fact, replay-safe. */
+  private appendTaskFactMessage(
+    groupId: string,
+    task: GroupTask,
+    kind: 'say' | 'result',
+  ): void {
+    const state = this.state(groupId)
+    if (
+      state.messages.some(
+        (message) =>
+          message.kind === kind &&
+          message.from === task.to &&
+          message.task?.taskId === task.taskId &&
+          message.task.attempt === task.attempt,
+      )
+    )
+      return
+    const source = state.messages.find(
+      (message) => message.task?.taskId === task.taskId,
+    )
+    const title = Array.from(task.title).slice(0, 40).join('')
+    const checks = task.checks?.length ?? 0
+    this.append(groupId, 'group/message', {
+      id: this.newId('gm_'),
+      turnId: source?.turnId ?? state.turn?.turnId ?? `task:${task.taskId}`,
+      from: task.to,
+      audience: { kind: 'all' },
+      ask: [],
+      answerMode: 'relay',
+      kind,
+      text:
+        kind === 'say'
+          ? `收到，我来做「${title}」。`
+          : `已完成「${title}」，${checks} 项检查通过。`,
+      ...(source ? { replyTo: source.id } : {}),
+      task: { ...task },
+      at: this.now(),
+    })
+  }
+
+  /** A truthful short failure explanation; execution detail stays in the rail. */
+  private appendTaskFailureMessage(groupId: string, task: GroupTask): void {
+    const state = this.state(groupId)
+    if (
+      state.messages.some(
+        (message) =>
+          message.from === BUILTIN_MODERATOR &&
+          message.task?.taskId === task.taskId &&
+          message.task.attempt === task.attempt &&
+          message.task.state === 'failed',
+      )
+    )
+      return
+    const source = state.messages.find(
+      (message) => message.task?.taskId === task.taskId,
+    )
+    const title = Array.from(task.title).slice(0, 40).join('')
+    const owner = this.memberView(state, task.to).name
+    const reason = task.problem?.reason
+    const text =
+      reason === 'readonly'
+        ? `「${title}」需要写入文件，但${owner}只有只读权限，已在执行前停止。`
+        : reason === 'missing_submission'
+          ? `「${title}」没有提交可核对的成果，本轮未完成；详情见右侧执行记录。`
+          : reason === 'app_restart'
+            ? `「${title}」在应用重启后无法确认结果，未自动重跑。`
+            : `「${title}」未完成，详细原因见右侧执行记录。`
+    this.append(groupId, 'group/message', {
+      id: this.newId('gm_'),
+      turnId: source?.turnId ?? state.turn?.turnId ?? `task:${task.taskId}`,
+      from: BUILTIN_MODERATOR,
+      audience: { kind: 'all' },
+      ask: [],
+      answerMode: 'relay',
+      kind: 'say',
+      text,
+      ...(source ? { replyTo: source.id } : {}),
+      task: { ...task },
+      at: this.now(),
+    })
+  }
+
+  /**
    * The groups a contact is in now, and how often it spoke in any group,
    * one it has left included (its profile, GRP-05).
    */
@@ -300,6 +712,12 @@ export class GroupService {
     const state = this.state(groupId)
     const title =
       patch.title === undefined ? undefined : this.title(patch.title)
+    if (
+      patch.moderator !== undefined &&
+      patch.moderator !== null &&
+      state.settings.coordination === 'builtin'
+    )
+      throw invalid('群聊已使用内置协调，不需要选择主持人')
     if (
       patch.moderator !== undefined &&
       patch.moderator !== null &&
@@ -336,6 +754,8 @@ export class GroupService {
 
   /** The member's session and every message stay; it is no longer asked. */
   removeMember(groupId: string, contactId: ContactId): GroupView {
+    if (contactId === BUILTIN_MODERATOR)
+      throw invalid('Emperor 是群聊的固定成员，不能移除')
     const state = this.state(groupId)
     if (!state.members.includes(contactId)) throw invalid('这位联系人不在群里')
     this.deps.log(groupId).append('group/member', {
@@ -353,6 +773,7 @@ export class GroupService {
    * moderator. Returns the groups it left.
    */
   leaveAll(contactId: ContactId): string[] {
+    if (contactId === BUILTIN_MODERATOR) return []
     const left: string[] = []
     for (const session of this.deps.sessions.list()) {
       if (session.surface !== 'group') continue
@@ -414,15 +835,73 @@ export class GroupService {
           : '交办需要标题、交付物和权限',
       )
     }
+    if (message.task) {
+      const registration = this.registerTask(groupId, message.task)
+      if (!registration.created) {
+        const original = state.messages.find(
+          (candidate) => candidate.task?.taskId === registration.task.taskId,
+        )
+        if (!original) throw invalid('幂等任务缺少原始交办消息')
+        return { message: { ...original, task: registration.task }, plan: [] }
+      }
+      message = { ...message, task: registration.task }
+    }
     this.deps.log(groupId).append('group/message', message)
     this.changed('message', groupId)
     // 「继续」 after the relay guard held tasks: they run now (GRP-15).
     const held =
       input.way === 'broadcast' && saysGoOn(text) ? this.release(groupId) : []
-    return {
-      message,
-      plan: held.length ? held : planFor(message, this.state(groupId), roster),
+    const plan = held.length
+      ? held
+      : planFor(message, this.state(groupId), roster)
+    if (!held.length) this.appendUserArrangement(groupId, message, plan)
+    return { message, plan }
+  }
+
+  /** One short visible explanation when the user's request is accepted. */
+  private appendUserArrangement(
+    groupId: string,
+    source: GroupMessage,
+    plan: QueueItem[],
+  ): void {
+    const state = this.state(groupId)
+    let text = ''
+    if (source.task) {
+      if (source.task.to === BUILTIN_MODERATOR) return
+      const owner = this.memberView(state, source.task.to).name
+      text = `已把「${source.task.title}」交给${owner}。`
+    } else {
+      const speakers = plan.flatMap((item) =>
+        item.kind === 'speak' && item.reason === 'asked'
+          ? [item.member]
+          : item.kind === 'batch'
+            ? item.members
+            : [],
+      )
+      const unique = [...new Set(speakers)].filter(
+        (id) => id !== BUILTIN_MODERATOR,
+      )
+      if (!unique.length) return
+      const names = unique
+        .map((id) => this.memberView(state, id).name)
+        .join('、')
+      text = plan.some((item) => item.kind === 'batch')
+        ? `已请${names}分别作答，完成后一起显示。`
+        : `已请${names}回答。`
     }
+    this.append(groupId, 'group/message', {
+      id: this.newId('gm_'),
+      turnId: source.turnId,
+      from: BUILTIN_MODERATOR,
+      audience: { kind: 'all' },
+      ask: [],
+      answerMode: 'relay',
+      kind: 'say',
+      text,
+      replyTo: source.id,
+      ...(source.task ? { task: { ...source.task } } : {}),
+      at: this.now(),
+    })
   }
 
   /** The tasks the relay guard held, queued again, as a turn's plan. */
@@ -482,6 +961,16 @@ export class GroupService {
         ...m,
         // A task message shows where its task is now (GRP-08).
         ...(m.task ? { task: state.tasks.get(m.task.taskId) ?? m.task } : {}),
+        ...(m.coordination?.tasks
+          ? {
+              coordination: {
+                ...m.coordination,
+                tasks: m.coordination.tasks.map(
+                  (task) => state.tasks.get(task.taskId) ?? task,
+                ),
+              },
+            }
+          : {}),
         private: m.audience.kind === 'private',
         hidden: m.batchId !== undefined && !state.revealed.has(m.batchId),
       })
@@ -510,6 +999,34 @@ export class GroupService {
     this.deps.log(groupId).append('group/answer', note)
     this.changed('message', groupId)
     return note
+  }
+
+  /** Add finished background work's cost to the turn that assigned it. */
+  addTurnSpend(
+    groupId: string,
+    turnId: string,
+    spend: { usd: number; tokens: number },
+  ): GroupEventMap['group/turn'] | null {
+    this.state(groupId)
+    let previous: GroupEventMap['group/turn'] | null = null
+    for (const event of this.deps.log(groupId).events) {
+      if (event.type !== 'group/turn') continue
+      const data = event.data as GroupEventMap['group/turn']
+      if (data.turnId === turnId) previous = data
+    }
+    if (!previous) return null
+    this.deps.log(groupId).append('group/turn', {
+      turnId,
+      state: previous.state,
+      ...(previous.reason ? { reason: previous.reason } : {}),
+      spend: {
+        usd: previous.spend.usd + spend.usd,
+        tokens: previous.spend.tokens + spend.tokens,
+      },
+      spendOnly: true,
+    })
+    const current = this.state(groupId).turn
+    return current?.turnId === turnId ? current : null
   }
 
   /** Write one event to a group's log (the scheduler's messages, turns, deliveries). */
@@ -556,6 +1073,7 @@ export class GroupService {
     log: GroupLog,
     contact: GroupContact,
   ): void {
+    this.deps.workspace?.ensureMember(groupId, contact.id)
     const session = this.deps.sessions.create(`${contact.name} · ${title}`, {
       surface: 'group_member',
       contactId: contact.id,
@@ -570,7 +1088,7 @@ export class GroupService {
   }
 
   private memberView(state: GroupState, id: ContactId): GroupMemberView {
-    const contact = this.deps.contact(id)
+    const contact = this.contact(id)
     return {
       id,
       name: contact?.name ?? id,
@@ -583,15 +1101,27 @@ export class GroupService {
   }
 
   private newMembers(ids: readonly ContactId[]): GroupContact[] {
-    if (!ids.length) throw invalid('一个群至少要有一位成员')
-    if (new Set(ids).size !== ids.length) throw invalid('成员不能重复')
-    if (ids.length > GROUP_MEMBER_LIMIT)
+    const others = ids.filter((id) => id !== BUILTIN_MODERATOR)
+    if (new Set(others).size !== others.length) throw invalid('成员不能重复')
+    const unique = [BUILTIN_MODERATOR, ...others]
+    if (unique.length > GROUP_MEMBER_LIMIT)
       throw invalid(`一个群最多 ${GROUP_MEMBER_LIMIT} 位成员`)
-    return ids.map((id) => this.knownContact(id))
+    return unique.map((id) => this.knownContact(id))
+  }
+
+  private contact(id: ContactId): GroupContact | null {
+    // Core migrates groups before the async contact directory is ready.
+    // Emperor is shipped, not user data, so that timing cannot make it missing.
+    return (
+      this.deps.contact(id) ??
+      (id === BUILTIN_MODERATOR ? EMPEROR_GROUP_CONTACT : null)
+    )
   }
 
   private knownContact(id: ContactId): GroupContact {
-    const contact = this.deps.contact(id)
+    if (id === ROLE_CREATOR_CONTACT_ID)
+      throw invalid('角色创建师不能加入普通工作群')
+    const contact = this.contact(id)
     if (!contact) throw invalid(`没有这个联系人：${id}`)
     return contact
   }
@@ -662,4 +1192,18 @@ function answerMessage(
 
 function invalid(message: string): GroupError {
   return new GroupError(message, 'group_invalid')
+}
+
+function required(value: string, label: string): string {
+  const text = String(value ?? '').trim()
+  if (!text) throw invalid(`${label}不能为空`)
+  return text
+}
+
+function lines(values: readonly string[], label: string): string[] {
+  return [...new Set(values.map((value) => required(value, label)))]
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : '任务操作失败'
 }

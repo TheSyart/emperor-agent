@@ -38,6 +38,15 @@ describe('Goal render model', () => {
   })
 
   it('enforces the active, paused, blocked and complete action matrices', () => {
+    expect(
+      toGoalStatusBarViewModel(goal({ activation: 'disarmed' })),
+    ).toMatchObject({
+      phaseLabel: '已暂停',
+      actions: ['resume', 'cancel'],
+    })
+    expect(
+      toGoalStatusBarViewModel(goal({ activation: 'armed' })).actions,
+    ).toEqual(['pause', 'cancel'])
     expect(toGoalStatusBarViewModel(goal({ phase: 'paused' })).actions).toEqual(
       ['resume', 'cancel'],
     )

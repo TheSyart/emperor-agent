@@ -11,6 +11,7 @@ export function groupCharter(
   roster: readonly GroupMember[],
   self: ContactId,
 ): string {
+  const legacy = state.settings.coordination === 'member'
   const me = roster.find((m) => m.id === self)
   const inGroup = state.members
     .map((id) => roster.find((m) => m.id === id))
@@ -19,15 +20,21 @@ export function groupCharter(
   // from it, so 「反方（红队）」 is never read as 「反方」 plus a role.
   const members = inGroup.map((m) => {
     const role =
-      m.id === state.moderator ? ' · 主持人' : m.external ? ' · 外部' : ''
+      legacy && m.id === state.moderator
+        ? ' · 主持人'
+        : m.external
+          ? ' · 外部'
+          : ''
     return `- @${m.name}${role}：${m.intro}`
   })
   const example = inGroup.find((m) => m.id !== self)
-  const moderator = state.moderator === self && !me?.external
+  const moderator = legacy && state.moderator === self && !me?.external
   const rule = state.settings.quiet
     ? '安静模式：只有被 @ 的成员发言。'
     : state.settings.collaboration === 'moderated'
-      ? '主持人审核：没人被 @ 时由主持人安排谁发言；你点名别人或交办任务，要先经主持人批准。'
+      ? legacy
+        ? '主持人审核：没人被 @ 时由主持人安排谁发言；你点名别人或交办任务，要先经主持人批准。'
+        : '协调后审核：没人被 @ 时由群聊自身安排谁发言；你点名别人或交办任务，要先经群聊协调审核。'
       : '自主：没人被 @ 时，和自己职责有关的成员举手发言；成员之间可以直接点名、直接交办。'
   const tools = me?.external
     ? ['- 要请别人接着说，在回答里写「@全名」。']
@@ -57,6 +64,7 @@ export function groupCharter(
     rule,
     '',
     '## 怎么说话',
+    '- 公开只发简短内容：结论、必要安排和交付提示；详细推理、工具过程与长报告留在自己的会话或公开文件里。',
     ...tools,
     '- 你只会收到公开的消息和发给你的私信；别人之间的私信你看不到。',
     '- 用户能看到群里所有的消息，包括私信。',

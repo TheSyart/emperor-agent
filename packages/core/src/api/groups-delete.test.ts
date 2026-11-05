@@ -213,9 +213,6 @@ describe('contacts.delete and the groups (GRP-16)', () => {
     const other = await invokeCoreOperation(fixture.api, 'groups.create', [
       { title: '只有 Emperor', members: ['ct-emperor'] },
     ])
-    await invokeCoreOperation(fixture.api, 'groups.update', [
-      { id: group.id, patch: { moderator: rev } },
-    ])
     await invokeCoreOperation(fixture.api, 'groups.send', [
       { id: group.id, way: 'mention', text: '@审稿人 看看' },
     ])
@@ -234,6 +231,7 @@ describe('contacts.delete and the groups (GRP-16)', () => {
     ])
     expect(history.messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
       [rev, '先修溢出'],
     ])
     expect(groupChanges(fixture).slice(changesBefore)).toEqual([
@@ -277,6 +275,6 @@ describe('contacts.delete and the groups (GRP-16)', () => {
       { id: group.id },
     ])
     expect(view.members.map((m) => m.id)).toContain('ct-emperor')
-    expect(view.moderator).toBe('ct-emperor')
+    expect(view.moderator).toBeNull()
   })
 })

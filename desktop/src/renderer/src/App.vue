@@ -695,6 +695,14 @@ const viewedSessionId = computed(() =>
     : '',
 )
 
+// Group artifacts use the same viewer without changing the conversation
+// session used by notifications and the workspace.
+const imageViewerOwner = computed(() =>
+  route.name === 'group' && typeof route.params.groupId === 'string'
+    ? route.params.groupId
+    : viewedSessionId.value,
+)
+
 function windowHidden(): boolean {
   return (
     typeof document !== 'undefined' && document.visibilityState === 'hidden'
@@ -916,7 +924,7 @@ provideAppContext({
         <WorkspacePanel :open="open" :agent-busy="busy" />
       </template>
     </AppFrame>
-    <ImageViewerHost :owner="viewedSessionId" />
+    <ImageViewerHost :owner="imageViewerOwner" />
     <SettingsModal />
     <FirstRunOnboarding v-if="firstRunOpen" @close="firstRunOpen = false" />
   </template>

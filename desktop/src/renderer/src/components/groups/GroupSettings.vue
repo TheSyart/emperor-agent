@@ -3,8 +3,7 @@
  * GroupSettings — 群设置, `/groups/:groupId/settings` (GRP-08, 预览 B 第 5
  * 步): the name; the announcement every member reads before speaking
  * (群公告, saved with 「保存公告」); the
- * collaboration (自主 / 主持人审核 — 设置 › 群聊 holds the default, this
- * changes the group only) and the moderator; then 每轮结束时主持人出结论,
+ * members work autonomously in separate directories; then 每轮结束时群聊出结论,
  * 防打转 and 安静模式, each saved at once (预览 B 第 5 步's order); then
  * the members; the group's files; last, 删除群聊 (GRP-16).
  * Every change goes to `groups.update` (members: addMember / removeMember)
@@ -14,6 +13,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ROLE_CREATOR_CONTACT_ID } from '@emperor/core/runtime-contract'
 import { ChevronLeft } from 'lucide-vue-next'
 import { core } from '../../api/http'
 import { confirm } from '../ui/confirm'
@@ -28,8 +28,6 @@ import IconButton from '../ui/IconButton.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import Notice from '../ui/Notice.vue'
-import Select from '../ui/Select.vue'
-import Surface from '../ui/Surface.vue'
 import Switch from '../ui/Switch.vue'
 import TextArea from '../ui/TextArea.vue'
 import TextField from '../ui/TextField.vue'
@@ -40,7 +38,6 @@ type Settings = GroupView['settings']
 type Patch = {
   title?: string
   charter?: string
-  moderator?: string | null
   settings?: Partial<Settings>
 }
 
@@ -131,18 +128,6 @@ function saveCharter(): void {
     void save({ charter: charter.value.trim() }, '群公告没有保存')
 }
 
-const moderatorOptions = computed(() => [
-  { value: '', label: '没有主持人' },
-  ...(group.value?.members ?? [])
-    .filter((member) => !member.missing)
-    .map((member) => ({ value: member.id, label: member.name })),
-])
-function setModerator(value: string): void {
-  const next = value || null
-  if (next === group.value?.moderator) return
-  void save({ moderator: next }, '主持人没有换成')
-}
-
 // ── members ─────────────────────────────────────────────────────────────
 function avatarOf(id: string, name: string) {
   const contact = directory.find(id)
@@ -153,6 +138,7 @@ function avatarOf(id: string, name: string) {
 const addable = computed(() =>
   directory.contacts.value.filter(
     (contact) =>
+      contact.id !== ROLE_CREATOR_CONTACT_ID &&
       !group.value?.members.some((member) => member.id === contact.id),
   ),
 )
@@ -179,19 +165,6 @@ async function remove(contactId: string): Promise<void> {
   }
 }
 
-const COLLABORATIONS = [
-  {
-    value: 'autonomous' as const,
-    title: '自主',
-    text: '没人被 @ 时，和职责有关的成员举手发言；成员之间可以直接点名、直接交办。',
-  },
-  {
-    value: 'moderated' as const,
-    title: '主持人审核',
-    text: '没人被 @ 时由主持人安排；成员点名别人、交办别人，先交给主持人批准、改顺序或驳回。',
-  },
-]
-
 const SWITCHES: {
   key: 'summarizeAtEnd' | 'loopGuard' | 'quiet'
   title: string
@@ -199,13 +172,13 @@ const SWITCHES: {
 }[] = [
   {
     key: 'summarizeAtEnd',
-    title: '每轮结束时主持人出结论',
+    title: '每轮结束时群聊出结论',
     text: '结论用浅金底显示，交回给你。',
   },
   {
     key: 'loopGuard',
     title: '防打转',
-    text: '两人来回、观点不再变化时，主持人介入换人或收尾。这不是额度，不限次数。',
+    text: '两人来回、观点不再变化时，群聊介入换人或收尾。这不是额度，不限次数。',
   },
   {
     key: 'quiet',
@@ -306,41 +279,6 @@ function back(): void {
           </div>
         </section>
 
-        <section class="block">
-          <h2 class="block-title">
-            协作方式 <small>默认值在「设置 › 群聊」，这里只改本群</small>
-          </h2>
-          <div class="options" role="radiogroup" aria-label="协作方式">
-            <Surface
-              v-for="option in COLLABORATIONS"
-              :key="option.value"
-              as="button"
-              pad="sm"
-              interactive
-              role="radio"
-              class="option"
-              :aria-checked="settings.collaboration === option.value"
-              :data-collaboration-option="option.value"
-              @click="setSetting('collaboration', option.value)"
-            >
-              <b>{{ option.title }}</b>
-              <span>{{ option.text }}</span>
-            </Surface>
-          </div>
-          <p class="hint">
-            你自己的 @
-            和交办永远不需要审核；不论哪种方式，改项目代码都要你确认。
-          </p>
-          <Field label="主持人">
-            <Select
-              :model-value="group.moderator ?? ''"
-              :options="moderatorOptions"
-              size="sm"
-              @update:model-value="setModerator(String($event))"
-            />
-          </Field>
-        </section>
-
         <section
           v-for="item in SWITCHES"
           :key="item.key"
@@ -398,11 +336,7 @@ function back(): void {
                 member.missing ? '已删除的联系人' : member.name
               }}</span>
               <span class="member-role">{{
-                member.id === group.moderator
-                  ? '主持人'
-                  : member.external
-                    ? '外部'
-                    : member.intro
+                member.external ? '外部' : member.intro
               }}</span>
               <Button size="sm" data-remove-member @click="remove(member.id)"
                 >移出</Button
@@ -547,32 +481,6 @@ function back(): void {
   font-size: var(--fs-xxs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.option {
-  display: grid;
-  align-content: start;
-  gap: var(--space-1);
-  color: rgb(var(--text-2));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xxs);
-  text-align: left;
-}
-
-.option b {
-  color: rgb(var(--text-1));
-  font-weight: var(--weight-semibold);
-}
-
-.option[aria-checked='true'] {
-  background: rgb(var(--accent-soft));
-  box-shadow: inset 0 0 0 1px rgb(var(--accent));
 }
 
 .hint {

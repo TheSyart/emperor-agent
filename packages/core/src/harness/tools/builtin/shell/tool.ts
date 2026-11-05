@@ -310,7 +310,7 @@ export function createShellTool(
   ): { argv: string[]; confined?: ConfinedArgv } => {
     const argv = shellArgv(platform, command)
     if (policy.mode === 'danger-full-access') {
-      const guarded = services.sandboxBackend.guard?.(argv) ?? null
+      const guarded = services.sandboxBackend.guard?.(argv, policy) ?? null
       return guarded === null
         ? { argv }
         : { argv: guarded.argv, confined: guarded }

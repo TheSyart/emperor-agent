@@ -172,7 +172,7 @@ import {
   ToolRegistry,
   type WorkspaceAccessLeaseProvider,
 } from '../tools/registry'
-import type { ToolCategory } from '../tools/definition'
+import type { ToolCategory, ToolDefinition } from '../tools/definition'
 import type {
   ClaudeCodeHooksDescription,
   PluginHookScope,
@@ -237,7 +237,18 @@ const TASK_CLOSE_IDLE_MS = 2_000
 /** How long closing waits for open tasks to be recorded (UI-S15). */
 const TASK_CLOSE_RECORD_MS = 5_000
 
+export interface HostGroupWorkspaceAccess {
+  readonly workspaceRoot: string
+  readonly readOnlyRoots: readonly string[]
+  readonly deniedRoots: readonly string[]
+}
+
 export interface HostExtensions {
+  /** Application-owned tools, with the same visibility gate as kernel tools. */
+  readonly tools?: readonly {
+    definition: ToolDefinition
+    visible(agent: Agent | undefined): boolean
+  }[]
   /**
    * Records the files each task changes (watches tool writes, root turns,
    * and when nothing of a task can go on; UI-S15).
@@ -262,6 +273,10 @@ export interface HostExtensions {
   readonly pluginSkills?: (projectRoot: string | null) => readonly string[]
   /** Where a Build session's managed worktree is (KRN-11). */
   readonly worktrees?: (sessionId: string, projectRoot: string) => string
+  /** D50: a group member's own workspace and hard cross-member boundaries. */
+  readonly groupWorkspaces?: (
+    entry: SessionEntry,
+  ) => HostGroupWorkspaceAccess | null
   /** The model entry local subagents use; undefined follows the conversation (AGT-10). */
   readonly localSubagentModel?: () => string | undefined
   /** Where a writing external task works when the model does not say (AGT-10). */
@@ -460,6 +475,9 @@ export class HarnessHost {
     () => 'isolated-worktree'
   private worktreeResolver: (sessionId: string, projectRoot: string) => string =
     (_sessionId, projectRoot) => projectRoot
+  private groupWorkspaceResolver: (
+    entry: SessionEntry,
+  ) => HostGroupWorkspaceAccess | null = () => null
   /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
   private readonly taskTrees = new Map<string, TaskTree>()
   /** Told when a root's task can no longer go on (UI-S15). */
@@ -537,6 +555,7 @@ export class HarnessHost {
       workspaceRoot: this.chatWorkspace(),
       // A contact's knowledge outside the workspace, for its whole task.
       readOnlyRoots: (session) => this.contactReadOnlyRoots(session),
+      deniedRoots: (session) => this.groupDeniedRoots(session),
     })
     this.sandboxBackend =
       options.sandboxBackend ??
@@ -1092,6 +1111,8 @@ export class HarnessHost {
    * optional; a second call adds or replaces the ones it names.
    */
   extend(extensions: HostExtensions): void {
+    for (const tool of extensions.tools ?? [])
+      this.tools.register(tool.definition, { visible: tool.visible })
     if (extensions.turnFiles)
       this.extensionTeardown.push(
         extensions.turnFiles.install({
@@ -1114,6 +1135,8 @@ export class HarnessHost {
     if (extensions.pluginSkills)
       this.kept.skillLoaders.setPluginSkillsResolver(extensions.pluginSkills)
     if (extensions.worktrees) this.worktreeResolver = extensions.worktrees
+    if (extensions.groupWorkspaces)
+      this.groupWorkspaceResolver = extensions.groupWorkspaces
     if (extensions.localSubagentModel)
       this.localSubagentModel = extensions.localSubagentModel
     if (extensions.defaultWorkspace)
@@ -1350,14 +1373,33 @@ export class HarnessHost {
     return toolFilter === undefined ? options : { ...options, toolFilter }
   }
 
-  /** The read-only knowledge of the contact a session's task belongs to. */
+  private groupWorkspaceForSession(
+    session: Session,
+  ): HostGroupWorkspaceAccess | null {
+    const agent = this.agents.get(session.id)
+    if (agent === undefined) return null
+    const entry = this.kept.sessionStore.get(this.rootOf(agent).id)
+    return entry?.surface === 'group_member'
+      ? this.groupWorkspaceResolver(entry)
+      : null
+  }
+
+  /** Contact knowledge plus the group shared area (and a removed member's old root). */
   private contactReadOnlyRoots(session: Session): readonly string[] {
     const agent = this.agents.get(session.id)
-    if (agent === undefined) return []
-    return (
-      this.contactBindings.get(this.rootOf(agent).id)?.snapshot.readOnlyRoots ??
-      []
-    )
+    const own =
+      agent === undefined
+        ? []
+        : (this.contactBindings.get(this.rootOf(agent).id)?.snapshot
+            .readOnlyRoots ?? [])
+    return [
+      ...own,
+      ...(this.groupWorkspaceForSession(session)?.readOnlyRoots ?? []),
+    ]
+  }
+
+  private groupDeniedRoots(session: Session): readonly string[] {
+    return this.groupWorkspaceForSession(session)?.deniedRoots ?? []
   }
 
   /** How many tools the kernel registered (health check). */
@@ -1771,6 +1813,10 @@ export class HarnessHost {
    * its project root; a Chat session works in the chat workspace.
    */
   workspaceRootFor(entry: SessionEntry | null | undefined): string {
+    if (entry?.surface === 'group_member') {
+      const group = this.groupWorkspaceResolver(entry)
+      if (group) return group.workspaceRoot
+    }
     if (entry?.mode === 'build' && entry.project_path)
       return this.worktreeResolver(entry.id, resolve(entry.project_path))
     return this.chatWorkspace()
@@ -1796,7 +1842,11 @@ export class HarnessHost {
     reason: WorkingDirectoryChangeReason,
   ): void {
     const entry = this.kept.sessionStore.get(agent.session.id)
-    if (entry?.mode !== 'build' || !entry.project_path) return
+    if (
+      entry?.surface !== 'group_member' &&
+      (entry?.mode !== 'build' || !entry.project_path)
+    )
+      return
     const current = agent.session.cwd
     const target = canonicalPath(this.workspaceRootFor(entry))
     if (current !== undefined && canonicalPath(current) === target) return
@@ -1814,6 +1864,10 @@ export class HarnessHost {
    */
   private resyncWorkingDirectory(agent: Agent): void {
     const entry = this.kept.sessionStore.get(agent.session.id)
+    if (entry?.surface === 'group_member') {
+      this.syncWorkingDirectory(agent, 'group-workspace')
+      return
+    }
     if (entry?.mode !== 'build' || !entry.project_path) return
     const bound =
       canonicalPath(this.workspaceRootFor(entry)) !==

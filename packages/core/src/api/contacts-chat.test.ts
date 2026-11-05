@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CoreApi } from './core-api'
+import { roleCreatorIntent, ROLE_CREATOR_CONTACT_ID } from '../contacts/creator'
 import { invokeCoreOperation } from './operations'
 import { makeApi, waitFor, type ApiFixture } from './test-helpers'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
@@ -152,10 +153,77 @@ describe('a single chat with a contact (GRP-05)', () => {
     ])
     expect(second.id).not.toBe(first.id)
     expect(second.contact_id).toBe(rev)
-    await api.chat.submit({ content: '看看这个改动', sessionId: first.id })
+    // Session timestamps have second precision: make the use observably newer.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 1000)
+      await api.chat.submit({ content: '看看这个改动', sessionId: first.id })
+      expect(
+        (await invokeCoreOperation(api, 'contacts.openChat', [{ id: rev }])).id,
+      ).toBe(first.id)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens the fixed creator with a deduplicated create/edit intent', async () => {
+    const { api } = await open()
+    const target = await reviewer(api, '待调整的研究员')
+    const first = await invokeCoreOperation(api, 'contacts.openChat', [
+      {
+        id: ROLE_CREATOR_CONTACT_ID,
+        intent: { action: 'edit', targetId: target },
+      },
+    ])
+    const session = api.host.sessionLog(first.id)!
+    expect(roleCreatorIntent(session)).toEqual({
+      action: 'edit',
+      targetId: target,
+    })
     expect(
-      (await invokeCoreOperation(api, 'contacts.openChat', [{ id: rev }])).id,
-    ).toBe(first.id)
+      api.contactRuntime.snapshot(ROLE_CREATOR_CONTACT_ID, api.root, first.id)
+        .prompt,
+    ).toContain(target)
+    const count = session.events.filter(
+      (event) => event.type === 'contact/creator-intent',
+    ).length
+    const again = await invokeCoreOperation(api, 'contacts.openChat', [
+      {
+        id: ROLE_CREATOR_CONTACT_ID,
+        intent: { action: 'edit', targetId: target },
+      },
+    ])
+    expect(again.id).toBe(first.id)
+    expect(
+      api.host
+        .sessionLog(first.id)!
+        .events.filter((event) => event.type === 'contact/creator-intent'),
+    ).toHaveLength(count)
+
+    await invokeCoreOperation(api, 'contacts.openChat', [
+      { id: ROLE_CREATOR_CONTACT_ID, intent: { action: 'create' } },
+    ])
+    expect(roleCreatorIntent(api.host.sessionLog(first.id))).toEqual({
+      action: 'create',
+    })
+  })
+
+  it('rejects creator intents for other contacts and edits of builtins', async () => {
+    const { api } = await open()
+    const target = await reviewer(api)
+    await expect(
+      invokeCoreOperation(api, 'contacts.openChat', [
+        { id: target, intent: { action: 'create' } },
+      ]),
+    ).rejects.toThrow()
+    await expect(
+      invokeCoreOperation(api, 'contacts.openChat', [
+        {
+          id: ROLE_CREATOR_CONTACT_ID,
+          intent: { action: 'edit', targetId: ROLE_CREATOR_CONTACT_ID },
+        },
+      ]),
+    ).rejects.toThrow('内置联系人')
   })
 
   it('goes on after a restart (card test: 重启后继续单聊)', async () => {

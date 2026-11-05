@@ -4,7 +4,10 @@
  * names; the user-facing configuration stays `model_config.json` V2.
  */
 
-import type { ModelEntry } from '../config/model-config'
+import type {
+  ModelEntry,
+  ModelEntryReasoningControl,
+} from '../config/model-config'
 import { resolveModelProfile } from '../model/profile'
 import {
   ANTHROPIC_BASE_PATH,
@@ -38,6 +41,8 @@ export interface RouteSpec {
   maxTokens: number
   vision: boolean
   reasoning: boolean
+  /** Whether reasoning is optional, adjustable, or mandatory on this route. */
+  reasoningControl?: ModelEntryReasoningControl
   /** Selectable reasoning efforts in the adapter's vocabulary. */
   reasoningEfforts: readonly string[]
   /** Configured default effort, already mapped into {@link reasoningEfforts}. */
@@ -211,6 +216,9 @@ export function routeFromEntry(entry: ModelEntry): RouteSpec {
     maxTokens: profile.maxTokens,
     vision: profile.vision,
     reasoning: deepseek ? true : profile.reasoning,
+    ...(entry.detected?.reasoningControl === undefined
+      ? {}
+      : { reasoningControl: entry.detected.reasoningControl }),
     reasoningEfforts,
     ...(defaultReasoningEffort === undefined ? {} : { defaultReasoningEffort }),
     ...(entry.temperature === null ? {} : { temperature: entry.temperature }),

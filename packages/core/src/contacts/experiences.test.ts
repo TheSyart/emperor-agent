@@ -194,6 +194,35 @@ describe('the experience collector (CP-04)', () => {
     expect(complete).toHaveBeenCalledOnce()
   })
 
+  it('leaves enough budget for a reasoning model to emit the JSON answer', async () => {
+    const experiences = store()
+    const complete = vi.fn(
+      async ({ maxTokens }: { maxTokens: number }): Promise<string> => {
+        if (maxTokens <= 800) return ''
+        return JSON.stringify([
+          { text: '采用工具返回的前缀', evidenceRefs: ['c1'] },
+        ])
+      },
+    )
+    const collector = new ContactExperienceCollector({
+      store: experiences,
+      complete,
+    })
+    collector.collect(
+      turn([
+        { role: 'tool', text: 'RELIABLE-HANDOFF-42', ref: 'c1' },
+        { role: 'assistant', text: '已读取前缀。', ref: 'm2' },
+      ]),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTokens: 1600 }),
+    )
+    expect((await experiences.list('ct-a')).experiences).toEqual([
+      expect.objectContaining({ text: '采用工具返回的前缀', status: 'active' }),
+    ])
+  })
+
   it('does not call the model for a turn with no substance', async () => {
     const experiences = store()
     const complete = vi.fn(async () => '[]')

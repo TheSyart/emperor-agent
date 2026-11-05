@@ -78,17 +78,28 @@ export function piModel(route: RouteSpec): Model<Api> {
 
 /**
  * The pi-ai thinking level of one request. Titles and compaction summaries
- * are sent without thinking, whatever effort the route materialized.
+ * disable optional thinking. An always-thinking route must instead retain a
+ * legal enabled level: pi-ai serializes an omitted level as `disabled` on
+ * Anthropic, which mandatory-thinking models reject.
  */
 export function piReasoningLevel(
+  route: Pick<
+    RouteSpec,
+    'reasoningControl' | 'reasoningEfforts' | 'defaultReasoningEffort'
+  >,
   options: GenerateOptions,
 ): ThinkingLevel | undefined {
-  if (options.purpose === 'session-title' || options.purpose === 'compaction')
-    return undefined
-  const effort = options.reasoningEffort
-  return effort !== undefined && THINKING_LEVELS.has(effort)
-    ? (effort as ThinkingLevel)
-    : undefined
+  const auxiliary =
+    options.purpose === 'session-title' || options.purpose === 'compaction'
+  if (auxiliary && route.reasoningControl !== 'always') return undefined
+  const effort = options.reasoningEffort ?? route.defaultReasoningEffort
+  if (effort !== undefined && THINKING_LEVELS.has(effort))
+    return effort as ThinkingLevel
+  if (route.reasoningControl !== 'always') return undefined
+  return (
+    (route.reasoningEfforts.find((level) => THINKING_LEVELS.has(level)) as
+      ThinkingLevel | undefined) ?? 'high'
+  )
 }
 
 export class PiAiAdapter implements LlmAdapter {
@@ -129,7 +140,7 @@ export class PiAiAdapter implements LlmAdapter {
           this.onReplayDegrade?.({ route: route.id, reason })
         },
       )
-      const reasoning = piReasoningLevel(options)
+      const reasoning = piReasoningLevel(route, options)
       const extraBody = route.extraBody
       const streamOptions: SimpleStreamOptions = {
         apiKey,

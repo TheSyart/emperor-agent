@@ -21,8 +21,14 @@ vi.mock('../../api/http', () => ({ core }))
 const events = vi.hoisted(() => ({
   listeners: [] as Array<(event: unknown) => void>,
 }))
+const links = vi.hoisted(() => ({
+  open: vi.fn(),
+  reveal: vi.fn(),
+}))
 vi.mock('../../api/backend', async (original) => ({
   ...(await original<typeof import('../../api/backend')>()),
+  openLink: links.open,
+  revealReference: links.reveal,
   onCoreEvent: (listener: (event: unknown) => void) => {
     events.listeners.push(listener)
     return () => {
@@ -80,7 +86,12 @@ const QUESTION = {
 let turn: Record<string, unknown> | null = null
 let pendingFor: Record<string, unknown> = {}
 
-function message(id: string, from: string, text: string, extra = {}) {
+function message(
+  id: string,
+  from: string,
+  text: string,
+  extra: Record<string, unknown> = {},
+) {
   return {
     id,
     turnId: 't1',
@@ -98,6 +109,7 @@ function message(id: string, from: string, text: string, extra = {}) {
 }
 
 let history: ReturnType<typeof message>[] = []
+let board: Array<Record<string, unknown>> = []
 
 /** The user's answer as Core keeps it in the group log (GRP-12). */
 function answerNote(
@@ -128,10 +140,13 @@ beforeEach(() => {
   resetContactDirectoryForTest()
   turn = null
   pendingFor = {}
+  board = []
   history = [
     message('m1', 'user', '@架构师 @审稿人 看看方案'),
     message('m2', 'ct-arch', '先拆成三步。'),
   ]
+  links.open.mockReset().mockResolvedValue('system')
+  links.reveal.mockReset().mockResolvedValue(undefined)
   core.mockReset()
   core.mockImplementation(async (op: string, ...args: unknown[]) => {
     const input = (args[0] ?? {}) as Record<string, unknown>
@@ -140,11 +155,12 @@ beforeEach(() => {
         return {
           id: 'grp-1',
           title: '0.3 方案评审',
-          moderator: 'ct-emperor',
+          moderator: null,
           members: MEMBERS,
           charter: '',
           settings: {
             collaboration: 'autonomous',
+            coordination: 'builtin',
             quiet: false,
             summarizeAtEnd: true,
             loopGuard: true,
@@ -155,6 +171,17 @@ beforeEach(() => {
         }
       case 'groups.history':
         return { messages: history, more: false }
+      case 'groups.files.list':
+        return { files: [] }
+      case 'sessions.history':
+        return { events: [], more: false }
+      case 'groups.tasks':
+        return board.length
+          ? board
+          : history.flatMap((item) => {
+              const task = (item as { task?: Record<string, unknown> }).task
+              return task ? [task] : []
+            })
       case 'control.get':
         return {
           preset: 'read-only',
@@ -169,7 +196,26 @@ beforeEach(() => {
         return { message: message('m9', 'user', String(input.text)), plan: [] }
       case 'groups.stop':
         return { stopped: true }
+      case 'references.resolve':
+        return String(input.href).startsWith('https:')
+          ? {
+              id: 'ref-web',
+              kind: 'web',
+              label: '文档',
+              tooltip: input.href,
+              available: true,
+              actions: ['open_external'],
+            }
+          : {
+              id: 'ref-file',
+              kind: 'external_file',
+              label: '报告.pdf',
+              tooltip: '/Users/test/报告.pdf',
+              available: true,
+              actions: ['reveal'],
+            }
       case 'groups.confirmTask':
+      case 'groups.acceptTask':
         return {}
       case 'control.answerInteraction':
       case 'control.cancelInteraction':
@@ -225,11 +271,60 @@ function page(): HTMLElement {
 }
 
 describe('the group page', () => {
+  it('opens a web link clicked in a group message', async () => {
+    history = [
+      message(
+        'm-web',
+        'ct-arch',
+        '请看 [Emperor 文档](https://example.com/docs)',
+      ),
+    ]
+    await mount()
+    const anchor = page().querySelector<HTMLAnchorElement>('a.md-link-chip')!
+    expect(anchor).not.toBeNull()
+    anchor.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    )
+    await flush()
+    expect(core).toHaveBeenCalledWith('references.resolve', {
+      sessionId: 'grp-1',
+      sourceMessageId: 'markdown',
+      href: 'https://example.com/docs',
+      label: 'Emperor 文档',
+    })
+    expect(links.open).toHaveBeenCalledWith('https://example.com/docs')
+  })
+
+  it('resolves and reveals a file link clicked in a group message', async () => {
+    history = [
+      message(
+        'm-file',
+        'ct-arch',
+        '[报告.pdf](file:///Users/test/%E6%8A%A5%E5%91%8A.pdf)',
+      ),
+    ]
+    await mount()
+    const anchor = page().querySelector<HTMLAnchorElement>('a.md-link-chip')!
+    expect(anchor).not.toBeNull()
+    anchor.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    )
+    await flush()
+    expect(core).toHaveBeenCalledWith(
+      'references.resolve',
+      expect.objectContaining({ sessionId: 'grp-1' }),
+    )
+    expect(links.reveal).toHaveBeenCalledWith({
+      sessionId: 'grp-1',
+      referenceId: 'ref-file',
+    })
+  })
+
   it('shows the group, its members and messages, collaboration and the uncapped spend', async () => {
     await mount()
     expect(page().querySelector('h1')?.textContent).toBe('0.3 方案评审')
     expect(page().querySelector('[data-collaboration]')?.textContent).toBe(
-      '自主',
+      '自主 · 内置协调',
     )
     expect(page().querySelector('[data-spend]')?.textContent).toBe(
       '本轮 $0 · 不设上限',
@@ -315,10 +410,10 @@ describe('the group page', () => {
     expect(live()?.textContent).toContain('先说结论：')
     expect(live()?.textContent).toContain('发言中')
 
-    // A tool call ends the prose so far; the answer after it streams.
+    // A tool call must not erase the public prose that preceded a question.
     emit({ event: 'tool_call', session_id: 'member-ct-rev', name: 'read' })
     await flush()
-    expect(live()).toBeNull()
+    expect(live()?.textContent).toContain('先说结论：')
     emit({
       event: 'message_delta',
       session_id: 'member-ct-rev',
@@ -326,7 +421,7 @@ describe('the group page', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
     await flush()
-    expect(live()?.textContent).toContain('查完了。')
+    expect(live()?.textContent).toContain('先说结论：查完了。')
 
     // The final group/message lands: the draft makes way for the log row.
     history = [
@@ -395,11 +490,66 @@ describe('the group page', () => {
     ])
   })
 
-  it('opens a member’s work with 「过程 ›」', async () => {
+  it('opens only the selected member’s group activity in the right rail', async () => {
     await mount()
-    page().querySelector<HTMLElement>('[data-process]')!.click()
+    page().querySelector<HTMLElement>('[data-member-row="ct-arch"]')!.click()
     await flush()
-    expect(router.currentRoute.value.fullPath).toBe('/chat/member-ct-arch')
+    expect(
+      page()
+        .querySelector('[data-member-activity]')
+        ?.getAttribute('data-session-id'),
+    ).toBe('member-ct-arch')
+    expect(core).toHaveBeenCalledWith('sessions.history', {
+      sessionId: 'member-ct-arch',
+      maxMessages: 50,
+    })
+    expect(router.currentRoute.value.fullPath).toBe('/groups/grp-1')
+  })
+
+  it('opens member details as an overlay without leaving the group', async () => {
+    await mount()
+    const open = page().querySelector<HTMLButtonElement>('[data-open-members]')!
+    expect(open).not.toBeNull()
+    open.click()
+    await flush()
+    expect(page().querySelector('.side')?.classList.contains('open')).toBe(true)
+    expect(page().querySelector('[data-close-members]')).not.toBeNull()
+    page().querySelector<HTMLElement>('[data-member-row="ct-arch"]')!.click()
+    await flush()
+    expect(
+      page()
+        .querySelector('[data-member-activity]')
+        ?.getAttribute('data-session-id'),
+    ).toBe('member-ct-arch')
+    expect(router.currentRoute.value.fullPath).toBe('/groups/grp-1')
+    page().querySelector<HTMLButtonElement>('[data-close-members]')!.click()
+    await flush()
+    expect(page().querySelector('.side')?.classList.contains('open')).toBe(
+      false,
+    )
+  })
+
+  it('opens a question’s process in this group, never a private chat', async () => {
+    pendingFor = {
+      'member-ct-rev': {
+        ...QUESTION,
+        kind: 'plan',
+        meta: { interaction_type: 'plan' },
+      },
+    }
+    await mount()
+    const process = [
+      ...page().querySelectorAll<HTMLButtonElement>('button'),
+    ].find((button) => button.textContent?.includes('去处理'))!
+    expect(process).not.toBeNull()
+    process.click()
+    await flush()
+    expect(router.currentRoute.value.fullPath).toBe('/groups/grp-1')
+    expect(
+      page()
+        .querySelector('[data-member-activity]')
+        ?.getAttribute('data-session-id'),
+    ).toBe('member-ct-rev')
   })
 
   it('brings a member’s pending question into the room and answers it there', async () => {
@@ -489,7 +639,7 @@ describe('the group page', () => {
     expect(page().querySelector('[data-group-ask]')).toBeNull()
   })
 
-  it('sends what the user writes, gives the user’s yes to a task and reads again on groups_changed', async () => {
+  it('sends what the user writes, shows no task controls and reads again on groups_changed', async () => {
     history = [
       ...history,
       message('m3', 'ct-rev', '请 Codex 修溢出', {
@@ -525,16 +675,11 @@ describe('the group page', () => {
       way: 'broadcast',
       text: '大家怎么看？',
     })
-    const agree = [
-      ...page().querySelectorAll<HTMLElement>('[data-task-card] button'),
-    ].find((button) => button.textContent?.trim() === '同意')!
-    agree.click()
-    await flush()
-    expect(core).toHaveBeenCalledWith('groups.confirmTask', {
-      id: 'grp-1',
-      taskId: 'gt_9',
-      approve: true,
-    })
+    expect(page().querySelector('[data-task-card]')).toBeNull()
+    expect(core).not.toHaveBeenCalledWith(
+      'groups.confirmTask',
+      expect.anything(),
+    )
     history = [
       ...history,
       message('m4', 'ct-emperor', '结论：先修溢出', { kind: 'summary' }),
@@ -543,6 +688,75 @@ describe('the group page', () => {
     await new Promise((resolve) => setTimeout(resolve, 120))
     await flush()
     expect(page().querySelectorAll('[data-group-row]')).toHaveLength(4)
+  })
+
+  it('CG-02: reads dependency state from the board even when its message is paged out', async () => {
+    board = [
+      {
+        taskId: 'gt_old',
+        to: 'ct-rev',
+        title: '旧契约',
+        deliverable: '契约',
+        access: 'readonly',
+        state: 'done',
+        ready: false,
+      },
+      {
+        taskId: 'gt_next',
+        to: 'ct-arch',
+        title: '后续回归',
+        deliverable: '结果',
+        access: 'readonly',
+        state: 'queued',
+        dependsOn: ['gt_old'],
+        ready: true,
+      },
+    ]
+    history = [
+      message('m1', 'user', '后续回归', {
+        kind: 'task',
+        task: board[1],
+      }),
+    ]
+    await mount()
+    const progress = page().querySelector(
+      '[data-task-progress] [data-task-id="gt_next"]',
+    )
+    expect(progress?.textContent).toContain('后续回归')
+    expect(progress?.textContent).toContain('排队中')
+    expect(page().querySelector('[data-task-dependencies]')).toBeNull()
+  })
+
+  it('CG-02: replays an old submission without a manual acceptance action', async () => {
+    const checks = [
+      { artifactRevision: 'rev-3', evidenceRef: 'run-184', passed: true },
+    ]
+    history = [
+      message('m1', 'ct-rev', '报告已提交', {
+        kind: 'task',
+        task: {
+          taskId: 'gt_submit',
+          to: 'ct-arch',
+          title: '完成接口验收',
+          deliverable: '验收报告',
+          access: 'readonly',
+          state: 'submitted',
+          artifacts: [
+            { ref: 'artifact://grp/art-3/report.md', revision: 'rev-3' },
+          ],
+          checks,
+        },
+      }),
+    ]
+    await mount()
+    expect(page().querySelector('[data-kind="task"]')?.textContent).toContain(
+      '报告已提交',
+    )
+    expect(page().querySelector('[data-task-card]')).toBeNull()
+    expect(core).not.toHaveBeenCalledWith(
+      'groups.acceptTask',
+      expect.anything(),
+    )
   })
 
   it('opens the group’s settings and says when the group is gone', async () => {

@@ -8,8 +8,11 @@
 /** A contact id (contacts/types.ts); kept a plain string here. */
 export type ContactId = string
 
-/** 设置 › 群聊 › 协作方式: who decides when nobody is @-mentioned. */
+/** Autonomous for every group; `moderated` is accepted only when replaying old logs. */
 export type Collaboration = 'autonomous' | 'moderated'
+
+/** New groups coordinate themselves; `member` exists only to replay old logs. */
+export type Coordination = 'builtin' | 'member'
 
 export type Audience =
   | { kind: 'all' }
@@ -22,12 +25,36 @@ export type Audience =
 export type AnswerMode = 'relay' | 'independent'
 
 export type GroupMessageKind =
-  'say' | 'task' | 'result' | 'summary' | 'system' | 'pass'
+  'say' | 'task' | 'result' | 'summary' | 'system' | 'pass' | 'coordination'
 
 export type GroupTaskAccess = 'group_files' | 'readonly' | 'isolated_worktree'
 
 export type GroupTaskState =
-  'queued' | 'waiting_user' | 'running' | 'done' | 'failed' | 'cancelled'
+  | 'queued'
+  | 'waiting_user'
+  | 'running'
+  | 'submitted'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+export interface GroupTaskArtifact {
+  ref: string
+  revision: string
+}
+
+export interface GroupTaskCheck {
+  artifactRevision: string
+  evidenceRef: string
+  passed: boolean
+}
+
+/** A run that could not produce a candidate; earlier artifacts stay intact. */
+export interface GroupTaskProblem {
+  kind: 'failed' | 'unknown' | 'adapter'
+  reason: string
+  runId?: string
+}
 
 export interface GroupTask {
   taskId: string
@@ -52,6 +79,29 @@ export interface GroupTask {
    * cancels it.
    */
   hold?: 'task_relay'
+  /** CG-02: optional collaboration contract; legacy tasks omit every field. */
+  idempotencyKey?: string
+  acceptance?: string[]
+  dependsOn?: string[]
+  contractRevision?: number
+  writeScopes?: string[]
+  attempt?: number
+  leaseEpoch?: number
+  activeRunId?: string
+  artifacts?: GroupTaskArtifact[]
+  checks?: GroupTaskCheck[]
+  problem?: GroupTaskProblem
+}
+
+export interface GroupTaskView extends GroupTask {
+  /** Queued, unclaimed, and every dependency has been accepted. */
+  ready: boolean
+}
+
+export interface GroupCoordination {
+  kind: 'arrangement' | 'plan' | 'conclusion'
+  speakers?: ContactId[]
+  tasks?: GroupTask[]
 }
 
 export interface GroupMessage {
@@ -66,7 +116,11 @@ export interface GroupMessage {
   kind: GroupMessageKind
   text: string
   replyTo?: string
+  /** The question/approval anchored immediately after this source speech. */
+  interactionId?: string
   task?: GroupTask
+  /** A system arrangement/plan/conclusion; never a member's speech. */
+  coordination?: GroupCoordination
   /** An external member's task result: the run whose card applies or discards it (GRP-09). */
   delegation?: { id: string; runId: string }
   /** Epoch milliseconds. */
@@ -75,6 +129,7 @@ export interface GroupMessage {
 
 export interface GroupSettings {
   collaboration: Collaboration
+  coordination: Coordination
   /** 安静模式: only @ starts anyone speaking. */
   quiet: boolean
   summarizeAtEnd: boolean

@@ -21,6 +21,7 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export function goalPhaseLabel(goal: RuntimeGoalView): string {
+  if (goal.phase === 'active' && goal.activation === 'disarmed') return '已暂停'
   return PHASE_LABELS[goal.phase] || goal.phase
 }
 
@@ -84,7 +85,11 @@ export function isTerminalGoal(goal: RuntimeGoalView): boolean {
 
 function actionsForGoal(goal: RuntimeGoalView): GoalCardAction[] {
   if (isTerminalGoal(goal)) return []
-  if (goal.phase === 'paused' || goal.phase === 'blocked')
+  if (
+    goal.phase === 'paused' ||
+    goal.phase === 'blocked' ||
+    (goal.phase === 'active' && goal.activation === 'disarmed')
+  )
     return ['resume', 'cancel']
   return ['pause', 'cancel']
 }
@@ -94,7 +99,11 @@ function noticeForGoal(goal: RuntimeGoalView): string | null {
     return goal.blockedReason?.message
       ? `目标已阻塞：${bounded(goal.blockedReason.message, 240)}`
       : '目标已阻塞，可恢复后继续。'
-  if (goal.phase === 'paused') return '目标已暂停，可恢复后继续。'
+  if (
+    goal.phase === 'paused' ||
+    (goal.phase === 'active' && goal.activation === 'disarmed')
+  )
+    return '目标已暂停，可恢复后继续。'
   return null
 }
 

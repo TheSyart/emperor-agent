@@ -565,11 +565,8 @@ describe('same-session goal driving', () => {
     expect(h.adapter.requests).toHaveLength(1)
   })
 
-  it.each([
-    ['request error', { error: 'provider broke', code: 'AUTH' }],
-    ['max tokens', { text: 'unfinished', finish: 'max-tokens' as const }],
-  ])('disarms automatic continuation after a %s', async (_label, reply) => {
-    const t = setup([reply])
+  it('disarms automatic continuation after a request error', async () => {
+    const t = setup([{ error: 'provider broke', code: 'AUTH' }])
     t.goals.create(t.agent, { objective: 'stop safely', maxGoalRounds: 8 })
     const goal = await waitForGoal(
       t.goals,
@@ -582,13 +579,92 @@ describe('same-session goal driving', () => {
     expect(t.h.adapter.requests).toHaveLength(1)
   })
 
-  it('disarms automatic continuation after a round reaches its step budget (KRN-03)', async () => {
-    const t = setup([{ tools: [{ name: 'missing_tool' }] }, { text: 'never' }])
+  it('reserves the next round after max tokens instead of waiting for the user', async () => {
+    const t = setup([
+      { text: 'unfinished', finish: 'max-tokens' as const },
+      { text: 'continued' },
+    ])
+    t.goals.create(t.agent, { objective: 'continue output', maxGoalRounds: 2 })
+    const goal = await waitForGoal(
+      t.goals,
+      t.agent,
+      (current) => current?.phase === 'blocked',
+    )
+    expect(goal).toMatchObject({ roundsStarted: 2 })
+    expect(t.h.adapter.requests).toHaveLength(2)
+    expect(roundEvents(t.agent)).toEqual([1, 2])
+    expect(
+      t.agent.session.events.find((event) => event.type === 'turn/end'),
+    ).toMatchObject({ data: { reason: { kind: 'max-tokens' } } })
+  })
+
+  it('reserves the next round after a goal round reaches its step budget', async () => {
+    const t = setup([
+      { tools: [{ name: 'missing_tool' }] },
+      { text: 'continued' },
+    ])
     withTaskBudget(t.h, t.agent.id, { maxSteps: 1 })
     t.goals.create(t.agent, {
-      objective: 'stop at the budget',
-      maxGoalRounds: 8,
+      objective: 'continue at the step boundary',
+      maxGoalRounds: 2,
     })
+    const goal = await waitForGoal(
+      t.goals,
+      t.agent,
+      (current) => current?.phase === 'blocked',
+    )
+    expect(goal).toMatchObject({ roundsStarted: 2 })
+    expect(t.h.adapter.requests).toHaveLength(2)
+    expect(roundEvents(t.agent)).toEqual([1, 2])
+    expect(
+      t.agent.session.events.find((event) => event.type === 'turn/end')?.data,
+    ).toMatchObject({ reason: { kind: 'budget', limit: 'steps', maxSteps: 1 } })
+  })
+
+  it('reserves goal round one when an ordinary Build turn reaches its step budget', async () => {
+    const t = setup([
+      {
+        tools: [
+          {
+            name: 'create_goal',
+            args: { objective: 'continue the Build', max_goal_rounds: 1 },
+          },
+        ],
+      },
+      { text: 'continued from the checkpoint' },
+    ])
+    withTaskBudget(t.h, t.agent.id, { maxSteps: 1 })
+    t.agent.followup(userText('build the feature'))
+    const goal = await waitForGoal(
+      t.goals,
+      t.agent,
+      (current) => current?.phase === 'blocked',
+    )
+    expect(goal).toMatchObject({ roundsStarted: 1 })
+    expect(t.h.adapter.requests).toHaveLength(2)
+    expect(roundEvents(t.agent)).toEqual([1])
+    expect(
+      t.agent.session.events.find((event) => event.type === 'turn/end'),
+    ).toMatchObject({ data: { reason: { kind: 'budget', limit: 'steps' } } })
+  })
+
+  it('does not reserve another round after the configured cost budget', async () => {
+    const t = setup([
+      { tools: [{ name: 'missing_tool' }] },
+      { text: 'never reached' },
+    ])
+    withTaskBudget(
+      t.h,
+      t.agent.id,
+      { maxCostUsd: 0.01 },
+      {
+        inputUsdPerMillionTokens: 1_000,
+        outputUsdPerMillionTokens: 1_000,
+        cacheReadUsdPerMillionTokens: 0,
+        cacheWriteUsdPerMillionTokens: 0,
+      },
+    )
+    t.goals.create(t.agent, { objective: 'respect cost', maxGoalRounds: 8 })
     const goal = await waitForGoal(
       t.goals,
       t.agent,
@@ -598,10 +674,10 @@ describe('same-session goal driving', () => {
     await settle(t.agent)
     expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
     expect(t.h.adapter.requests).toHaveLength(1)
-    expect(t.agent.session.lastOf('turn/end')?.data.reason).toEqual({
+    expect(roundEvents(t.agent)).toEqual([1])
+    expect(t.agent.session.lastOf('turn/end')?.data.reason).toMatchObject({
       kind: 'budget',
-      limit: 'steps',
-      maxSteps: 1,
+      limit: 'cost',
     })
   })
 

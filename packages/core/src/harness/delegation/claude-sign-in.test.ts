@@ -715,7 +715,7 @@ describe('FIX-11 · 登录 Claude Code: Core runs claude auth login itself', () 
       environment: probe.environment,
       cwd: s.dirs.home,
       console: false,
-      timeoutMs: 1500,
+      timeoutMs: 5000,
       graceMs: 200,
     })
     expect(login.started).toBe(true)

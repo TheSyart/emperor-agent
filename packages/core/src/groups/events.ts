@@ -10,6 +10,7 @@ import type {
   GroupSettings,
   GroupTask,
 } from './types'
+import type { GroupArtifact, GroupWorkspaceInfo } from './workspace'
 
 export interface GroupEventMap {
   'group/created': {
@@ -32,6 +33,8 @@ export interface GroupEventMap {
     memberSessionId?: string
     contactVersion: number
   }
+  'group/workspace': GroupWorkspaceInfo
+  'group/artifact': GroupArtifact
   'group/message': GroupMessage
   'group/reveal': { batchId: string }
   'group/delivery': { contactId: ContactId; upTo: string }
@@ -47,6 +50,8 @@ export interface GroupEventMap {
     state: GroupTurnState
     reason?: string
     spend: { usd: number; tokens: number }
+    /** A late work-cost correction; it must not bring an old turn to the front. */
+    spendOnly?: boolean
   }
   /**
    * The user answered a member who asked during its speech (GRP-12). For
@@ -81,6 +86,8 @@ export interface GroupState {
   memberSessions: Map<ContactId, string>
   charter: string
   settings: GroupSettings
+  workspace: GroupWorkspaceInfo | null
+  artifacts: Map<string, GroupArtifact>
   messages: GroupMessage[]
   revealed: Set<string>
   /** Per member, the id of the last message it was delivered. */
@@ -98,6 +105,8 @@ export interface GroupState {
 
 const DEFAULT_SETTINGS: GroupSettings = {
   collaboration: 'autonomous',
+  // Logs written before CG-00 keep their visible moderator until migrated.
+  coordination: 'member',
   quiet: false,
   summarizeAtEnd: true,
   loopGuard: true,
@@ -111,6 +120,8 @@ export function emptyGroupState(): GroupState {
     memberSessions: new Map(),
     charter: '',
     settings: { ...DEFAULT_SETTINGS },
+    workspace: null,
+    artifacts: new Map(),
     messages: [],
     revealed: new Set(),
     cursors: new Map(),
@@ -135,14 +146,22 @@ export function foldGroupEvents(
         state.moderator = event.data.moderator
         state.members = [...event.data.members]
         state.charter = event.data.charter
-        state.settings = { ...DEFAULT_SETTINGS, ...event.data.settings }
+        state.settings = {
+          ...DEFAULT_SETTINGS,
+          ...event.data.settings,
+          collaboration: 'autonomous',
+        }
         break
       case 'group/settings': {
         const { title, charter, moderator, ...settings } = event.data.patch
         if (title !== undefined) state.title = title
         if (charter !== undefined) state.charter = charter
         if (moderator !== undefined) state.moderator = moderator
-        state.settings = { ...state.settings, ...settings }
+        state.settings = {
+          ...state.settings,
+          ...settings,
+          collaboration: 'autonomous',
+        }
         break
       }
       case 'group/member':
@@ -160,6 +179,12 @@ export function foldGroupEvents(
           )
           if (state.moderator === event.data.contactId) state.moderator = null
         }
+        break
+      case 'group/workspace':
+        state.workspace = { ...event.data }
+        break
+      case 'group/artifact':
+        state.artifacts.set(event.data.artifactRef, { ...event.data })
         break
       case 'group/message':
         order.set(event.data.id, state.messages.length)
@@ -183,7 +208,8 @@ export function foldGroupEvents(
         state.digest = { ...event.data }
         break
       case 'group/turn':
-        state.turn = { ...event.data }
+        if (!event.data.spendOnly || state.turn?.turnId === event.data.turnId)
+          state.turn = { ...event.data }
         break
       case 'group/answer':
         state.answers.push({

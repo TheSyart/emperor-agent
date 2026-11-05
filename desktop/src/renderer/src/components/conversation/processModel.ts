@@ -20,6 +20,7 @@ import {
 import type { ProcessDisplay } from '../../composables/useUiPreferences'
 import { conversationContextKey, deepEqual } from '../../conversation/assembler'
 import type { ConversationTimeline } from '../../conversation/locationIndex'
+import { contactRoleDraftMeta } from '../../conversation/contactRoleDraft'
 import type {
   AssistantBlock,
   AssistantChatNode,
@@ -169,6 +170,13 @@ const PROCESS_KINDS = new Set([
 ])
 
 function inProcess(node: ChatNode): boolean {
+  // A role draft is a user decision, not an implementation detail: its
+  // confirmation card stays visible even when process details are folded.
+  if (
+    node.kind === 'tool' &&
+    contactRoleDraftMeta(node.data.result?.meta) !== null
+  )
+    return false
   return node.turn !== null && PROCESS_KINDS.has(node.kind)
 }
 

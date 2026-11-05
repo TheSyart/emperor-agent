@@ -86,7 +86,9 @@ export class ExternalSpeaker {
           })
         ).runId
       } else {
-        const callId = `${task ? TASK_REQUEST : CHAT_REQUEST}${request.groupId}:${randomUUID()}`
+        const callId = task
+          ? `${TASK_REQUEST}${request.groupId}:${task.activeRunId ?? randomUUID()}`
+          : `${CHAT_REQUEST}${request.groupId}:${randomUUID()}`
         const writes =
           task?.access === 'isolated_worktree' && task.confirmed === true
         const record = await this.deps.delegations.start(
@@ -157,7 +159,9 @@ export class ExternalSpeaker {
     return {
       rootSessionId: request.memberSessionId,
       parentAgentId: this.deps.parentAgentId(request.memberSessionId),
-      taskScopeId: `group-turn:${request.turnId}`,
+      taskScopeId: request.task
+        ? `group-task:${request.task.taskId}`
+        : `group-turn:${request.turnId}`,
       requiredForGoal: false,
       parentCallId: callId,
       depth: 1,

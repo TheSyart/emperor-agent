@@ -44,6 +44,7 @@ import {
   type FromTemplateInput,
   type GroupHabit,
   type RoleCard,
+  ROLE_CREATOR_CONTACT_ID,
 } from './types'
 import {
   charCount,
@@ -322,6 +323,8 @@ export class ContactStore {
   update(id: string, patch: ContactPatch): Promise<Contact> {
     return this.mutate(async (state) => {
       const current = this.find(state, id)
+      if (id === ROLE_CREATOR_CONTACT_ID)
+        throw new ContactBuiltinError('角色创建师不能修改')
       if (!isRecord(patch))
         throw new ContactValidationError('contact', '修改内容不对')
       const candidate = current.builtin
@@ -618,8 +621,11 @@ export class ContactStore {
       return saved
         ? {
             ...builtin,
-            avatar: saved.avatar,
-            intro: saved.intro,
+            // The creator is entirely fixed; older builtins retain their
+            // user-selected avatar and intro.
+            ...(builtin.id === ROLE_CREATOR_CONTACT_ID
+              ? {}
+              : { avatar: saved.avatar, intro: saved.intro }),
             version: saved.version,
             createdAt: saved.createdAt,
             updatedAt: saved.updatedAt,

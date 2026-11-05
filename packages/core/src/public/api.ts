@@ -88,6 +88,16 @@ export type {
   ContactFeedbackInput,
   ContactFeedbackResult,
 } from '../api/services/contact-memory-service'
+// CG-CT-01: the fixed role creator's validated, unsaved confirmation card.
+export {
+  ROLE_CREATOR_CONTACT_ID,
+  ROLE_CREATOR_META_KIND,
+} from '../contacts/creator'
+export type {
+  ContactRoleDraftMeta,
+  RoleCreatorIntent,
+} from '../contacts/creator'
+
 // GRP-04: the contact editor (draft, import, preview, trial).
 export type {
   AvatarTheme as ContactAvatarTheme,

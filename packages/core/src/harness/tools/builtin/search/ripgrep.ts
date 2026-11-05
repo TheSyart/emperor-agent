@@ -28,6 +28,7 @@ export type SearchErrorCode =
   | 'SEARCH_RAW_OUTPUT_OVERFLOW'
   | 'SEARCH_ABORTED'
   | 'SEARCH_PROTECTED_PATH'
+  | 'SEARCH_GROUP_PRIVATE_PATH'
 
 /** Typed search failure with a stable machine-routable code. */
 export class SearchError extends ToolError {

@@ -88,15 +88,28 @@ function sampleVersionOutput(pattern: string, version: string): string | null {
 /** Scripted adapter that answers session-title requests out of band. */
 export class KernelTestAdapter extends ScriptedAdapter {
   readonly titleRequests: GenerateOptions[] = []
+  readonly experienceRequests: GenerateOptions[] = []
   titleText = 'Generated'
+  experienceText = '[]'
 
   override async *stream(
     route: RouteSpec,
     options: GenerateOptions,
   ): AsyncIterable<StreamChunk> {
-    if (options.purpose === 'session-title') {
-      this.titleRequests.push(options)
-      for (const chunk of replyChunks({ text: this.titleText })) yield chunk
+    const experience =
+      options.purpose === 'auxiliary' &&
+      options.system?.includes('你从一次已经结束的工作里提炼可复用的经验')
+    if (options.purpose === 'session-title' || experience) {
+      const requests =
+        options.purpose === 'session-title'
+          ? this.titleRequests
+          : this.experienceRequests
+      const text =
+        options.purpose === 'session-title'
+          ? this.titleText
+          : this.experienceText
+      requests.push(options)
+      for (const chunk of replyChunks({ text })) yield chunk
       return
     }
     yield* super.stream(route, options)

@@ -83,6 +83,7 @@ function fixture(
     protectedStateRoot?: string
     protectedHome?: string
     readOnlyRoots?: string[]
+    deniedRoots?: string[]
   } = {},
 ): Fixture {
   const approvals: string[] = []
@@ -102,6 +103,9 @@ function fixture(
       ...(options.readOnlyRoots === undefined
         ? {}
         : { readOnlyRoots: () => options.readOnlyRoots! }),
+      ...(options.deniedRoots === undefined
+        ? {}
+        : { deniedRoots: () => options.deniedRoots! }),
     }),
     sandboxBackend: {
       confine() {
@@ -699,6 +703,28 @@ describe('sandbox', () => {
       `Error: ${sandboxDenialMarker('read-only')}\n${escalationHintMarker('edit')}`,
     )
     expect(readFileSync(path, 'utf8')).toBe('content')
+  })
+
+  it("CG-01: another member's private root is unreadable and unwritable in every mode", async () => {
+    const other = join(root, 'members', 'ct-other')
+    mkdirSync(other, { recursive: true })
+    const secret = join(other, 'secret.md')
+    writeFileSync(secret, 'private')
+    for (const mode of [
+      'workspace-write',
+      'danger-full-access',
+    ] as SandboxMode[]) {
+      const f = fixture({ mode, deniedRoots: [other], answer: 'allowed-once' })
+      expect(codeOf(await f.call('read', { file_path: secret }))).toBe(
+        'FS_GROUP_PRIVATE_PATH',
+      )
+      expect(
+        codeOf(
+          await f.call('write', { file_path: secret, content: 'changed' }),
+        ),
+      ).toBe('FS_GROUP_PRIVATE_PATH')
+      expect(readFileSync(secret, 'utf8')).toBe('private')
+    }
   })
 
   it('a read-only root is read, never written, in every mode (GRP-03)', async () => {

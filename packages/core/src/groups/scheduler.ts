@@ -17,6 +17,12 @@
  * other way. Spend adds up per turn and is shown, never capped here — a
  * speech's own step and cost limits stop that speech only.
  */
+import {
+  CoordinatorError,
+  validateCoordinatorResult,
+  type CoordinatorRequest,
+  type CoordinatorResult,
+} from './coordinator'
 import { digestPrompt, digestSource } from './digest'
 import { ACCESS_LABELS, formatDelivery, planDelivery } from './delivery'
 import { parseMentions, resolveMentions } from './envelope'
@@ -27,6 +33,7 @@ import {
 } from './events'
 import { loopStall, PASS_WITHDRAWS, TASK_RELAY_LIMIT } from './loop-guard'
 import { assignTask, planFor, type QueueItem } from './plan'
+import { usesWorkQueue } from './task-board'
 import type { GroupService } from './service'
 import type {
   ContactId,
@@ -42,9 +49,16 @@ export const GROUP_BATCH_LIMIT = 3
 const DELIVERY_LIMIT = 8_000
 /** What a digest leaves undigested at the end of the backlog. */
 const DIGEST_KEEP = 4_000
+const EMPEROR = 'ct-emperor'
+const PUBLIC_REPLY_LIMIT = 480
+const INTERNAL_REPLY_NOTE = '完整内容已保留在右侧执行详情。'
 
 export type SpeakReason =
-  Extract<QueueItem, { kind: 'speak' }>['reason'] | 'task' | 'batch' | 'summary'
+  | Extract<QueueItem, { kind: 'speak' }>['reason']
+  | 'task'
+  | 'batch'
+  | 'summary'
+  | 'clarify'
 
 export interface SpeakRequest {
   groupId: string
@@ -119,10 +133,20 @@ export interface GroupSchedulerDeps {
   }): Promise<HandRaise>
   review(request: {
     groupId: string
-    moderator: ContactId
+    /** null for CG-00's system coordinator; a contact only in old member mode. */
+    moderator: ContactId | null
     message: GroupMessage
     signal: AbortSignal
   }): Promise<ReviewVerdict>
+  /** CG-00: absent only in focused legacy tests; built-in calls degrade safely. */
+  coordinate?(request: CoordinatorRequest): Promise<CoordinatorResult>
+  /** Public rooms show a brief answer; the full turn stays in its session. */
+  shorten?(request: {
+    groupId: string
+    member: ContactId
+    text: string
+    signal: AbortSignal
+  }): Promise<string>
   digest(request: {
     groupId: string
     prompt: string
@@ -151,6 +175,8 @@ interface Run {
   stopped: boolean
   paused: boolean
   closed: boolean
+  /** A broadcast/review actually used system coordination this turn. */
+  coordinated: boolean
   intervened: boolean
   pending: { message: GroupMessage; plan: QueueItem[] } | null
   spend: { usd: number; tokens: number }
@@ -221,6 +247,65 @@ export class GroupScheduler {
     }
   }
 
+  /** Persist prose spoken before a real question; the card anchors to it. */
+  async publishInteractionSource(
+    groupId: string,
+    member: ContactId,
+    interactionId: string,
+    text: string,
+  ): Promise<GroupMessage | null> {
+    const run = this.runs.get(groupId)
+    if (!run || run.stopped || !text.trim()) return null
+    const existing = this.deps.groups
+      .state(groupId)
+      .messages.find((message) => message.interactionId === interactionId)
+    if (existing) return existing
+    const concise = await this.publicText(run, member, text.trim())
+    if (run.stopped) return null
+    return this.post(run, {
+      from: member,
+      audience: { kind: 'all' },
+      ask: [],
+      kind: 'say',
+      text: concise,
+      interactionId,
+    })
+  }
+
+  /** Background work belongs to the turn whose message assigned its task. */
+  addWorkSpend(
+    groupId: string,
+    turnId: string,
+    spend: { usd: number; tokens: number },
+  ): void {
+    const run = this.runs.get(groupId)
+    if (run && run.turnId === turnId && !GROUP_TURN_ENDED.has(run.state)) {
+      run.spend = {
+        usd: run.spend.usd + spend.usd,
+        tokens: run.spend.tokens + spend.tokens,
+      }
+      this.deps.emit?.({
+        event: 'group_turn_changed',
+        group_id: groupId,
+        turn_id: turnId,
+        state: run.state,
+        speakers: [...run.speaking.keys()],
+        spend: { ...run.spend },
+      })
+      return
+    }
+    const turn = this.deps.groups.addTurnSpend(groupId, turnId, spend)
+    if (!turn) return
+    this.deps.emit?.({
+      event: 'group_turn_changed',
+      group_id: groupId,
+      turn_id: turnId,
+      state: turn.state,
+      ...(turn.reason ? { reason: turn.reason } : {}),
+      spend: { ...turn.spend },
+    })
+  }
+
   /** Resolves once the group's current run (if any) has settled. */
   settled(groupId: string): Promise<void> {
     return this.runs.get(groupId)?.done ?? Promise.resolve()
@@ -256,6 +341,7 @@ export class GroupScheduler {
       stopped: false,
       paused: false,
       closed: false,
+      coordinated: false,
       intervened: false,
       pending: null,
       spend: { usd: 0, tokens: 0 },
@@ -291,7 +377,10 @@ export class GroupScheduler {
     run.controller.abort()
     const state = this.deps.groups.state(groupId)
     for (const task of state.tasks.values())
-      if (['queued', 'running', 'waiting_user'].includes(task.state))
+      if (
+        !usesWorkQueue(task) &&
+        ['queued', 'running', 'waiting_user'].includes(task.state)
+      )
         this.deps.groups.append(groupId, 'group/task', {
           ...task,
           state: 'cancelled',
@@ -404,6 +493,10 @@ export class GroupScheduler {
       deliverable: string
       basis?: string
       access: GroupTaskAccess
+      idempotencyKey?: string
+      acceptance?: string[]
+      dependsOn?: string[]
+      writeScopes?: string[]
     },
   ): GroupTask {
     const { run, state, context } = this.speaking(groupId, from)
@@ -419,17 +512,22 @@ export class GroupScheduler {
       access: input.access,
       state: 'queued',
       chain,
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.acceptance ? { acceptance: input.acceptance } : {}),
+      ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
+      ...(input.writeScopes ? { writeScopes: input.writeScopes } : {}),
     }
+    const registration = this.deps.groups.registerTask(groupId, task)
+    if (!registration.created) return registration.task
     this.post(run, {
       from,
       audience: { kind: 'all' },
       ask: [input.to],
       kind: 'task',
       text: task.title,
-      task,
+      task: registration.task,
     })
-    this.deps.groups.append(groupId, 'group/task', task)
-    return task
+    return registration.task
   }
 
   /** group_pass: 没有补充 — nothing to add; it starts nothing. */
@@ -455,6 +553,8 @@ export class GroupScheduler {
     },
   ): void {
     const { state, context } = this.speaking(groupId, from)
+    if (state.settings.coordination === 'builtin')
+      throw new Error('内置协调群不需要成员使用 group_next')
     if (state.moderator !== from) throw new Error('只有主持人能用 group_next')
     if (!context.planning) throw new Error(NEXT_OUTSIDE_PLANNING)
     const speakers = input.speakers.filter(
@@ -474,6 +574,8 @@ export class GroupScheduler {
    */
   close(groupId: string, from: ContactId, summary: string): void {
     const { state, context } = this.speaking(groupId, from)
+    if (state.settings.coordination === 'builtin')
+      throw new Error('内置协调群不需要成员使用 group_close')
     if (state.moderator !== from) throw new Error('只有主持人能用 group_close')
     context.close = required(summary, '结论')
   }
@@ -518,6 +620,7 @@ export class GroupScheduler {
     run.held = []
     run.withdrawn = 0
     run.closed = false
+    run.coordinated = false
     run.intervened = false
     this.turn(run, 'started')
   }
@@ -526,6 +629,21 @@ export class GroupScheduler {
   private async endOfTurn(run: Run): Promise<boolean> {
     if (run.closed || run.paused || run.stopped) return false
     const state = this.deps.groups.state(run.groupId)
+    if (state.settings.coordination === 'builtin') {
+      if (
+        !state.settings.summarizeAtEnd ||
+        !run.coordinated ||
+        run.spoke.size === 0
+      )
+        return false
+      run.closed = true
+      await this.coordinate(run, {
+        kind: 'coordinate',
+        reason: 'summary',
+        source: state.messages.at(-1)?.id ?? run.turnId,
+      })
+      return run.pending !== null
+    }
     const moderator = state.moderator
     if (
       !state.settings.summarizeAtEnd ||
@@ -550,6 +668,8 @@ export class GroupScheduler {
         return this.batch(run, item.members, item.batchId)
       case 'poll':
         return this.poll(run, item.members, item.source)
+      case 'coordinate':
+        return this.coordinate(run, item)
       case 'review':
         return this.review(run, item.reviewer, item.message)
       case 'task':
@@ -655,11 +775,16 @@ export class GroupScheduler {
     source: string,
   ): Promise<void> {
     const state = this.deps.groups.state(run.groupId)
+    if (state.settings.coordination === 'builtin') run.coordinated = true
     const message = state.messages.find((m) => m.id === source)
     if (!message) return
     const roster = this.deps.groups.roster(state)
+    const candidates =
+      state.settings.coordination === 'builtin'
+        ? members.filter((id) => id !== EMPEROR)
+        : members
     const hands = await Promise.all(
-      members.map(async (id) => {
+      candidates.map(async (id) => {
         const member = roster.find((m) => m.id === id)
         if (!member) return null
         try {
@@ -680,6 +805,14 @@ export class GroupScheduler {
       .filter((h): h is NonNullable<typeof h> => h !== null && h.raise)
       .sort((a, b) => b.score - a.score)
     if (raised.length) {
+      const names = raised.map((hand) => this.name(state, hand.id)).join('、')
+      await this.coordinationSay(run, {
+        text:
+          raised.length === 1
+            ? `已请${names}发言。`
+            : `已安排${names}依次发言。`,
+      })
+      if (run.stopped) return
       run.queue.unshift(
         ...raised.map((hand) => ({
           kind: 'speak' as const,
@@ -691,7 +824,12 @@ export class GroupScheduler {
       )
       return
     }
-    // Nobody claimed it: the moderator answers, or the user is told how.
+    // Nobody claimed it: built-in coordination intervenes once. The old
+    // member branch remains solely for pre-CG-00 logs.
+    if (state.settings.coordination === 'builtin') {
+      run.queue.unshift({ kind: 'coordinate', reason: 'fallback', source })
+      return
+    }
     if (state.moderator && state.members.includes(state.moderator))
       run.queue.unshift({
         kind: 'speak',
@@ -702,14 +840,146 @@ export class GroupScheduler {
     else this.system(run, '没有成员认领这条消息：@ 一位成员试试。')
   }
 
+  /** One system call proposes; Core validates and realizes the queue items. */
+  private async coordinate(
+    run: Run,
+    item: Extract<QueueItem, { kind: 'coordinate' }>,
+  ): Promise<void> {
+    run.coordinated = true
+    this.turn(run, 'planning')
+    const state = this.deps.groups.state(run.groupId)
+    const roster = this.deps.groups.roster(state)
+    let result: CoordinatorResult
+    try {
+      if (!this.deps.coordinate) throw new Error('协调模型没有配置')
+      const proposed = await this.deps.coordinate({
+        groupId: run.groupId,
+        turnId: run.turnId,
+        reason: item.reason,
+        source: item.source,
+        ...(item.note ? { note: item.note } : {}),
+        signal: run.controller.signal,
+      })
+      result = validateCoordinatorResult(proposed, roster)
+      if (
+        item.reason === 'summary' &&
+        result.kind !== 'answer' &&
+        result.kind !== 'close'
+      )
+        throw new CoordinatorError('本轮结论只能是 answer 或 close')
+    } catch (error) {
+      if (run.stopped) return
+      const detail =
+        error instanceof CoordinatorError ? `：${error.message}` : ''
+      this.system(
+        run,
+        `自动协调暂时没有完成${detail}。你仍可以直接 @ 成员、交办任务或停止本轮。`,
+      )
+      return
+    }
+    if (run.stopped) return
+    const names = (ids: readonly ContactId[]) =>
+      ids.map((id) => this.name(state, id)).join('、')
+    switch (result.kind) {
+      case 'relay': {
+        await this.coordinationSay(run, {
+          text: result.note ?? `按顺序请 ${names(result.speakers)} 发言。`,
+        })
+        run.queue.push(
+          ...result.speakers.map((member) => ({
+            kind: 'speak' as const,
+            member,
+            reason: 'assigned' as const,
+            source: item.source,
+            ...(result.note ? { note: result.note } : {}),
+          })),
+        )
+        return
+      }
+      case 'independent': {
+        await this.coordinationSay(run, {
+          text:
+            result.note ??
+            `${names(result.speakers)} 分别作答，完成后一起显示。`,
+        })
+        run.queue.push({
+          kind: 'batch',
+          members: result.speakers,
+          batchId: this.newId('gb_'),
+          source: item.source,
+        })
+        return
+      }
+      case 'tasks': {
+        const tasks = result.tasks.map((task) => ({
+          ...task,
+          state: 'queued' as const,
+          chain: [],
+          confirmed: false as const,
+        }))
+        await this.coordinationSay(run, {
+          text: `按顺序完成 ${tasks.length} 项任务：${tasks
+            .map((task) => task.title)
+            .join(' → ')}`,
+        })
+        for (const task of tasks)
+          this.deps.groups.append(run.groupId, 'group/task', task)
+        run.queue.push(
+          ...tasks.map((task) => ({
+            kind: 'task' as const,
+            task,
+            source: item.source,
+          })),
+        )
+        return
+      }
+      case 'answer':
+        await this.coordinationSay(run, {
+          text: result.text,
+        })
+        return
+      case 'clarify':
+        await this.speakOne(run, EMPEROR, 'clarify', {
+          note: result.text,
+          replyTo: item.source,
+        })
+        return
+      case 'close':
+        await this.coordinationSay(run, {
+          text: result.text,
+        })
+        run.closed = true
+        run.queue = []
+        run.withdrawn = 0
+        return
+    }
+  }
+
+  /** The system decides; the fixed visible member speaks one short line. */
+  private async coordinationSay(
+    run: Run,
+    input: { text: string },
+  ): Promise<GroupMessage | null> {
+    const text = await this.publicText(run, EMPEROR, input.text.trim())
+    if (run.stopped) return null
+    return this.post(run, {
+      from: EMPEROR,
+      audience: { kind: 'all' },
+      ask: [],
+      kind: 'say',
+      text,
+    })
+  }
+
   private async review(
     run: Run,
-    reviewer: ContactId,
+    reviewer: ContactId | null,
     messageId: string,
   ): Promise<void> {
     const state = this.deps.groups.state(run.groupId)
     const message = state.messages.find((m) => m.id === messageId)
     if (!message) return
+    if (reviewer === null) run.coordinated = true
     let verdict: ReviewVerdict
     try {
       verdict = await this.deps.review({
@@ -726,7 +996,7 @@ export class GroupScheduler {
     if (verdict.verdict === 'reject') {
       this.system(
         run,
-        `主持人没有采纳「${name}」的安排${verdict.note ? `：${verdict.note}` : '。'}`,
+        `${reviewer === null ? '群聊协调' : '主持人'}没有采纳「${name}」的安排${verdict.note ? `：${verdict.note}` : '。'}`,
       )
       return
     }
@@ -769,7 +1039,8 @@ export class GroupScheduler {
       !task.confirmed
     ) {
       const assigner = task.chain?.at(-1)
-      if (assigner === undefined) task = { ...task, confirmed: true }
+      if (assigner === undefined && task.confirmed === undefined)
+        task = { ...task, confirmed: true }
       else {
         this.deps.groups.append(run.groupId, 'group/task', {
           ...task,
@@ -777,7 +1048,7 @@ export class GroupScheduler {
         })
         this.system(
           run,
-          `「${this.name(state, assigner)}」想让「${target.name}」在独立的工作树里改代码：${task.title}。需要你确认：同意后它才开始，改动先给你看再合进项目。`,
+          `「${this.name(state, assigner ?? 'system')}」想让「${target.name}」在独立的工作树里改代码：${task.title}。需要你确认：同意后它才开始，改动先给你看再合进项目。`,
         )
         return
       }
@@ -877,7 +1148,8 @@ export class GroupScheduler {
       .state(run.groupId)
       .messages.slice(before)
       .filter((m) => m.from === member)
-    const reply = result.text.trim()
+    const reply = await this.publicText(run, member, result.text.trim())
+    if (run.stopped) return null
     if (reply && !opts.batchId) {
       const roster = groups.roster(groups.state(run.groupId))
       const ask =
@@ -901,12 +1173,36 @@ export class GroupScheduler {
       )
       if (reason !== 'summary') this.outsiders(run, member, reply, roster)
     }
-    this.limitNotice(run, member, result)
+    await this.limitNotice(run, member, result)
     // group_close from any speech but a blind answer (batch closes after
     // the reveal): the summary goes after its reply, and the turn ends.
     if (context.close !== undefined && !opts.batchId)
       this.closeTurn(run, member, context.close)
     return { context, produced, reply, result }
+  }
+
+  private async publicText(
+    run: Run,
+    member: ContactId,
+    text: string,
+  ): Promise<string> {
+    if (text.length <= PUBLIC_REPLY_LIMIT) return text
+    let concise = ''
+    try {
+      concise = (
+        (await this.deps.shorten?.({
+          groupId: run.groupId,
+          member,
+          text,
+          signal: run.controller.signal,
+        })) ?? ''
+      ).trim()
+    } catch {
+      // A failed summary must never expose the raw execution transcript.
+    }
+    return concise && concise.length <= PUBLIC_REPLY_LIMIT
+      ? concise
+      : INTERNAL_REPLY_NOTE
   }
 
   /** The moderator's group_close: its summary, then nobody else speaks. */
@@ -995,6 +1291,7 @@ export class GroupScheduler {
     // GRP-15: the moderator may end the turn from any speech. GRP-18: it is
     // a choice, and closing drops whoever is still queued — say who.
     if (
+      state.settings.coordination === 'member' &&
       state.moderator === member &&
       !['moderator-plan', 'intervene', 'summary', 'batch'].includes(reason)
     ) {
@@ -1043,11 +1340,13 @@ export class GroupScheduler {
         return '请独立作答：你看不到其他人的回答，所有回答会一起揭晓。'
       case 'summary':
         return '这一轮讨论结束了。请作为主持人写结论：定下了什么、还有什么分歧、下一步做什么。'
+      case 'clarify':
+        return `信息不足，需要向用户澄清：${opts.note ?? ''}。必须调用 ask_user_question 提出这个问题，提供合理选项并允许用户自己填写；不要只用正文提问。用户回答后用一句话确认理解。`
       case 'task': {
         const task = opts.task!
         const assigner = task.chain?.at(-1)
         return [
-          `${assigner ? `「${this.name(state, assigner)}」` : '用户'}交办给你一项任务：${task.title}`,
+          `${assigner ? `「${this.name(state, assigner ?? 'system')}」` : '用户'}交办给你一项任务：${task.title}`,
           `交付物：${task.deliverable}`,
           ...(task.basis ? [`依据：${task.basis}`] : []),
           `权限：${ACCESS_LABELS[task.access]}`,
@@ -1147,6 +1446,17 @@ export class GroupScheduler {
     run.intervened = true
     const [a, b] = stall.pair.map((id) => this.name(state, id))
     const note = `「${a}」和「${b}」来回没有新进展，请换人或收尾。`
+    if (state.settings.coordination === 'builtin') {
+      run.queue = [
+        {
+          kind: 'coordinate',
+          reason: 'intervene',
+          source: state.messages.at(-1)!.id,
+          note,
+        },
+      ]
+      return
+    }
     const moderator = state.moderator
     if (
       moderator &&
@@ -1182,7 +1492,13 @@ export class GroupScheduler {
       Partial<
         Pick<
           GroupMessage,
-          'batchId' | 'replyTo' | 'task' | 'answerMode' | 'delegation'
+          | 'batchId'
+          | 'replyTo'
+          | 'task'
+          | 'answerMode'
+          | 'delegation'
+          | 'coordination'
+          | 'interactionId'
         >
       >,
   ): GroupMessage {
@@ -1235,17 +1551,21 @@ export class GroupScheduler {
   }
 
   /** A speech stopped by its own limit says why; the turn goes on. */
-  private limitNotice(run: Run, member: ContactId, result: SpeakResult): void {
+  private async limitNotice(
+    run: Run,
+    member: ContactId,
+    result: SpeakResult,
+  ): Promise<void> {
     const name = this.name(this.deps.groups.state(run.groupId), member)
-    if (result.outcome === 'step-limit')
-      this.system(run, `${name} 这次发言达到工具调用上限，已停下。`)
-    else if (result.outcome === 'cost-cap')
-      this.system(run, `${name} 这次发言达到费用上限，已停下。`)
-    else if (result.outcome === 'error')
-      this.system(
-        run,
-        `${name} 这次发言失败${result.detail ? `：${result.detail}` : '。'}`,
-      )
+    const text =
+      result.outcome === 'step-limit'
+        ? `${name} 这次发言达到工具调用上限，已停下。`
+        : result.outcome === 'cost-cap'
+          ? `${name} 这次发言达到费用上限，已停下。`
+          : result.outcome === 'error'
+            ? `${name} 这次发言失败${result.detail ? `：${result.detail}` : '。'}`
+            : ''
+    if (text) await this.coordinationSay(run, { text })
   }
 
   private turn(

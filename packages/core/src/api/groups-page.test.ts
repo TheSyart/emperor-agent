@@ -51,7 +51,7 @@ describe('设置 › 群聊 (GRP-08, D14)', () => {
     ).toEqual({ collaboration: 'autonomous', loopGuard: true })
   })
 
-  it('starts a new group from the defaults, keeps an old one as it was, and survives a restart', async () => {
+  it('keeps non-collaboration defaults across restart while every group stays autonomous', async () => {
     const root = tmp('emperor-groups-defaults-')
     const stateRoot = join(root, 'home')
     const first = await open({ stateRoot })
@@ -75,7 +75,7 @@ describe('设置 › 群聊 (GRP-08, D14)', () => {
       { title: '新群', members: [rev] },
     ])
     expect(fresh.settings).toMatchObject({
-      collaboration: 'moderated',
+      collaboration: 'autonomous',
       loopGuard: false,
     })
     expect(
@@ -167,7 +167,9 @@ describe('the group page’s live view (GRP-08)', () => {
     const group = await invokeCoreOperation(fixture.api, 'groups.create', [
       { title: '登录页', members: [rev] },
     ])
-    const memberSessionId = group.members[0]!.memberSessionId!
+    const memberSessionId = group.members.find(
+      (member: { id: string }) => member.id === rev,
+    )!.memberSessionId!
     await invokeCoreOperation(fixture.api, 'groups.send', [
       { id: group.id, way: 'mention', text: '@审稿人 看看' },
     ])
@@ -196,6 +198,7 @@ describe('the group page’s live view (GRP-08)', () => {
     // GRP-12: the answer stays in the group log, for the user only.
     expect(history.messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看'],
+      ['ct-emperor', '已请审稿人回答。'],
       ['system', '你回答了 审稿人 的提问：登录'],
       [rev, '好，先看登录。'],
     ])

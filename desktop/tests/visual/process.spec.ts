@@ -407,3 +407,57 @@ test('the turn’s copy and 用时 appear only while the turn is hovered', async
   await page.locator('.assistant-step').last().hover()
   await expect.poll(opacity).toBe('1')
 })
+
+// CG-CT-01: a creator draft is a decision card in the real ChatTimeline,
+// not an implementation detail folded into the tool process. Confirmation
+// is deliberately not clicked here; the gallery has no contact write bridge.
+for (const theme of ['light', 'dark'] as const) {
+  test(`CG-CT-01 · the unsaved role draft is a prominent decision card (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, 'role-creator', { theme, height: 1500 })
+    const card = page.locator('[data-role-draft-card]')
+    await expect(card).toBeVisible()
+    await expect(card).toHaveAttribute('data-action', 'create')
+    await expect(card).toContainText('草稿尚未保存')
+    await expect(card).toContainText('证据研究员')
+    await expect(card).toContainText('以后新增的工具不会自动授权')
+    await expect(card.getByRole('button', { name: '先试用' })).toBeVisible()
+    await expect(card.getByRole('button', { name: '继续调整' })).toBeVisible()
+    await expect(card.getByRole('button', { name: '确认创建' })).toBeVisible()
+    await expect(group(page)).toHaveCount(0)
+    expect(
+      await card.evaluate(
+        (element) => element.closest('[data-process-body]') === null,
+      ),
+    ).toBe(true)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true)
+    await shot(page, `role-creator-draft-${theme}`)
+  })
+}
+
+test('CG-CT-01 · the role draft and its actions fit a narrow window', async ({
+  page,
+}) => {
+  await open(page, 'role-creator', {
+    theme: 'dark',
+    width: 390,
+    height: 1100,
+  })
+  const card = page.locator('[data-role-draft-card]')
+  await expect(card).toBeVisible()
+  await expect(card.getByRole('button', { name: '确认创建' })).toBeVisible()
+  const box = (await card.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(390)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+  await shot(page, 'role-creator-draft-narrow-dark')
+})

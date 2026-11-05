@@ -18,6 +18,7 @@ import {
 } from '../harness/tools/definition'
 import { resolveName } from './envelope'
 import type { GroupScheduler } from './scheduler'
+import type { GroupWorkScheduler } from './work-scheduler'
 import type { ContactId, GroupMember } from './types'
 
 export const GROUP_TOOL_NAMES = [
@@ -26,6 +27,7 @@ export const GROUP_TOOL_NAMES = [
   'group_pass',
   'group_next',
   'group_close',
+  'group_task_submit',
 ] as const
 export const MODERATOR_TOOL_NAMES: readonly string[] = [
   'group_next',
@@ -43,6 +45,8 @@ export interface GroupToolHost {
     GroupScheduler,
     'whisper' | 'assign' | 'pass' | 'next' | 'close'
   >
+  /** CG-03: candidate submission is visible only during an active work run. */
+  work?: Pick<GroupWorkScheduler, 'isWorking' | 'submit'>
 }
 
 export interface GroupToolRegistration {
@@ -139,6 +143,27 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
           'group_files: may write the group files; readonly: reads only; ' +
             'isolated_worktree: changes code in a worktree of its own.',
         ),
+      idempotencyKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Stable delivery key; a replay must reuse the original task.',
+        ),
+      acceptance: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Checks required before the result can be accepted.'),
+      dependsOn: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Task ids in this group that must be accepted first.'),
+      writeScopes: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Declared write boundaries; Core still enforces the member root.',
+        ),
     }),
     execute: async (args, context) => {
       const { groupId, contactId } = speaker(context.agent)
@@ -150,6 +175,12 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
           deliverable: args.deliverable,
           ...(args.basis ? { basis: args.basis } : {}),
           access: args.access,
+          ...(args.idempotencyKey
+            ? { idempotencyKey: args.idempotencyKey }
+            : {}),
+          ...(args.acceptance ? { acceptance: args.acceptance } : {}),
+          ...(args.dependsOn ? { dependsOn: args.dependsOn } : {}),
+          ...(args.writeScopes ? { writeScopes: args.writeScopes } : {}),
         }),
       )
       return `已交办给「${nameOf(groupId, to)}」：${task.title}`
@@ -216,11 +247,49 @@ export function createGroupTools(host: GroupToolHost): GroupToolRegistration[] {
     },
   })
 
+  const submit = defineTool({
+    name: 'group_task_submit',
+    description:
+      'During your current background task only: publish a file from your own member workspace as a candidate and attach real check evidence. A normal reply never changes task state.',
+    input: z.object({
+      sourcePath: z
+        .string()
+        .min(1)
+        .describe(
+          'A file in your own member workspace, absolute or relative to it.',
+        ),
+      checks: z
+        .array(
+          z.object({
+            evidenceRef: z
+              .string()
+              .min(1)
+              .describe(
+                'The real tool result, test output or other check evidence.',
+              ),
+            passed: z.boolean(),
+          }),
+        )
+        .max(100)
+        .optional(),
+    }),
+    execute: async (args, context) => {
+      if (!host.work)
+        throw new ToolError('后台任务服务没有启动', 'GROUP_REFUSED')
+      const task = run(() => host.work!.submit(context.agent, args))
+      return `已提交候选成果：${task.artifacts?.at(-1)?.ref ?? task.taskId}`
+    },
+  })
+
   return [
     { definition: whisper, visible: member },
     { definition: assign, visible: member },
     { definition: pass, visible: member },
     { definition: next, visible: moderator },
     { definition: close, visible: moderator },
+    {
+      definition: submit,
+      visible: (agent) => host.work?.isWorking(agent) === true,
+    },
   ]
 }

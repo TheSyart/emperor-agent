@@ -4,12 +4,12 @@
  * a 600-weight colored title, the secondary message, and an optional mono
  * code on the right. Shared by turn error / max-tokens / cost cap rows.
  *
- * Props: state ('error' | 'warn'), title, message, code?.
+ * Props: state ('error' | 'warn' | 'running'), title, message, code?.
  */
 import Dot from '../../ui/Dot.vue'
 
 defineProps<{
-  state: 'error' | 'warn'
+  state: 'error' | 'warn' | 'running'
   title: string
   message: string
   code?: string
@@ -59,6 +59,10 @@ defineProps<{
 
 [data-state='warn'] .title {
   color: rgb(var(--warn));
+}
+
+[data-state='running'] .title {
+  color: rgb(var(--info));
 }
 
 .message {

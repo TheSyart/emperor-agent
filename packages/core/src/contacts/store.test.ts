@@ -60,7 +60,7 @@ function contactsFile(stateRoot: string) {
 }
 
 describe('builtin contacts (card test 1)', () => {
-  it('creates Emperor, Claude Code and Codex on first start', async () => {
+  it('creates the four fixed contacts on first start', async () => {
     const { store, make, stateRoot } = setup()
     const listing = await store.list()
 
@@ -69,7 +69,7 @@ describe('builtin contacts (card test 1)', () => {
       ...BUILTIN_CONTACT_IDS,
     ])
     expect(listing.contacts.filter((contact) => contact.builtin)).toHaveLength(
-      3,
+      4,
     )
     const file = JSON.parse(readFileSync(contactsFile(stateRoot), 'utf8'))
     expect(file.schemaVersion).toBe(3)
@@ -107,7 +107,7 @@ describe('builtin contacts (card test 1)', () => {
       })
     }
 
-    // A second store over the same home reads the same three.
+    // A second store over the same home reads the same four.
     expect((await make().list()).contacts).toEqual(listing.contacts)
   })
 })
@@ -574,7 +574,7 @@ describe('versions (card tests 7, 8)', () => {
 })
 
 describe('a corrupt contacts file (card test 9)', () => {
-  it('backs the file up and goes read-only with the three builtins', async () => {
+  it('backs the file up and goes read-only with the shipped builtins', async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-contacts-bad-'))
     mkdirSync(join(stateRoot, 'contacts'), { recursive: true })
     writeFileSync(contactsFile(stateRoot), '{"schemaVersion": 2, "contacts": [')
@@ -615,7 +615,7 @@ describe('a corrupt contacts file (card test 9)', () => {
       reason: 'newer',
       backupPath: null,
     })
-    expect(listing.contacts).toHaveLength(3)
+    expect(listing.contacts).toHaveLength(4)
     await expect(store.create({ name: '审稿人' })).rejects.toMatchObject({
       code: 'contacts_read_only',
     })
@@ -633,7 +633,7 @@ describe('a corrupt contacts file (card test 9)', () => {
 
     const listing = await make().list()
     expect(listing.readOnly?.reason).toBe('corrupt')
-    expect(listing.contacts).toHaveLength(3)
+    expect(listing.contacts).toHaveLength(4)
   })
 })
 
@@ -700,8 +700,27 @@ describe('duplicate, delete and change notifications (card test 12)', () => {
     ])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const listed = (await make().list()).contacts
-    expect(listed).toHaveLength(3 + 8 + 1)
+    expect(listed).toHaveLength(BUILTIN_CONTACT_IDS.length + 8 + 1)
     const lowered = listed.map((contact) => contact.name.toLowerCase())
     expect(new Set(lowered).size).toBe(lowered.length)
+  })
+})
+
+describe('the fixed role creator (CG-CT-01)', () => {
+  it('ships one fixed creator but refuses every edit to itself', async () => {
+    const { store } = setup()
+    const creator = await store.get('ct-role-creator')
+    expect(creator).toMatchObject({
+      name: '角色创建师',
+      builtin: true,
+      kind: 'local',
+      memory: { enabled: false },
+      skills: [],
+      mcp: [],
+    })
+    await expect(
+      store.update(creator.id, { intro: '改写系统角色' }),
+    ).rejects.toThrow('角色创建师不能修改')
+    await expect(store.delete(creator.id)).rejects.toThrow('不能删除')
   })
 })

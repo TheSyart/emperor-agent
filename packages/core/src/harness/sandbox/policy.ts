@@ -45,6 +45,8 @@ export interface SandboxExecutionPolicy {
   /** Unforgeable host nonce carried by inherited macOS Seatbelt policy. */
   processBoundaryTag?: string
   readOnlyRoots?: readonly string[]
+  /** Host-only private group directories: no read or write in any mode. */
+  deniedRoots?: readonly string[]
   /**
    * Host-only: single existing files an external runtime may rewrite in place
    * (the user's Codex auth.json behind the isolated home's link, AGT-03).
@@ -195,12 +197,16 @@ export interface SandboxPolicyOptions {
    * contact's knowledge outside the workspace, GRP-03). Empty: none.
    */
   readOnlyRoots?: (session: Session) => readonly string[]
+  /** Other group members' private directories, resolved by the host. */
+  deniedRoots?: (session: Session) => readonly string[]
 }
 
 export class SandboxPolicyService {
   readonly defaultMode: SandboxMode
   readonly workspaceRoot: string
   private readonly readOnlyRootsOf:
+    ((session: Session) => readonly string[]) | undefined
+  private readonly deniedRootsOf:
     ((session: Session) => readonly string[]) | undefined
 
   constructor(options: SandboxPolicyOptions) {
@@ -209,6 +215,7 @@ export class SandboxPolicyService {
       canonicalPath(options.workspaceRoot ?? process.cwd()),
     )
     this.readOnlyRootsOf = options.readOnlyRoots
+    this.deniedRootsOf = options.deniedRoots
   }
 
   /** Contribute the `sandbox:policy` runtime context (order 110). */
@@ -233,6 +240,8 @@ export class SandboxPolicyService {
     const { session } = request
     const readOnly =
       session === undefined ? [] : (this.readOnlyRootsOf?.(session) ?? [])
+    const denied =
+      session === undefined ? [] : (this.deniedRootsOf?.(session) ?? [])
     return {
       mode:
         request.mode ??
@@ -243,6 +252,7 @@ export class SandboxPolicyService {
       ),
       ...(session === undefined ? {} : { sessionId: session.id }),
       ...(readOnly.length === 0 ? {} : { readOnlyRoots: [...readOnly] }),
+      ...(denied.length === 0 ? {} : { deniedRoots: [...denied] }),
     }
   }
 

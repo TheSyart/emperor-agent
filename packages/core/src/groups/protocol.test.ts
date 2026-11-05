@@ -419,7 +419,7 @@ describe('groupCharter', () => {
     expect(groupCharter(state, ROSTER, 'ct-arch')).not.toMatch(/group_close/)
   })
 
-  it('describes the collaboration mode in force', () => {
+  it('CG-01: describes autonomous collaboration even for legacy moderated logs', () => {
     const autonomous = groupCharter(
       foldGroupEvents([created()]),
       ROSTER,
@@ -440,7 +440,8 @@ describe('groupCharter', () => {
       ROSTER,
       'ct-rev',
     )
-    expect(moderated).toMatch(/主持人审核/)
+    expect(moderated).toMatch(/自主/)
+    expect(moderated).not.toMatch(/主持人审核/)
   })
 })
 

@@ -106,7 +106,7 @@ async function install(page: Page) {
         id: 'ct-emperor',
         name: 'Emperor',
         avatar: { kind: 'mascot', pose: 'crown-head' },
-        intro: '主持人 · 通才',
+        intro: '通才',
         builtin: true,
         capabilities: {
           model: 'inherit',

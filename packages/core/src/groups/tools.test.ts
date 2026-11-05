@@ -68,7 +68,7 @@ function setup(
   const view = groups.service.create({
     title: '评审',
     members: ['ct-emperor', 'ct-arch', 'ct-rev'],
-    settings: { summarizeAtEnd: false },
+    settings: { coordination: 'member', summarizeAtEnd: false },
   })
   const sessionOf = (contact: string) =>
     groups.service.get(view.id).members.find((m) => m.id === contact)!
@@ -91,7 +91,7 @@ function setup(
 }
 
 describe('group tools', () => {
-  it('registers the five tools', () => {
+  it('registers the six tools', () => {
     const { tools } = setup()
     expect(tools.map((t) => t.definition.name)).toEqual([...GROUP_TOOL_NAMES])
   })
@@ -108,7 +108,9 @@ describe('group tools', () => {
       'group_assign',
       'group_pass',
     ])
-    expect(visibleTo(moderator)).toEqual([...GROUP_TOOL_NAMES])
+    expect(visibleTo(moderator)).toEqual(
+      GROUP_TOOL_NAMES.filter((name) => name !== 'group_task_submit'),
+    )
     expect(visibleTo(child)).toEqual([])
     expect(visibleTo({ id: 'some-chat' } as Agent)).toEqual([])
     expect(visibleTo(undefined)).toEqual([])
@@ -134,6 +136,35 @@ describe('group tools', () => {
       .messages.filter((m) => m.from === 'ct-arch')
       .map((m) => m.kind)
     expect(kinds).toEqual(['say', 'task', 'pass'])
+  })
+
+  it('CG-02: preserves an extended assignment and leaves it for the work queue', async () => {
+    const { groups, view, scheduler } = setup(async (member, use) => {
+      if (member !== 'ct-arch') return
+      await use('group_assign', {
+        to: '审稿人',
+        title: '独立审查',
+        deliverable: '审查报告',
+        access: 'readonly',
+        acceptance: ['引用可复核'],
+        dependsOn: [],
+        writeScopes: ['members/ct-rev'],
+        idempotencyKey: 'member-task-1',
+      })
+    })
+    const { message, plan } = groups.service.send(view.id, {
+      way: 'mention',
+      text: '@架构师 请安排审查',
+    })
+    await scheduler.start(view.id, message, plan)
+    const tasks = [...groups.service.state(view.id).tasks.values()]
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      state: 'queued',
+      acceptance: ['引用可复核'],
+      writeScopes: ['members/ct-rev'],
+      idempotencyKey: 'member-task-1',
+    })
   })
 
   it('refuses a group tool outside a speech', async () => {

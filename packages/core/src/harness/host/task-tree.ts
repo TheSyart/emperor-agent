@@ -336,7 +336,7 @@ export class TaskTree implements SubagentBudget {
       reason: { kind: 'budget', limit: 'steps', maxSteps },
       notice: contextMessage(
         TASK_BUDGET_PRODUCER,
-        `This turn stopped before step ${maxSteps + 1}: one turn takes at most ${maxSteps} steps (Settings › Advanced › Task budget). The work may be unfinished; check where it stands before you go on, and go on only when the user asks.`,
+        `This turn stopped before step ${maxSteps + 1}: one turn takes at most ${maxSteps} steps (Settings › Advanced › Task budget). The work may be unfinished. An active goal can continue automatically from this checkpoint; otherwise wait for the user. Before any further side effect, inspect the recorded state and do not repeat completed work.`,
         { form: 'notice', summary: `本轮已达 ${maxSteps} 步上限，已停止` },
       ),
     }

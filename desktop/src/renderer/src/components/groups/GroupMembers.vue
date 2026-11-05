@@ -4,9 +4,9 @@
  * 「成员 N」 and 「邀请」, then one row per member — avatar with a status
  * dot, name and status (空闲, 发言中, 执行中, 排队, 等你回答, 出错; 主持人 and
  * external members say so while idle) — and at the bottom what 不设本轮额度
- * means. A status change is read out politely: the member and the status,
+ * progress. A status change is read out politely: the member and the status,
  * never what was said. Past 8 members the list scrolls. A row opens the
- * contact's profile; a deleted contact is greyed out.
+ * read-only activity from this group; a deleted contact is greyed out.
  *
  * Props: members; contacts (avatars); moderator; statuses
  * (group_member_status); tools (running a tool now); pending (a question
@@ -23,12 +23,17 @@ import Button from '../ui/Button.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import {
+  independentProgress,
   memberStatusLine,
+  TASK_STATE_LABELS,
+  type GroupHistoryMessage,
   type GroupMemberView,
+  type GroupTask,
   type MemberLiveStatus,
   type MemberTone,
 } from './groupModel'
 import { GROUP_MEMBER_LIMIT } from './newGroupModel'
+import GroupMemberActivity from './GroupMemberActivity.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -41,9 +46,12 @@ const props = withDefaults(
       Record<string, Pick<ControlInteraction, 'id' | 'kind' | 'status'> | null>
     >
     tasks: readonly string[]
+    taskList?: readonly GroupTask[]
+    messages?: readonly GroupHistoryMessage[]
+    groupTitle?: string
     addable?: readonly Contact[]
   }>(),
-  { addable: () => [] },
+  { addable: () => [], taskList: () => [], messages: () => [], groupTitle: '' },
 )
 const emit = defineEmits<{
   invite: [contactId: string]
@@ -88,6 +96,53 @@ watch(
   },
 )
 
+const selected = ref<string | null>(null)
+const selectedMember = computed(
+  () => props.members.find((member) => member.id === selected.value) ?? null,
+)
+const independent = computed(() => independentProgress(props.messages))
+watch(
+  () => props.members.map((member) => member.id).join('\n'),
+  () => {
+    if (selected.value && !selectedMember.value) selected.value = null
+  },
+)
+function openMember(contactId: string): void {
+  selected.value = contactId
+  emit('open', contactId)
+}
+
+defineExpose({ openMember })
+function taskState(task: GroupTask): string {
+  return TASK_STATE_LABELS[task.state]
+}
+function taskSteps(
+  task: GroupTask,
+): Array<{ text: string; tone: 'done' | 'current' }> {
+  if (task.state === 'queued') return [{ text: '等待接单', tone: 'current' }]
+  if (task.state === 'failed')
+    return [
+      {
+        text: `没有完成 · ${task.problem?.reason ?? '执行失败'}`,
+        tone: 'current',
+      },
+    ]
+  if (task.state === 'cancelled') return [{ text: '已取消', tone: 'current' }]
+  const steps: Array<{ text: string; tone: 'done' | 'current' }> = [
+    { text: '已接单', tone: 'done' },
+  ]
+  if (task.state === 'running')
+    steps.push({ text: '执行与检查中', tone: 'current' })
+  else {
+    steps.push({ text: '执行与检查已完成', tone: 'done' })
+    steps.push({
+      text: '公开成果已发布',
+      tone: task.state === 'done' ? 'done' : 'current',
+    })
+  }
+  return steps
+}
+
 const inviteAnchor = ref<HTMLElement | null>(null)
 const inviting = ref(false)
 const full = computed(() => props.members.length >= GROUP_MEMBER_LIMIT)
@@ -106,78 +161,137 @@ const TONE_DOT: Partial<Record<MemberTone, true>> = {
 </script>
 
 <template>
-  <aside class="members" aria-label="成员" data-group-members>
-    <div class="head">
-      <h2 class="title" data-member-count>成员 {{ members.length }}</h2>
-      <Button
-        size="sm"
-        data-invite
-        :disabled="full || !addable.length"
-        :title="full ? `一个群最多 ${GROUP_MEMBER_LIMIT} 位成员` : undefined"
-        @click="openInvite"
-        >+ 邀请</Button
-      >
-    </div>
-    <Menu
-      v-model:open="inviting"
-      :anchor="inviteAnchor"
-      placement="bottom"
-      label="邀请进群"
-      dense
-    >
-      <MenuItem
-        v-for="contact in addable"
-        :key="contact.id"
-        :description="contact.intro || undefined"
-        @select="emit('invite', contact.id)"
-      >
-        <template #icon>
-          <Avatar
-            v-bind="contactAvatarProps(contact.avatar, contact.name)"
-            :size="16"
-          />
-        </template>
-        {{ contact.name }}
-      </MenuItem>
-    </Menu>
-    <div
-      class="list"
-      data-member-list
-      :data-scroll="members.length > SCROLL_AFTER ? 'true' : undefined"
-    >
-      <div
-        v-for="row in rows"
-        :key="row.member.id"
-        class="row"
-        role="button"
-        tabindex="0"
-        :data-member-row="row.member.id"
-        :data-missing="row.member.missing || undefined"
-        :title="row.member.intro || row.member.name"
-        @click="emit('open', row.member.id)"
-        @keydown.enter.self="emit('open', row.member.id)"
-        @keydown.space.self.prevent="emit('open', row.member.id)"
-      >
-        <span class="face" :data-tone="row.line.tone">
-          <Avatar v-bind="row.avatar" :size="28" />
-          <span v-if="TONE_DOT[row.line.tone]" class="dot" aria-hidden="true" />
-        </span>
-        <span class="two">
-          <span class="name">{{
-            row.member.missing ? '已删除的联系人' : row.member.name
-          }}</span>
-          <span class="status" data-status :data-tone="row.line.tone">{{
-            row.line.text
-          }}</span>
-        </span>
+  <aside class="members" aria-label="成员与协作进展" data-group-members>
+    <GroupMemberActivity
+      v-if="selectedMember"
+      :member="selectedMember"
+      :contact="contacts.find((contact) => contact.id === selectedMember!.id)"
+      :group-title="groupTitle"
+      @back="selected = null"
+    />
+    <template v-else>
+      <div class="head">
+        <h2 class="title" data-member-count>成员 {{ members.length }}</h2>
+        <Button
+          size="sm"
+          data-invite
+          :disabled="full || !addable.length"
+          :title="full ? `一个群最多 ${GROUP_MEMBER_LIMIT} 位成员` : undefined"
+          @click="openInvite"
+          >+ 邀请</Button
+        >
       </div>
-    </div>
-    <p class="notice">
-      <b>不设本轮额度</b>
-      <span
-        >不限发言次数和费用，只显示花了多少。停不下来时：点「停止」，或者等主持人发现「来回没有新进展」后收尾。</span
+      <Menu
+        v-model:open="inviting"
+        :anchor="inviteAnchor"
+        placement="bottom"
+        label="邀请进群"
+        dense
       >
-    </p>
+        <MenuItem
+          v-for="contact in addable"
+          :key="contact.id"
+          :description="contact.intro || undefined"
+          @select="emit('invite', contact.id)"
+        >
+          <template #icon
+            ><Avatar
+              v-bind="contactAvatarProps(contact.avatar, contact.name)"
+              :size="16"
+          /></template>
+          {{ contact.name }}
+        </MenuItem>
+      </Menu>
+      <div
+        class="list"
+        data-member-list
+        :data-scroll="members.length > SCROLL_AFTER ? 'true' : undefined"
+      >
+        <div
+          v-for="row in rows"
+          :key="row.member.id"
+          class="row"
+          role="button"
+          tabindex="0"
+          :data-member-row="row.member.id"
+          :data-missing="row.member.missing || undefined"
+          :title="row.member.intro || row.member.name"
+          @click="openMember(row.member.id)"
+          @keydown.enter.self="openMember(row.member.id)"
+          @keydown.space.self.prevent="openMember(row.member.id)"
+        >
+          <span class="face" :data-tone="row.line.tone"
+            ><Avatar v-bind="row.avatar" :size="28" /><span
+              v-if="TONE_DOT[row.line.tone]"
+              class="dot"
+              aria-hidden="true"
+          /></span>
+          <span class="two"
+            ><span class="name">{{
+              row.member.missing ? '已删除的联系人' : row.member.name
+            }}</span
+            ><span class="status" data-status :data-tone="row.line.tone">{{
+              row.line.text
+            }}</span></span
+          >
+        </div>
+      </div>
+      <section
+        v-if="taskList.length"
+        class="progress-section"
+        data-task-progress
+      >
+        <div class="section-label">任务进度</div>
+        <div
+          v-for="task in taskList"
+          :key="task.taskId"
+          class="task-progress"
+          :data-task-id="task.taskId"
+        >
+          <div class="task-title">
+            <b>{{ task.title }}</b
+            ><span>{{ taskState(task) }}</span>
+          </div>
+          <p class="owner">
+            {{
+              members.find((member) => member.id === task.to)?.name ?? task.to
+            }}负责
+          </p>
+          <ol class="steps">
+            <li
+              v-for="step in taskSteps(task)"
+              :key="step.text"
+              :data-tone="step.tone"
+            >
+              {{ step.text }}
+            </li>
+          </ol>
+          <p v-if="task.state === 'done' && task.checks?.length" class="checks">
+            {{ task.checks.length }} 项检查通过 · 已自动完成
+          </p>
+        </div>
+      </section>
+      <section
+        v-for="batch in independent"
+        :key="batch.batchId"
+        class="progress-section"
+        data-independent-progress
+      >
+        <div class="section-label">
+          发言进度
+          <span
+            >{{ batch.answers.length }}/{{ batch.members.length }} 已答</span
+          >
+        </div>
+        <p class="independent-status">
+          {{
+            batch.revealed
+              ? '全部答完，已一起显示'
+              : '答完后一起显示，答案不会提前出现'
+          }}
+        </p>
+      </section>
+    </template>
     <div class="live" aria-live="polite" data-member-announcer>
       {{ announcement }}
     </div>
@@ -214,7 +328,7 @@ const TONE_DOT: Partial<Record<MemberTone, true>> = {
 
 .list {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: var(--space-0-5);
   min-height: 0;
@@ -327,21 +441,83 @@ const TONE_DOT: Partial<Record<MemberTone, true>> = {
   color: rgb(var(--error));
 }
 
-.notice {
+.progress-section {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-1) 0;
+  box-shadow: inset 0 0.5px 0 var(--hairline);
+}
+.section-label {
+  display: flex;
+  justify-content: space-between;
+  color: rgb(var(--text-3));
+  font-size: var(--fs-xxs);
+}
+.task-progress {
+  display: grid;
+  gap: var(--space-1-5);
+}
+.task-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.task-title b {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-medium);
+}
+.task-title span {
+  margin-left: auto;
+  flex: none;
+  color: rgb(var(--info));
+  font-size: var(--fs-xxs);
+}
+.owner,
+.checks,
+.independent-status {
+  margin: 0;
+  color: rgb(var(--text-3));
+  font-size: var(--fs-xxs);
+}
+.steps {
   display: grid;
   gap: var(--space-1);
-  margin: var(--space-2) 0 0;
-  padding: var(--space-2-5);
-  border-radius: var(--r-sm);
-  background: rgb(var(--surface-raised));
-  color: rgb(var(--text-2));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-
-.notice b {
+.steps li {
+  position: relative;
+  padding-left: var(--space-3);
+  color: rgb(var(--text-3));
+  font-size: var(--fs-xxs);
+}
+.steps li:before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: var(--space-1-5);
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: rgb(var(--text-4));
+}
+.steps li[data-tone='done']:before {
+  background: rgb(var(--ok));
+}
+.steps li[data-tone='current'] {
   color: rgb(var(--text-1));
-  font-weight: var(--weight-medium);
+}
+.steps li[data-tone='current']:before {
+  background: rgb(var(--info));
+}
+.checks {
+  color: rgb(var(--ok));
+}
+.independent-status {
+  line-height: var(--lh-s);
 }
 
 .live {

@@ -172,7 +172,8 @@ export class ContactExperienceCollector {
             .map((item) => `- ${item.ref}（${item.kind}）`)
             .join('\n') || '（没有可引用的依据）',
         ].join('\n'),
-        maxTokens: 800,
+        // Reasoning models spend part of this budget before emitting JSON.
+        maxTokens: 1600,
         signal: new AbortController().signal,
       })
     } catch (error) {

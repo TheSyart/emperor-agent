@@ -27,9 +27,11 @@ import { core } from '../../api/http'
 import type { ControlInteraction } from '../../types'
 import {
   turnRunning,
+  type GroupArtifactFile,
   type GroupAsk,
   type GroupHistoryMessage,
   type GroupSendInput,
+  type GroupTask,
   type GroupTurnView,
   type GroupView,
   type MemberLiveStatus,
@@ -67,6 +69,7 @@ interface RoomEvent {
 export interface GroupStreamView {
   contactId: string
   text: string
+  startedAt: number
 }
 
 export interface GroupRoomOptions {
@@ -76,6 +79,8 @@ export interface GroupRoomOptions {
 export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   const group = ref<GroupView | null>(null)
   const messages = ref<GroupHistoryMessage[]>([])
+  const tasks = ref<GroupTask[]>([])
+  const artifacts = ref<GroupArtifactFile[]>([])
   const gone = ref(false)
   const loadError = ref('')
   const loaded = ref(false)
@@ -148,16 +153,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     publishStreams(true)
   }
 
-  /** A tool call ends the prose so far; only the answer after it is shown. */
-  function clearStreamText(contactId: string): void {
-    if (statuses.value[contactId] !== 'thinking') return
-    const draft = buffers.get(contactId)
-    if (!draft) return
-    draft.text = ''
-    draft.startedAt = Date.now()
-    publishStreams(true)
-  }
-
   function dropStream(contactId: string): void {
     if (buffers.delete(contactId)) publishStreams(true)
   }
@@ -221,13 +216,17 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
 
   async function readGroup(id: string, run: number): Promise<boolean> {
     try {
-      const [view, history] = await Promise.all([
+      const [view, history, board, files] = await Promise.all([
         core('groups.get', { id }),
         core('groups.history', { id, limit: 500 }),
+        core('groups.tasks', { id }),
+        core('groups.files.list', { id }),
       ])
       if (run !== generation) return false
       group.value = view
       messages.value = history.messages
+      tasks.value = board
+      artifacts.value = files.files
       gone.value = false
       loadError.value = ''
       return true
@@ -235,6 +234,8 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
       if (run !== generation) return false
       group.value = null
       messages.value = []
+      tasks.value = []
+      artifacts.value = []
       if ((error as { code?: string }).code === 'group_not_found')
         gone.value = true
       else
@@ -275,6 +276,8 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   async function open(id: string): Promise<void> {
     const run = ++generation
     loaded.value = false
+    tasks.value = []
+    artifacts.value = []
     statuses.value = {}
     tools.value = {}
     pending.value = {}
@@ -360,7 +363,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     const name = event.event ?? ''
     if (name === 'tool_call') {
       tools.value = { ...tools.value, [contactId]: true }
-      clearStreamText(contactId)
     } else if (TOOL_ENDS.has(name))
       tools.value = { ...tools.value, [contactId]: false }
     else if (name === 'message_delta') addDelta(contactId, event.delta)
@@ -448,7 +450,11 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     if (independent.value) return []
     return Object.entries(live.value)
       .filter(([, draft]) => draft.text.length > 0)
-      .map(([contactId, draft]) => ({ contactId, text: draft.text }))
+      .map(([contactId, draft]) => ({
+        contactId,
+        text: draft.text,
+        startedAt: draft.startedAt,
+      }))
   })
   const asks = computed<GroupAsk[]>(() =>
     Object.entries(pending.value)
@@ -475,15 +481,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
       await core('groups.stop', { id: groupId() })
     } catch (error) {
       options.showError(error, '没有停下来')
-    }
-  }
-
-  async function confirmTask(taskId: string, approve: boolean): Promise<void> {
-    try {
-      await core('groups.confirmTask', { id: groupId(), taskId, approve })
-      schedule()
-    } catch (error) {
-      options.showError(error, approve ? '没有同意成功' : '没有取消成功')
     }
   }
 
@@ -530,6 +527,8 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
   return {
     group,
     messages,
+    tasks,
+    artifacts,
     gone,
     loadError,
     loaded,
@@ -546,7 +545,6 @@ export function useGroupRoom(groupId: () => string, options: GroupRoomOptions) {
     taskMembers,
     send,
     stop,
-    confirmTask,
     answer,
     cancelAsk,
     invite,

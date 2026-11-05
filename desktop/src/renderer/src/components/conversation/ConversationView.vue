@@ -1363,6 +1363,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           "
           :speaker="replySpeaker"
           :feedback="contactChat?.speaker ? chatFeedback : undefined"
+          :goal="activeGoal"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"

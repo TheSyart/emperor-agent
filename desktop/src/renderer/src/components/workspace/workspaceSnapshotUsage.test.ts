@@ -20,7 +20,7 @@ describe('workspace snapshot binding', () => {
     expect(block).not.toMatch(/sessionId: \(\) => viewedSessionId/)
   })
 
-  it('keeps the image viewer owned by the viewed session', () => {
-    expect(app).toContain('<ImageViewerHost :owner="viewedSessionId" />')
+  it('keeps the image viewer owned by the viewed session or Group', () => {
+    expect(app).toContain('<ImageViewerHost :owner="imageViewerOwner" />')
   })
 })

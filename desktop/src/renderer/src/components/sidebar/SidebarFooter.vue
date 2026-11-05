@@ -47,6 +47,18 @@ function go(entry: SidebarPageEntry): void {
 
 <template>
   <div class="sidebar-footer" :data-rail="rail || undefined">
+    <IconButton
+      v-if="rail && ctx.appMode.mode.value === 'group'"
+      class="contacts"
+      label="联系人"
+      :selected="contactBrowser.active.value"
+      :aria-current="contactBrowser.active.value ? 'page' : undefined"
+      :side="rail ? 'right' : 'top'"
+      data-testid="sidebar-contacts-toggle"
+      @click="contactBrowser.toggle()"
+    >
+      <DsUser :size="rail ? 18 : 16" />
+    </IconButton>
     <Tooltip label="设置" :disabled="!rail" side="right" :delay-ms="500">
       <button
         type="button"
@@ -58,6 +70,18 @@ function go(entry: SidebarPageEntry): void {
         <span v-if="!rail" class="label">设置</span>
       </button>
     </Tooltip>
+    <IconButton
+      v-if="!rail && ctx.appMode.mode.value === 'group'"
+      class="contacts"
+      label="联系人"
+      :selected="contactBrowser.active.value"
+      :aria-current="contactBrowser.active.value ? 'page' : undefined"
+      :side="rail ? 'right' : 'top'"
+      data-testid="sidebar-contacts-toggle"
+      @click="contactBrowser.toggle()"
+    >
+      <DsUser :size="rail ? 18 : 16" />
+    </IconButton>
     <template v-if="!rail">
       <IconButton
         v-for="entry in pages"
@@ -72,18 +96,6 @@ function go(entry: SidebarPageEntry): void {
         <component :is="entry.icon" :size="16" />
       </IconButton>
     </template>
-    <IconButton
-      v-if="ctx.appMode.mode.value === 'group'"
-      class="contacts"
-      label="联系人"
-      :selected="contactBrowser.active.value"
-      :aria-current="contactBrowser.active.value ? 'page' : undefined"
-      :side="rail ? 'right' : 'top'"
-      data-testid="sidebar-contacts-toggle"
-      @click="contactBrowser.toggle()"
-    >
-      <DsUser :size="rail ? 18 : 16" />
-    </IconButton>
     <IconButton
       class="theme"
       :label="themeLabel"

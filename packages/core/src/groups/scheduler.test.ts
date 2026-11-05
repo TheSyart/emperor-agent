@@ -73,7 +73,11 @@ function room(
     title: '评审',
     members: opts.members ?? ['ct-emperor', 'ct-arch', 'ct-rev'],
     ...(opts.moderator !== undefined ? { moderator: opts.moderator } : {}),
-    settings: { loopGuard: true, ...opts.settings } as never,
+    settings: {
+      coordination: 'member',
+      loopGuard: true,
+      ...opts.settings,
+    } as never,
   })
   const send = async (input: Parameters<typeof groups.service.send>[1]) => {
     const { message, plan } = groups.service.send(view.id, input)
@@ -113,6 +117,7 @@ describe('relay and independent answers', () => {
     expect(r.speeches.map((s) => s.member)).toEqual(['ct-rev', 'ct-arch'])
     expect(r.speeches[1]!.prompt).toContain('ct-rev 的回答')
     expect(r.said()).toEqual([
+      'ct-emperor:say:已请审稿人、架构师回答。',
       'ct-rev:say:ct-rev 的回答',
       'ct-arch:say:ct-arch 的回答',
     ])
@@ -137,7 +142,7 @@ describe('relay and independent answers', () => {
     expect(r.maxActive()).toBe(2)
     for (const speech of r.speeches) expect(speech.prompt).not.toMatch(/估三天/)
     const state = r.groups.service.state(r.view.id)
-    const answers = state.messages.filter((m) => m.from !== 'user')
+    const answers = state.messages.filter((m) => m.from !== 'user' && m.batchId)
     expect(answers).toHaveLength(2)
     expect(new Set(answers.map((m) => m.batchId)).size).toBe(1)
     expect(state.revealed.has(answers[0]!.batchId!)).toBe(true)
@@ -145,7 +150,7 @@ describe('relay and independent answers', () => {
 })
 
 describe('who answers a broadcast', () => {
-  it('3 · moderated: the moderator plans with group_next', async () => {
+  it('CG-01 · legacy moderated input does not restore moderator planning', async () => {
     const r = room({
       settings: { collaboration: 'moderated', summarizeAtEnd: false },
       script: (req, s) => {
@@ -161,9 +166,7 @@ describe('who answers a broadcast', () => {
     })
     await r.send({ way: 'broadcast', text: '大家看看' })
     expect(r.speeches.map((s) => [s.member, s.planning])).toEqual([
-      ['ct-emperor', true],
-      ['ct-arch', false],
-      ['ct-rev', false],
+      ['ct-emperor', false],
     ])
   })
 
@@ -178,6 +181,7 @@ describe('who answers a broadcast', () => {
     await r.send({ way: 'broadcast', text: '方案有问题吗' })
     expect(r.polls.sort()).toEqual(['ct-arch', 'ct-emperor', 'ct-rev'])
     expect(r.speeches.map((s) => s.member)).toEqual(['ct-rev', 'ct-arch'])
+    expect(r.said()[0]).toBe('ct-emperor:say:已安排审稿人、架构师依次发言。')
   })
 
   it('autonomous with no hand raised: the moderator answers', async () => {
@@ -242,6 +246,7 @@ describe('what a member’s message starts', () => {
     })
     await r.send({ way: 'mention', text: '@架构师 说说' })
     expect(r.said()).toEqual([
+      'ct-emperor:say:已请架构师回答。',
       'ct-arch:say:私下说',
       'ct-arch:task:查溢出',
       'ct-rev:result:溢出来自固定宽度',
@@ -294,7 +299,10 @@ describe('what a member’s message starts', () => {
       },
     })
     await r.send({ way: 'mention', text: '@审稿人 还有吗' })
-    expect(r.said()).toEqual(['ct-rev:pass:同意'])
+    expect(r.said()).toEqual([
+      'ct-emperor:say:已请审稿人回答。',
+      'ct-rev:pass:同意',
+    ])
   })
 })
 
@@ -310,42 +318,19 @@ describe('collaboration modes', () => {
     expect(r.speeches.map((s) => s.member)).toEqual(['ct-arch', 'ct-rev'])
   })
 
-  it('9 · moderated: a member’s @ goes to the moderator, who approves, reorders or rejects', async () => {
+  it('CG-01 · legacy moderated member @ runs directly without review or reorder', async () => {
     const script: Script = (req) =>
       req.member === 'ct-arch' ? { text: '@审稿人 @研究员 你们看看' } : {}
     const members = ['ct-emperor', 'ct-arch', 'ct-rev', 'ct-res']
     const settings = { collaboration: 'moderated', summarizeAtEnd: false }
     const approved = room({ members, settings, script })
     await approved.send({ way: 'mention', text: '@架构师 说说' })
-    expect(approved.reviews).toHaveLength(1)
+    expect(approved.reviews).toHaveLength(0)
     expect(approved.speeches.map((s) => s.member)).toEqual([
       'ct-arch',
       'ct-rev',
       'ct-res',
     ])
-    const reordered = room({
-      members,
-      settings,
-      script,
-      review: () => ({ verdict: 'reorder', order: ['ct-res', 'ct-rev'] }),
-    })
-    await reordered.send({ way: 'mention', text: '@架构师 说说' })
-    expect(reordered.speeches.map((s) => s.member)).toEqual([
-      'ct-arch',
-      'ct-res',
-      'ct-rev',
-    ])
-    const rejected = room({
-      members,
-      settings,
-      script,
-      review: () => ({ verdict: 'reject', note: '先别扩大范围' }),
-    })
-    await rejected.send({ way: 'mention', text: '@架构师 说说' })
-    expect(rejected.speeches.map((s) => s.member)).toEqual(['ct-arch'])
-    expect(rejected.messages().some((m) => /先别扩大范围/.test(m.text))).toBe(
-      true,
-    )
   })
 
   it('9 · moderated: the user’s own task is not reviewed', async () => {
@@ -399,6 +384,40 @@ describe('no quota', () => {
     ).toMatchObject({ spend: { usd: 5, tokens: 2000 } })
   })
 
+  it('background spend joins a still-running turn before its final log', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((done) => (release = done))
+    const r = room({
+      settings: { summarizeAtEnd: false },
+      script: async () => {
+        await gate
+        return { spend: { usd: 1, tokens: 100 } }
+      },
+    })
+    const sent = r.groups.service.send(r.view.id, {
+      way: 'mention',
+      text: '@审稿人 正在回答',
+    })
+    const done = r.scheduler.start(r.view.id, sent.message, sent.plan)
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(r.speeches).toHaveLength(1)
+
+    r.scheduler.addWorkSpend(r.view.id, sent.message.turnId, {
+      usd: 2,
+      tokens: 200,
+    })
+    expect(r.events.at(-1)).toMatchObject({
+      turn_id: sent.message.turnId,
+      spend: { usd: 2, tokens: 200 },
+    })
+    release()
+    await done
+    expect(r.turns().at(-1)).toMatchObject({
+      state: 'finished',
+      spend: { usd: 3, tokens: 300 },
+    })
+  })
+
   it('15 · a speech cut at its step limit says why, and the others go on', async () => {
     const r = room({
       settings: { summarizeAtEnd: false },
@@ -407,7 +426,8 @@ describe('no quota', () => {
     })
     await r.send({ way: 'mention', text: '@审稿人 @架构师 看看' })
     expect(r.said()).toEqual([
-      'system:system:审稿人 这次发言达到工具调用上限，已停下。',
+      'ct-emperor:say:已请审稿人、架构师回答。',
+      'ct-emperor:say:审稿人 这次发言达到工具调用上限，已停下。',
       'ct-arch:say:ct-arch 的回答',
     ])
   })
@@ -476,6 +496,7 @@ describe('the loop guard', () => {
     let i = 0
     const r = room({
       members: ['ct-arch', 'ct-rev'],
+      moderator: null,
       settings: { summarizeAtEnd: false },
       script: (req) => {
         const next = req.member === 'ct-arch' ? '审稿人' : '架构师'
@@ -526,12 +547,14 @@ describe('interrupting, stopping and restarting', () => {
     await resent
     expect(r.speeches.map((s) => s.member)).toEqual(['ct-rev', 'ct-res'])
     expect(r.said()).toEqual([
+      'ct-emperor:say:已请审稿人、架构师回答。',
+      'ct-emperor:say:已请研究员回答。',
       'ct-rev:say:ct-rev 的回答',
       'ct-res:say:ct-res 的回答',
     ])
   })
 
-  it('13 · after stop no message is added and the task is cancelled', async () => {
+  it('13 · after stop only the acceptance remains and the task is cancelled', async () => {
     const r: ReturnType<typeof room> = room({
       settings: { summarizeAtEnd: false },
       script: async (req) => {
@@ -545,7 +568,7 @@ describe('interrupting, stopping and restarting', () => {
       text: '查一下',
       task: { title: '查', deliverable: '原因', access: 'readonly' },
     })
-    expect(r.said()).toEqual([])
+    expect(r.said()).toEqual(['ct-emperor:say:已把「查」交给审稿人。'])
     expect(r.turns().at(-1)).toMatchObject({ state: 'stopped', reason: 'user' })
     const task = [...r.groups.service.state(r.view.id).tasks.values()][0]!
     expect(task.state).toBe('cancelled')
@@ -575,12 +598,13 @@ describe('the end of a turn', () => {
     })
     await r.send({ way: 'mention', text: '@审稿人 看看' })
     expect(r.said()).toEqual([
+      'ct-emperor:say:已请审稿人回答。',
       'ct-rev:say:ct-rev 的回答',
       'ct-emperor:summary:结论：先修溢出',
     ])
   })
 
-  it('group_close ends the turn with the moderator’s summary', async () => {
+  it('CG-01 · legacy moderated input does not restore moderator group_close', async () => {
     const r = room({
       settings: { collaboration: 'moderated' },
       script: (req, s) => {
@@ -592,7 +616,7 @@ describe('the end of a turn', () => {
       },
     })
     await r.send({ way: 'broadcast', text: '要不要改' })
-    expect(r.said()).toEqual(['ct-emperor:summary:这件事不用讨论：已经定了。'])
+    expect(r.said()).toEqual(['ct-emperor:say:ct-emperor 的回答'])
     expect(r.speeches).toHaveLength(1)
   })
 })
@@ -823,6 +847,7 @@ describe('GRP-15 · the moderator closes the turn whenever it speaks', () => {
     // Its prompt says it may end the turn.
     expect(r.speeches[1]!.prompt).toMatch(/group_close/)
     expect(r.said()).toEqual([
+      'ct-emperor:say:已请审稿人回答。',
       'ct-rev:say:@架构师 你也看看',
       'ct-emperor:summary:结论：先修溢出，不用再讨论。',
     ])

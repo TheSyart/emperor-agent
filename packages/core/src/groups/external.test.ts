@@ -225,6 +225,26 @@ describe('ExternalSpeaker', () => {
     expect(delegations.api.send).not.toHaveBeenCalled()
   })
 
+  it('CG-02: scopes an external task delegation to its task, not only its turn', async () => {
+    const { external, delegations } = speaker()
+    await external.speak(
+      request({
+        reason: 'task',
+        task: {
+          taskId: 'gt_task_1',
+          to: 'ct-codex',
+          title: '查溢出',
+          deliverable: '原因',
+          access: 'readonly',
+          state: 'running',
+        },
+      }),
+    )
+    expect(delegations.api.start.mock.calls[0]![0].taskScopeId).toBe(
+      'group-task:gt_task_1',
+    )
+  })
+
   it('says to sign in when the executor is not signed in', async () => {
     const { external, delegations } = speaker()
     delegations.api.start.mockRejectedValueOnce(

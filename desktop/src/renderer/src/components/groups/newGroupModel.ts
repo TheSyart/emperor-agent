@@ -2,7 +2,8 @@
  * 新建群聊's templates (GRP-08): 评审, 正反方, 调研写作. A template names
  * the group, writes its announcement (群公告, read by every member before
  * speaking) and asks for the contacts made from its roles' templates
- * (`Contact.templateId`); Emperor joins as moderator. A role nobody was
+ * (`Contact.templateId`); fixed Emperor is added by Core, not picked here.
+ * A role nobody was
  * made from is listed as missing, for the user to create. The
  * collaboration is not the template's: it starts at 设置 › 群聊's default
  * (D14). Pure; NewGroupDialog does the calls.
@@ -39,9 +40,9 @@ export const GROUP_TEMPLATES: readonly GroupTemplate[] = [
   {
     id: 'debate',
     name: '正反方',
-    description: '产品经理讲为什么做，红队专挑毛病，主持人收尾',
+    description: '产品经理讲为什么做，红队专挑毛病，群聊收尾',
     charter: [
-      '目标：把一个决定的正反两面讲透，最后由主持人写结论。',
+      '目标：把一个决定的正反两面讲透，最后由群聊写结论。',
       '约束：每次发言只说新的理由，不重复对方说过的；拿不准的标出来。',
     ].join('\n'),
     roles: [
@@ -66,16 +67,14 @@ export const GROUP_TEMPLATES: readonly GroupTemplate[] = [
 ]
 
 /**
- * The members a template asks for: Emperor first, then the first contact
- * made from each role's template; the roles nobody was made from.
+ * The optional members a template asks for: the first contact made from each
+ * role's template; fixed Emperor is not a selectable template member.
  */
 export function templateMembers(
   template: GroupTemplate,
   contacts: readonly Pick<Contact, 'id' | 'templateId'>[],
 ): { members: string[]; missing: string[] } {
-  const members = contacts.some((contact) => contact.id === EMPEROR_ID)
-    ? [EMPEROR_ID]
-    : []
+  const members: string[] = []
   const missing: string[] = []
   for (const role of template.roles) {
     const found = contacts.find(

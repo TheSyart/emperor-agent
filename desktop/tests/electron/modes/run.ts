@@ -287,8 +287,8 @@ async function urlGroup(page: Page): Promise<string> {
   )
 }
 
-/** Group's sections since GRP-05: 群聊, then 联系人. */
-const GROUP_SECTIONS = JSON.stringify(['groups', 'contacts'])
+/** Group's section since GRP-21: contacts have their own page. */
+const GROUP_SECTIONS = JSON.stringify(['groups'])
 
 /** Wait until the address shows a saved session (not a draft); its id. */
 async function savedSession(page: Page, what: string): Promise<string> {
@@ -520,8 +520,9 @@ async function newSessionsPerMode(
         throw new Error('Build lists the Chat session')
       await page.screenshot({ path: join(shots, 'build-sessions.png') })
 
-      // Group: 新建群聊 opens its dialog (GRP-08); a group made in Core is
-      // listed in Group's 群聊 at once and in neither Chat nor Build.
+      // Group: 新建群聊 keeps Emperor fixed and submits only the other
+      // members. A named blank group can contain just that built-in member;
+      // it is listed in Group's 群聊 at once and in neither Chat nor Build.
       await page.keyboard.press('ControlOrMeta+3')
       await brandIs(page, 'Emperor Group')
       // No group session yet: ⌘3 opens the Group home (GRP-05).
@@ -532,12 +533,54 @@ async function newSessionsPerMode(
       await create.click()
       const dialog = page.getByRole('dialog', { name: '新建群聊' })
       await dialog.waitFor({ timeout: 10_000 })
-      await dialog.getByRole('button', { name: '取消' }).click()
-      await dialog.waitFor({ state: 'detached', timeout: 10_000 })
-      const group = await core<{ id: string }>(page, 'groups.create', {
-        title: GROUP_TITLE,
-        members: ['ct-emperor'],
+      const fixed = dialog.locator('[data-fixed-emperor]')
+      await fixed.waitFor({ timeout: 10_000 })
+      if ((await fixed.locator('input, button').count()) !== 0)
+        throw new Error('fixed Emperor has a picker control')
+      if (
+        (await dialog.locator('[data-pick-member="ct-emperor"]').count()) !== 0
+      )
+        throw new Error('Emperor is still a selectable candidate')
+      await dialog.locator('[data-template="review"]').click()
+      const picked = await dialog
+        .locator('[data-pick-member] input:checked')
+        .evaluateAll((inputs) =>
+          inputs.map(
+            (input) =>
+              input.closest<HTMLElement>('[data-pick-member]')?.dataset
+                .pickMember,
+          ),
+        )
+      if (picked.includes('ct-emperor'))
+        throw new Error('the review template still picks Emperor')
+      await dialog.locator('[data-template="blank"]').click()
+      await dialog.locator('[data-new-group-title] input').fill(GROUP_TITLE)
+      const submit = dialog.getByRole('button', { name: '建群', exact: true })
+      if (await submit.isDisabled())
+        throw new Error('a blank group with fixed Emperor cannot be created')
+      if (!(await dialog.innerText()).includes('已选 0 位其他成员 · 共 1 人'))
+        throw new Error('the blank group count omits fixed Emperor')
+      await page.screenshot({
+        path: join(shots, 'new-group-fixed-emperor.png'),
       })
+      await submit.click()
+      await dialog.waitFor({ state: 'detached', timeout: 10_000 })
+      const groups = await core<Array<{ id: string; title: string }>>(
+        page,
+        'groups.list',
+      )
+      const group = groups.find((item) => item.title === GROUP_TITLE)
+      if (!group) throw new Error('the dialog did not create the group')
+      const created = await core<{ members: Array<{ id: string }> }>(
+        page,
+        'groups.get',
+        { id: group.id },
+      )
+      if (
+        JSON.stringify(created.members.map((member) => member.id)) !==
+        JSON.stringify(['ct-emperor'])
+      )
+        throw new Error('Core did not add exactly one fixed Emperor')
       ids.group = group.id
       await until(
         async () =>

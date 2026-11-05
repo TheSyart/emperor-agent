@@ -58,6 +58,11 @@ export interface WorkspaceReferenceServiceOptions {
   webFetchClient?: WebFetchClient | null
   githubPreview?: GitHubPreviewReader
   resolveAttachment?: (attachmentId: string) => AttachmentReferenceTarget | null
+  /** Host-owned immutable group artifact; the callback checks session/group ownership. */
+  resolveArtifact?: (
+    sessionId: string,
+    artifactRef: string,
+  ) => AttachmentReferenceTarget | null
 }
 
 export class WorkspaceReferenceService {
@@ -118,6 +123,7 @@ export class WorkspaceReferenceService {
     if (input.delegationId)
       this.delegatedRoot?.(input.sessionId, input.delegationId)
     if (/^attachment:/i.test(href)) return this.resolveAttachment(input, href)
+    if (/^artifact:\/\//i.test(href)) return this.resolveArtifact(input, href)
     if (/^https?:\/\//i.test(href)) return this.resolveWeb(input, href)
     if (
       /^[a-z][a-z0-9+.-]*:/i.test(href) &&
@@ -281,6 +287,55 @@ export class WorkspaceReferenceService {
       },
       available ? canonical : undefined,
       `attachment\0${input.sessionId}\0${input.sourceMessageId}\0${attachmentId}\0${canonical}`,
+    )
+  }
+
+  private resolveArtifact(
+    input: ResolveReferenceInput,
+    href: string,
+  ): ReferenceDescriptor {
+    this.options.authorizeSession?.(input.sessionId)
+    const artifact = this.options.resolveArtifact?.(input.sessionId, href)
+    if (!artifact)
+      throw new WorkspaceOperationError(
+        'reference_artifact_unknown',
+        '公开成果不存在或已被移除。',
+      )
+    const path = artifact.relativePath
+    if (
+      !path ||
+      path.includes('\0') ||
+      path.includes('\\') ||
+      isAbsolute(path) ||
+      path.split('/').includes('..')
+    )
+      throw new WorkspaceOperationError(
+        'reference_artifact_invalid',
+        '公开成果路径无效。',
+      )
+    const root = realpathSync(artifact.root)
+    const requested = resolve(root, path)
+    const exists = existsSync(requested)
+    const canonical = exists ? realpathSync(requested) : requested
+    if (!within(root, requested) || !within(root, canonical))
+      throw new WorkspaceOperationError(
+        'reference_artifact_invalid',
+        '公开成果路径超出群共享区。',
+      )
+    const available = exists && statSync(canonical).isFile()
+    return this.store(
+      input.sessionId,
+      input.sourceMessageId,
+      {
+        id: referenceId(),
+        kind: 'external_file',
+        label: cleanLabel(input.label, artifact.label),
+        tooltip: canonical,
+        available,
+        actions: available ? ['reveal', 'preview'] : [],
+      },
+      available ? canonical : undefined,
+      `artifact\0${input.sessionId}\0${input.sourceMessageId}\0${href}\0${canonical}`,
     )
   }
 

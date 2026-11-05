@@ -543,6 +543,9 @@ it('MOD-02 8 · Pull Request shows in the footer in Build only, with the GitHub 
       ),
     ].map((el) => el.getAttribute('aria-label'))
   expect(pages()).toEqual(['定时任务', '能力'])
+  appMode.mode.value = 'group'
+  await settle()
+  expect(pages()).toEqual(['定时任务', '能力'])
   appMode.mode.value = 'build'
   await settle()
   expect(pages()).toEqual(['定时任务', '能力'])
@@ -557,6 +560,36 @@ it('MOD-02 8 · Pull Request shows in the footer in Build only, with the GitHub 
   appMode.mode.value = 'group'
   await settle()
   expect(pages()).toEqual(['定时任务', '能力'])
+})
+
+it('CG-UI-01 · contacts leads the footer icon group in both sidebar widths', async () => {
+  await mount('/chat/pinned')
+  appMode.mode.value = 'group'
+  await settle()
+  const footerLabels = () =>
+    [
+      ...root.querySelectorAll<HTMLElement>(
+        '[data-sidebar-block="footer"] button',
+      ),
+    ].map((el) => el.getAttribute('aria-label'))
+  expect(footerLabels().slice(0, 4)).toEqual([
+    '设置',
+    '联系人',
+    '定时任务',
+    '能力',
+  ])
+  expect(footerLabels()[4]).toMatch(/^切换/)
+
+  await mount('/chat/pinned', { collapsed: true, width: 0 })
+  appMode.mode.value = 'group'
+  await settle()
+  const railLabels = [
+    ...root.querySelectorAll<HTMLElement>(
+      '.sidebar-rail .sidebar-footer button',
+    ),
+  ].map((el) => el.getAttribute('aria-label'))
+  expect(railLabels.slice(0, 2)).toEqual(['联系人', '设置'])
+  expect(railLabels[2]).toMatch(/^切换/)
 })
 
 it('MOD-02 · the brand row switches modes through the controller', async () => {

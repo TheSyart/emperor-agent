@@ -97,6 +97,7 @@ export async function resolveMutationPolicy(
     session === undefined ? {} : { session },
   )
   const resolved = await resolveTarget(standing.workspaceRoot, filePath)
+  await refuseGroupPrivate(resolved, standing, toolName)
   await refuseProtected(state, resolved, toolName)
   if (
     args.sandbox_permissions === undefined ||
@@ -125,8 +126,23 @@ export async function resolveMutationPolicy(
   if (policy.workspaceRoot === standing.workspaceRoot)
     return { policy, resolved }
   const wider = await resolveTarget(policy.workspaceRoot, filePath)
+  await refuseGroupPrivate(wider, policy, toolName)
   await refuseProtected(state, wider, toolName)
   return { policy, resolved: wider }
+}
+
+async function refuseGroupPrivate(
+  target: FsTarget,
+  policy: SandboxExecutionPolicy,
+  verb: 'read' | 'write' | 'edit',
+): Promise<void> {
+  for (const root of policy.deniedRoots ?? []) {
+    if (await isPathUnder(target.targetKey, canonicalPath(root)))
+      throw new FsError(
+        `cannot ${verb} "${target.displayPath}": another group member's private workspace is not available in this session`,
+        'FS_GROUP_PRIVATE_PATH',
+      )
+  }
 }
 
 function sandboxDenied(
@@ -182,6 +198,7 @@ export async function fenceTarget(
   if (policy.mode === 'danger-full-access') return target
   if (policy.mode === 'read-only') throw sandboxDenied(policy, toolName, target)
   const fresh = await resolveTarget(policy.workspaceRoot, target.displayPath)
+  await refuseGroupPrivate(fresh, policy, toolName)
   await refuseReadOnly(fresh, policy, toolName)
   // Git config and hooks can make the user's own git run programs: changing
   // one is an escalation even inside the workspace.
@@ -239,6 +256,11 @@ export async function authorizeRead(
   context: ToolRunContext,
 ): Promise<void> {
   validateEscalationArgs(args.sandbox_permissions, args.justification)
+  const session = context.agent?.session
+  const standing = state.services.sandbox.resolve(
+    session === undefined ? {} : { session },
+  )
+  await refuseGroupPrivate(target, standing, 'read')
   const scope = protectedScope(state)
   if (scope === null) return
   const found = await classifyProtectedPath(target.targetKey, scope)
@@ -248,10 +270,6 @@ export async function authorizeRead(
       `cannot read "${target.displayPath}": ${REFUSAL_REASONS[found]}`,
       'FS_PROTECTED_PATH',
     )
-  const session = context.agent?.session
-  const standing = state.services.sandbox.resolve(
-    session === undefined ? {} : { session },
-  )
   if (standing.mode === 'danger-full-access') return
   if (
     args.sandbox_permissions === undefined ||

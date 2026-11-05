@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 /**
- * GRP-08 (D14): 设置 › 群聊 — the collaboration a new group starts with
- * (自主 by default, or 主持人审核) and the loop guard (on by default). New
- * groups start from these; an existing group keeps its own (Core).
+ * GRP-08 (D14): 设置 › 群聊 — only the loop guard default. Every group collaborates autonomously;
+ * there are no collaboration, project or Git controls.
  */
 import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -63,11 +62,9 @@ describe('设置 › 群聊', () => {
   it('shows the defaults a new group starts with', async () => {
     const root = await mount()
     expect(root.textContent).toContain('新群的默认设置')
-    expect(root.textContent).toContain('已有的群不变')
-    const autonomous = root.querySelector<HTMLElement>(
-      '[data-default-collaboration="autonomous"]',
-    )!
-    expect(autonomous.getAttribute('aria-checked')).toBe('true')
+    expect(root.textContent).toContain('所有群都由成员按职责自主协作')
+    expect(root.querySelector('[data-default-collaboration]')).toBeNull()
+    expect(root.textContent).not.toContain('协作方式')
     expect(
       root
         .querySelector('[data-default="loopGuard"] [role="switch"]')
@@ -75,27 +72,15 @@ describe('设置 › 群聊', () => {
     ).toBe('true')
   })
 
-  it('saves the collaboration and the loop guard', async () => {
+  it('saves the loop guard without a collaboration setting', async () => {
     const root = await mount()
-    root
-      .querySelector<HTMLElement>('[data-default-collaboration="moderated"]')!
-      .click()
-    await settle()
     root
       .querySelector<HTMLElement>('[data-default="loopGuard"] [role="switch"]')!
       .click()
     await settle()
     expect(
       core.mock.calls.filter(([op]) => op === 'groups.setDefaults'),
-    ).toEqual([
-      ['groups.setDefaults', { collaboration: 'moderated' }],
-      ['groups.setDefaults', { loopGuard: false }],
-    ])
-    expect(
-      root
-        .querySelector('[data-default-collaboration="moderated"]')
-        ?.getAttribute('aria-checked'),
-    ).toBe('true')
+    ).toEqual([['groups.setDefaults', { loopGuard: false }]])
   })
 
   it('says when a change could not be saved and goes back', async () => {

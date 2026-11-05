@@ -58,6 +58,7 @@ describe('group turns in Core', () => {
     ])
     expect(history.messages.map((m) => [m.from, m.text])).toEqual([
       ['user', '@审稿人 看看方案'],
+      ['ct-emperor', '已请审稿人回答。'],
       [rev, '我看过了，先修溢出'],
     ])
     const request = fixture.adapter.requests[0]!
@@ -88,7 +89,10 @@ describe('group turns in Core', () => {
     const history = await invokeCoreOperation(fixture.api, 'groups.history', [
       { id: group.id },
     ])
-    const notice = history.messages.find((m) => m.kind === 'system')!
+    const notice = history.messages.find(
+      (m) => m.from === 'ct-emperor' && m.text.includes('发言失败'),
+    )!
+    expect(notice.kind).toBe('say')
     expect(notice.text).toMatch(
       /审稿人 这次发言失败：模型服务的余额或额度用完了/,
     )
@@ -109,46 +113,73 @@ describe('group turns in Core', () => {
     ])
     expect(history.messages.map((m) => [m.from, m.kind, m.text])).toEqual([
       ['user', 'say', '@审稿人 还有补充吗'],
+      ['ct-emperor', 'say', '已请审稿人回答。'],
       [rev, 'pass', '同意'],
     ])
     expect(fixture.adapter.requests).toHaveLength(1)
   })
 
-  it('GRP-15 · the moderator asked by an @ has group_close, and closing ends the turn', async () => {
-    const fixture = await open({
-      replies: [
-        {
-          tools: [
-            { name: 'group_close', args: { summary: '结论：先修溢出。' } },
-          ],
-        },
-      ],
-    })
+  it('CG-00 · direct @ has no moderator tools and needs no coordinator call', async () => {
+    const fixture = await open({ replies: [{ text: '我直接回答。' }] })
     const { rev } = await groupWithReviewer(fixture)
     const group = await invokeCoreOperation(fixture.api, 'groups.create', [
-      { title: '收尾', members: ['ct-emperor', rev] },
+      { title: '直接点名', members: ['ct-emperor', rev] },
     ])
     await invokeCoreOperation(fixture.api, 'groups.send', [
-      { id: group.id, way: 'mention', text: '@Emperor 收个尾' },
+      { id: group.id, way: 'mention', text: '@Emperor 直接回答' },
     ])
     await fixture.api.groups.settled(group.id)
     const history = await invokeCoreOperation(fixture.api, 'groups.history', [
       { id: group.id },
     ])
     expect(history.messages.map((m) => [m.from, m.kind, m.text])).toEqual([
-      ['user', 'say', '@Emperor 收个尾'],
-      ['ct-emperor', 'summary', '结论：先修溢出。'],
+      ['user', 'say', '@Emperor 直接回答'],
+      ['ct-emperor', 'say', '我直接回答。'],
     ])
-    expect(toolNames(fixture.adapter.requests[0]!)).toEqual(
-      expect.arrayContaining(['group_next', 'group_close']),
-    )
+    expect(toolNames(fixture.adapter.requests[0]!)).not.toContain('group_next')
+    expect(toolNames(fixture.adapter.requests[0]!)).not.toContain('group_close')
     expect(fixture.adapter.requests).toHaveLength(1)
-    expect(
-      fixture.events.filter((e) => e.event === 'group_turn_changed').at(-1),
-    ).toMatchObject({ group_id: group.id, state: 'finished' })
+    expect(rev).toBeTruthy()
   })
 
-  it('groups.stop stops the turn and drops the speech', async () => {
+  it('CG-01 · a legacy moderated broadcast runs autonomously without a coordinator', async () => {
+    const fixture = await open({
+      replies: [
+        { text: '{"raise":true,"score":0.9,"reason":"负责评审"}' },
+        { text: '我看过了，先修溢出。' },
+      ],
+    })
+    const { rev, group } = await groupWithReviewer(fixture)
+    await invokeCoreOperation(fixture.api, 'groups.update', [
+      {
+        id: group.id,
+        patch: {
+          settings: { collaboration: 'moderated', summarizeAtEnd: false },
+        },
+      },
+    ])
+    await invokeCoreOperation(fixture.api, 'groups.send', [
+      { id: group.id, way: 'broadcast', text: '检查一下方案' },
+    ])
+    await fixture.api.groups.settled(group.id)
+    const history = await invokeCoreOperation(fixture.api, 'groups.history', [
+      { id: group.id },
+    ])
+    expect(history.messages.map((m) => [m.from, m.kind, m.text])).toEqual([
+      ['user', 'say', '检查一下方案'],
+      ['ct-emperor', 'say', '已请审稿人发言。'],
+      [rev, 'say', '我看过了，先修溢出。'],
+    ])
+    expect(history.messages[1]!.coordination).toBeUndefined()
+    expect(fixture.adapter.requests).toHaveLength(2)
+    expect(
+      fixture.adapter.requests.every(
+        (request) => !(request.system ?? '').includes('系统协调能力'),
+      ),
+    ).toBe(true)
+  })
+
+  it('groups.stop drops the speech but keeps the acceptance', async () => {
     const fixture = await open({ replies: [{ hang: true }] })
     const { group } = await groupWithReviewer(fixture)
     await invokeCoreOperation(fixture.api, 'groups.send', [
@@ -163,7 +194,7 @@ describe('group turns in Core', () => {
     const history = await invokeCoreOperation(fixture.api, 'groups.history', [
       { id: group.id },
     ])
-    expect(history.messages.map((m) => m.from)).toEqual(['user'])
+    expect(history.messages.map((m) => m.from)).toEqual(['user', 'ct-emperor'])
     expect(
       fixture.events.filter((e) => e.event === 'group_turn_changed').at(-1),
     ).toMatchObject({ state: 'stopped', reason: 'user' })

@@ -14,8 +14,14 @@ import {
 } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { core } = vi.hoisted(() => ({ core: vi.fn() }))
+const { core, adopt } = vi.hoisted(() => ({
+  core: vi.fn(),
+  adopt: vi.fn(),
+}))
 vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../composables/useSession', () => ({
+  useSession: () => ({ adopt }),
+}))
 vi.mock('../../api/backend', async (original) => ({
   ...(await original<typeof import('../../api/backend')>()),
   onCoreEvent: () => () => undefined,
@@ -95,6 +101,7 @@ async function mount(path = '/contacts') {
       { path: '/contacts/:id', name: 'contact', component: ContactsPage },
       { path: '/contacts/new', name: 'contact-new', component: stub },
       { path: '/groups', name: 'groups', component: stub },
+      { path: '/chat/:sessionId?', name: 'chat', component: stub },
     ],
   })
   await router.push(path)
@@ -119,6 +126,7 @@ beforeEach(() => {
     contact('ct-translator', '翻译', { domains: [] }),
   ]
   core.mockReset()
+  adopt.mockReset()
   core.mockImplementation(async (op: string) => {
     switch (op) {
       case 'contacts.list':
@@ -211,6 +219,34 @@ describe('the contacts page', () => {
     await mount('/contacts/ct-pm')
     expect(page().querySelector('[data-stub-profile]')).not.toBeNull()
     expect(page().querySelector('[data-contact-grid]')).toBeNull()
+  })
+
+  it('opens the fixed role creator directly into its chat, never its editor', async () => {
+    contacts.push(
+      contact('ct-role-creator', '角色创建师', {
+        builtin: true,
+        intro: '通过对话创建或调整联系人',
+      }),
+    )
+    core.mockImplementation(async (op: string) => {
+      if (op === 'contacts.list') return { contacts, readOnly: null }
+      if (op === 'groups.list') return []
+      if (op === 'contacts.openChat') return { id: 's-creator' }
+      return {}
+    })
+    await mount()
+    const card = page().querySelector<HTMLElement>(
+      '[data-contact-card="ct-role-creator"]',
+    )!
+    expect(card.textContent).toContain('系统 · 创建角色')
+    card.click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('contacts.openChat', {
+      id: 'ct-role-creator',
+      intent: { action: 'create' },
+    })
+    expect(adopt).toHaveBeenCalledWith({ id: 's-creator' })
+    expect(router.currentRoute.value.name).toBe('chat')
   })
 
   it('says when the contact list could not be read', async () => {

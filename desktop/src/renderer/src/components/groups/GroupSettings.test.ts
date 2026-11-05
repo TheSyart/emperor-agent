@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
  * GRP-08 (预览 B 第 5 步): 群设置 `/groups/:groupId/settings` — the name,
- * the announcement (公告), the members, the moderator, the collaboration
- * (自主 / 主持人审核), quiet mode, the summary at the end and the loop
+ * the announcement (公告), the members, quiet mode, the summary at the
+ * end and the loop
  * guard, each saved to the group with `groups.update`.
  */
 import { createApp, h, nextTick, type App } from 'vue'
@@ -36,6 +36,7 @@ async function flush(): Promise<void> {
 
 const settings = {
   collaboration: 'autonomous',
+  coordination: 'builtin',
   quiet: false,
   summarizeAtEnd: true,
   loopGuard: true,
@@ -45,7 +46,7 @@ function view(patch: Record<string, unknown> = {}) {
   return {
     id: 'grp-1',
     title: '0.3 方案评审',
-    moderator: 'ct-emperor',
+    moderator: null,
     members: [
       ['ct-emperor', 'Emperor'],
       ['ct-arch', '架构师'],
@@ -161,14 +162,18 @@ describe('群设置', () => {
         ?.value,
     ).toBe('目标：评审 0.3 的群聊方案。')
     expect(root().querySelectorAll('[data-settings-member]')).toHaveLength(3)
-    expect(
-      root()
-        .querySelector('[data-collaboration-option="autonomous"]')
-        ?.getAttribute('aria-checked'),
-    ).toBe('true')
+    expect(root().querySelector('[data-collaboration-option]')).toBeNull()
+    expect(root().textContent).not.toContain('协作方式')
   })
 
-  it('saves the announcement, the collaboration, quiet mode, the summary and the loop guard', async () => {
+  it('CG-00: describes system coordination without a moderator selector', async () => {
+    await mount()
+    expect(root().querySelectorAll('select')).toHaveLength(0)
+    expect(root().textContent).toContain('每轮结束时群聊出结论')
+    expect(root().textContent).not.toContain('主持人')
+  })
+
+  it('saves the announcement, quiet mode, the summary and the loop guard without collaboration choices', async () => {
     await mount()
     const charter = root().querySelector<HTMLTextAreaElement>(
       '[data-charter] textarea',
@@ -178,10 +183,6 @@ describe('群设置', () => {
     await flush()
     root().querySelector<HTMLElement>('[data-save-charter]')!.click()
     await flush()
-    root()
-      .querySelector<HTMLElement>('[data-collaboration-option="moderated"]')!
-      .click()
-    await flush()
     for (const name of ['quiet', 'summarizeAtEnd', 'loopGuard']) {
       root()
         .querySelector<HTMLElement>(`[data-setting="${name}"] [role="switch"]`)!
@@ -190,7 +191,6 @@ describe('群设置', () => {
     }
     expect(updates()).toEqual([
       { id: 'grp-1', patch: { charter: '目标：评审方案，结论写成一页说明。' } },
-      { id: 'grp-1', patch: { settings: { collaboration: 'moderated' } } },
       { id: 'grp-1', patch: { settings: { quiet: true } } },
       { id: 'grp-1', patch: { settings: { summarizeAtEnd: false } } },
       { id: 'grp-1', patch: { settings: { loopGuard: false } } },

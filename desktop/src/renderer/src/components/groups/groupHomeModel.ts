@@ -161,7 +161,6 @@ export type HomeSendPlan =
       kind: 'group'
       title: string
       members: string[]
-      moderator: string
       ask: string[]
     }
 
@@ -182,8 +181,7 @@ export function planHomeSend(
   return {
     kind: 'group',
     title: temporaryGroupTitle(text, names),
-    members: [EMPEROR_ID, ...ask.filter((id) => id !== EMPEROR_ID)],
-    moderator: EMPEROR_ID,
+    members: [...ask],
     ask,
   }
 }

@@ -661,6 +661,10 @@ describe('KRN-03 task tree: cost and steps', () => {
           event.data.source.producer === 'task-budget',
       )!
     expect(messageText(notice.data)).toContain('400 steps')
+    expect(messageText(notice.data)).toContain('do not repeat completed work')
+    expect(messageText(notice.data)).not.toContain(
+      'go on only when the user asks',
+    )
     await t.submit('carry on')
     expect(
       t.adapter.requests.at(-1)!.messages.map(messageText).join('\n'),

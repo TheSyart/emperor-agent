@@ -132,6 +132,7 @@ describe('contacts operations', () => {
       'ct-emperor',
       'ct-claude-code',
       'ct-codex',
+      'ct-role-creator',
     ])
     expect(listed.readOnly).toBeNull()
     expect(

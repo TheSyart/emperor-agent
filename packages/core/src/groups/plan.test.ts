@@ -105,16 +105,33 @@ describe('planFor · from the user', () => {
     ])
   })
 
-  it('moderated: a broadcast goes to the moderator to plan', () => {
+  it('CG-01: legacy moderated input still uses the autonomous broadcast', () => {
     expect(
       planFor(msg({}), state({ collaboration: 'moderated' }), ROSTER),
     ).toEqual([
       {
-        kind: 'speak',
-        member: 'ct-emperor',
-        reason: 'moderator-plan',
+        kind: 'poll',
+        members: ['ct-emperor', 'ct-arch', 'ct-rev'],
         source: 'm1',
       },
+      { kind: 'speak', member: 'ct-res', reason: 'always', source: 'm1' },
+    ])
+  })
+
+  it('CG-01: legacy moderated builtin input does not call the coordinator', () => {
+    expect(
+      planFor(
+        msg({}),
+        state({ collaboration: 'moderated', coordination: 'builtin' }),
+        ROSTER,
+      ),
+    ).toEqual([
+      {
+        kind: 'poll',
+        members: ['ct-emperor', 'ct-arch', 'ct-rev'],
+        source: 'm1',
+      },
+      { kind: 'speak', member: 'ct-res', reason: 'always', source: 'm1' },
     ])
   })
 
@@ -169,12 +186,24 @@ describe('planFor · from a member', () => {
     ])
   })
 
-  it('moderated: a member’s @ or task goes to the moderator for review first', () => {
+  it('CG-01: a legacy moderated member @ goes directly to its recipient', () => {
     const s = state({ collaboration: 'moderated' })
     expect(
       planFor(msg({ from: 'ct-rev', ask: ['ct-arch'] }), s, ROSTER),
     ).toEqual([
-      { kind: 'review', reviewer: 'ct-emperor', message: 'm1', source: 'm1' },
+      { kind: 'speak', member: 'ct-arch', reason: 'mention', source: 'm1' },
+    ])
+  })
+
+  it('CG-01: legacy moderated builtin member @ has no system review', () => {
+    expect(
+      planFor(
+        msg({ from: 'ct-rev', ask: ['ct-arch'] }),
+        state({ collaboration: 'moderated', coordination: 'builtin' }),
+        ROSTER,
+      ),
+    ).toEqual([
+      { kind: 'speak', member: 'ct-arch', reason: 'mention', source: 'm1' },
     ])
   })
 

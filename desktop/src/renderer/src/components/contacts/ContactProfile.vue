@@ -21,8 +21,8 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type {
-  Contact,
+import {
+  type Contact,
   ContactCapabilityView,
   ContactExperience,
   ContactExperienceListing,
@@ -30,6 +30,7 @@ import type {
   ContactStats,
   ContactVersionEntry,
 } from '@emperor/core/api'
+import { ROLE_CREATOR_CONTACT_ID } from '@emperor/core/runtime-contract'
 import { onCoreEvent } from '../../api/backend'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
@@ -174,6 +175,7 @@ onBeforeUnmount(() => {
 
 // ── header ─────────────────────────────────────────────────────────────
 const external = computed(() => contact.value?.kind === 'external')
+const creator = computed(() => contact.value?.id === ROLE_CREATOR_CONTACT_ID)
 const introLine = computed(() => {
   const current = contact.value
   if (!current) return ''
@@ -255,7 +257,7 @@ async function deleteContact(): Promise<void> {
 }
 
 function edit() {
-  if (!contact.value) return
+  if (!contact.value || creator.value) return
   void router
     .push({ name: 'contact-edit', params: { id: contact.value.id } })
     .catch(() => undefined)
@@ -280,7 +282,7 @@ const libraryId = computed(() =>
 
 async function changeAvatar(avatarId: string) {
   const current = contact.value
-  if (!current) return
+  if (!current || creator.value) return
   try {
     contact.value = await core('contacts.update', {
       id: current.id,
@@ -439,7 +441,7 @@ async function deleteEntry(entryId: string) {
 
 async function setMemory(enabled: boolean) {
   const current = contact.value
-  if (!current) return
+  if (!current || creator.value) return
   try {
     contact.value = await core('contacts.update', {
       id: current.id,
@@ -707,7 +709,11 @@ function backHome() {
               @click="sendMessage"
               >发消息</Button
             >
-            <Button size="sm" variant="secondary" @click="openPull"
+            <Button
+              v-if="!creator"
+              size="sm"
+              variant="secondary"
+              @click="openPull"
               >拉进群</Button
             >
             <Menu
@@ -728,7 +734,7 @@ function backHome() {
                 >还没有群聊</MenuItem
               >
             </Menu>
-            <Button size="sm" @click="edit">编辑</Button>
+            <Button v-if="!creator" size="sm" @click="edit">编辑</Button>
             <template v-if="!contact.builtin">
               <IconButton
                 label="更多操作"
@@ -819,7 +825,7 @@ function backHome() {
           <p v-if="!(contact.knowledge ?? []).length" class="hint">
             还没有知识：在「编辑」里加文件、文件夹、网址或笔记。
           </p>
-          <Button size="sm" @click="edit">添加资料</Button>
+          <Button v-if="!creator" size="sm" @click="edit">添加资料</Button>
         </section>
 
         <section
@@ -1094,7 +1100,7 @@ function backHome() {
     </div>
 
     <AvatarLibraryPicker
-      v-if="contact && !external"
+      v-if="contact && !external && !creator"
       v-model:open="pickerOpen"
       :selected="libraryId"
       :in-use="inUse"

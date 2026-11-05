@@ -22,6 +22,7 @@ import {
   SandboxUnavailableError,
   writableRoots,
   type ConfinedSandboxMode,
+  type SandboxExecutionPolicy,
   type SandboxPolicy,
 } from './policy'
 import {
@@ -60,7 +61,10 @@ export interface SandboxBackend {
    * stay out of reach and nothing else is confined. Null: this host has no
    * guard and the command runs unwrapped (tests, Linux, no protected root).
    */
-  guard?(argv: readonly string[]): ConfinedArgv | null
+  guard?(
+    argv: readonly string[],
+    policy?: SandboxExecutionPolicy,
+  ): ConfinedArgv | null
 }
 
 const DENIAL_SIGNATURES: Record<ContainmentRunner, readonly string[]> = {
@@ -96,10 +100,16 @@ export function shellContainmentPolicy(
 ): ContainmentPolicy {
   const scope = protectedScope(protectedStateRoot, protectedHome)
   return {
-    read: { allow: 'all', deny: [] },
+    read: {
+      allow: 'all',
+      deny: (policy.deniedRoots ?? []).map(canonicalPath),
+    },
     write: {
       allow: writableRoots(policy),
-      deny: (policy.readOnlyRoots ?? []).map(canonicalPath),
+      deny: [
+        ...(policy.readOnlyRoots ?? []),
+        ...(policy.deniedRoots ?? []),
+      ].map(canonicalPath),
     },
     network: 'allow',
     tempDir: policy.privateTempRoot ?? tmpdir(),
@@ -125,21 +135,29 @@ export function shellContainmentPolicy(
  * config files, and no mode writes the user's credentials.
  */
 export function shellGuardPolicy(
-  protectedStateRoot: string,
+  protectedStateRoot: string | undefined,
   protectedHome?: string,
+  deniedRoots: readonly string[] = [],
+  readOnlyRoots: readonly string[] = [],
 ): ContainmentPolicy {
   return {
-    read: { allow: 'all', deny: [] },
-    write: { allow: 'all', deny: [] },
+    read: { allow: 'all', deny: deniedRoots.map(canonicalPath) },
+    write: {
+      allow: 'all',
+      deny: [...deniedRoots, ...readOnlyRoots].map(canonicalPath),
+    },
     network: 'allow',
     tempDir: tmpdir(),
     toolchainReadOnly: [],
     ancestorsMetadata: true,
     fallback: 'refuse',
-    protectedPaths: {
-      ...protectedScope(protectedStateRoot, protectedHome)!,
-      credentialReads: 'allow',
-    },
+    protectedPaths:
+      protectedScope(protectedStateRoot, protectedHome) === null
+        ? null
+        : {
+            ...protectedScope(protectedStateRoot, protectedHome)!,
+            credentialReads: 'allow',
+          },
     desktop: 'allow',
     deniedSocketDirs: [],
   }
@@ -240,9 +258,19 @@ export class LocalSandbox implements SandboxBackend {
     }
   }
 
-  guard(argv: readonly string[]): ConfinedArgv | null {
+  guard(
+    argv: readonly string[],
+    policy?: SandboxExecutionPolicy,
+  ): ConfinedArgv | null {
     const stateRoot = this.options.protectedStateRoot
-    if (stateRoot === undefined) return null
+    const deniedRoots = policy?.deniedRoots ?? []
+    const readOnlyRoots = policy?.readOnlyRoots ?? []
+    if (
+      stateRoot === undefined &&
+      deniedRoots.length === 0 &&
+      readOnlyRoots.length === 0
+    )
+      return null
     // Only Seatbelt has a guard; elsewhere full access runs unwrapped.
     if (this.backend.platform !== 'darwin') return null
     const capability = this.backend.capability()
@@ -251,16 +279,29 @@ export class LocalSandbox implements SandboxBackend {
     return {
       argv: this.backend.wrap(
         argv,
-        shellGuardPolicy(stateRoot, this.options.protectedHome),
+        shellGuardPolicy(
+          stateRoot,
+          this.options.protectedHome,
+          deniedRoots,
+          readOnlyRoots,
+        ),
         'seatbelt',
       ),
       enforcement: 'partial',
       denialSignatures: DENIAL_SIGNATURES.seatbelt,
       runnerFailureRules: RUNNER_FAILURE_RULES.seatbelt,
-      denialPaths: protectedPathSpellings({
-        stateRoot,
-        home: this.options.protectedHome ?? homedir(),
-      }),
+      denialPaths: [
+        ...(stateRoot === undefined
+          ? []
+          : protectedPathSpellings({
+              stateRoot,
+              home: this.options.protectedHome ?? homedir(),
+            })),
+        ...[...deniedRoots, ...readOnlyRoots].flatMap((path) => [
+          path.toLowerCase(),
+          canonicalPath(path).toLowerCase(),
+        ]),
+      ],
     }
   }
 

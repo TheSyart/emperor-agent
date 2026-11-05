@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatSpend,
   independentAskees,
+  independentProgress,
   isLongMessage,
   liveBarParts,
   memberStatusLine,
@@ -231,7 +232,7 @@ describe('发给 ▾: five ways, five envelopes', () => {
 })
 
 describe('the message flow: eight kinds', () => {
-  it('sorts each message into its kind and gathers independent answers into one card', () => {
+  it('sorts each message into its kind and keeps independent answers as dialogue', () => {
     const rows = timelineRows([
       message('m1', 'user', '各自说说', {
         answerMode: 'independent',
@@ -278,7 +279,9 @@ describe('the message flow: eight kinds', () => {
     ])
     expect(rows.map((row) => row.kind)).toEqual([
       'user',
-      'independent',
+      'say',
+      'say',
+      'say',
       'say',
       'private',
       'task',
@@ -287,12 +290,6 @@ describe('the message flow: eight kinds', () => {
       'system',
       'pass',
     ])
-    const batch = rows[1]!
-    expect(batch.kind === 'independent' && batch.batch).toMatchObject({
-      batchId: 'gb_1',
-      members: ['ct-arch', 'ct-rev', 'ct-res'],
-      revealed: true,
-    })
   })
 
   it('keeps the user’s answers to members as lines of their own (GRP-12)', () => {
@@ -321,7 +318,7 @@ describe('the message flow: eight kinds', () => {
     expect(speechCount([note], 't1')).toBe(0)
   })
 
-  it('keeps an independent card waiting until its answers are revealed', () => {
+  it('keeps unrevealed independent answers out of the conversation', () => {
     const rows = timelineRows([
       message('m1', 'user', '各自说说', {
         answerMode: 'independent',
@@ -334,9 +331,21 @@ describe('the message flow: eight kinds', () => {
         hidden: true,
       }),
     ])
-    expect(rows.map((row) => row.kind)).toEqual(['user', 'independent'])
-    const card = rows[1]!
-    expect(card.kind === 'independent' && card.batch.revealed).toBe(false)
+    expect(rows.map((row) => row.kind)).toEqual(['user'])
+    expect(
+      independentProgress([
+        message('m1', 'user', '各自说说', {
+          answerMode: 'independent',
+          ask: ['ct-arch', 'ct-rev'],
+          batchId: 'gb_2',
+        }),
+        message('m2', 'ct-arch', '我先想好了', {
+          batchId: 'gb_2',
+          answerMode: 'independent',
+          hidden: true,
+        }),
+      ])[0]?.revealed,
+    ).toBe(false)
   })
 
   it('counts this turn’s speeches: not a pass, not the system, not the user', () => {
@@ -533,5 +542,30 @@ describe('mentionSpans (GRP-20)', () => {
     expect(mentionSpans('没有点名', names)).toEqual([
       { text: '没有点名', mention: false },
     ])
+  })
+
+  it('CG-05: keeps independent answers as dialogue and their progress outside it', () => {
+    const messages = [
+      message('m1', 'user', '各自说说', {
+        answerMode: 'independent',
+        ask: ['ct-arch', 'ct-rev'],
+        batchId: 'gb_chat',
+      }),
+      message('m2', 'ct-arch', '先形成的答案', {
+        batchId: 'gb_chat',
+        answerMode: 'independent',
+        hidden: true,
+      }),
+    ]
+    expect(timelineRows(messages).map((row) => row.kind)).toEqual(['user'])
+    expect(independentProgress(messages)).toMatchObject([
+      { batchId: 'gb_chat', revealed: false, answers: [{ hidden: true }] },
+    ])
+    const revealed = messages.map((message) => ({ ...message, hidden: false }))
+    expect(timelineRows(revealed).map((row) => row.kind)).toEqual([
+      'user',
+      'say',
+    ])
+    expect(independentProgress(revealed)[0]?.revealed).toBe(true)
   })
 })

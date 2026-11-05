@@ -1200,6 +1200,10 @@ const groupMemberRefSchema = z.object({
   id: groupIdSchema,
   contactId: contactIdSchema,
 })
+const groupTaskRefSchema = z.object({
+  id: groupIdSchema,
+  taskId: z.string().min(1).max(128),
+})
 // GRP-04: the editor. Shapes and bounds only; the services apply the rules.
 const contactDraftSchema = z
   .object({
@@ -2428,6 +2432,16 @@ export const CORE_OPERATION_REGISTRY = {
               deliverable: z.string().max(4000),
               basis: z.string().max(4000).optional(),
               access: z.enum(['group_files', 'readonly', 'isolated_worktree']),
+              idempotencyKey: z.string().min(1).max(200).optional(),
+              acceptance: z
+                .array(z.string().min(1).max(1000))
+                .max(64)
+                .optional(),
+              dependsOn: z.array(z.string().min(1).max(128)).max(64).optional(),
+              writeScopes: z
+                .array(z.string().min(1).max(1000))
+                .max(64)
+                .optional(),
             })
             .strict()
             .optional(),
@@ -2464,12 +2478,114 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.stop(input),
   ),
+  'groups.stopWork': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.stopWork(input),
+  ),
+  // CG-02/CG-03: explicit task-board commands on the one group log.
+  'groups.tasks': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.tasks(input),
+  ),
+  'groups.claimTask': operation(
+    z.tuple([
+      groupTaskRefSchema
+        .extend({
+          owner: contactIdSchema,
+          contractRevision: z.number().int().positive(),
+          runId: z.string().min(1).max(200),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.claimTask(input),
+  ),
+  'groups.submitTask': operation(
+    z.tuple([
+      groupTaskRefSchema
+        .extend({
+          owner: contactIdSchema,
+          attempt: z.number().int().positive(),
+          leaseEpoch: z.number().int().positive(),
+          artifact: z
+            .object({
+              ref: z.string().min(1).max(2000),
+              revision: z.string().min(1).max(200),
+            })
+            .strict(),
+          checks: z
+            .array(
+              z
+                .object({
+                  artifactRevision: z.string().min(1).max(200),
+                  evidenceRef: z.string().min(1).max(2000),
+                  passed: z.boolean(),
+                })
+                .strict(),
+            )
+            .max(100)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.submitTask(input),
+  ),
+  'groups.acceptTask': operation(
+    z.tuple([
+      groupTaskRefSchema
+        .extend({
+          artifactRevision: z.string().min(1).max(200),
+          checks: z
+            .array(
+              z
+                .object({
+                  artifactRevision: z.string().min(1).max(200),
+                  evidenceRef: z.string().min(1).max(2000),
+                  passed: z.boolean(),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(100),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.acceptTask(input),
+  ),
+  'groups.transferTask': operation(
+    z.tuple([
+      groupTaskRefSchema
+        .extend({
+          to: contactIdSchema,
+          contractRevision: z.number().int().positive(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.transferTask(input),
+  ),
   // GRP-16: to 最近删除 with its member sessions; a running turn stops first.
   'groups.delete': operation(
     z.tuple([z.object({ id: groupIdSchema }).strict()]),
     (api, [input]) => api.groups.delete(input),
   ),
-  // 设置 › 群聊 (GRP-08, D14): what a new group starts with.
+  // CG-01: Core-managed member workspaces and host-published public artifacts.
+  'groups.workspace': operation(
+    z.tuple([z.object({ id: groupIdSchema }).strict()]),
+    (api, [input]) => api.groups.workspace(input),
+  ),
+  'groups.publishArtifact': operation(
+    z.tuple([
+      z
+        .object({
+          id: groupIdSchema,
+          contactId: contactIdSchema,
+          sourcePath: z.string().min(1),
+          taskId: z.string().min(1).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.groups.publishArtifact(input),
+  ),
+  // 设置 › 群聊: non-collaboration defaults; every new group is autonomous.
   'groups.defaults': operation(z.tuple([]), (api) => api.groups.defaults()),
   'groups.setDefaults': operation(
     z.tuple([
@@ -2595,7 +2711,23 @@ export const CORE_OPERATION_REGISTRY = {
   // and its profile's four numbers.
   'contacts.openChat': operation(
     z.tuple([
-      z.object({ id: contactIdSchema, fresh: z.boolean().optional() }).strict(),
+      z
+        .object({
+          id: contactIdSchema,
+          fresh: z.boolean().optional(),
+          intent: z
+            .discriminatedUnion('action', [
+              z.object({ action: z.literal('create') }).strict(),
+              z
+                .object({
+                  action: z.literal('edit'),
+                  targetId: contactIdSchema,
+                })
+                .strict(),
+            ])
+            .optional(),
+        })
+        .strict(),
     ]),
     (api, [input]) => api.contacts.openChat(input),
   ),

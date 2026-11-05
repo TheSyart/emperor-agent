@@ -170,3 +170,13 @@ export {
   resultNeedsCleanup,
 } from '../runtime/agent-view'
 export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'
+
+export { ROLE_CREATOR_CONTACT_ID } from '../contacts/types'
+
+// CG-CT-01: the conversation layer parses an unsaved creator draft without
+// importing the full Core API. Saving remains in the contact components.
+export type {
+  Contact,
+  ContactDraftInput,
+  ContactPatch,
+} from '../contacts/types'

@@ -35,13 +35,21 @@ import {
   type KnowledgeContext,
   type PinnedKnowledge,
 } from './compile'
+import {
+  ROLE_CREATOR_CATALOG_TOOL,
+  ROLE_CREATOR_DRAFT_TOOL,
+  type RoleCreatorIntent,
+} from './creator'
+import { ROLE_CREATOR_PROMPT } from './creator-prompt'
 import { ContactModelUnavailableError } from './errors'
 import type { ContactMemoryStore } from './memory'
+import { ROLE_CREATOR_CONTACT_ID } from './types'
 import type {
   Contact,
   ContactKnowledge,
   ContactPermission,
   ContactTools,
+  GroupCharter,
   ToolPreset,
 } from './types'
 
@@ -352,8 +360,12 @@ export interface ContactRuntimeDeps {
   memory: ContactMemoryStore
   /** Every tool name the registry has. */
   toolNames(): Iterable<string>
+  /** The validated New/Edit intent that opened a creator session (CG-CT-01). */
+  creatorIntent?(sessionId: string): RoleCreatorIntent | null
   /** Active experiences to recall for one contact session (CP-04). */
   experiences?(contactId: string, sessionId?: string): string
+  /** The group a member session belongs to; single chats return null. */
+  group?(sessionId: string): GroupCharter | null
   /** 设置 › 常规 › 会话 › 新会话的权限. */
   globalPreset(): string
   /** A configured model entry, by id. */
@@ -427,6 +439,7 @@ export class ContactRuntime {
   ceiling(contactId: string, sessionId?: string): string | null {
     const contact = this.resolve(contactId, sessionId)
     if (contact === null) return 'read-only'
+    if (contactId === ROLE_CREATOR_CONTACT_ID) return 'read-only'
     if (contact.kind === 'external' || contact.builtin) return null
     return contactPermissionPreset(
       contact.capabilities.permission,
@@ -496,6 +509,23 @@ export class ContactRuntime {
       model: { kind: 'default' },
     } satisfies ContactSnapshot
     if (contact.kind === 'external') return unchanged
+    if (contact.id === ROLE_CREATOR_CONTACT_ID) {
+      const intent = sessionId
+        ? this.deps.creatorIntent?.(sessionId)
+        : undefined
+      const entry =
+        intent?.action === 'edit'
+          ? `\n\n当前入口意图：调整联系人 ${intent.targetId}。先用目录核对这个编号，再只生成用户要求的 patch。`
+          : intent?.action === 'create'
+            ? '\n\n当前入口意图：创建一个新联系人。'
+            : ''
+      return {
+        ...unchanged,
+        tools: [ROLE_CREATOR_CATALOG_TOOL, ROLE_CREATOR_DRAFT_TOOL],
+        prompt: `${ROLE_CREATOR_PROMPT}${entry}`,
+        ceiling: 'read-only',
+      }
+    }
     const memory = contact.memory.enabled ? this.memoryText(contact.id) : ''
     const experiences = contact.memory.enabled
       ? (this.deps.experiences?.(contact.id, sessionId) ?? '')
@@ -516,6 +546,9 @@ export class ContactRuntime {
         ...(memory ? { memory } : {}),
         knowledge,
         ...(experiences ? { experiences } : {}),
+        ...(sessionId && this.deps.group?.(sessionId)
+          ? { inGroup: this.deps.group(sessionId)! }
+          : {}),
       }).trimEnd(),
       ceiling: contactPermissionPreset(
         contact.capabilities.permission,

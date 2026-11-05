@@ -612,6 +612,35 @@ describe('editing a saved contact', () => {
     })
   })
 
+  it('selects an MCP service as a whole and saves every current tool', async () => {
+    ;(ctx as unknown as { boot?: unknown }).boot = {
+      value: {
+        skills: [],
+        mcp: {
+          servers: [
+            {
+              serverName: 'docs',
+              state: 'ready',
+              tools: ['search', 'read', 'lookup'],
+            },
+          ],
+        },
+      },
+    }
+    await mount('/contacts/ct-reviewer00001/edit')
+    q('[data-mcp-service="docs"] button').click()
+    await flush()
+    button('保存联系人').click()
+    await flush()
+    expect(calls('contacts.update')[0]![1]).toMatchObject({
+      id: 'ct-reviewer00001',
+      patch: {
+        mcp: [{ serverId: 'docs', toolNames: ['search', 'read', 'lookup'] }],
+      },
+    })
+    expect(document.querySelector('[data-mcp-tool]')).toBeNull()
+  })
+
   it('lets a builtin change only its avatar and intro', async () => {
     await mount('/contacts/ct-emperor/edit')
     expect(q('[data-contact-editor]').textContent).toContain(

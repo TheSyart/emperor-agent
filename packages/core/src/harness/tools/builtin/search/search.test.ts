@@ -48,6 +48,7 @@ function setup(
     protectedStateRoot?: (workdir: string) => string
     protectedHome?: (workdir: string) => string
     mode?: SandboxMode
+    deniedRoots?: (workdir: string) => string[]
   } = {},
 ) {
   const workdir = mkdtempSync(join(tmpdir(), 'emperor-search-'))
@@ -61,11 +62,14 @@ function setup(
     ...(options.protectedHome
       ? { protectedHome: options.protectedHome(workdir) }
       : {}),
-    ...(options.mode
+    ...(options.mode || options.deniedRoots
       ? {
           sandbox: new SandboxPolicyService({
-            defaultMode: options.mode,
+            defaultMode: options.mode ?? 'workspace-write',
             workspaceRoot: workdir,
+            ...(options.deniedRoots
+              ? { deniedRoots: () => options.deniedRoots!(workdir) }
+              : {}),
           }),
         }
       : {}),
@@ -98,6 +102,28 @@ function write(
   writeFileSync(path, text)
   if (mtimeSec !== undefined) utimesSync(path, mtimeSec, mtimeSec)
 }
+
+describe('CG-01 group-private search boundaries', () => {
+  it("glob and grep hide another member's files in both engines and every mode", async () => {
+    for (const resolveBinary of [undefined, missingBinary]) {
+      const f = setup(resolveBinary, {
+        mode: 'danger-full-access',
+        deniedRoots: (workdir) => [join(workdir, 'members', 'ct-other')],
+      })
+      write(f.workdir, 'members/ct-other/secret.md', 'private needle')
+      write(f.workdir, 'shared/public.md', 'public needle')
+      const paths = await f.run('glob', { pattern: '*.md', path: f.workdir })
+      expect(textOf(paths.content)).toContain('public.md')
+      expect(textOf(paths.content)).not.toContain('secret.md')
+      const matches = await f.run('grep', {
+        pattern: 'needle',
+        path: f.workdir,
+      })
+      expect(textOf(matches.content)).toContain('public.md')
+      expect(textOf(matches.content)).not.toContain('secret.md')
+    }
+  })
+})
 
 describe('search argv and parsing', () => {
   it('glob: fixed rg --files argv with newest-first sort and paired VCS excludes', () => {

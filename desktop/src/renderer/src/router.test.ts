@@ -63,12 +63,18 @@ describe('renderer routes', () => {
     expect((await resolve('/chat/s1/trajectory')).path).toBe('/chat/s1')
   })
 
-  it('serves the contact editor (GRP-04)', async () => {
+  it('routes routine contact creation through the creator, with an internal advanced fallback', async () => {
     const created = await resolve('/contacts/new')
     expect(created.name).toBe('contact-new')
     const edited = await resolve('/contacts/ct-reviewer00001/edit')
     expect(edited.name).toBe('contact-edit')
     expect(edited.params.id).toBe('ct-reviewer00001')
+    expect((await resolve('/contacts/advanced/new')).name).toBe(
+      'contact-advanced-new',
+    )
+    const advanced = await resolve('/contacts/ct-reviewer00001/advanced')
+    expect(advanced.name).toBe('contact-advanced-edit')
+    expect(advanced.params.id).toBe('ct-reviewer00001')
   }, 20_000)
 
   it('serves the Group home, a contact’s profile and a group’s page (GRP-05)', async () => {
@@ -76,7 +82,7 @@ describe('renderer routes', () => {
     const profile = await resolve('/contacts/ct-reviewer00001')
     expect(profile.name).toBe('contact')
     expect(profile.params.id).toBe('ct-reviewer00001')
-    // 新建 stays the editor, not a contact named 「new」.
+    // 新建 is the creator entry, not a contact named 「new」.
     expect((await resolve('/contacts/new')).name).toBe('contact-new')
     const group = await resolve('/groups/grp-1')
     expect(group.name).toBe('group')

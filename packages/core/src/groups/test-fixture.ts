@@ -2,7 +2,12 @@
  * An in-memory group store for tests: sessions, logs and contacts held in
  * maps, ids counted from 1 (GRP-06, GRP-07).
  */
-import { GroupService, type GroupContact, type GroupLog } from './service'
+import {
+  GroupService,
+  type GroupContact,
+  type GroupLog,
+  type GroupServiceDeps,
+} from './service'
 import type { GroupSessionEntry } from './service'
 
 export const TEST_CONTACTS: GroupContact[] = [
@@ -48,7 +53,10 @@ export const TEST_CONTACTS: GroupContact[] = [
   },
 ]
 
-export function memoryGroups(contacts: GroupContact[] = TEST_CONTACTS) {
+export function memoryGroups(
+  contacts: GroupContact[] = TEST_CONTACTS,
+  extra: Pick<GroupServiceDeps, 'workspace'> = {},
+) {
   const sessions = new Map<string, GroupSessionEntry>()
   const logs = new Map<string, { type: string; data: unknown }[]>()
   let n = 0
@@ -87,6 +95,7 @@ export function memoryGroups(contacts: GroupContact[] = TEST_CONTACTS) {
     contact: (id) => contacts.find((c) => c.id === id) ?? null,
     newId: (prefix) => `${prefix}${++n}`,
     now: () => (clock += 1000),
+    ...extra,
   })
   return { service, sessions, logs }
 }

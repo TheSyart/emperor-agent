@@ -19,9 +19,18 @@ import {
   PRESET_TOOLS,
   toolPresetTable,
 } from '../contacts/runtime'
-import type { Contact, ContactInput } from '../contacts/types'
+import {
+  ROLE_CREATOR_CONTACT_ID,
+  type Contact,
+  type ContactInput,
+} from '../contacts/types'
 import { replyChunks, testRoute, type ScriptedReply } from '../harness/testing'
-import { messageText } from '../llm/message'
+import {
+  createAssistantMessage,
+  createToolResultMessage,
+  messageText,
+  userText,
+} from '../llm/message'
 import type { GenerateOptions } from '../llm/types'
 import type { CoreApi } from './core-api'
 import {
@@ -138,6 +147,71 @@ describe('contact experiences (CP-04)', () => {
     const id = contactSession(api, person.id)
     await api.host.submit({ sessionId: id, content: '再审一次' })
     expect(JSON.stringify(adapter.requests[0])).toContain('先跑测试再下结论')
+  })
+
+  it('uses a nested tool result as evidence for an active experience', async () => {
+    const fixture = await setup()
+    const { api, adapter } = fixture
+    adapter.experienceText = JSON.stringify([
+      {
+        text: '读取发布说明后可引用 MCP 的已核验结果',
+        scope: 'contact',
+        evidenceRefs: ['call-1'],
+      },
+    ])
+    const person = await contact(api, { name: '验收员' })
+    const id = contactSession(api, person.id)
+    const session = api.host.agentFor(id).session
+    session.append('turn/start', { turn: 1 })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('user/message', userText('核验发布说明'), {
+      surfaceOp: 'append',
+    })
+    session.append(
+      'tool/result',
+      {
+        turn: 1,
+        step: 1,
+        message: createToolResultMessage({
+          callId: 'call-1',
+          content: [{ type: 'text', text: 'MCP verified' }],
+          isError: false,
+        }),
+      },
+      { surfaceOp: 'append' },
+    )
+    session.append(
+      'assistant/message',
+      {
+        turn: 1,
+        step: 1,
+        message: createAssistantMessage({
+          content: [{ type: 'text', text: '已核验。' }],
+          source: { provider: 'test', model: 'test-model' },
+        }),
+      },
+      { surfaceOp: 'append' },
+    )
+    session.append('step/end', { turn: 1, step: 1 })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+
+    await waitFor(() => adapter.experienceRequests.length > 0)
+    const request = adapter.experienceRequests[0]!
+    expect(messageText(request.messages[0]!)).toContain(
+      '[call-1] 工具结果：MCP verified',
+    )
+    await expect
+      .poll(async () => {
+        const listing = await api.contacts.experiences.list({ id: person.id })
+        return listing.experiences
+      })
+      .toEqual([
+        expect.objectContaining({
+          text: '读取发布说明后可引用 MCP 的已核验结果',
+          status: 'active',
+          evidence: [{ kind: 'tool_result', ref: 'call-1' }],
+        }),
+      ])
   })
 })
 
@@ -746,6 +820,31 @@ describe('knowledge (card tests 6, 7, 10)', () => {
   })
 })
 
+describe('group member prompts', () => {
+  it("compiles the contact's brief speaking habit in its own group session", async () => {
+    const { api } = await setup()
+    const member = await contact(api, {
+      name: '简短研究员',
+      groupHabit: { speak: 'relevant', length: 'brief' },
+    })
+    const group = await api.groups.create({
+      title: '生日行程核实',
+      members: [member.id],
+    })
+    const sessionId = group.members.find(
+      (item) => item.id === member.id,
+    )!.memberSessionId!
+    const snapshot = api.contactRuntime.snapshot(
+      member.id,
+      api.groupService.memberWorkspace(group.id, member.id).workspaceRoot,
+      sessionId,
+    )
+    expect(snapshot.prompt).toContain('# 群聊习惯')
+    expect(snapshot.prompt).toContain('生日行程核实')
+    expect(snapshot.prompt).toContain('篇幅：')
+  })
+})
+
 describe('personal memory (card tests 8, 9)', () => {
   async function chatOnce(api: CoreApi, id: string) {
     await api.chat.submit({ content: 'hi', sessionId: id })
@@ -914,5 +1013,111 @@ describe('contacts memory operations', () => {
       await expect(
         invokeCoreOperation(api, key, args as never),
       ).rejects.toBeInstanceOf(CoreOperationArgumentsError)
+  })
+})
+
+describe('the fixed role creator (CG-CT-01)', () => {
+  it('runs only its catalog/draft tools, read-only, without persona or experience', async () => {
+    const { api, adapter } = await setup([{ text: '先补充岗位信息。' }])
+    await api.contactStore.ready()
+    const snapshot = api.contactRuntime.snapshot(
+      ROLE_CREATOR_CONTACT_ID,
+      api.root,
+    )
+    expect(snapshot.tools).toEqual([
+      'contact_role_catalog',
+      'contact_role_draft',
+    ])
+    expect(snapshot.ceiling).toBe('read-only')
+    expect(snapshot.prompt).toContain('固定的「角色创建师」')
+    expect(snapshot.prompt).not.toContain('You are Emperor Agent')
+
+    const id = contactSession(api, ROLE_CREATOR_CONTACT_ID)
+    await api.chat.submit({ content: '创建一个联系人', sessionId: id })
+    const request = adapter.requests[0]
+    expect(toolNames(request).sort()).toEqual([
+      'contact_role_catalog',
+      'contact_role_draft',
+    ])
+  })
+
+  it('persists an unsaved draft as tool metadata and never saves it', async () => {
+    const { api } = await setup([
+      {
+        tools: [
+          {
+            name: 'contact_role_draft',
+            args: {
+              action: 'create',
+              draft: {
+                name: '证据研究员',
+                intro: '查找并核验资料',
+                domains: ['data'],
+                role: {
+                  mission: '查找可靠资料。',
+                  deliverable: '带引用的结论。',
+                  playbook: '先检索，再交叉核验。',
+                  boundaries: '不编造来源。',
+                },
+                knowledge: [],
+                skills: [],
+                mcp: [],
+                capabilities: {
+                  model: 'inherit',
+                  tools: { preset: 'read_only', allow: [] },
+                  permission: 'read_only',
+                },
+                groupHabit: { speak: 'mentioned', length: 'brief' },
+                memory: { enabled: true },
+              },
+            },
+          },
+        ],
+      },
+    ])
+    await api.contactStore.ready()
+    const before = (await api.contacts.list()).contacts.map((item) => item.id)
+    const id = contactSession(api, ROLE_CREATOR_CONTACT_ID)
+    await api.chat.submit({ content: '创建证据研究员', sessionId: id })
+    const result = api.host
+      .sessionLog(id)!
+      .events.filter((event) => event.type === 'tool/result')
+      .at(-1)
+    expect(result?.type).toBe('tool/result')
+    if (result?.type !== 'tool/result') throw new Error('missing tool result')
+    expect(result.data.meta).toMatchObject({
+      kind: 'contact-role-draft',
+      action: 'create',
+      draft: { name: '证据研究员' },
+    })
+    expect((await api.contacts.list()).contacts.map((item) => item.id)).toEqual(
+      before,
+    )
+    const experiences = await api.contacts.experiences.list({
+      id: ROLE_CREATOR_CONTACT_ID,
+    })
+    expect(experiences.experiences).toEqual([])
+    expect(experiences.legacy).toEqual([])
+  })
+
+  it('refuses a creator draft tool call outside the creator root session', async () => {
+    const { api } = await setup()
+    await api.contactStore.ready()
+    const result = await api.host.tools.execute({
+      callId: 'ordinary-role-draft',
+      name: 'contact_role_draft',
+      arguments: {
+        action: 'create',
+        draft: {
+          name: '不应保存',
+          role: { mission: '普通会话不能创建联系人。' },
+        },
+      },
+      signal: new AbortController().signal,
+    })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toContain('unknown tool')
+    expect(JSON.stringify(result)).toContain('contact_role_draft')
+    expect((await api.contacts.list()).contacts).toHaveLength(4)
   })
 })

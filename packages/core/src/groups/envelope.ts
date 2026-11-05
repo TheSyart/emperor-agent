@@ -141,6 +141,10 @@ export interface UserSend {
     deliverable: string
     basis?: string
     access: GroupTaskAccess
+    idempotencyKey?: string
+    acceptance?: string[]
+    dependsOn?: string[]
+    writeScopes?: string[]
   }
 }
 

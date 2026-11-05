@@ -14,6 +14,8 @@
  *   moderator first; the user's and the moderator's never are.
  * - A member message that @-mentions nobody ends that line.
  */
+import type { CoordinatorReason } from './coordinator'
+import { taskReady, usesWorkQueue } from './task-board'
 import type { GroupState } from './events'
 import type { ContactId, GroupMember, GroupMessage, GroupTask } from './types'
 
@@ -40,7 +42,19 @@ export type QueueItem =
     }
   | { kind: 'batch'; members: ContactId[]; batchId: string; source: string }
   | { kind: 'poll'; members: ContactId[]; source: string }
-  | { kind: 'review'; reviewer: ContactId; message: string; source: string }
+  | {
+      kind: 'coordinate'
+      reason: CoordinatorReason
+      source: string
+      note?: string
+    }
+  | {
+      kind: 'review'
+      /** null: the built-in system coordinator, not a contact. */
+      reviewer: ContactId | null
+      message: string
+      source: string
+    }
   | { kind: 'task'; task: GroupTask; source: string }
   | { kind: 'notice'; text: string; source: string }
 
@@ -54,15 +68,19 @@ function broadcast(
 ): QueueItem[] {
   const source = message.id
   if (state.settings.quiet) return [{ kind: 'notice', text: QUIET, source }]
-  if (state.settings.collaboration === 'moderated' && state.moderator)
-    return [
-      {
-        kind: 'speak',
-        member: state.moderator,
-        reason: 'moderator-plan',
-        source,
-      },
-    ]
+  if (state.settings.collaboration === 'moderated') {
+    if (state.settings.coordination === 'builtin')
+      return [{ kind: 'coordinate', reason: 'plan', source }]
+    if (state.moderator)
+      return [
+        {
+          kind: 'speak',
+          member: state.moderator,
+          reason: 'moderator-plan',
+          source,
+        },
+      ]
+  }
   const members = state.members
     .map((id) => roster.find((m) => m.id === id))
     .filter((m): m is GroupMember => Boolean(m))
@@ -91,14 +109,21 @@ export function planFor(
   const reviewed =
     fromMember &&
     state.settings.collaboration === 'moderated' &&
-    state.moderator !== null &&
-    message.from !== state.moderator
+    (state.settings.coordination === 'builtin'
+      ? true
+      : state.moderator !== null && message.from !== state.moderator)
   if (message.kind === 'task' && message.task) {
+    const registered = state.tasks.get(message.task.taskId) ?? message.task
+    // CG-02: extended contracts wait for the work queue (CG-03); a simple
+    // foreground task keeps the original path. Dependencies gate both.
+    if (usesWorkQueue(registered) || !taskReady(state.tasks, registered))
+      return []
     if (reviewed)
       return [
         {
           kind: 'review',
-          reviewer: state.moderator!,
+          reviewer:
+            state.settings.coordination === 'builtin' ? null : state.moderator!,
           message: message.id,
           source,
         },
@@ -113,7 +138,8 @@ export function planFor(
       return [
         {
           kind: 'review',
-          reviewer: state.moderator!,
+          reviewer:
+            state.settings.coordination === 'builtin' ? null : state.moderator!,
           message: message.id,
           source,
         },

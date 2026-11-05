@@ -12,10 +12,13 @@ export type ContactId = string
 /** The contact id of an editor draft that was never saved (GRP-04). */
 export const DRAFT_CONTACT_ID = 'ct-draft'
 
+export const ROLE_CREATOR_CONTACT_ID = 'ct-role-creator'
+
 export const BUILTIN_CONTACT_IDS = [
   'ct-emperor',
   'ct-claude-code',
   'ct-codex',
+  ROLE_CREATOR_CONTACT_ID,
 ] as const
 export type BuiltinContactId = (typeof BUILTIN_CONTACT_IDS)[number]
 

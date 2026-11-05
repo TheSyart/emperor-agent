@@ -109,6 +109,7 @@ function group(f = fixture()) {
   const view = f.service.create({
     title: '登录页改版',
     members: ['ct-emperor', 'ct-arch', 'ct-rev'],
+    settings: { coordination: 'member' },
   })
   return { ...f, view }
 }
@@ -141,6 +142,7 @@ describe('GroupService.create', () => {
     expect(view.moderator).toBe('ct-emperor')
     expect(view.settings).toEqual({
       collaboration: 'autonomous',
+      coordination: 'member',
       quiet: false,
       summarizeAtEnd: true,
       loopGuard: true,
@@ -165,11 +167,72 @@ describe('GroupService.create', () => {
         title: 'g2',
         members: ['ct-arch', 'ct-rev'],
         moderator: 'ct-rev',
+        settings: { coordination: 'member' },
       }).moderator,
     ).toBe('ct-rev')
   })
 
-  it('refuses an unknown contact, a repeated member, an empty group or an outside moderator', () => {
+  it('always keeps exactly one visible Emperor, including in existing groups', () => {
+    const f = fixture()
+    const view = f.service.create({ title: '默认协调', members: ['ct-arch'] })
+    expect(view.members.map((member) => member.id)).toEqual([
+      'ct-emperor',
+      'ct-arch',
+    ])
+    expect(() => f.service.removeMember(view.id, 'ct-emperor')).toThrow(
+      'Emperor 是群聊的固定成员',
+    )
+    expect(f.service.leaveAll('ct-emperor')).toEqual([])
+    const deduplicated = f.service.create({
+      title: '不重复',
+      members: ['ct-emperor', 'ct-rev', 'ct-emperor'],
+    })
+    expect(
+      deduplicated.members.filter((member) => member.id === 'ct-emperor'),
+    ).toHaveLength(1)
+
+    f.service.append(view.id, 'group/member', {
+      action: 'removed',
+      contactId: 'ct-emperor',
+      contactVersion: 1,
+    })
+    expect(f.service.get(view.id).members.map((member) => member.id)).toEqual([
+      'ct-arch',
+    ])
+    expect(f.service.migrateLegacyCoordination()).toBe(1)
+    expect(f.service.get(view.id).members.map((member) => member.id)).toEqual([
+      'ct-arch',
+      'ct-emperor',
+    ])
+    expect(f.service.migrateLegacyCoordination()).toBe(0)
+  })
+
+  it('migrates a legacy group before the contact directory has loaded Emperor', () => {
+    const f = fixture(CONTACTS.filter((contact) => contact.id !== 'ct-emperor'))
+    const view = f.service.create({
+      title: '旧群',
+      members: ['ct-arch'],
+      settings: { coordination: 'member' },
+    })
+    f.service.append(view.id, 'group/member', {
+      action: 'removed',
+      contactId: 'ct-emperor',
+      contactVersion: 1,
+    })
+
+    expect(f.service.migrateLegacyCoordination()).toBe(1)
+    expect(f.service.get(view.id).members).toContainEqual({
+      id: 'ct-emperor',
+      name: 'Emperor',
+      intro: '你的主智能体：统筹、拆解任务，在群里主持讨论',
+      external: false,
+      speak: 'relevant',
+      memberSessionId: expect.any(String),
+      missing: false,
+    })
+  })
+
+  it('refuses an unknown contact, a repeated member or an outside moderator', () => {
     const f = fixture()
     expect(() =>
       f.service.create({ title: 'g', members: ['ct-arch', 'ct-ghost'] }),
@@ -177,17 +240,20 @@ describe('GroupService.create', () => {
     expect(() =>
       f.service.create({ title: 'g', members: ['ct-arch', 'ct-arch'] }),
     ).toThrow(/重复/)
-    expect(() => f.service.create({ title: 'g', members: [] })).toThrow(/至少/)
+    expect(
+      f.service.create({ title: 'g', members: [] }).members.map((m) => m.id),
+    ).toEqual(['ct-emperor'])
     expect(() =>
       f.service.create({
         title: 'g',
         members: ['ct-arch'],
         moderator: 'ct-rev',
+        settings: { coordination: 'member' },
       }),
     ).toThrow(/主持人/)
   })
 
-  it('takes the settings the user chose as defaults', () => {
+  it('keeps non-collaboration preferences while legacy moderation stays autonomous', () => {
     const f = fixture()
     const view = f.service.create({
       title: 'g',
@@ -195,7 +261,7 @@ describe('GroupService.create', () => {
       settings: { collaboration: 'moderated', quiet: true },
     })
     expect(view.settings).toMatchObject({
-      collaboration: 'moderated',
+      collaboration: 'autonomous',
       quiet: true,
     })
   })
@@ -236,7 +302,15 @@ describe('GroupService.send', () => {
     const messages = logs
       .get(view.id)!
       .filter((e) => e.type === 'group/message')
-    expect(messages).toHaveLength(3)
+    expect(
+      messages.map((event) => (event.data as { text: string }).text),
+    ).toEqual([
+      '大家看看方案',
+      '@审稿人 你先看',
+      '已请审稿人回答。',
+      '私下问一句',
+      '已请架构师回答。',
+    ])
   })
 
   it('refuses a private message to someone outside the group', () => {
@@ -275,9 +349,12 @@ describe('GroupService members and settings', () => {
     expect(() => service.removeMember(view.id, 'ct-arch')).toThrow(/不在群里/)
   })
 
-  it('removing the moderator leaves the group without one', () => {
+  it('clears a legacy moderator without removing the fixed Emperor member', () => {
     const { service, view } = group()
-    expect(service.removeMember(view.id, 'ct-emperor').moderator).toBeNull()
+    expect(service.update(view.id, { moderator: null }).moderator).toBeNull()
+    expect(service.get(view.id).members.map((m) => m.id)).toContain(
+      'ct-emperor',
+    )
   })
 
   it('updates title, charter, moderator and settings, and renames the session', () => {
@@ -313,7 +390,9 @@ describe('GroupService.history and list', () => {
     const { messages } = service.history(view.id)
     expect(messages.map((m) => [m.text, m.private, m.hidden])).toEqual([
       ['私信', true, false],
+      ['已请架构师回答。', false, false],
       ['各自估个工期', false, true],
+      ['已请架构师、审稿人分别作答，完成后一起显示。', false, false],
     ])
   })
 
@@ -337,8 +416,8 @@ describe('GroupService.history and list', () => {
     f.service.create({ title: '甲', members: ['ct-arch'] })
     f.service.create({ title: '乙', members: ['ct-arch', 'ct-rev'] })
     expect(f.service.list().map((g) => [g.title, g.memberCount])).toEqual([
-      ['甲', 1],
-      ['乙', 2],
+      ['甲', 2],
+      ['乙', 3],
     ])
   })
 
@@ -395,25 +474,25 @@ describe('GroupService.history and list', () => {
 // screen, each task's latest state, 设置 › 群聊's defaults for a new group,
 // and a change event whenever the view of a message changes.
 describe('GroupService for the group page (GRP-08)', () => {
-  it('starts a new group from 设置 › 群聊’s defaults; a group made before keeps its own', () => {
+  it('CG-01: always uses autonomous collaboration, including legacy defaults and explicit legacy input', () => {
     let defaults: ReturnType<NonNullable<GroupServiceDeps['defaults']>> = {}
     const { service } = fixture(CONTACTS, { defaults: () => defaults })
     const before = service.create({ title: '旧群', members: ['ct-arch'] })
     defaults = { collaboration: 'moderated', loopGuard: false }
     const after = service.create({ title: '新群', members: ['ct-arch'] })
     expect(after.settings).toMatchObject({
-      collaboration: 'moderated',
+      collaboration: 'autonomous',
       loopGuard: false,
     })
     expect(service.get(before.id).settings).toMatchObject({
       collaboration: 'autonomous',
       loopGuard: true,
     })
-    // What the user picks in the dialog still wins.
+    // Legacy callers cannot turn moderation back on.
     const picked = service.create({
-      title: '挑过的',
+      title: '旧调用',
       members: ['ct-arch'],
-      settings: { collaboration: 'autonomous' },
+      settings: { collaboration: 'moderated' },
     })
     expect(picked.settings.collaboration).toBe('autonomous')
   })
@@ -531,10 +610,11 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     const { messages } = service.history(view.id)
     expect(messages.map((m) => [m.from, m.kind, m.text])).toEqual([
       ['user', 'say', '@架构师 看看'],
+      ['ct-emperor', 'say', '已请架构师回答。'],
       ['system', 'system', '你回答了 架构师 的提问：登录'],
       ['user', 'say', '好的，继续'],
     ])
-    const shown = messages[1]!
+    const shown = messages[2]!
     expect(shown).toMatchObject({
       id: note.id,
       turnId: asked.message.turnId,
@@ -545,15 +625,15 @@ describe('the user’s answers in the group log (GRP-12)', () => {
     // It is not a message: no member is ever delivered it, the digest and
     // the counts never see it.
     const state = service.state(view.id)
-    expect(state.messages).toHaveLength(2)
+    expect(state.messages).toHaveLength(3)
     for (const member of ['ct-emperor', 'ct-arch', 'ct-rev'])
       expect(pendingDelivery(state, member).map((m) => m.text)).not.toContain(
         '你回答了 架构师 的提问：登录',
       )
     expect(
       digestSource(state, () => 1, 0)?.messages.map((m) => m.text),
-    ).toEqual(['@架构师 看看', '好的，继续'])
-    expect(service.get(view.id).messageCount).toBe(2)
+    ).toEqual(['@架构师 看看', '已请架构师回答。', '好的，继续'])
+    expect(service.get(view.id).messageCount).toBe(3)
   })
 
   it('names the member as it is called now, or as a deleted contact', () => {
@@ -675,19 +755,31 @@ describe('GroupService.leaveAll (GRP-16)', () => {
       title: 'a',
       members: ['ct-arch', 'ct-rev'],
       moderator: 'ct-rev',
+      settings: { coordination: 'member' },
     })
-    const b = f.service.create({ title: 'b', members: ['ct-arch'] })
+    const b = f.service.create({
+      title: 'b',
+      members: ['ct-arch'],
+      settings: { coordination: 'member' },
+    })
     const c = f.service.create({
       title: 'c',
       members: ['ct-rev', 'ct-emperor'],
+      settings: { coordination: 'member' },
     })
     f.service.send(a.id, { way: 'broadcast', text: '开始' })
     f.changes.length = 0
 
     expect(f.service.leaveAll('ct-rev')).toEqual([a.id, c.id])
     expect(f.service.get(a.id)).toMatchObject({ moderator: null })
-    expect(f.service.get(a.id).members.map((m) => m.id)).toEqual(['ct-arch'])
-    expect(f.service.get(b.id).members.map((m) => m.id)).toEqual(['ct-arch'])
+    expect(f.service.get(a.id).members.map((m) => m.id)).toEqual([
+      'ct-emperor',
+      'ct-arch',
+    ])
+    expect(f.service.get(b.id).members.map((m) => m.id)).toEqual([
+      'ct-emperor',
+      'ct-arch',
+    ])
     expect(f.service.get(c.id)).toMatchObject({ moderator: 'ct-emperor' })
     expect(f.service.get(c.id).members.map((m) => m.id)).toEqual(['ct-emperor'])
     expect(f.service.history(a.id).messages.map((m) => m.text)).toEqual([
@@ -698,5 +790,26 @@ describe('GroupService.leaveAll (GRP-16)', () => {
       { reason: 'member', groupId: c.id },
     ])
     expect(f.service.leaveAll('ct-rev')).toEqual([])
+  })
+})
+
+describe('role creator membership (CG-CT-01)', () => {
+  it('refuses the fixed creator both at group creation and when added later', () => {
+    const creator: GroupContact = {
+      id: 'ct-role-creator',
+      name: '角色创建师',
+      intro: '固定内置',
+      kind: 'local',
+      speak: 'mentioned',
+      version: 1,
+    }
+    const { service } = fixture([...CONTACTS, creator])
+    expect(() =>
+      service.create({ title: '错误成员', members: ['ct-role-creator'] }),
+    ).toThrow('角色创建师不能加入普通工作群')
+    const group = service.create({ title: '正常群', members: ['ct-arch'] })
+    expect(() => service.addMember(group.id, 'ct-role-creator')).toThrow(
+      '角色创建师不能加入普通工作群',
+    )
   })
 })

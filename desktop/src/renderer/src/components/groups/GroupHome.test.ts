@@ -267,7 +267,7 @@ describe('the Group home', () => {
     expect(calls('groups.create')).toEqual([])
   })
 
-  it('makes a temporary group for two @, Emperor moderating, and sends the mention (card tests: @ 多位建群；Emperor 作为主持人加入)', async () => {
+  it('CG-00: makes a temporary group for two @ without adding a visible moderator', async () => {
     await mount()
     await type('@架构师 @审稿人 帮我评估一下 0.3 的群聊方案。顺便看代码')
     expect(q('[data-send-plan]').textContent).toContain(
@@ -280,8 +280,7 @@ describe('the Group home', () => {
         'groups.create',
         {
           title: '帮我评估一下 0.3 的群聊方案',
-          members: ['ct-emperor', 'ct-architect0001', 'ct-reviewer00001'],
-          moderator: 'ct-emperor',
+          members: ['ct-architect0001', 'ct-reviewer00001'],
         },
       ],
     ])

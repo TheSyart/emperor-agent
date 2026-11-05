@@ -12,9 +12,12 @@
  * 外部 and appear only there. A contact with no known domain falls into
  * 其他; a category with nothing in it is left out.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ROLE_CREATOR_CONTACT_ID } from '@emperor/core/runtime-contract'
 import type { Contact } from '@emperor/core/api'
+import { core } from '../../api/http'
+import { useSession } from '../../composables/useSession'
 import PageShell from '../pages/PageShell.vue'
 import type { SettingsHeaderAction } from '../settings/settingsHeader'
 import Avatar from '../ui/Avatar.vue'
@@ -30,6 +33,9 @@ import { activeContactCategory, contactCategories } from './contactsCategories'
 const route = useRoute()
 const router = useRouter()
 const directory = useContactDirectory()
+const sessions = useSession()
+const openingCreator = ref(false)
+const actionError = ref('')
 
 const categories = computed(() => contactCategories(directory.contacts.value))
 
@@ -67,8 +73,28 @@ function line(contact: Contact): string {
   return contact.kind === 'external' ? '外部' : '还没有简介'
 }
 
-function open(id: string): void {
-  void router.push({ name: 'contact', params: { id } }).catch(() => undefined)
+async function open(id: string): Promise<void> {
+  actionError.value = ''
+  if (id !== ROLE_CREATOR_CONTACT_ID) {
+    await router
+      .push({ name: 'contact', params: { id } })
+      .catch(() => undefined)
+    return
+  }
+  if (openingCreator.value) return
+  openingCreator.value = true
+  try {
+    const session = await core('contacts.openChat', {
+      id: ROLE_CREATOR_CONTACT_ID,
+      intent: { action: 'create' },
+    })
+    sessions.adopt(session)
+    await router.push({ name: 'chat', params: { sessionId: session.id } })
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    openingCreator.value = false
+  }
 }
 
 function backToList(): void {
@@ -112,7 +138,10 @@ function backToList(): void {
             </span>
             <span class="intro">{{ line(contact) }}</span>
             <span class="meta">
-              <template v-if="contact.kind === 'external'">
+              <span v-if="contact.id === ROLE_CREATOR_CONTACT_ID" class="chip"
+                >系统 · 创建角色</span
+              >
+              <template v-else-if="contact.kind === 'external'">
                 <span class="chip">外部 · 只读</span>
               </template>
               <template v-else-if="contact.domains.length">
@@ -127,6 +156,9 @@ function backToList(): void {
             </span>
           </div>
         </div>
+        <p v-if="actionError" class="failed" role="alert">
+          没有打开角色创建师：{{ actionError }}
+        </p>
         <EmptyState
           v-if="
             directory.loaded.value &&
